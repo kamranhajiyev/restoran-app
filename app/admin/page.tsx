@@ -8,10 +8,8 @@ import {
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
 import {
-  getMenu, saveMenu, getOrders, updateOrderStatus,
-  pullMenuFromSupabase, pullOrdersFromSupabase,
-  getCategories, saveCategories, pullCategoriesFromSupabase,
-  syncMenuToSupabase,
+  fetchMenu, saveMenu, fetchOrders, updateOrderStatus,
+  fetchCategories, saveCategories,
 } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { MenuItem, MenuItemVariant, Order, OrderStatus } from '@/types';
@@ -125,20 +123,15 @@ export default function AdminPage() {
     const session = getSession();
     if (!session || session.role !== 'admin') { router.replace('/login'); return; }
     setAdminName(session.name);
-    setCategories(getCategories());
-    setMenu(getMenu());
-    setOrders(getOrders());
-    syncMenuToSupabase().then(() =>
-      Promise.all([pullMenuFromSupabase(), pullOrdersFromSupabase(), pullCategoriesFromSupabase()])
-    ).then(([ok]) => {
-      setOnline(ok);
-      setMenu(getMenu());
-      setOrders(getOrders());
-      setCategories(getCategories());
+    Promise.all([fetchMenu(), fetchOrders(), fetchCategories()]).then(([m, o, c]) => {
+      setMenu(m);
+      setOrders(o);
+      setCategories(c);
+      setOnline(m.length > 0 || o.length > 0);
     });
   }, [router]);
 
-  function refresh() { setOrders(getOrders()); }
+  function refresh() { fetchOrders().then(setOrders); }
 
   // ── image ──────────────────────────────────────────────────────────────────
   async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -194,9 +187,9 @@ export default function AdminPage() {
       cookingStation: form.cookingStation || undefined,
     };
     const updated = editingId ? menu.map(m => m.id === editingId ? item : m) : [...menu, item];
-    saveMenu(updated);
     setMenu(updated);
     cancelForm();
+    saveMenu(updated);
   }
 
   function addVariant() {
@@ -210,14 +203,17 @@ export default function AdminPage() {
   }
   function toggleAvailable(id: string) {
     const updated = menu.map(m => m.id === id ? { ...m, available: !m.available } : m);
-    saveMenu(updated); setMenu(updated);
+    setMenu(updated);
+    saveMenu(updated);
   }
   function deleteItem(id: string) {
     const updated = menu.filter(m => m.id !== id);
-    saveMenu(updated); setMenu(updated);
+    setMenu(updated);
+    saveMenu(updated);
   }
   function handleStatusChange(orderId: string, status: OrderStatus) {
-    updateOrderStatus(orderId, status); refresh();
+    updateOrderStatus(orderId, status);
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
   }
 
   // ── categories ─────────────────────────────────────────────────────────────
@@ -226,11 +222,14 @@ export default function AdminPage() {
     const trimmed = newCat.trim();
     if (!trimmed || categories.includes(trimmed)) return;
     const updated = [...categories, trimmed];
-    saveCategories(updated); setCategories(updated); setNewCat('');
+    setCategories(updated);
+    setNewCat('');
+    saveCategories(updated);
   }
   function deleteCategory(cat: string) {
     const updated = categories.filter(c => c !== cat);
-    saveCategories(updated); setCategories(updated);
+    setCategories(updated);
+    saveCategories(updated);
   }
 
   // ── stats computations ────────────────────────────────────────────────────

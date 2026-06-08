@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { getSession, logout } from '@/lib/auth';
-import { getMenu, addOrder, getOrders, updateOrderStatus, nextOrderNumber, pullMenuFromSupabase, pullOrdersFromSupabase } from '@/lib/store';
+import { fetchMenu, addOrder, fetchOrders, updateOrderStatus } from '@/lib/store';
 import { MenuItem, Order, OrderItem, OrderStatus } from '@/types';
 
 type View = 'orders' | 'tables' | 'menu';
@@ -54,55 +54,33 @@ export default function SellerPage() {
   const [payingOrder, setPayingOrder] = useState<Order | null>(null);
   const [payMethod, setPayMethod] = useState<PayMethod>('nağd');
 
-  const refreshOrders = useCallback(() => setOrders(getOrders()), []);
-
-  useEffect(() => {
-    if (view === 'menu') {
-      const fresh = getMenu();
-      setMenu(fresh);
-      const cats = [...new Set(fresh.map(i => i.category))];
-      setActiveCategory(prev => cats.includes(prev) ? prev : (cats[0] ?? ''));
-    }
-  }, [view]);
-
-  // Re-read menu when another tab (admin) saves to localStorage or window regains focus
-  useEffect(() => {
-    function syncMenu() {
-      const fresh = getMenu();
-      setMenu(fresh);
-      setOrders(getOrders());
-    }
-    async function syncMenuFromSupabase() {
-      await Promise.all([pullMenuFromSupabase(), pullOrdersFromSupabase()]);
-      syncMenu();
-    }
-    window.addEventListener('storage', syncMenu);
-    window.addEventListener('focus', syncMenuFromSupabase);
-    return () => {
-      window.removeEventListener('storage', syncMenu);
-      window.removeEventListener('focus', syncMenuFromSupabase);
-    };
+  const refreshOrders = useCallback(() => {
+    fetchOrders().then(setOrders);
   }, []);
 
   useEffect(() => {
     const session = getSession();
     if (!session || session.role !== 'seller') { router.replace('/login'); return; }
     setSellerName(session.name);
-    setOrders(getOrders());
-    const m = getMenu();
-    setMenu(m);
-    const cats = [...new Set(m.map(i => i.category))];
-    if (cats.length > 0) setActiveCategory(cats[0]);
 
-    Promise.all([pullMenuFromSupabase(), pullOrdersFromSupabase()]).then(([ok]) => {
-      setOnline(ok);
-      const fresh = getMenu();
-      setMenu(fresh);
-      setOrders(getOrders());
-      const cats2 = [...new Set(fresh.map(i => i.category))];
-      if (cats2.length > 0) setActiveCategory(cats2[0]);
-    });
+    Promise.all([fetchMenu(), fetchOrders()]).then(([m, o]) => {
+      setOnline(true);
+      setMenu(m);
+      setOrders(o);
+      const cats = [...new Set(m.map(i => i.category))];
+      if (cats.length > 0) setActiveCategory(cats[0]);
+    }).catch(() => setOnline(false));
   }, [router]);
+
+  useEffect(() => {
+    async function syncFromSupabase() {
+      const [m, o] = await Promise.all([fetchMenu(), fetchOrders()]);
+      setMenu(m);
+      setOrders(o);
+    }
+    window.addEventListener('focus', syncFromSupabase);
+    return () => window.removeEventListener('focus', syncFromSupabase);
+  }, []);
 
   // ── cart helpers ──────────────────────────────────────────────────────────
 
@@ -132,18 +110,16 @@ export default function SellerPage() {
     setSelectedTable(n);
     setCart([]);
     setNote('');
-    const fresh = getMenu();
-    setMenu(fresh);
-    const cats = [...new Set(fresh.map(i => i.category))];
+    const cats = [...new Set(menu.map(i => i.category))];
     if (cats.length > 0) setActiveCategory(cats[0]);
     setView('menu');
   }
 
-  function submitOrder() {
+  async function submitOrder() {
     if (!selectedTable || cart.length === 0) return;
     const order: Order = {
       id: Date.now().toString(),
-      orderNumber: nextOrderNumber(),
+      orderNumber: orders.length + 1,
       tableNumber: selectedTable,
       items: cart,
       status: 'gözləyir',
@@ -151,19 +127,24 @@ export default function SellerPage() {
       sellerName,
       note: note.trim() || undefined,
     };
-    addOrder(order);
-    refreshOrders();
+    setOrders(prev => [order, ...prev]);
     setCart([]);
     setNote('');
     setSelectedTable(null);
     setView('orders');
+    await addOrder(order);
   }
 
-  function confirmPayment() {
+  async function confirmPayment() {
     if (!payingOrder) return;
-    updateOrderStatus(payingOrder.id, 'ödənilib', payMethod);
-    refreshOrders();
+    setOrders(prev => prev.map(o => o.id === payingOrder.id ? { ...o, status: 'ödənilib', paymentMethod: payMethod } : o));
     setPayingOrder(null);
+    await updateOrderStatus(payingOrder.id, 'ödənilib', payMethod);
+  }
+
+  async function handleStatusChange(id: string, status: OrderStatus) {
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
+    await updateOrderStatus(id, status);
   }
 
   // ── grouped orders ────────────────────────────────────────────────────────
@@ -244,7 +225,7 @@ export default function SellerPage() {
               <div className="px-5 py-2 bg-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                 ▸ Əvvəlki günlər &nbsp;{prevOrders.length}
               </div>
-              {prevOrders.map(o => <OrderRow key={o.id} order={o} onPay={() => setPayingOrder(o)} onStatusChange={(id, s) => { updateOrderStatus(id, s); refreshOrders(); }} />)}
+              {prevOrders.map(o => <OrderRow key={o.id} order={o} onPay={() => setPayingOrder(o)} onStatusChange={handleStatusChange} />)}
             </div>
           )}
 
@@ -253,7 +234,7 @@ export default function SellerPage() {
               <div className="px-5 py-2 bg-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                 ▸ Bu gün &nbsp;{todayOrders.length}
               </div>
-              {todayOrders.map(o => <OrderRow key={o.id} order={o} onPay={() => setPayingOrder(o)} onStatusChange={(id, s) => { updateOrderStatus(id, s); refreshOrders(); }} />)}
+              {todayOrders.map(o => <OrderRow key={o.id} order={o} onPay={() => setPayingOrder(o)} onStatusChange={handleStatusChange} />)}
             </div>
           )}
         </div>
@@ -449,7 +430,6 @@ function OrderRow({ order, onPay, onStatusChange }: {
 
   return (
     <div className="grid grid-cols-[120px_1fr_160px_180px_120px] gap-4 px-5 py-4 border-b bg-white hover:bg-gray-50 items-center">
-      {/* time */}
       <div>
         <p className="font-semibold text-gray-800 text-sm">
           {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })}
@@ -457,7 +437,6 @@ function OrderRow({ order, onPay, onStatusChange }: {
         <p className="text-xs text-gray-400">{elapsed(order.createdAt)}</p>
       </div>
 
-      {/* order info */}
       <div>
         <p className="text-sm font-medium text-gray-800">
           <span className="text-blue-600">№{order.orderNumber}</span>
@@ -467,7 +446,6 @@ function OrderRow({ order, onPay, onStatusChange }: {
         <p className="text-xs text-gray-400 truncate max-w-xs">{itemsPreview}</p>
       </div>
 
-      {/* status */}
       <div>
         <span className={`text-xs font-bold uppercase border-b-2 pb-0.5 ${STATUS_STYLES[order.status]}`}>
           {order.status}
@@ -475,7 +453,6 @@ function OrderRow({ order, onPay, onStatusChange }: {
         <p className="text-xs text-gray-400 mt-0.5">{elapsed(order.createdAt)}</p>
       </div>
 
-      {/* action */}
       <div>
         {order.status !== 'ödənilib' && (
           <div className="flex gap-2">
@@ -502,7 +479,6 @@ function OrderRow({ order, onPay, onStatusChange }: {
         )}
       </div>
 
-      {/* total */}
       <div className="text-right">
         <span className="font-bold text-gray-800">{total.toFixed(2)} ₼</span>
       </div>
