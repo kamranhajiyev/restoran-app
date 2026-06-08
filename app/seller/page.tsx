@@ -104,6 +104,10 @@ export default function SellerPage() {
     setSelectedTable(n);
     setCart([]);
     setNote('');
+    const fresh = getMenu();
+    setMenu(fresh);
+    const cats = [...new Set(fresh.map(i => i.category))];
+    if (cats.length > 0) setActiveCategory(cats[0]);
     setView('menu');
   }
 
