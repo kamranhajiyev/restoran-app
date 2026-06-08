@@ -57,6 +57,15 @@ export default function SellerPage() {
   const refreshOrders = useCallback(() => setOrders(getOrders()), []);
 
   useEffect(() => {
+    if (view === 'menu') {
+      const fresh = getMenu();
+      setMenu(fresh);
+      const cats = [...new Set(fresh.map(i => i.category))];
+      setActiveCategory(prev => cats.includes(prev) ? prev : (cats[0] ?? ''));
+    }
+  }, [view]);
+
+  useEffect(() => {
     const session = getSession();
     if (!session || session.role !== 'seller') { router.replace('/login'); return; }
     setSellerName(session.name);

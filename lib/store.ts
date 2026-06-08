@@ -93,18 +93,22 @@ async function pushMenuToSupabase(menu: MenuItem[]) {
     await supabase.from('menu_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     await supabase.from('menu_items').insert(
       menu.map(m => ({
-        id: m.id,
+        id: isValidUUID(m.id) ? m.id : undefined,
         name: m.name,
         price: m.price,
         category: m.category,
         available: m.available,
         variants: m.variants ?? null,
         cost_price: m.costPrice ?? null,
-        image: m.image ?? null,
+        image: m.image && m.image.startsWith('data:') ? null : (m.image ?? null),
         cooking_station: m.cookingStation ?? null,
       }))
     );
   } catch { /* offline */ }
+}
+
+function isValidUUID(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }
 
 export async function pullMenuFromSupabase(): Promise<boolean> {
@@ -122,7 +126,10 @@ export async function pullMenuFromSupabase(): Promise<boolean> {
       image: r.image ?? undefined,
       cookingStation: r.cooking_station ?? undefined,
     }));
-    if (menu.length > 0) localStorage.setItem(MENU_KEY, JSON.stringify(menu));
+    const localCount = localMenu().length;
+    if (menu.length > 0 && menu.length >= localCount) {
+      localStorage.setItem(MENU_KEY, JSON.stringify(menu));
+    }
     return true;
   } catch {
     return false;
