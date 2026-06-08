@@ -88,7 +88,7 @@ export async function fetchOrders(): Promise<Order[]> {
       note: o.note ?? undefined,
       createdAt: o.created_at,
       paymentMethod: o.payment_method ?? undefined,
-      items: (o.order_items ?? []).map((oi: { menu_item_id: string; menu_item_name: string; menu_item_price: number; quantity: number }) => ({
+      items: (o.order_items ?? []).map((oi: { menu_item_id: string; menu_item_name: string; menu_item_price: number; quantity: number; modifiers?: string }) => ({
         menuItem: {
           id: oi.menu_item_id,
           name: oi.menu_item_name,
@@ -97,6 +97,7 @@ export async function fetchOrders(): Promise<Order[]> {
           available: true,
         },
         quantity: oi.quantity,
+        modifiers: oi.modifiers ?? undefined,
       })),
     }));
   } catch {
@@ -121,6 +122,7 @@ export async function addOrder(order: Order): Promise<void> {
         menu_item_name: oi.menuItem.name,
         menu_item_price: oi.menuItem.price,
         quantity: oi.quantity,
+        modifiers: oi.modifiers ?? null,
       }))
     );
   } catch (e) {

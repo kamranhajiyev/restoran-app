@@ -22,6 +22,7 @@ export interface MenuItem {
 export interface OrderItem {
   menuItem: MenuItem;
   quantity: number;
+  modifiers?: string;
 }
 
 export type OrderStatus = 'gözləyir' | 'hazırlanır' | 'hazırdır' | 'ödənilib';
