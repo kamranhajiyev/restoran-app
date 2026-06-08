@@ -6,6 +6,7 @@ import {
   getMenu, saveMenu, getOrders, updateOrderStatus,
   pullMenuFromSupabase, pullOrdersFromSupabase,
   getCategories, saveCategories, pullCategoriesFromSupabase,
+  syncMenuToSupabase,
 } from '@/lib/store';
 import { MenuItem, MenuItemVariant, Order, OrderStatus } from '@/types';
 
@@ -65,7 +66,10 @@ export default function AdminPage() {
     setMenu(getMenu());
     setOrders(getOrders());
 
-    Promise.all([pullMenuFromSupabase(), pullOrdersFromSupabase(), pullCategoriesFromSupabase()]).then(([ok]) => {
+    // push local menu to Supabase first, then pull to get UUID-stable ids back
+    syncMenuToSupabase().then(() =>
+      Promise.all([pullMenuFromSupabase(), pullOrdersFromSupabase(), pullCategoriesFromSupabase()])
+    ).then(([ok]) => {
       setOnline(ok);
       setMenu(getMenu());
       setOrders(getOrders());
@@ -127,7 +131,7 @@ export default function AdminPage() {
     const basePrice = form.hasVariants ? (variants[0]?.price ?? 0) : (parseFloat(form.price) || 0);
 
     const item: MenuItem = {
-      id: editingId ?? Date.now().toString(),
+      id: editingId ?? crypto.randomUUID(),
       name: form.name,
       price: basePrice,
       category: form.category,

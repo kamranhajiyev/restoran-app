@@ -88,23 +88,29 @@ export function saveMenu(menu: MenuItem[]) {
   pushMenuToSupabase(menu);
 }
 
+export async function syncMenuToSupabase(): Promise<void> {
+  await pushMenuToSupabase(localMenu());
+}
+
 async function pushMenuToSupabase(menu: MenuItem[]) {
   try {
-    await supabase.from('menu_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('menu_items').insert(
-      menu.map(m => ({
-        id: isValidUUID(m.id) ? m.id : undefined,
-        name: m.name,
-        price: m.price,
-        category: m.category,
-        available: m.available,
-        variants: m.variants ?? null,
-        cost_price: m.costPrice ?? null,
-        image: m.image && m.image.startsWith('data:') ? null : (m.image ?? null),
-        cooking_station: m.cookingStation ?? null,
-      }))
-    );
-  } catch { /* offline */ }
+    const { error: delErr } = await supabase.from('menu_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    if (delErr) { console.error('[menu push] delete:', delErr.message); return; }
+    const rows = menu.map(m => ({
+      id: isValidUUID(m.id) ? m.id : undefined,
+      name: m.name,
+      price: m.price,
+      category: m.category,
+      available: m.available,
+      variants: m.variants ?? null,
+      cost_price: m.costPrice ?? null,
+      image: m.image && m.image.startsWith('data:') ? null : (m.image ?? null),
+      cooking_station: m.cookingStation ?? null,
+    }));
+    const { error: insErr } = await supabase.from('menu_items').insert(rows);
+    if (insErr) console.error('[menu push] insert:', insErr.message);
+    else console.log('[menu push] ok —', rows.length, 'items');
+  } catch (e) { console.error('[menu push] exception:', e); }
 }
 
 function isValidUUID(id: string): boolean {

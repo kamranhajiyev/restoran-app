@@ -65,6 +65,21 @@ export default function SellerPage() {
     }
   }, [view]);
 
+  // Re-read menu when another tab (admin) saves to localStorage or window regains focus
+  useEffect(() => {
+    function syncMenu() {
+      const fresh = getMenu();
+      setMenu(fresh);
+      setOrders(getOrders());
+    }
+    window.addEventListener('storage', syncMenu);
+    window.addEventListener('focus', syncMenu);
+    return () => {
+      window.removeEventListener('storage', syncMenu);
+      window.removeEventListener('focus', syncMenu);
+    };
+  }, []);
+
   useEffect(() => {
     const session = getSession();
     if (!session || session.role !== 'seller') { router.replace('/login'); return; }
