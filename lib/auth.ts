@@ -4,7 +4,7 @@ const AUTH_KEY = 'restoran_auth';
 
 const USERS: { username: string; password: string; role: Role; name: string }[] = [
   { username: 'admin', password: 'admin123', role: 'admin', name: 'Admin' },
-  { username: 'ofisiant', password: '1234', role: 'waiter', name: 'Ofisiant' },
+  { username: 'satici', password: '1234', role: 'seller', name: 'Satıcı' },
 ];
 
 export function login(username: string, password: string) {

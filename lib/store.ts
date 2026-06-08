@@ -3,6 +3,7 @@ import { supabase } from './supabase';
 
 const MENU_KEY = 'restoran_menu';
 const ORDERS_KEY = 'restoran_orders';
+const ORDER_COUNTER_KEY = 'restoran_order_counter';
 
 // ─── default menu ────────────────────────────────────────────────────────────
 
@@ -36,6 +37,14 @@ function localOrders(): Order[] {
   return raw ? JSON.parse(raw) : [];
 }
 
+export function nextOrderNumber(): number {
+  if (typeof window === 'undefined') return 1;
+  const current = parseInt(localStorage.getItem(ORDER_COUNTER_KEY) ?? '0', 10);
+  const next = current + 1;
+  localStorage.setItem(ORDER_COUNTER_KEY, String(next));
+  return next;
+}
+
 // ─── menu ─────────────────────────────────────────────────────────────────────
 
 export function getMenu(): MenuItem[] {
@@ -53,15 +62,12 @@ async function pushMenuToSupabase(menu: MenuItem[]) {
     await supabase.from('menu_items').insert(
       menu.map(m => ({ id: m.id, name: m.name, price: m.price, category: m.category, available: m.available }))
     );
-  } catch { /* offline — will sync on next write */ }
+  } catch { /* offline */ }
 }
 
 export async function pullMenuFromSupabase(): Promise<boolean> {
   try {
-    const { data, error } = await supabase
-      .from('menu_items')
-      .select('*')
-      .order('created_at');
+    const { data, error } = await supabase.from('menu_items').select('*').order('created_at');
     if (error || !data) return false;
     const menu: MenuItem[] = data.map(r => ({
       id: r.id,
@@ -70,9 +76,7 @@ export async function pullMenuFromSupabase(): Promise<boolean> {
       category: r.category,
       available: r.available,
     }));
-    if (menu.length > 0) {
-      localStorage.setItem(MENU_KEY, JSON.stringify(menu));
-    }
+    if (menu.length > 0) localStorage.setItem(MENU_KEY, JSON.stringify(menu));
     return true;
   } catch {
     return false;
@@ -96,13 +100,14 @@ export function addOrder(order: Order) {
   pushOrderToSupabase(order);
 }
 
-export function updateOrderStatus(orderId: string, status: Order['status']) {
+export function updateOrderStatus(orderId: string, status: Order['status'], paymentMethod?: Order['paymentMethod']) {
   const orders = localOrders();
   const idx = orders.findIndex(o => o.id === orderId);
   if (idx !== -1) {
     orders[idx].status = status;
+    if (paymentMethod) orders[idx].paymentMethod = paymentMethod;
     saveOrders(orders);
-    void supabase.from('orders').update({ status }).eq('id', orderId);
+    void supabase.from('orders').update({ status, payment_method: paymentMethod ?? null }).eq('id', orderId);
   }
 }
 
@@ -111,7 +116,7 @@ async function pushOrderToSupabase(order: Order) {
     await supabase.from('orders').insert({
       id: order.id,
       table_id: order.tableNumber,
-      waiter_name: order.waiterName,
+      waiter_name: order.sellerName,
       status: order.status,
       note: order.note ?? null,
       created_at: order.createdAt,
@@ -135,13 +140,15 @@ export async function pullOrdersFromSupabase(): Promise<boolean> {
       .select('*, order_items(*)')
       .order('created_at', { ascending: false });
     if (error || !ordersData) return false;
-    const orders: Order[] = ordersData.map(o => ({
+    const orders: Order[] = ordersData.map((o, i) => ({
       id: o.id,
+      orderNumber: ordersData.length - i,
       tableNumber: o.table_id,
-      waiterName: o.waiter_name,
+      sellerName: o.waiter_name,
       status: o.status,
       note: o.note ?? undefined,
       createdAt: o.created_at,
+      paymentMethod: o.payment_method ?? undefined,
       items: (o.order_items ?? []).map((oi: { menu_item_id: string; menu_item_name: string; menu_item_price: number; quantity: number }) => ({
         menuItem: {
           id: oi.menu_item_id,

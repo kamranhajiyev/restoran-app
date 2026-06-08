@@ -1,4 +1,4 @@
-export type Role = 'admin' | 'waiter';
+export type Role = 'admin' | 'seller';
 
 export interface MenuItem {
   id: string;
@@ -17,10 +17,12 @@ export type OrderStatus = 'gözləyir' | 'hazırlanır' | 'hazırdır' | 'ödən
 
 export interface Order {
   id: string;
+  orderNumber: number;
   tableNumber: number;
   items: OrderItem[];
   status: OrderStatus;
   createdAt: string;
-  waiterName: string;
+  sellerName: string;
   note?: string;
+  paymentMethod?: 'nağd' | 'kart';
 }

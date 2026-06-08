@@ -74,7 +74,7 @@ export default function LoginPage() {
 
         <div className="mt-6 text-xs text-gray-400 text-center space-y-1">
           <p>Admin: <span className="font-mono">admin / admin123</span></p>
-          <p>Ofisiant: <span className="font-mono">ofisiant / 1234</span></p>
+          <p>Satıcı: <span className="font-mono">satici / 1234</span></p>
         </div>
       </div>
     </div>

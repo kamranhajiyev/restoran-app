@@ -196,7 +196,7 @@ export default function AdminPage() {
                     <div key={o.id} className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
                       <div>
                         <span className="font-medium text-sm text-gray-800">Masa {o.tableNumber}</span>
-                        <span className="ml-2 text-xs text-gray-400">{o.waiterName}</span>
+                        <span className="ml-2 text-xs text-gray-400">{o.sellerName}</span>
                       </div>
                       <div className="text-right">
                         <span className="font-bold text-sm text-gray-800">{orderTotal(o).toFixed(2)} ₼</span>
@@ -237,7 +237,7 @@ export default function AdminPage() {
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <span className="font-bold text-lg">Masa {order.tableNumber}</span>
-                    <span className="ml-3 text-sm text-gray-500">{order.waiterName}</span>
+                    <span className="ml-3 text-sm text-gray-500">{order.sellerName}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLORS[order.status]}`}>{order.status}</span>

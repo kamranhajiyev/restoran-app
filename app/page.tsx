@@ -12,7 +12,7 @@ export default function Home() {
     } else if (session.role === 'admin') {
       router.replace('/admin');
     } else {
-      router.replace('/waiter');
+      router.replace('/seller');
     }
   }, [router]);
 
