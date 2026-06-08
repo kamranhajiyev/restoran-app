@@ -604,13 +604,23 @@ export default function AdminPage() {
               <div className="grid md:grid-cols-2 gap-5">
                 <div className="bg-white rounded-xl border border-gray-100 p-5">
                   <h3 className="font-semibold text-gray-800 text-sm mb-4">Gün saatlarına görə</h3>
-                  <div className="flex items-end gap-0.5 h-16">
-                    {hourlyData.map((d, i) => (
-                      <div key={i} title={`${i}:00 — ${d.rev.toFixed(2)} ₼`}
-                        className="flex-1 bg-orange-400 hover:bg-orange-500 rounded-t-sm transition-colors cursor-default"
-                        style={{ height: `${Math.max((d.rev / maxHourly) * 100, d.rev > 0 ? 4 : 0)}%`, opacity: d.rev > 0 ? 1 : 0.15 }}
-                      />
-                    ))}
+                  <div className="flex items-end gap-0.5 h-20 pt-5">
+                    {hourlyData.map((d, i) => {
+                      const isPeak = d.rev > 0 && d.rev === maxHourly;
+                      return (
+                        <div key={i}
+                          className={`relative flex-1 rounded-t-sm transition-colors cursor-default ${isPeak ? 'bg-orange-500' : 'bg-orange-300 hover:bg-orange-400'}`}
+                          style={{ height: `${Math.max((d.rev / maxHourly) * 100, d.rev > 0 ? 4 : 0)}%`, opacity: d.rev > 0 ? 1 : 0.12 }}
+                          title={`${i}:00 — ${d.rev.toFixed(2)} ₼`}
+                        >
+                          {isPeak && (
+                            <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[8px] text-orange-500 font-semibold whitespace-nowrap">
+                              {d.rev >= 1000 ? `${(d.rev / 1000).toFixed(1)}k` : `${d.rev.toFixed(0)}₼`}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                   <div className="flex justify-between mt-1.5 text-[9px] text-gray-300">
                     <span>0</span><span>6</span><span>12</span><span>18</span><span>23</span>
@@ -619,13 +629,23 @@ export default function AdminPage() {
 
                 <div className="bg-white rounded-xl border border-gray-100 p-5">
                   <h3 className="font-semibold text-gray-800 text-sm mb-4">Həftənin günlərinə görə</h3>
-                  <div className="flex items-end gap-1 h-16">
-                    {weeklyData.map(d => (
-                      <div key={d.label} title={`${d.label} — ${d.rev.toFixed(2)} ₼`}
-                        className="flex-1 bg-orange-400 hover:bg-orange-500 rounded-t-sm transition-colors cursor-default"
-                        style={{ height: `${Math.max((d.rev / maxWeekly) * 100, d.rev > 0 ? 4 : 0)}%`, opacity: d.rev > 0 ? 1 : 0.15 }}
-                      />
-                    ))}
+                  <div className="flex items-end gap-1 h-20 pt-5">
+                    {weeklyData.map(d => {
+                      const isPeak = d.rev > 0 && d.rev === maxWeekly;
+                      return (
+                        <div key={d.label}
+                          className={`relative flex-1 rounded-t-sm transition-colors cursor-default ${isPeak ? 'bg-orange-500' : 'bg-orange-300 hover:bg-orange-400'}`}
+                          style={{ height: `${Math.max((d.rev / maxWeekly) * 100, d.rev > 0 ? 4 : 0)}%`, opacity: d.rev > 0 ? 1 : 0.12 }}
+                          title={`${d.label} — ${d.rev.toFixed(2)} ₼`}
+                        >
+                          {d.rev > 0 && (
+                            <span className={`absolute -top-4 left-1/2 -translate-x-1/2 text-[8px] font-semibold whitespace-nowrap ${isPeak ? 'text-orange-500' : 'text-gray-400'}`}>
+                              {d.rev >= 1000 ? `${(d.rev / 1000).toFixed(1)}k` : `${d.rev.toFixed(0)}₼`}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                   <div className="flex mt-1.5">
                     {weeklyData.map(d => (
