@@ -334,13 +334,19 @@ export default function SellerPage() {
                 <button
                   key={item.id}
                   onClick={() => addToCart(item)}
-                  className="bg-white rounded-xl shadow-sm p-4 text-left hover:shadow-md border border-transparent hover:border-orange-200 transition-all relative"
+                  className="bg-white rounded-xl shadow-sm text-left hover:shadow-md border border-transparent hover:border-orange-200 transition-all relative overflow-hidden"
                 >
                   {inCart && (
-                    <span className="absolute top-2 right-2 bg-orange-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">{inCart.quantity}</span>
+                    <span className="absolute top-2 right-2 z-10 bg-orange-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">{inCart.quantity}</span>
                   )}
-                  <p className="text-sm font-medium text-gray-800 leading-tight">{item.name}</p>
-                  <p className="text-orange-600 font-bold text-sm mt-1">{item.price.toFixed(2)} ₼</p>
+                  {item.image
+                    ? <img src={item.image} alt={item.name} className="w-full h-28 object-cover" />
+                    : <div className="w-full h-28 bg-gray-100 flex items-center justify-center text-3xl">🍴</div>
+                  }
+                  <div className="p-3">
+                    <p className="text-sm font-medium text-gray-800 leading-tight">{item.name}</p>
+                    <p className="text-orange-600 font-bold text-sm mt-0.5">{item.price.toFixed(2)} ₼</p>
+                  </div>
                 </button>
               );
             })}
