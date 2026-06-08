@@ -1,0 +1,161 @@
+import { MenuItem, Order } from '@/types';
+import { supabase } from './supabase';
+
+const MENU_KEY = 'restoran_menu';
+const ORDERS_KEY = 'restoran_orders';
+
+// ─── default menu ────────────────────────────────────────────────────────────
+
+const defaultMenu: MenuItem[] = [
+  { id: '1', name: 'Çoban Salat', price: 4, category: 'Salatlar', available: true },
+  { id: '2', name: 'Kənd Salat', price: 4.5, category: 'Salatlar', available: true },
+  { id: '3', name: 'Düşbərə', price: 5, category: 'Şorbalar', available: true },
+  { id: '4', name: 'Piti', price: 7, category: 'Şorbalar', available: true },
+  { id: '5', name: 'Lülə Kabab', price: 9, category: 'Əsas Yeməklər', available: true },
+  { id: '6', name: 'Toyuq Kabab', price: 8, category: 'Əsas Yeməklər', available: true },
+  { id: '7', name: 'Qutab', price: 3, category: 'Qəlyanaltı', available: true },
+  { id: '8', name: 'Çay', price: 1.5, category: 'İçkilər', available: true },
+  { id: '9', name: 'Ayran', price: 2, category: 'İçkilər', available: true },
+];
+
+// ─── local helpers ────────────────────────────────────────────────────────────
+
+function localMenu(): MenuItem[] {
+  if (typeof window === 'undefined') return defaultMenu;
+  const raw = localStorage.getItem(MENU_KEY);
+  if (!raw) {
+    localStorage.setItem(MENU_KEY, JSON.stringify(defaultMenu));
+    return defaultMenu;
+  }
+  return JSON.parse(raw);
+}
+
+function localOrders(): Order[] {
+  if (typeof window === 'undefined') return [];
+  const raw = localStorage.getItem(ORDERS_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+
+// ─── menu ─────────────────────────────────────────────────────────────────────
+
+export function getMenu(): MenuItem[] {
+  return localMenu();
+}
+
+export function saveMenu(menu: MenuItem[]) {
+  localStorage.setItem(MENU_KEY, JSON.stringify(menu));
+  pushMenuToSupabase(menu);
+}
+
+async function pushMenuToSupabase(menu: MenuItem[]) {
+  try {
+    await supabase.from('menu_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('menu_items').insert(
+      menu.map(m => ({ id: m.id, name: m.name, price: m.price, category: m.category, available: m.available }))
+    );
+  } catch { /* offline — will sync on next write */ }
+}
+
+export async function pullMenuFromSupabase(): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from('menu_items')
+      .select('*')
+      .order('created_at');
+    if (error || !data) return false;
+    const menu: MenuItem[] = data.map(r => ({
+      id: r.id,
+      name: r.name,
+      price: Number(r.price),
+      category: r.category,
+      available: r.available,
+    }));
+    if (menu.length > 0) {
+      localStorage.setItem(MENU_KEY, JSON.stringify(menu));
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ─── orders ───────────────────────────────────────────────────────────────────
+
+export function getOrders(): Order[] {
+  return localOrders();
+}
+
+export function saveOrders(orders: Order[]) {
+  localStorage.setItem(ORDERS_KEY, JSON.stringify(orders));
+}
+
+export function addOrder(order: Order) {
+  const orders = localOrders();
+  orders.unshift(order);
+  saveOrders(orders);
+  pushOrderToSupabase(order);
+}
+
+export function updateOrderStatus(orderId: string, status: Order['status']) {
+  const orders = localOrders();
+  const idx = orders.findIndex(o => o.id === orderId);
+  if (idx !== -1) {
+    orders[idx].status = status;
+    saveOrders(orders);
+    void supabase.from('orders').update({ status }).eq('id', orderId);
+  }
+}
+
+async function pushOrderToSupabase(order: Order) {
+  try {
+    await supabase.from('orders').insert({
+      id: order.id,
+      table_id: order.tableNumber,
+      waiter_name: order.waiterName,
+      status: order.status,
+      note: order.note ?? null,
+      created_at: order.createdAt,
+    });
+    await supabase.from('order_items').insert(
+      order.items.map(oi => ({
+        order_id: order.id,
+        menu_item_id: oi.menuItem.id,
+        menu_item_name: oi.menuItem.name,
+        menu_item_price: oi.menuItem.price,
+        quantity: oi.quantity,
+      }))
+    );
+  } catch { /* offline */ }
+}
+
+export async function pullOrdersFromSupabase(): Promise<boolean> {
+  try {
+    const { data: ordersData, error } = await supabase
+      .from('orders')
+      .select('*, order_items(*)')
+      .order('created_at', { ascending: false });
+    if (error || !ordersData) return false;
+    const orders: Order[] = ordersData.map(o => ({
+      id: o.id,
+      tableNumber: o.table_id,
+      waiterName: o.waiter_name,
+      status: o.status,
+      note: o.note ?? undefined,
+      createdAt: o.created_at,
+      items: (o.order_items ?? []).map((oi: { menu_item_id: string; menu_item_name: string; menu_item_price: number; quantity: number }) => ({
+        menuItem: {
+          id: oi.menu_item_id,
+          name: oi.menu_item_name,
+          price: Number(oi.menu_item_price),
+          category: '',
+          available: true,
+        },
+        quantity: oi.quantity,
+      })),
+    }));
+    localStorage.setItem(ORDERS_KEY, JSON.stringify(orders));
+    return true;
+  } catch {
+    return false;
+  }
+}
