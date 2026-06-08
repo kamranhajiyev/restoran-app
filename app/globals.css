@@ -4,6 +4,31 @@
   --font-sans: var(--font-quicksand);
 }
 
+:root {
+  --background:   30 20% 97%;
+  --card:         0  0% 100%;
+  --border:       30 15% 88%;
+  --foreground:   20 15% 12%;
+  --muted:        30 10% 94%;
+  --muted-fg:     25 10% 50%;
+  --primary:      24 100% 28%;   /* amber-800 #92400e */
+  --primary-fg:   0 0% 100%;
+
+  --shadow-card:       0 2px 8px  rgb(0 0 0 / 0.06);
+  --shadow-card-hover: 0 6px 20px rgb(0 0 0 / 0.10);
+  --transition-smooth: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 body {
   font-family: var(--font-quicksand, 'Quicksand', sans-serif);
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.card {
+  box-shadow: var(--shadow-card);
+  transition: var(--transition-smooth);
+}
+.card:hover {
+  box-shadow: var(--shadow-card-hover);
 }

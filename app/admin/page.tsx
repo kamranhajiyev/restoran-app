@@ -73,8 +73,8 @@ function LineChartSvg({ data }: { data: { label: string; rev: number }[] }) {
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
       <defs>
         <linearGradient id="lc-g" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#f97316" stopOpacity="0.18" />
-          <stop offset="100%" stopColor="#f97316" stopOpacity="0.02" />
+          <stop offset="0%" stopColor="#92400e" stopOpacity="0.18" />
+          <stop offset="100%" stopColor="#92400e" stopOpacity="0.02" />
         </linearGradient>
       </defs>
       {yTicks.map(t => (
@@ -86,9 +86,9 @@ function LineChartSvg({ data }: { data: { label: string; rev: number }[] }) {
         </g>
       ))}
       {n > 1 && <polygon points={areaStr} fill="url(#lc-g)" />}
-      {n > 1 && <polyline points={lineStr} fill="none" stroke="#f97316" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
+      {n > 1 && <polyline points={lineStr} fill="none" stroke="#92400e" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
       {pts.map(([x, y], i) => data[i].rev > 0 && (
-        <circle key={i} cx={x} cy={y} r="3" fill="#f97316" stroke="white" strokeWidth="1.5" />
+        <circle key={i} cx={x} cy={y} r="3" fill="#92400e" stroke="white" strokeWidth="1.5" />
       ))}
       {data.map((d, i) => (i % step === 0 || i === n - 1) && (
         <text key={i} x={px(i)} y={H - 4} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize="10" fill="#9ca3af">{d.label}</text>
@@ -344,12 +344,12 @@ export default function AdminPage() {
   // ── sidebar ────────────────────────────────────────────────────────────────
   function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     return (
-      <div className="flex flex-col h-full bg-white">
+      <div className="flex flex-col h-full bg-white min-h-[calc(100vh-4rem)]">
         {/* Logo row */}
-        <div className={`flex items-center h-16 border-b border-gray-100 ${collapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
+        <div className={`flex items-center h-16 border-b border-gray-100/50 ${collapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
           {!collapsed && (
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-orange-500 flex items-center justify-center">
+              <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
                 <Coffee className="w-4 h-4 text-white" />
               </div>
               <span className="font-semibold text-gray-800 text-sm">Admin Paneli</span>
@@ -377,11 +377,13 @@ export default function AdminPage() {
                   title={n.label}
                   onClick={() => { navigate(n.id); onNavigate?.(); if (n.id === 'orders') refresh(); }}
                   className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
-                    isActive ? 'bg-orange-50 text-orange-500 before:absolute before:left-[-9px] before:top-1/2 before:-translate-y-1/2 before:w-[3px] before:h-4 before:rounded-r-full before:bg-orange-500' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700'
+                    isActive
+                      ? 'bg-amber-800/10 text-amber-800 before:absolute before:left-[-9px] before:top-1/2 before:-translate-y-1/2 before:w-[3px] before:h-4 before:rounded-r-full before:bg-amber-800'
+                      : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700'
                   }`}
                 >
                   <Icon className="w-4 h-4" />
-                  {badge && <span className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 text-white text-[9px] rounded-full flex items-center justify-center font-bold">{badge}</span>}
+                  {badge && <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-800 text-white text-[9px] rounded-full flex items-center justify-center font-bold">{badge}</span>}
                 </button>
               );
             }
@@ -391,13 +393,15 @@ export default function AdminPage() {
                 key={n.id}
                 onClick={() => { navigate(n.id); onNavigate?.(); if (n.id === 'orders') refresh(); }}
                 className={`flex items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium transition-colors w-full ${
-                  isActive ? 'bg-orange-500 text-white' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'
+                  isActive
+                    ? 'bg-amber-800 text-white shadow-sm'
+                    : 'text-gray-500 hover:bg-amber-50 hover:text-amber-900'
                 }`}
               >
                 <Icon className="w-4 h-4 shrink-0" />
                 <span className="flex-1 text-left truncate">{n.label}</span>
                 {badge && (
-                  <span className={`text-xs rounded-full px-1.5 py-0.5 font-semibold ${isActive ? 'bg-white/20 text-white' : 'bg-orange-500 text-white'}`}>
+                  <span className={`text-xs rounded-full px-1.5 py-0.5 font-semibold ${isActive ? 'bg-white/20 text-white' : 'bg-amber-800 text-white'}`}>
                     {badge}
                   </span>
                 )}
@@ -408,12 +412,12 @@ export default function AdminPage() {
 
         {/* User + logout */}
         {!collapsed && (
-          <div className="px-4 py-4 border-t border-gray-100">
+          <div className="px-4 py-4 border-t border-gray-100/50">
             <div className="flex items-center gap-2 mb-3">
-              <div className="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 text-xs font-bold">
+              <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
                 {adminName[0]?.toUpperCase()}
               </div>
-              <span className="text-xs text-gray-600 truncate">{adminName}</span>
+              <span className="text-xs text-gray-500 truncate">{adminName}</span>
               {!online && <span className="ml-auto text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">Oflayn</span>}
             </div>
             <button
@@ -426,8 +430,8 @@ export default function AdminPage() {
           </div>
         )}
         {collapsed && (
-          <div className="py-4 flex flex-col items-center gap-2 border-t border-gray-100">
-            <div className="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 text-xs font-bold">
+          <div className="py-4 flex flex-col items-center gap-2 border-t border-gray-100/50">
+            <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
               {adminName[0]?.toUpperCase()}
             </div>
             <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-gray-400 hover:text-red-500 transition-colors">
@@ -442,10 +446,10 @@ export default function AdminPage() {
   const meta = PAGE_META[tab];
 
   return (
-    <div className="min-h-screen bg-gray-50" style={{ fontFamily: 'var(--font-quicksand, Quicksand, sans-serif)' }}>
+    <div className="min-h-screen bg-gray-50">
 
       {/* ── Top header ── */}
-      <header className="sticky top-0 z-50 h-16 border-b border-gray-100 bg-white/90 backdrop-blur-sm flex items-center gap-3 px-4">
+      <header className="sticky top-0 z-50 h-16 border-b border-gray-100/60 bg-white/80 backdrop-blur-sm flex items-center gap-3 px-4">
         {/* Mobile menu */}
         <button
           className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100"
@@ -455,7 +459,7 @@ export default function AdminPage() {
         </button>
 
         <div className="flex items-center gap-2 md:hidden">
-          <div className="w-7 h-7 rounded-lg bg-orange-500 flex items-center justify-center">
+          <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
             <Coffee className="w-4 h-4 text-white" />
           </div>
           <span className="font-semibold text-gray-800 text-sm">Restoran</span>
@@ -464,7 +468,7 @@ export default function AdminPage() {
         <div className="flex-1" />
 
         <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-gray-100 rounded-xl">
-          <div className="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 text-xs font-bold">
+          <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
             {adminName[0]?.toUpperCase()}
           </div>
           <span className="text-sm font-medium text-gray-700 hidden sm:inline">{adminName}</span>
@@ -494,18 +498,18 @@ export default function AdminPage() {
         </>
       )}
 
-      <div className="flex min-h-[calc(100vh-4rem)]">
+      <div className="flex min-h-[calc(100vh-4rem)] bg-white">
 
         {/* ── Desktop sidebar ── */}
-        <aside className={`hidden md:block flex-shrink-0 sticky top-16 self-start h-[calc(100vh-4rem)] transition-all duration-200 border-r border-gray-100 ${collapsed ? 'w-14' : 'w-56'}`}>
+        <aside className={`hidden md:block flex-shrink-0 sticky top-16 self-start h-[calc(100vh-4rem)] transition-all duration-200 border-r border-gray-100/60 ${collapsed ? 'w-14' : 'w-56'}`}>
           <SidebarContent />
         </aside>
 
         {/* ── Main ── */}
-        <main className="flex-1 min-w-0 bg-gray-50 rounded-tl-2xl border-l border-t border-gray-100 p-6 md:p-8 overflow-y-auto">
+        <main className="flex-1 min-w-0 bg-gray-50 rounded-tl-2xl border-l border-t border-gray-100/60 p-6 md:p-8 overflow-y-auto">
           <div className="mb-6">
             <h1 className="text-lg font-semibold text-gray-900">{meta.title}</h1>
-            <p className="text-sm text-gray-400 mt-0.5">{meta.subtitle}</p>
+            <p className="text-sm text-gray-500 mt-0.5">{meta.subtitle}</p>
           </div>
 
           {/* ── STATS ─────────────────────────────────────────────────── */}
@@ -513,7 +517,7 @@ export default function AdminPage() {
             <div className="space-y-5 max-w-5xl">
 
               {/* Main chart card */}
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
                 <div className="flex items-center justify-between px-6 pt-5 pb-3">
                   <h3 className="font-semibold text-gray-800">Gəlir</h3>
                   <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5">
@@ -554,7 +558,7 @@ export default function AdminPage() {
 
               {/* Payment + Category */}
               <div className="grid md:grid-cols-2 gap-5">
-                <div className="bg-white rounded-xl border border-gray-100 p-5">
+                <div className="bg-white rounded-xl border border-gray-100 card p-5">
                   <h3 className="font-semibold text-gray-800 text-sm mb-4">Ödəniş üsulları</h3>
                   {totalPayRev === 0 ? (
                     <p className="text-sm text-gray-300 text-center py-4">Məlumat yoxdur</p>
@@ -572,7 +576,7 @@ export default function AdminPage() {
                               </div>
                             </div>
                             <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                              <div className="h-full bg-orange-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                              <div className="h-full bg-amber-700 rounded-full transition-all" style={{ width: `${pct}%` }} />
                             </div>
                           </div>
                         );
@@ -581,7 +585,7 @@ export default function AdminPage() {
                   )}
                 </div>
 
-                <div className="bg-white rounded-xl border border-gray-100 p-5">
+                <div className="bg-white rounded-xl border border-gray-100 card p-5">
                   <h3 className="font-semibold text-gray-800 text-sm mb-4">Kateqoriya mənfəəti</h3>
                   {repCategories.length === 0 ? (
                     <p className="text-sm text-gray-300 text-center py-4">Məlumat yoxdur</p>
@@ -612,19 +616,19 @@ export default function AdminPage() {
 
               {/* Hourly + Weekly */}
               <div className="grid md:grid-cols-2 gap-5">
-                <div className="bg-white rounded-xl border border-gray-100 p-5">
+                <div className="bg-white rounded-xl border border-gray-100 card p-5">
                   <h3 className="font-semibold text-gray-800 text-sm mb-4">Gün saatlarına görə</h3>
                   <div className="flex items-end gap-0.5 h-36 pt-6">
                     {hourlyData.map((d, i) => {
                       const isPeak = d.rev > 0 && d.rev === maxHourly;
                       return (
                         <div key={i}
-                          className={`relative flex-1 rounded-t-sm transition-colors cursor-default ${isPeak ? 'bg-orange-500' : 'bg-orange-300 hover:bg-orange-400'}`}
+                          className={`relative flex-1 rounded-t-sm transition-colors cursor-default ${isPeak ? 'bg-amber-800' : 'bg-amber-600 hover:bg-amber-700'}`}
                           style={{ height: `${Math.max((d.rev / maxHourly) * 100, d.rev > 0 ? 3 : 0)}%`, opacity: d.rev > 0 ? 1 : 0.12 }}
                           title={`${i}:00 — ${d.rev.toFixed(2)} ₼`}
                         >
                           {isPeak && (
-                            <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] text-orange-500 font-bold whitespace-nowrap">
+                            <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] text-amber-800 font-bold whitespace-nowrap">
                               {d.rev >= 1000 ? `${(d.rev / 1000).toFixed(1)}k` : `${d.rev.toFixed(0)}₼`}
                             </span>
                           )}
@@ -641,19 +645,19 @@ export default function AdminPage() {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl border border-gray-100 p-5">
+                <div className="bg-white rounded-xl border border-gray-100 card p-5">
                   <h3 className="font-semibold text-gray-800 text-sm mb-4">Həftənin günlərinə görə</h3>
                   <div className="flex items-end gap-2 h-36 pt-6">
                     {weeklyData.map(d => {
                       const isPeak = d.rev > 0 && d.rev === maxWeekly;
                       return (
                         <div key={d.label}
-                          className={`relative flex-1 rounded-t-sm transition-colors cursor-default ${isPeak ? 'bg-orange-500' : 'bg-orange-300 hover:bg-orange-400'}`}
+                          className={`relative flex-1 rounded-t-sm transition-colors cursor-default ${isPeak ? 'bg-amber-800' : 'bg-amber-600 hover:bg-amber-700'}`}
                           style={{ height: `${Math.max((d.rev / maxWeekly) * 100, d.rev > 0 ? 3 : 0)}%`, opacity: d.rev > 0 ? 1 : 0.12 }}
                           title={`${d.label} — ${d.rev.toFixed(2)} ₼`}
                         >
                           {d.rev > 0 && (
-                            <span className={`absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] font-bold whitespace-nowrap ${isPeak ? 'text-orange-500' : 'text-gray-500'}`}>
+                            <span className={`absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] font-bold whitespace-nowrap ${isPeak ? 'text-amber-800' : 'text-gray-500'}`}>
                               {d.rev >= 1000 ? `${(d.rev / 1000).toFixed(1)}k` : `${d.rev.toFixed(0)}₼`}
                             </span>
                           )}
@@ -671,9 +675,9 @@ export default function AdminPage() {
 
               {/* Top items */}
               {topItems.length > 0 && (
-                <div className="bg-white rounded-xl border border-gray-100 p-5">
+                <div className="bg-white rounded-xl border border-gray-100 card p-5">
                   <div className="flex items-center gap-2 mb-4">
-                    <Star className="w-4 h-4 text-orange-400" />
+                    <Star className="w-4 h-4 text-amber-700" />
                     <h3 className="font-semibold text-gray-800 text-sm">Top məhsullar</h3>
                   </div>
                   <div className="space-y-2.5">
@@ -695,7 +699,7 @@ export default function AdminPage() {
                           </div>
                         </div>
                         <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-orange-400 rounded-full" style={{ width: `${(item.rev / maxItemRev) * 100}%` }} />
+                          <div className="h-full bg-amber-700 rounded-full" style={{ width: `${(item.rev / maxItemRev) * 100}%` }} />
                         </div>
                       </div>
                     ))}
@@ -717,22 +721,22 @@ export default function AdminPage() {
             <div className="space-y-4 max-w-3xl">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-gray-400">{activeOrders.length} aktiv sifariş</p>
-                <button onClick={refresh} className="text-xs font-medium text-orange-500 hover:text-orange-700 px-3 py-1.5 rounded-lg hover:bg-orange-50 transition-colors">Yenilə</button>
+                <button onClick={refresh} className="text-xs font-medium text-amber-800 hover:text-amber-950 px-3 py-1.5 rounded-lg hover:bg-amber-50 transition-colors">Yenilə</button>
               </div>
 
               {activeOrders.length === 0 && (
-                <div className="bg-white rounded-xl border border-gray-100 p-16 text-center">
+                <div className="bg-white rounded-xl border border-gray-100 card p-16 text-center">
                   <Coffee className="w-10 h-10 mx-auto mb-3 text-gray-200" />
                   <p className="text-sm text-gray-400">Aktiv sifariş yoxdur</p>
                 </div>
               )}
 
               {activeOrders.map(order => (
-                <div key={order.id} className="bg-white rounded-xl border border-gray-100 p-5">
+                <div key={order.id} className="bg-white rounded-xl border border-gray-100 card p-5">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-lg bg-orange-50 flex items-center justify-center">
-                        <span className="text-sm font-bold text-orange-600">#{order.orderNumber}</span>
+                      <div className="w-9 h-9 rounded-lg bg-amber-50 flex items-center justify-center">
+                        <span className="text-sm font-bold text-amber-900">#{order.orderNumber}</span>
                       </div>
                       <div>
                         <p className="font-semibold text-gray-800 text-sm">Sifariş #{order.orderNumber}</p>
@@ -744,7 +748,7 @@ export default function AdminPage() {
                       <select
                         value={order.status}
                         onChange={e => handleStatusChange(order.id, e.target.value as OrderStatus)}
-                        className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
+                        className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
                       >
                         {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
@@ -761,7 +765,7 @@ export default function AdminPage() {
                   {order.note && <p className="text-xs text-gray-400 italic mb-3">Qeyd: {order.note}</p>}
                   <div className="flex justify-between items-center pt-3 border-t border-gray-100">
                     <span className="text-xs text-gray-400">{new Date(order.createdAt).toLocaleTimeString('az-AZ')}</span>
-                    <span className="font-bold text-orange-600">{orderTotal(order).toFixed(2)} ₼</span>
+                    <span className="font-bold text-amber-900">{orderTotal(order).toFixed(2)} ₼</span>
                   </div>
                 </div>
               ))}
@@ -774,7 +778,7 @@ export default function AdminPage() {
                   </summary>
                   <div className="mt-3 space-y-2">
                     {orders.filter(o => o.status === 'ödənilib').map(order => (
-                      <div key={order.id} className="bg-white rounded-xl border border-gray-100 p-4 opacity-60">
+                      <div key={order.id} className="bg-white rounded-xl border border-gray-100 card p-4 opacity-60">
                         <div className="flex justify-between items-center">
                           <span className="text-sm font-medium text-gray-700">Sifariş #{order.orderNumber}</span>
                           <span className="font-bold text-sm text-gray-600">{orderTotal(order).toFixed(2)} ₼</span>
@@ -792,28 +796,28 @@ export default function AdminPage() {
             <div className="max-w-3xl">
               <div className="flex items-center justify-between mb-5">
                 <p className="text-sm text-gray-400">{menu.length} məhsul</p>
-                <button onClick={openAdd} className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-sm">
+                <button onClick={openAdd} className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-sm">
                   <span className="text-base leading-none">+</span>
                   Məhsul əlavə et
                 </button>
               </div>
 
               {showForm && (
-                <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-100 p-6 mb-5 space-y-4">
+                <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-100 card p-6 mb-5 space-y-4">
                   <h3 className="font-semibold text-gray-800">{editingId ? 'Məhsulu düzəlt' : 'Yeni Məhsul'}</h3>
 
                   <div>
                     <label className="text-xs font-medium text-gray-500 mb-1.5 block">Ad</label>
                     <input type="text" placeholder="Məhsulun adı" value={form.name}
                       onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
                       required />
                   </div>
 
                   <div>
                     <label className="text-xs font-medium text-gray-500 mb-1.5 block">Kateqoriya</label>
                     <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white">
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white">
                       {categories.map(c => <option key={c}>{c}</option>)}
                     </select>
                   </div>
@@ -825,8 +829,8 @@ export default function AdminPage() {
                         <input type="text" placeholder="Şəkil URL-i"
                           value={form.image.startsWith('data:') ? '' : form.image}
                           onChange={e => setForm(f => ({ ...f, image: e.target.value }))}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white" />
-                        <button type="button" onClick={() => imgRef.current?.click()} className="mt-1.5 text-xs text-orange-500 hover:text-orange-700 font-medium">
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
+                        <button type="button" onClick={() => imgRef.current?.click()} className="mt-1.5 text-xs text-amber-800 hover:text-amber-950 font-medium">
                           Fayldan yüklə
                         </button>
                         <input ref={imgRef} type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
@@ -843,7 +847,7 @@ export default function AdminPage() {
                   <label className="flex items-center gap-2 cursor-pointer select-none">
                     <input type="checkbox" checked={form.hasVariants}
                       onChange={e => setForm(f => ({ ...f, hasVariants: e.target.checked, variants: e.target.checked && f.variants.length === 0 ? [{ id: Date.now().toString(), name: '', price: '', costPrice: '' }] : f.variants }))}
-                      className="rounded accent-orange-500" />
+                      className="rounded accent-amber-800" />
                     <span className="text-sm text-gray-700">Variantlar var (ölçü, növ…)</span>
                   </label>
 
@@ -853,13 +857,13 @@ export default function AdminPage() {
                         <label className="text-xs font-medium text-gray-500 mb-1.5 block">Qiymət (₼)</label>
                         <input type="number" placeholder="0.00" step="0.5" min="0" value={form.price}
                           onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white" required />
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" required />
                       </div>
                       <div>
                         <label className="text-xs font-medium text-gray-500 mb-1.5 block">Maya dəyəri (₼)</label>
                         <input type="number" placeholder="0.00" step="0.01" min="0" value={form.costPrice}
                           onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white" />
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
                       </div>
                       <div className="pb-2 text-sm font-semibold text-green-600">
                         {calcMargin(form.price, form.costPrice) && `Marja: ${calcMargin(form.price, form.costPrice)}`}
@@ -875,13 +879,13 @@ export default function AdminPage() {
                       </div>
                       {form.variants.map((v, i) => (
                         <div key={v.id} className="grid grid-cols-9 gap-2 items-center">
-                          <input className="col-span-3 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
+                          <input className="col-span-3 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
                             placeholder={`Variant ${i + 1}`} value={v.name} onChange={e => updateVariant(i, 'name', e.target.value)} required />
                           <input type="number" placeholder="0.00" step="0.5" min="0"
-                            className="col-span-2 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
+                            className="col-span-2 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
                             value={v.price} onChange={e => updateVariant(i, 'price', e.target.value)} required />
                           <input type="number" placeholder="0.00" step="0.01" min="0"
-                            className="col-span-2 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
+                            className="col-span-2 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
                             value={v.costPrice} onChange={e => updateVariant(i, 'costPrice', e.target.value)} />
                           <div className="col-span-2 flex items-center gap-1">
                             <span className="text-xs text-green-600 font-medium flex-1">{calcMargin(v.price, v.costPrice)}</span>
@@ -889,12 +893,12 @@ export default function AdminPage() {
                           </div>
                         </div>
                       ))}
-                      <button type="button" onClick={addVariant} className="text-sm text-orange-500 hover:text-orange-700 font-medium">+ Variant əlavə et</button>
+                      <button type="button" onClick={addVariant} className="text-sm text-amber-800 hover:text-amber-950 font-medium">+ Variant əlavə et</button>
                     </div>
                   )}
 
                   <div className="flex gap-2 pt-1">
-                    <button type="submit" disabled={saving} className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-sm font-medium px-5 py-2 rounded-lg shadow-sm transition-colors">
+                    <button type="submit" disabled={saving} className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 disabled:opacity-60 text-white text-sm font-medium px-5 py-2 rounded-lg shadow-sm transition-colors">
                       {saving && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
                       {saving ? 'Saxlanır…' : editingId ? 'Yadda saxla' : 'Əlavə et'}
                     </button>
@@ -909,7 +913,7 @@ export default function AdminPage() {
                 return (
                   <div key={cat} className="mb-5">
                     <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-1">{cat}</p>
-                    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                    <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
                       {items.map((item, i) => (
                         <div key={item.id} className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${i < items.length - 1 ? 'border-b border-gray-50' : ''}`}>
                           {item.image
@@ -945,7 +949,7 @@ export default function AdminPage() {
               })}
 
               {menu.length === 0 && !showForm && (
-                <div className="bg-white rounded-xl border border-gray-100 p-16 text-center">
+                <div className="bg-white rounded-xl border border-gray-100 card p-16 text-center">
                   <Coffee className="w-10 h-10 mx-auto mb-3 text-gray-200" />
                   <p className="text-sm text-gray-400">Məhsul yoxdur</p>
                 </div>
@@ -959,15 +963,15 @@ export default function AdminPage() {
               <form onSubmit={addCategory} className="flex gap-2">
                 <input type="text" placeholder="Yeni kateqoriya adı" value={newCat}
                   onChange={e => setNewCat(e.target.value)}
-                  className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white" />
-                <button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors">Əlavə et</button>
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
+                <button type="submit" className="bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors">Əlavə et</button>
               </form>
 
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
                 {categories.map((cat, i) => (
                   <div key={cat} className={`flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors ${i < categories.length - 1 ? 'border-b border-gray-50' : ''}`}>
                     <div className="flex items-center gap-3">
-                      <span className="w-6 h-6 bg-orange-50 text-orange-500 rounded-lg flex items-center justify-center text-xs font-bold">{i + 1}</span>
+                      <span className="w-6 h-6 bg-amber-50 text-amber-800 rounded-lg flex items-center justify-center text-xs font-bold">{i + 1}</span>
                       <span className="text-sm text-gray-800 font-medium">{cat}</span>
                     </div>
                     <div className="flex items-center gap-3">
