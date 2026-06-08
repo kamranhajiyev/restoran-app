@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import {
   LayoutDashboard, ClipboardList, UtensilsCrossed, Tag,
   PanelLeftClose, PanelLeftOpen, LogOut, Menu, X,
-  TrendingUp, ShoppingBag, Receipt, Star, ChevronDown,
+  TrendingUp, ShoppingBag, Receipt, Star, ChevronDown, Percent,
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
 import {
@@ -239,6 +239,12 @@ export default function AdminPage() {
   const paidOrders = orders.filter(o => o.status === 'ödənilib');
   const activeOrders = orders.filter(o => o.status !== 'ödənilib');
 
+  const menuCostMap: Record<string, number> = {};
+  menu.forEach(m => {
+    if (m.costPrice) menuCostMap[m.id] = m.costPrice;
+    m.variants?.forEach(v => { if (v.costPrice) menuCostMap[v.id] = v.costPrice; });
+  });
+
   const chartRangeStart: Date = (() => {
     const d = new Date(rTodayStart);
     if (chartView === 'gün') { d.setDate(d.getDate() - 29); return d; }
@@ -279,26 +285,35 @@ export default function AdminPage() {
 
   const chartPaid = paidOrders.filter(o => new Date(o.createdAt) >= chartRangeStart);
   const chartRevenue = chartPaid.reduce((s, o) => s + orderTotal(o), 0);
+  const chartCost = chartPaid.reduce((s, o) => s + o.items.reduce((os, oi) => os + (menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity, 0), 0);
+  const chartProfit = chartRevenue - chartCost;
+  const chartMarginPct = chartRevenue > 0 ? (chartProfit / chartRevenue) * 100 : 0;
   const chartAvg = chartPaid.length > 0 ? chartRevenue / chartPaid.length : 0;
 
   const cashRev = chartPaid.filter(o => o.paymentMethod === 'nağd').reduce((s, o) => s + orderTotal(o), 0);
   const cardRev = chartPaid.filter(o => o.paymentMethod === 'kart').reduce((s, o) => s + orderTotal(o), 0);
   const totalPayRev = cashRev + cardRev;
 
-  const repCatMap: Record<string, number> = {};
+  const repCatMap: Record<string, { rev: number; cost: number }> = {};
   chartPaid.forEach(o => o.items.forEach(oi => {
-    const cat = oi.menuItem.category || 'Digər';
-    repCatMap[cat] = (repCatMap[cat] ?? 0) + oi.menuItem.price * oi.quantity;
+    const menuItem = menu.find(m => m.id === oi.menuItem.id);
+    const cat = menuItem?.category || oi.menuItem.category || 'Digər';
+    if (!repCatMap[cat]) repCatMap[cat] = { rev: 0, cost: 0 };
+    repCatMap[cat].rev += oi.menuItem.price * oi.quantity;
+    repCatMap[cat].cost += (menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity;
   }));
-  const repCategories = Object.entries(repCatMap).sort((a, b) => b[1] - a[1]);
-  const maxRepCat = repCategories[0]?.[1] ?? 1;
+  const repCategories = Object.entries(repCatMap)
+    .map(([cat, { rev, cost }]) => ({ cat, rev, cost, profit: rev - cost }))
+    .sort((a, b) => b.profit - a.profit);
+  const maxRepCatProfit = Math.max(...repCategories.map(c => Math.abs(c.profit)), 0.01);
 
-  const itemMap: Record<string, { name: string; qty: number; rev: number }> = {};
+  const itemMap: Record<string, { name: string; qty: number; rev: number; cost: number }> = {};
   chartPaid.forEach(o => o.items.forEach(oi => {
-    const k = oi.menuItem.name;
-    if (!itemMap[k]) itemMap[k] = { name: k, qty: 0, rev: 0 };
+    const k = oi.menuItem.id;
+    if (!itemMap[k]) itemMap[k] = { name: oi.menuItem.name, qty: 0, rev: 0, cost: 0 };
     itemMap[k].qty += oi.quantity;
     itemMap[k].rev += oi.menuItem.price * oi.quantity;
+    itemMap[k].cost += (menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity;
   }));
   const topItems = Object.values(itemMap).sort((a, b) => b.rev - a.rev).slice(0, 8);
   const maxItemRev = topItems[0]?.rev ?? 1;
@@ -504,21 +519,23 @@ export default function AdminPage() {
                   <LineChartSvg data={chartData} />
                 </div>
                 {/* KPI strip */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 border-t border-gray-100 divide-x divide-gray-100">
+                <div className="flex flex-wrap border-t border-gray-100">
                   {[
-                    { label: 'Gəlir',     value: `${chartRevenue.toFixed(2)} ₼`, icon: TrendingUp    },
-                    { label: 'Qəbzlər',   value: String(chartPaid.length),        icon: Receipt       },
-                    { label: 'Orta qəbz', value: `${chartAvg.toFixed(2)} ₼`,     icon: ShoppingBag   },
-                    { label: 'Aktiv',     value: String(activeOrders.length),     icon: ClipboardList },
-                  ].map(kpi => {
+                    { label: 'Gəlir',       value: `${chartRevenue.toFixed(2)} ₼`,  icon: TrendingUp,  color: 'text-gray-800' },
+                    { label: 'Maya dəyəri', value: `${chartCost.toFixed(2)} ₼`,     icon: ShoppingBag, color: 'text-gray-800' },
+                    { label: 'Mənfəət',     value: `${chartProfit.toFixed(2)} ₼`,   icon: TrendingUp,  color: chartProfit >= 0 ? 'text-green-600' : 'text-red-500' },
+                    { label: 'Mənfəət %',   value: `${chartMarginPct.toFixed(1)}%`, icon: Percent,     color: chartMarginPct >= 0 ? 'text-green-600' : 'text-red-500' },
+                    { label: 'Orta çek',    value: `${chartAvg.toFixed(2)} ₼`,      icon: Receipt,     color: 'text-gray-800' },
+                    { label: 'Sifarişlər',  value: String(chartPaid.length),         icon: ClipboardList, color: 'text-gray-800' },
+                  ].map((kpi, i, arr) => {
                     const Icon = kpi.icon;
                     return (
-                      <div key={kpi.label} className="px-5 py-4">
+                      <div key={kpi.label} className={`flex-1 min-w-[100px] px-4 py-3 ${i < arr.length - 1 ? 'border-r border-gray-100' : ''}`}>
                         <div className="flex items-center gap-1.5 mb-1">
-                          <Icon className="w-3.5 h-3.5 text-gray-300" />
-                          <p className="text-xs text-gray-400">{kpi.label}</p>
+                          <Icon className="w-3 h-3 text-gray-300" />
+                          <p className="text-xs text-gray-400 whitespace-nowrap">{kpi.label}</p>
                         </div>
-                        <p className="font-bold text-gray-800">{kpi.value}</p>
+                        <p className={`font-bold text-sm whitespace-nowrap ${kpi.color}`}>{kpi.value}</p>
                       </div>
                     );
                   })}
@@ -555,22 +572,29 @@ export default function AdminPage() {
                 </div>
 
                 <div className="bg-white rounded-xl border border-gray-100 p-5">
-                  <h3 className="font-semibold text-gray-800 text-sm mb-4">Kateqoriyaya görə</h3>
+                  <h3 className="font-semibold text-gray-800 text-sm mb-4">Kateqoriya mənfəəti</h3>
                   {repCategories.length === 0 ? (
                     <p className="text-sm text-gray-300 text-center py-4">Məlumat yoxdur</p>
                   ) : (
                     <div className="space-y-3">
-                      {repCategories.slice(0, 5).map(([cat, rev]) => (
-                        <div key={cat}>
-                          <div className="flex justify-between items-center mb-1.5">
-                            <span className="text-sm text-gray-600 truncate flex-1 mr-3">{cat}</span>
-                            <span className="font-semibold text-gray-800 text-sm shrink-0">{rev.toFixed(2)} ₼</span>
+                      {repCategories.slice(0, 5).map(({ cat, rev, profit }) => {
+                        const margin = rev > 0 ? Math.round((profit / rev) * 100) : 0;
+                        return (
+                          <div key={cat}>
+                            <div className="flex justify-between items-center mb-1.5">
+                              <span className="text-sm text-gray-600 truncate flex-1 mr-3">{cat}</span>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="text-xs text-gray-400">{margin}%</span>
+                                <span className={`font-semibold text-sm ${profit >= 0 ? 'text-gray-800' : 'text-red-500'}`}>{profit.toFixed(2)} ₼</span>
+                              </div>
+                            </div>
+                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                              <div className={`h-full rounded-full transition-all ${profit >= 0 ? 'bg-green-400' : 'bg-red-400'}`}
+                                style={{ width: `${(Math.abs(profit) / maxRepCatProfit) * 100}%` }} />
+                            </div>
                           </div>
-                          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-blue-400 rounded-full transition-all" style={{ width: `${(rev / maxRepCat) * 100}%` }} />
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -627,6 +651,11 @@ export default function AdminPage() {
                             <span className="text-sm text-gray-700 truncate">{item.name}</span>
                           </div>
                           <div className="flex items-center gap-2 shrink-0 ml-3">
+                            {item.cost > 0 && (
+                              <span className="text-xs font-medium text-green-500">
+                                {Math.round((1 - item.cost / item.rev) * 100)}%
+                              </span>
+                            )}
                             <span className="text-xs text-gray-400">{item.qty} ədəd</span>
                             <span className="font-semibold text-gray-800 text-sm">{item.rev.toFixed(2)} ₼</span>
                           </div>
