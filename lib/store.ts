@@ -1,7 +1,7 @@
 import { MenuItem, Order } from '@/types';
 import { supabase } from './supabase';
 
-const DEFAULT_CATEGORIES = ['Salatlar', 'Şorbalar', 'Əsas Yeməklər', 'Qəlyanaltı', 'İçkilər', 'Desertlər'];
+const DEFAULT_CATEGORIES = ['Qəhvə', 'Çay', 'Soyuq içkilər', 'Şirniyyat', 'Snack', 'Xüsusi'];
 
 function isValidUUID(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);

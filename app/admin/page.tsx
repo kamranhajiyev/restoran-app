@@ -2,9 +2,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  LayoutDashboard, ClipboardList, UtensilsCrossed, Tag,
+  LayoutDashboard, Tag,
   PanelLeftClose, PanelLeftOpen, LogOut, Menu, X,
-  TrendingUp, ShoppingBag, Receipt, Star, ChevronDown, Percent,
+  TrendingUp, Receipt, Star, ChevronDown, Percent,
+  Coffee, BarChart2, Package, Wallet,
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
 import {
@@ -43,16 +44,16 @@ function calcMargin(price: string, cost: string): string {
 }
 
 const NAV_ITEMS: { id: Tab; label: string; icon: React.ElementType }[] = [
-  { id: 'stats',      label: 'Statistika',    icon: LayoutDashboard },
-  { id: 'orders',     label: 'Sifarişlər',    icon: ClipboardList },
-  { id: 'menu',       label: 'Menyu',         icon: UtensilsCrossed },
+  { id: 'stats',      label: 'Statistika',    icon: BarChart2 },
+  { id: 'orders',     label: 'Sifarişlər',    icon: Receipt },
+  { id: 'menu',       label: 'Menyu',         icon: Coffee },
   { id: 'categories', label: 'Kateqoriyalar', icon: Tag },
 ];
 
 const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
   stats:      { title: 'Statistika & Hesabatlar', subtitle: 'Satış analitikası' },
   orders:     { title: 'Sifarişlər',              subtitle: 'Aktiv sifarişlər' },
-  menu:       { title: 'Menyu İdarəsi',           subtitle: 'Məhsulları əlavə et, düzəlt, sil' },
+  menu:       { title: 'Menyu',                    subtitle: 'Məhsulları əlavə et, düzəlt, sil' },
   categories: { title: 'Kateqoriyalar',           subtitle: 'Menyu kateqoriyaları' },
 };
 
@@ -98,7 +99,12 @@ function LineChartSvg({ data }: { data: { label: string; rev: number }[] }) {
 
 export default function AdminPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>('stats');
+  const [tab, setTab] = useState<Tab>(() => {
+    if (typeof window === 'undefined') return 'stats';
+    const saved = localStorage.getItem('admin_tab') as Tab;
+    const valid: Tab[] = ['stats', 'orders', 'menu', 'categories'];
+    return valid.includes(saved) ? saved : 'stats';
+  });
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
@@ -112,6 +118,8 @@ export default function AdminPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm(''));
   const imgRef = useRef<HTMLInputElement>(null);
+
+  const [saving, setSaving] = useState(false);
 
   // categories form
   const [newCat, setNewCat] = useState('');
@@ -132,6 +140,7 @@ export default function AdminPage() {
   }, [router]);
 
   function refresh() { fetchOrders().then(setOrders); }
+  function navigate(t: Tab) { setTab(t); localStorage.setItem('admin_tab', t); }
 
   // ── image ──────────────────────────────────────────────────────────────────
   async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -169,7 +178,7 @@ export default function AdminPage() {
 
   function cancelForm() { setShowForm(false); setEditingId(null); }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const variants: MenuItemVariant[] = form.hasVariants
       ? form.variants.map(v => ({ id: v.id || Date.now().toString(), name: v.name, price: parseFloat(v.price) || 0, costPrice: v.costPrice ? parseFloat(v.costPrice) : undefined }))
@@ -188,8 +197,10 @@ export default function AdminPage() {
     };
     const updated = editingId ? menu.map(m => m.id === editingId ? item : m) : [...menu, item];
     setMenu(updated);
+    setSaving(true);
+    await saveMenu(updated);
+    setSaving(false);
     cancelForm();
-    saveMenu(updated);
   }
 
   function addVariant() {
@@ -339,7 +350,7 @@ export default function AdminPage() {
           {!collapsed && (
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-orange-500 flex items-center justify-center">
-                <UtensilsCrossed className="w-4 h-4 text-white" />
+                <Coffee className="w-4 h-4 text-white" />
               </div>
               <span className="font-semibold text-gray-800 text-sm">Admin Paneli</span>
             </div>
@@ -364,7 +375,7 @@ export default function AdminPage() {
                 <button
                   key={n.id}
                   title={n.label}
-                  onClick={() => { setTab(n.id); onNavigate?.(); if (n.id === 'orders') refresh(); }}
+                  onClick={() => { navigate(n.id); onNavigate?.(); if (n.id === 'orders') refresh(); }}
                   className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
                     isActive ? 'bg-orange-50 text-orange-500 before:absolute before:left-[-9px] before:top-1/2 before:-translate-y-1/2 before:w-[3px] before:h-4 before:rounded-r-full before:bg-orange-500' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700'
                   }`}
@@ -378,7 +389,7 @@ export default function AdminPage() {
             return (
               <button
                 key={n.id}
-                onClick={() => { setTab(n.id); onNavigate?.(); if (n.id === 'orders') refresh(); }}
+                onClick={() => { navigate(n.id); onNavigate?.(); if (n.id === 'orders') refresh(); }}
                 className={`flex items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium transition-colors w-full ${
                   isActive ? 'bg-orange-500 text-white' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'
                 }`}
@@ -445,7 +456,7 @@ export default function AdminPage() {
 
         <div className="flex items-center gap-2 md:hidden">
           <div className="w-7 h-7 rounded-lg bg-orange-500 flex items-center justify-center">
-            <UtensilsCrossed className="w-4 h-4 text-white" />
+            <Coffee className="w-4 h-4 text-white" />
           </div>
           <span className="font-semibold text-gray-800 text-sm">Restoran</span>
         </div>
@@ -520,12 +531,12 @@ export default function AdminPage() {
                 {/* KPI strip */}
                 <div className="flex flex-wrap border-t border-gray-100">
                   {[
-                    { label: 'Gəlir',       value: `${chartRevenue.toFixed(2)} ₼`,  icon: TrendingUp,  color: 'text-gray-800' },
-                    { label: 'Maya dəyəri', value: `${chartCost.toFixed(2)} ₼`,     icon: ShoppingBag, color: 'text-gray-800' },
-                    { label: 'Mənfəət',     value: `${chartProfit.toFixed(2)} ₼`,   icon: TrendingUp,  color: chartProfit >= 0 ? 'text-green-600' : 'text-red-500' },
-                    { label: 'Mənfəət %',   value: `${chartMarginPct.toFixed(1)}%`, icon: Percent,     color: chartMarginPct >= 0 ? 'text-green-600' : 'text-red-500' },
-                    { label: 'Orta çek',    value: `${chartAvg.toFixed(2)} ₼`,      icon: Receipt,     color: 'text-gray-800' },
-                    { label: 'Sifarişlər',  value: String(chartPaid.length),         icon: ClipboardList, color: 'text-gray-800' },
+                    { label: 'Gəlir',       value: `${chartRevenue.toFixed(2)} ₼`,  icon: Wallet,    color: 'text-gray-800' },
+                    { label: 'Maya dəyəri', value: `${chartCost.toFixed(2)} ₼`,     icon: Package,   color: 'text-gray-800' },
+                    { label: 'Mənfəət',     value: `${chartProfit.toFixed(2)} ₼`,   icon: TrendingUp,color: chartProfit >= 0 ? 'text-green-600' : 'text-red-500' },
+                    { label: 'Mənfəət %',   value: `${chartMarginPct.toFixed(1)}%`, icon: Percent,   color: chartMarginPct >= 0 ? 'text-green-600' : 'text-red-500' },
+                    { label: 'Orta çek',    value: `${chartAvg.toFixed(2)} ₼`,      icon: Receipt,   color: 'text-gray-800' },
+                    { label: 'Sifarişlər',  value: String(chartPaid.length),         icon: Coffee,    color: 'text-gray-800' },
                   ].map((kpi, i, arr) => {
                     const Icon = kpi.icon;
                     return (
@@ -711,7 +722,7 @@ export default function AdminPage() {
 
               {activeOrders.length === 0 && (
                 <div className="bg-white rounded-xl border border-gray-100 p-16 text-center">
-                  <ClipboardList className="w-10 h-10 mx-auto mb-3 text-gray-200" />
+                  <Coffee className="w-10 h-10 mx-auto mb-3 text-gray-200" />
                   <p className="text-sm text-gray-400">Aktiv sifariş yoxdur</p>
                 </div>
               )}
@@ -721,10 +732,10 @@ export default function AdminPage() {
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
                       <div className="w-9 h-9 rounded-lg bg-orange-50 flex items-center justify-center">
-                        <span className="text-sm font-bold text-orange-600">{order.tableNumber}</span>
+                        <span className="text-sm font-bold text-orange-600">#{order.orderNumber}</span>
                       </div>
                       <div>
-                        <p className="font-semibold text-gray-800 text-sm">Masa {order.tableNumber}</p>
+                        <p className="font-semibold text-gray-800 text-sm">Sifariş #{order.orderNumber}</p>
                         <p className="text-xs text-gray-400">{order.sellerName}</p>
                       </div>
                     </div>
@@ -765,7 +776,7 @@ export default function AdminPage() {
                     {orders.filter(o => o.status === 'ödənilib').map(order => (
                       <div key={order.id} className="bg-white rounded-xl border border-gray-100 p-4 opacity-60">
                         <div className="flex justify-between items-center">
-                          <span className="text-sm font-medium text-gray-700">Masa {order.tableNumber}</span>
+                          <span className="text-sm font-medium text-gray-700">Sifariş #{order.orderNumber}</span>
                           <span className="font-bold text-sm text-gray-600">{orderTotal(order).toFixed(2)} ₼</span>
                         </div>
                       </div>
@@ -783,38 +794,28 @@ export default function AdminPage() {
                 <p className="text-sm text-gray-400">{menu.length} məhsul</p>
                 <button onClick={openAdd} className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-sm">
                   <span className="text-base leading-none">+</span>
-                  Yemək əlavə et
+                  Məhsul əlavə et
                 </button>
               </div>
 
               {showForm && (
                 <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-100 p-6 mb-5 space-y-4">
-                  <h3 className="font-semibold text-gray-800">{editingId ? 'Yeməyi düzəlt' : 'Yeni Yemək'}</h3>
+                  <h3 className="font-semibold text-gray-800">{editingId ? 'Məhsulu düzəlt' : 'Yeni Məhsul'}</h3>
 
                   <div>
                     <label className="text-xs font-medium text-gray-500 mb-1.5 block">Ad</label>
-                    <input type="text" placeholder="Yeməyin adı" value={form.name}
+                    <input type="text" placeholder="Məhsulun adı" value={form.name}
                       onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
                       required />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs font-medium text-gray-500 mb-1.5 block">Kateqoriya</label>
-                      <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white">
-                        {categories.map(c => <option key={c}>{c}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-gray-500 mb-1.5 block">Bişirmə sexi</label>
-                      <select value={form.cookingStation} onChange={e => setForm(f => ({ ...f, cookingStation: e.target.value }))}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white">
-                        <option value="">— Seçin —</option>
-                        {COOKING_STATIONS.map(s => <option key={s}>{s}</option>)}
-                      </select>
-                    </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 mb-1.5 block">Kateqoriya</label>
+                    <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white">
+                      {categories.map(c => <option key={c}>{c}</option>)}
+                    </select>
                   </div>
 
                   <div>
@@ -893,10 +894,11 @@ export default function AdminPage() {
                   )}
 
                   <div className="flex gap-2 pt-1">
-                    <button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-5 py-2 rounded-lg shadow-sm transition-colors">
-                      {editingId ? 'Yadda saxla' : 'Əlavə et'}
+                    <button type="submit" disabled={saving} className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white text-sm font-medium px-5 py-2 rounded-lg shadow-sm transition-colors">
+                      {saving && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                      {saving ? 'Saxlanır…' : editingId ? 'Yadda saxla' : 'Əlavə et'}
                     </button>
-                    <button type="button" onClick={cancelForm} className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors">Ləğv et</button>
+                    <button type="button" onClick={cancelForm} disabled={saving} className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-40">Ləğv et</button>
                   </div>
                 </form>
               )}
@@ -912,13 +914,12 @@ export default function AdminPage() {
                         <div key={item.id} className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${i < items.length - 1 ? 'border-b border-gray-50' : ''}`}>
                           {item.image
                             ? <img src={item.image} alt={item.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-gray-100" />
-                            : <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0"><UtensilsCrossed className="w-4 h-4 text-gray-300" /></div>
+                            : <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0"><Coffee className="w-4 h-4 text-gray-300" /></div>
                           }
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${item.available ? 'bg-green-400' : 'bg-gray-300'}`} />
                               <span className={`text-sm font-medium ${item.available ? 'text-gray-800' : 'text-gray-400 line-through'}`}>{item.name}</span>
-                              {item.cookingStation && <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-md">{item.cookingStation}</span>}
                             </div>
                             {item.variants?.length ? (
                               <p className="text-xs text-gray-400 mt-0.5">{item.variants.map(v => `${v.name}: ${v.price.toFixed(2)}₼`).join(' · ')}</p>
@@ -945,8 +946,8 @@ export default function AdminPage() {
 
               {menu.length === 0 && !showForm && (
                 <div className="bg-white rounded-xl border border-gray-100 p-16 text-center">
-                  <UtensilsCrossed className="w-10 h-10 mx-auto mb-3 text-gray-200" />
-                  <p className="text-sm text-gray-400">Menyu boşdur</p>
+                  <Coffee className="w-10 h-10 mx-auto mb-3 text-gray-200" />
+                  <p className="text-sm text-gray-400">Məhsul yoxdur</p>
                 </div>
               )}
             </div>
