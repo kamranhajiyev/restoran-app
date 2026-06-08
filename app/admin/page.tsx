@@ -1,6 +1,11 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import {
+  LayoutDashboard, ClipboardList, UtensilsCrossed, Tag,
+  PanelLeftClose, PanelLeftOpen, LogOut, Menu, X,
+  TrendingUp, ShoppingBag, Receipt, Star, ChevronDown,
+} from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
 import {
   getMenu, saveMenu, getOrders, updateOrderStatus,
@@ -14,16 +19,15 @@ import { MenuItem, MenuItemVariant, Order, OrderStatus } from '@/types';
 const COOKING_STATIONS = ['Mətbəx', 'Bar', 'Soyuq mətbəx', 'Pizza', 'Mangal'];
 
 const STATUS_COLORS: Record<OrderStatus, string> = {
-  'gözləyir': 'bg-yellow-100 text-yellow-800',
-  'hazırlanır': 'bg-blue-100 text-blue-800',
-  'hazırdır': 'bg-green-100 text-green-800',
-  'ödənilib': 'bg-gray-100 text-gray-500',
+  'gözləyir':  'bg-amber-100 text-amber-700',
+  'hazırlanır':'bg-blue-100 text-blue-700',
+  'hazırdır':  'bg-green-100 text-green-700',
+  'ödənilib':  'bg-gray-100 text-gray-500',
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
 
-type Tab = 'dashboard' | 'orders' | 'menu' | 'categories' | 'reports';
-type ReportPeriod = 'today' | 'yesterday' | 'week' | 'month' | 'lastmonth' | 'all';
-
+type Tab = 'stats' | 'orders' | 'menu' | 'categories';
+type ChartView = 'gün' | 'həftə' | 'ay';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
 
 function emptyForm(cat: string) {
@@ -40,16 +44,70 @@ function calcMargin(price: string, cost: string): string {
   return `${Math.round((1 - c / p) * 100)}%`;
 }
 
+const NAV_ITEMS: { id: Tab; label: string; icon: React.ElementType }[] = [
+  { id: 'stats',      label: 'Statistika',    icon: LayoutDashboard },
+  { id: 'orders',     label: 'Sifarişlər',    icon: ClipboardList },
+  { id: 'menu',       label: 'Menyu',         icon: UtensilsCrossed },
+  { id: 'categories', label: 'Kateqoriyalar', icon: Tag },
+];
+
+const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
+  stats:      { title: 'Statistika & Hesabatlar', subtitle: 'Satış analitikası' },
+  orders:     { title: 'Sifarişlər',              subtitle: 'Aktiv sifarişlər' },
+  menu:       { title: 'Menyu İdarəsi',           subtitle: 'Məhsulları əlavə et, düzəlt, sil' },
+  categories: { title: 'Kateqoriyalar',           subtitle: 'Menyu kateqoriyaları' },
+};
+
+function LineChartSvg({ data }: { data: { label: string; rev: number }[] }) {
+  const W = 800, H = 160, PL = 44, PR = 12, PT = 14, PB = 26;
+  const plotW = W - PL - PR, plotH = H - PT - PB;
+  const n = data.length;
+  const maxV = Math.max(...data.map(d => d.rev), 0.01);
+  const px = (i: number) => PL + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const py = (v: number) => PT + (1 - v / maxV) * plotH;
+  const pts = data.map((d, i) => [px(i), py(d.rev)] as [number, number]);
+  const lineStr = pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const areaStr = [`${pts[0][0].toFixed(1)},${(PT + plotH).toFixed(1)}`, ...pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`), `${pts[n - 1][0].toFixed(1)},${(PT + plotH).toFixed(1)}`].join(' ');
+  const yTicks = [0, Math.round(maxV / 2), Math.round(maxV)];
+  const step = Math.max(1, Math.floor(n / 6));
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+      <defs>
+        <linearGradient id="lc-g" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#f97316" stopOpacity="0.18" />
+          <stop offset="100%" stopColor="#f97316" stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      {yTicks.map(t => (
+        <g key={t}>
+          <line x1={PL} y1={py(t)} x2={W - PR} y2={py(t)} stroke="#f3f4f6" strokeWidth="1" />
+          <text x={PL - 5} y={py(t) + 4} textAnchor="end" fontSize="11" fill="#d1d5db">
+            {t === 0 ? '0' : t >= 1000 ? `${(t / 1000).toFixed(1)}k` : t}
+          </text>
+        </g>
+      ))}
+      {n > 1 && <polygon points={areaStr} fill="url(#lc-g)" />}
+      {n > 1 && <polyline points={lineStr} fill="none" stroke="#f97316" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
+      {pts.map(([x, y], i) => data[i].rev > 0 && (
+        <circle key={i} cx={x} cy={y} r="3" fill="#f97316" stroke="white" strokeWidth="1.5" />
+      ))}
+      {data.map((d, i) => (i % step === 0 || i === n - 1) && (
+        <text key={i} x={px(i)} y={H - 4} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize="10" fill="#9ca3af">{d.label}</text>
+      ))}
+    </svg>
+  );
+}
+
 export default function AdminPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>('dashboard');
+  const [tab, setTab] = useState<Tab>('stats');
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [adminName, setAdminName] = useState('Admin');
   const [online, setOnline] = useState(true);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('today');
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   // menu form
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -60,16 +118,16 @@ export default function AdminPage() {
   // categories form
   const [newCat, setNewCat] = useState('');
 
+  // stats chart
+  const [chartView, setChartView] = useState<ChartView>('gün');
+
   useEffect(() => {
     const session = getSession();
     if (!session || session.role !== 'admin') { router.replace('/login'); return; }
     setAdminName(session.name);
-    const cats = getCategories();
-    setCategories(cats);
+    setCategories(getCategories());
     setMenu(getMenu());
     setOrders(getOrders());
-
-    // push local menu to Supabase first, then pull to get UUID-stable ids back
     syncMenuToSupabase().then(() =>
       Promise.all([pullMenuFromSupabase(), pullOrdersFromSupabase(), pullCategoriesFromSupabase()])
     ).then(([ok]) => {
@@ -89,10 +147,7 @@ export default function AdminPage() {
     const ext = file.name.split('.').pop();
     const path = `${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from('menu-images').upload(path, file, { upsert: true });
-    if (error) {
-      alert('Şəkil yüklənmədi: ' + error.message);
-      return;
-    }
+    if (error) { alert('Şəkil yüklənmədi: ' + error.message); return; }
     const { data } = supabase.storage.from('menu-images').getPublicUrl(path);
     setForm(f => ({ ...f, image: data.publicUrl }));
   }
@@ -114,12 +169,7 @@ export default function AdminPage() {
       image: item.image ?? '',
       cookingStation: item.cookingStation ?? '',
       hasVariants: !!item.variants?.length,
-      variants: item.variants?.map(v => ({
-        id: v.id,
-        name: v.name,
-        price: String(v.price),
-        costPrice: v.costPrice ? String(v.costPrice) : '',
-      })) ?? [],
+      variants: item.variants?.map(v => ({ id: v.id, name: v.name, price: String(v.price), costPrice: v.costPrice ? String(v.costPrice) : '' })) ?? [],
     });
     setShowForm(true);
   }
@@ -129,16 +179,9 @@ export default function AdminPage() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const variants: MenuItemVariant[] = form.hasVariants
-      ? form.variants.map(v => ({
-          id: v.id || Date.now().toString(),
-          name: v.name,
-          price: parseFloat(v.price) || 0,
-          costPrice: v.costPrice ? parseFloat(v.costPrice) : undefined,
-        }))
+      ? form.variants.map(v => ({ id: v.id || Date.now().toString(), name: v.name, price: parseFloat(v.price) || 0, costPrice: v.costPrice ? parseFloat(v.costPrice) : undefined }))
       : [];
-
     const basePrice = form.hasVariants ? (variants[0]?.price ?? 0) : (parseFloat(form.price) || 0);
-
     const item: MenuItem = {
       id: editingId ?? crypto.randomUUID(),
       name: form.name,
@@ -150,7 +193,6 @@ export default function AdminPage() {
       image: form.image || undefined,
       cookingStation: form.cookingStation || undefined,
     };
-
     const updated = editingId ? menu.map(m => m.id === editingId ? item : m) : [...menu, item];
     saveMenu(updated);
     setMenu(updated);
@@ -160,25 +202,20 @@ export default function AdminPage() {
   function addVariant() {
     setForm(f => ({ ...f, variants: [...f.variants, { id: Date.now().toString(), name: '', price: '', costPrice: '' }] }));
   }
-
   function updateVariant(idx: number, field: keyof FormVariant, value: string) {
     setForm(f => ({ ...f, variants: f.variants.map((v, i) => i === idx ? { ...v, [field]: value } : v) }));
   }
-
   function removeVariant(idx: number) {
     setForm(f => ({ ...f, variants: f.variants.filter((_, i) => i !== idx) }));
   }
-
   function toggleAvailable(id: string) {
     const updated = menu.map(m => m.id === id ? { ...m, available: !m.available } : m);
     saveMenu(updated); setMenu(updated);
   }
-
   function deleteItem(id: string) {
     const updated = menu.filter(m => m.id !== id);
     saveMenu(updated); setMenu(updated);
   }
-
   function handleStatusChange(orderId: string, status: OrderStatus) {
     updateOrderStatus(orderId, status); refresh();
   }
@@ -191,201 +228,411 @@ export default function AdminPage() {
     const updated = [...categories, trimmed];
     saveCategories(updated); setCategories(updated); setNewCat('');
   }
-
   function deleteCategory(cat: string) {
     const updated = categories.filter(c => c !== cat);
     saveCategories(updated); setCategories(updated);
   }
 
-  // ── stats ──────────────────────────────────────────────────────────────────
-  const activeOrders = orders.filter(o => o.status !== 'ödənilib');
-  const paidOrders = orders.filter(o => o.status === 'ödənilib');
-  const today = new Date().toDateString();
-  const todayOrders = orders.filter(o => new Date(o.createdAt).toDateString() === today);
-  const todayPaid = todayOrders.filter(o => o.status === 'ödənilib');
-  const todayRevenue = todayPaid.reduce((s, o) => s + orderTotal(o), 0);
-  const avgCheck = todayPaid.length > 0 ? todayRevenue / todayPaid.length : 0;
-  const totalRevenue = paidOrders.reduce((s, o) => s + orderTotal(o), 0);
-
-  const categoryMap: Record<string, number> = {};
-  todayPaid.forEach(o => o.items.forEach(oi => {
-    categoryMap[oi.menuItem.category] = (categoryMap[oi.menuItem.category] ?? 0) + oi.menuItem.price * oi.quantity;
-  }));
-  const topCategories = Object.entries(categoryMap).sort((a, b) => b[1] - a[1]);
-  const maxCatRevenue = topCategories[0]?.[1] ?? 1;
-
-  // ── report computations ──────────────────────────────────────────────────────
+  // ── stats computations ────────────────────────────────────────────────────
   const rNow = new Date();
   const rTodayStart = new Date(rNow.getFullYear(), rNow.getMonth(), rNow.getDate());
-  function getReportRange(p: ReportPeriod): [Date, Date] {
-    switch (p) {
-      case 'today': return [rTodayStart, rNow];
-      case 'yesterday': { const y = new Date(rTodayStart); y.setDate(y.getDate() - 1); return [y, rTodayStart]; }
-      case 'week': { const w = new Date(rTodayStart); w.setDate(w.getDate() - 6); return [w, rNow]; }
-      case 'month': return [new Date(rNow.getFullYear(), rNow.getMonth(), 1), rNow];
-      case 'lastmonth': return [new Date(rNow.getFullYear(), rNow.getMonth() - 1, 1), new Date(rNow.getFullYear(), rNow.getMonth(), 1)];
-      case 'all': return [new Date(0), rNow];
+  const paidOrders = orders.filter(o => o.status === 'ödənilib');
+  const activeOrders = orders.filter(o => o.status !== 'ödənilib');
+
+  const chartRangeStart: Date = (() => {
+    const d = new Date(rTodayStart);
+    if (chartView === 'gün') { d.setDate(d.getDate() - 29); return d; }
+    if (chartView === 'həftə') { d.setDate(d.getDate() - 83); return d; }
+    return new Date(rNow.getFullYear(), rNow.getMonth() - 11, 1);
+  })();
+
+  const chartData: { label: string; rev: number }[] = (() => {
+    if (chartView === 'gün') {
+      return Array.from({ length: 30 }, (_, i) => {
+        const d = new Date(rTodayStart); d.setDate(d.getDate() - (29 - i));
+        const ds = d.toDateString();
+        return {
+          label: i === 0 || d.getDate() === 1 ? `${d.getDate()} ${d.toLocaleDateString('az-AZ', { month: 'short' })}` : String(d.getDate()),
+          rev: paidOrders.filter(o => new Date(o.createdAt).toDateString() === ds).reduce((s, o) => s + orderTotal(o), 0),
+        };
+      });
     }
-  }
-  const [rStart, rEnd] = getReportRange(reportPeriod);
-  const reportOrders = orders.filter(o => { const d = new Date(o.createdAt); return o.status === 'ödənilib' && d >= rStart && d < rEnd; });
-  const reportRevenue = reportOrders.reduce((s, o) => s + orderTotal(o), 0);
-  const reportAvg = reportOrders.length > 0 ? reportRevenue / reportOrders.length : 0;
+    if (chartView === 'həftə') {
+      return Array.from({ length: 12 }, (_, i) => {
+        const wS = new Date(rTodayStart); wS.setDate(wS.getDate() - (11 - i) * 7);
+        const wE = new Date(wS); wE.setDate(wE.getDate() + 7);
+        return {
+          label: `${wS.getDate()} ${wS.toLocaleDateString('az-AZ', { month: 'short' })}`,
+          rev: paidOrders.filter(o => { const d = new Date(o.createdAt); return d >= wS && d < wE; }).reduce((s, o) => s + orderTotal(o), 0),
+        };
+      });
+    }
+    return Array.from({ length: 12 }, (_, i) => {
+      const m = new Date(rNow.getFullYear(), rNow.getMonth() - (11 - i), 1);
+      const mE = new Date(rNow.getFullYear(), rNow.getMonth() - (10 - i), 1);
+      return {
+        label: m.toLocaleDateString('az-AZ', { month: 'short' }),
+        rev: paidOrders.filter(o => { const d = new Date(o.createdAt); return d >= m && d < mE; }).reduce((s, o) => s + orderTotal(o), 0),
+      };
+    });
+  })();
+
+  const chartPaid = paidOrders.filter(o => new Date(o.createdAt) >= chartRangeStart);
+  const chartRevenue = chartPaid.reduce((s, o) => s + orderTotal(o), 0);
+  const chartAvg = chartPaid.length > 0 ? chartRevenue / chartPaid.length : 0;
+
+  const cashRev = chartPaid.filter(o => o.paymentMethod === 'nağd').reduce((s, o) => s + orderTotal(o), 0);
+  const cardRev = chartPaid.filter(o => o.paymentMethod === 'kart').reduce((s, o) => s + orderTotal(o), 0);
+  const totalPayRev = cashRev + cardRev;
+
+  const repCatMap: Record<string, number> = {};
+  chartPaid.forEach(o => o.items.forEach(oi => {
+    const cat = oi.menuItem.category || 'Digər';
+    repCatMap[cat] = (repCatMap[cat] ?? 0) + oi.menuItem.price * oi.quantity;
+  }));
+  const repCategories = Object.entries(repCatMap).sort((a, b) => b[1] - a[1]);
+  const maxRepCat = repCategories[0]?.[1] ?? 1;
 
   const itemMap: Record<string, { name: string; qty: number; rev: number }> = {};
-  reportOrders.forEach(o => o.items.forEach(oi => {
+  chartPaid.forEach(o => o.items.forEach(oi => {
     const k = oi.menuItem.name;
     if (!itemMap[k]) itemMap[k] = { name: k, qty: 0, rev: 0 };
     itemMap[k].qty += oi.quantity;
     itemMap[k].rev += oi.menuItem.price * oi.quantity;
   }));
-  const topItems = Object.values(itemMap).sort((a, b) => b.rev - a.rev).slice(0, 10);
+  const topItems = Object.values(itemMap).sort((a, b) => b.rev - a.rev).slice(0, 8);
   const maxItemRev = topItems[0]?.rev ?? 1;
 
-  const repCatMap: Record<string, number> = {};
-  reportOrders.forEach(o => o.items.forEach(oi => {
-    repCatMap[oi.menuItem.category] = (repCatMap[oi.menuItem.category] ?? 0) + oi.menuItem.price * oi.quantity;
+  const hourlyData = Array.from({ length: 24 }, (_, h) => ({
+    label: String(h),
+    rev: paidOrders.filter(o => new Date(o.createdAt).getHours() === h).reduce((s, o) => s + orderTotal(o), 0),
   }));
-  const repCategories = Object.entries(repCatMap).sort((a, b) => b[1] - a[1]);
-  const maxRepCat = repCategories[0]?.[1] ?? 1;
+  const maxHourly = Math.max(...hourlyData.map(h => h.rev), 0.01);
 
-  const cashRev = reportOrders.filter(o => o.paymentMethod === 'nağd').reduce((s, o) => s + orderTotal(o), 0);
-  const cardRev = reportOrders.filter(o => o.paymentMethod === 'kart').reduce((s, o) => s + orderTotal(o), 0);
+  const WEEKDAYS = ['Be', 'Ça', 'Çə', 'Ca', 'Cü', 'Şə', 'Ba'];
+  const weeklyData = WEEKDAYS.map((label, i) => {
+    const jsDay = i === 6 ? 0 : i + 1;
+    return { label, rev: paidOrders.filter(o => new Date(o.createdAt).getDay() === jsDay).reduce((s, o) => s + orderTotal(o), 0) };
+  });
+  const maxWeekly = Math.max(...weeklyData.map(w => w.rev), 0.01);
 
-  const timeSlots: { label: string; rev: number }[] = (() => {
-    if (reportPeriod === 'today' || reportPeriod === 'yesterday') {
-      const hours = Array.from({ length: 24 }, (_, h) => ({ label: `${h}:00`, rev: 0 }));
-      reportOrders.forEach(o => { hours[new Date(o.createdAt).getHours()].rev += orderTotal(o); });
-      return hours.filter(h => h.rev > 0);
-    }
-    if (reportPeriod === 'week') {
-      return Array.from({ length: 7 }, (_, i) => {
-        const d = new Date(rTodayStart); d.setDate(d.getDate() - (6 - i));
-        return {
-          label: d.toLocaleDateString('az-AZ', { weekday: 'short', day: 'numeric' }),
-          rev: reportOrders.filter(o => new Date(o.createdAt).toDateString() === d.toDateString()).reduce((s, o) => s + orderTotal(o), 0),
-        };
-      });
-    }
-    if (reportPeriod === 'month' || reportPeriod === 'lastmonth') {
-      const slots: { label: string; rev: number }[] = [];
-      const d = new Date(rStart);
-      while (d < rEnd) {
-        const ds = d.toDateString();
-        slots.push({ label: String(d.getDate()), rev: reportOrders.filter(o => new Date(o.createdAt).toDateString() === ds).reduce((s, o) => s + orderTotal(o), 0) });
-        d.setDate(d.getDate() + 1);
-      }
-      return slots;
-    }
-    const monthMap: Record<string, number> = {};
-    reportOrders.forEach(o => { const d = new Date(o.createdAt); const k = `${d.getFullYear()}/${d.getMonth() + 1}`; monthMap[k] = (monthMap[k] ?? 0) + orderTotal(o); });
-    return Object.entries(monthMap).sort().map(([k, rev]) => ({ label: k, rev }));
-  })();
-  const maxTimeRev = Math.max(...timeSlots.map(t => t.rev), 1);
-
-  const NAV: { id: Tab; label: string; icon: string }[] = [
-    { id: 'dashboard', label: 'Statistika', icon: '📊' },
-    { id: 'orders', label: 'Sifarişlər', icon: '📋' },
-    { id: 'menu', label: 'Menyu', icon: '🍽️' },
-    { id: 'categories', label: 'Kateqoriyalar', icon: '🗂️' },
-    { id: 'reports', label: 'Hesabatlar', icon: '📈' },
-  ];
-
-  function navClick(t: Tab) {
-    setTab(t);
-    setSidebarOpen(false);
-    if (t === 'orders') refresh();
-  }
-
-  return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
-
-      {/* ── Sidebar overlay (mobile) ── */}
-      {sidebarOpen && (
-        <div className="fixed inset-0 bg-black/30 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />
-      )}
-
-      {/* ── Sidebar ── */}
-      <aside className={`fixed md:static inset-y-0 left-0 z-30 w-60 bg-white border-r border-gray-100 flex flex-col transform transition-transform duration-200 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}>
-        <div className="px-5 py-5 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <span className="text-2xl">🍽️</span>
-            <div>
-              <p className="font-bold text-gray-800 text-sm">Restoran</p>
-              <p className="text-xs text-gray-400">Admin Paneli</p>
+  // ── sidebar ────────────────────────────────────────────────────────────────
+  function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+    return (
+      <div className="flex flex-col h-full bg-white">
+        {/* Logo row */}
+        <div className={`flex items-center h-16 border-b border-gray-100 ${collapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
+          {!collapsed && (
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-orange-500 flex items-center justify-center">
+                <UtensilsCrossed className="w-4 h-4 text-white" />
+              </div>
+              <span className="font-semibold text-gray-800 text-sm">Admin Paneli</span>
             </div>
-          </div>
-          {!online && <span className="mt-2 inline-block text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">Oflayn</span>}
-        </div>
-
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {NAV.map(n => (
-            <button
-              key={n.id}
-              onClick={() => navClick(n.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${tab === n.id ? 'bg-orange-50 text-orange-600' : 'text-gray-600 hover:bg-gray-50'}`}
-            >
-              <span>{n.icon}</span>
-              <span>{n.label}</span>
-              {n.id === 'orders' && activeOrders.length > 0 && (
-                <span className="ml-auto bg-orange-500 text-white text-xs rounded-full px-1.5 py-0.5">{activeOrders.length}</span>
-              )}
-            </button>
-          ))}
-        </nav>
-
-        <div className="px-5 py-4 border-t border-gray-100">
-          <p className="text-xs text-gray-500 mb-2">Salam, {adminName}</p>
+          )}
           <button
-            onClick={() => { logout(); router.push('/login'); }}
-            className="w-full text-sm text-red-500 hover:text-red-700 font-medium text-left"
+            onClick={() => setCollapsed(c => !c)}
+            className="hidden md:flex w-8 h-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
           >
-            Çıxış
+            {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </button>
         </div>
-      </aside>
 
-      {/* ── Main ── */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Mobile header */}
-        <header className="md:hidden bg-white border-b border-gray-100 px-4 py-3 flex items-center gap-3">
-          <button onClick={() => setSidebarOpen(true)} className="text-gray-500 text-xl">☰</button>
-          <span className="font-semibold text-gray-800 text-sm">{NAV.find(n => n.id === tab)?.label}</span>
-        </header>
+        {/* Nav */}
+        <nav className={`flex flex-col gap-1 p-3 flex-1 ${collapsed ? 'items-center' : ''}`}>
+          {NAV_ITEMS.map(n => {
+            const Icon = n.icon;
+            const isActive = tab === n.id;
+            const badge = n.id === 'orders' && activeOrders.length > 0 ? activeOrders.length : null;
 
-        <main className="flex-1 overflow-y-auto p-6">
+            if (collapsed) {
+              return (
+                <button
+                  key={n.id}
+                  title={n.label}
+                  onClick={() => { setTab(n.id); onNavigate?.(); if (n.id === 'orders') refresh(); }}
+                  className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
+                    isActive ? 'bg-orange-50 text-orange-500 before:absolute before:left-[-9px] before:top-1/2 before:-translate-y-1/2 before:w-[3px] before:h-4 before:rounded-r-full before:bg-orange-500' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  {badge && <span className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 text-white text-[9px] rounded-full flex items-center justify-center font-bold">{badge}</span>}
+                </button>
+              );
+            }
 
-          {/* ── DASHBOARD ──────────────────────────────────────────────── */}
-          {tab === 'dashboard' && (
-            <div className="space-y-6 max-w-3xl">
-              <h2 className="text-lg font-semibold text-gray-800">Statistika</h2>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                {[
-                  { label: 'Bu gün gəlir', value: `${todayRevenue.toFixed(2)} ₼`, sub: `${todayPaid.length} qəbz` },
-                  { label: 'Orta qəbz', value: `${avgCheck.toFixed(2)} ₼`, sub: 'bu gün' },
-                  { label: 'Aktiv sifarişlər', value: String(activeOrders.length), sub: 'hal-hazırda' },
-                  { label: 'Ümumi gəlir', value: `${totalRevenue.toFixed(2)} ₼`, sub: `${paidOrders.length} qəbz` },
-                ].map(kpi => (
-                  <div key={kpi.label} className="bg-white rounded-xl shadow-sm p-5">
-                    <p className="text-xs text-gray-500 mb-1">{kpi.label}</p>
-                    <p className="text-2xl font-bold text-gray-800">{kpi.value}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{kpi.sub}</p>
+            return (
+              <button
+                key={n.id}
+                onClick={() => { setTab(n.id); onNavigate?.(); if (n.id === 'orders') refresh(); }}
+                className={`flex items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium transition-colors w-full ${
+                  isActive ? 'bg-orange-500 text-white' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'
+                }`}
+              >
+                <Icon className="w-4 h-4 shrink-0" />
+                <span className="flex-1 text-left truncate">{n.label}</span>
+                {badge && (
+                  <span className={`text-xs rounded-full px-1.5 py-0.5 font-semibold ${isActive ? 'bg-white/20 text-white' : 'bg-orange-500 text-white'}`}>
+                    {badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* User + logout */}
+        {!collapsed && (
+          <div className="px-4 py-4 border-t border-gray-100">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 text-xs font-bold">
+                {adminName[0]?.toUpperCase()}
+              </div>
+              <span className="text-xs text-gray-600 truncate">{adminName}</span>
+              {!online && <span className="ml-auto text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">Oflayn</span>}
+            </div>
+            <button
+              onClick={() => { logout(); router.push('/login'); }}
+              className="flex items-center gap-2 text-xs text-gray-400 hover:text-red-500 transition-colors"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              Çıxış
+            </button>
+          </div>
+        )}
+        {collapsed && (
+          <div className="py-4 flex flex-col items-center gap-2 border-t border-gray-100">
+            <div className="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 text-xs font-bold">
+              {adminName[0]?.toUpperCase()}
+            </div>
+            <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-gray-400 hover:text-red-500 transition-colors">
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const meta = PAGE_META[tab];
+
+  return (
+    <div className="min-h-screen bg-gray-50" style={{ fontFamily: 'var(--font-quicksand, Quicksand, sans-serif)' }}>
+
+      {/* ── Top header ── */}
+      <header className="sticky top-0 z-50 h-16 border-b border-gray-100 bg-white/90 backdrop-blur-sm flex items-center gap-3 px-4">
+        {/* Mobile menu */}
+        <button
+          className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100"
+          onClick={() => setMobileOpen(true)}
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+
+        <div className="flex items-center gap-2 md:hidden">
+          <div className="w-7 h-7 rounded-lg bg-orange-500 flex items-center justify-center">
+            <UtensilsCrossed className="w-4 h-4 text-white" />
+          </div>
+          <span className="font-semibold text-gray-800 text-sm">Restoran</span>
+        </div>
+
+        <div className="flex-1" />
+
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-gray-100 rounded-xl">
+          <div className="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 text-xs font-bold">
+            {adminName[0]?.toUpperCase()}
+          </div>
+          <span className="text-sm font-medium text-gray-700 hidden sm:inline">{adminName}</span>
+        </div>
+
+        <button
+          onClick={() => { logout(); router.push('/login'); }}
+          className="w-9 h-9 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+          title="Çıxış"
+        >
+          <LogOut className="w-4 h-4" />
+        </button>
+      </header>
+
+      {/* ── Mobile sidebar overlay ── */}
+      {mobileOpen && (
+        <>
+          <div className="fixed inset-0 bg-black/30 z-[60] md:hidden" onClick={() => setMobileOpen(false)} />
+          <div className="fixed inset-y-0 left-0 z-[70] w-64 md:hidden shadow-xl">
+            <div className="absolute top-3 right-3 z-10">
+              <button onClick={() => setMobileOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 text-gray-500">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <SidebarContent onNavigate={() => setMobileOpen(false)} />
+          </div>
+        </>
+      )}
+
+      <div className="flex min-h-[calc(100vh-4rem)]">
+
+        {/* ── Desktop sidebar ── */}
+        <aside className={`hidden md:block flex-shrink-0 sticky top-16 self-start h-[calc(100vh-4rem)] transition-all duration-200 border-r border-gray-100 ${collapsed ? 'w-14' : 'w-56'}`}>
+          <SidebarContent />
+        </aside>
+
+        {/* ── Main ── */}
+        <main className="flex-1 min-w-0 bg-gray-50 rounded-tl-2xl border-l border-t border-gray-100 p-6 md:p-8 overflow-y-auto">
+          <div className="mb-6">
+            <h1 className="text-lg font-semibold text-gray-900">{meta.title}</h1>
+            <p className="text-sm text-gray-400 mt-0.5">{meta.subtitle}</p>
+          </div>
+
+          {/* ── STATS ─────────────────────────────────────────────────── */}
+          {tab === 'stats' && (
+            <div className="space-y-5 max-w-5xl">
+
+              {/* Main chart card */}
+              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                <div className="flex items-center justify-between px-6 pt-5 pb-3">
+                  <h3 className="font-semibold text-gray-800">Gəlir</h3>
+                  <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5">
+                    {([['gün', 'Gün'], ['həftə', 'Həftə'], ['ay', 'Ay']] as [ChartView, string][]).map(([v, l]) => (
+                      <button key={v} onClick={() => setChartView(v)}
+                        className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${chartView === v ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
+                        {l}
+                      </button>
+                    ))}
                   </div>
-                ))}
+                </div>
+                <div className="px-4 pb-2">
+                  <LineChartSvg data={chartData} />
+                </div>
+                {/* KPI strip */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 border-t border-gray-100 divide-x divide-gray-100">
+                  {[
+                    { label: 'Gəlir',     value: `${chartRevenue.toFixed(2)} ₼`, icon: TrendingUp    },
+                    { label: 'Qəbzlər',   value: String(chartPaid.length),        icon: Receipt       },
+                    { label: 'Orta qəbz', value: `${chartAvg.toFixed(2)} ₼`,     icon: ShoppingBag   },
+                    { label: 'Aktiv',     value: String(activeOrders.length),     icon: ClipboardList },
+                  ].map(kpi => {
+                    const Icon = kpi.icon;
+                    return (
+                      <div key={kpi.label} className="px-5 py-4">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Icon className="w-3.5 h-3.5 text-gray-300" />
+                          <p className="text-xs text-gray-400">{kpi.label}</p>
+                        </div>
+                        <p className="font-bold text-gray-800">{kpi.value}</p>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
-              {topCategories.length > 0 && (
-                <div className="bg-white rounded-xl shadow-sm p-5">
-                  <h3 className="font-semibold text-gray-800 mb-4">Bu gün kateqoriyaya görə gəlir</h3>
-                  <div className="space-y-3">
-                    {topCategories.map(([cat, rev]) => (
-                      <div key={cat}>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-gray-700">{cat}</span>
-                          <span className="font-medium text-gray-800">{rev.toFixed(2)} ₼</span>
+              {/* Payment + Category */}
+              <div className="grid md:grid-cols-2 gap-5">
+                <div className="bg-white rounded-xl border border-gray-100 p-5">
+                  <h3 className="font-semibold text-gray-800 text-sm mb-4">Ödəniş üsulları</h3>
+                  {totalPayRev === 0 ? (
+                    <p className="text-sm text-gray-300 text-center py-4">Məlumat yoxdur</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {[{ label: 'Nağd', rev: cashRev }, { label: 'Kart', rev: cardRev }].map(pm => {
+                        const pct = totalPayRev > 0 ? (pm.rev / totalPayRev) * 100 : 0;
+                        return (
+                          <div key={pm.label}>
+                            <div className="flex justify-between items-center mb-1.5">
+                              <span className="text-sm text-gray-600">{pm.label}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-gray-400">{pct.toFixed(0)}%</span>
+                                <span className="font-semibold text-gray-800 text-sm">{pm.rev.toFixed(2)} ₼</span>
+                              </div>
+                            </div>
+                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                              <div className="h-full bg-orange-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-white rounded-xl border border-gray-100 p-5">
+                  <h3 className="font-semibold text-gray-800 text-sm mb-4">Kateqoriyaya görə</h3>
+                  {repCategories.length === 0 ? (
+                    <p className="text-sm text-gray-300 text-center py-4">Məlumat yoxdur</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {repCategories.slice(0, 5).map(([cat, rev]) => (
+                        <div key={cat}>
+                          <div className="flex justify-between items-center mb-1.5">
+                            <span className="text-sm text-gray-600 truncate flex-1 mr-3">{cat}</span>
+                            <span className="font-semibold text-gray-800 text-sm shrink-0">{rev.toFixed(2)} ₼</span>
+                          </div>
+                          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-blue-400 rounded-full transition-all" style={{ width: `${(rev / maxRepCat) * 100}%` }} />
+                          </div>
                         </div>
-                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-orange-400 rounded-full" style={{ width: `${(rev / maxCatRevenue) * 100}%` }} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Hourly + Weekly */}
+              <div className="grid md:grid-cols-2 gap-5">
+                <div className="bg-white rounded-xl border border-gray-100 p-5">
+                  <h3 className="font-semibold text-gray-800 text-sm mb-4">Gün saatlarına görə</h3>
+                  <div className="flex items-end gap-0.5 h-16">
+                    {hourlyData.map((d, i) => (
+                      <div key={i} title={`${i}:00 — ${d.rev.toFixed(2)} ₼`}
+                        className="flex-1 bg-orange-400 hover:bg-orange-500 rounded-t-sm transition-colors cursor-default"
+                        style={{ height: `${Math.max((d.rev / maxHourly) * 100, d.rev > 0 ? 4 : 0)}%`, opacity: d.rev > 0 ? 1 : 0.15 }}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex justify-between mt-1.5 text-[9px] text-gray-300">
+                    <span>0</span><span>6</span><span>12</span><span>18</span><span>23</span>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl border border-gray-100 p-5">
+                  <h3 className="font-semibold text-gray-800 text-sm mb-4">Həftənin günlərinə görə</h3>
+                  <div className="flex items-end gap-1 h-16">
+                    {weeklyData.map(d => (
+                      <div key={d.label} title={`${d.label} — ${d.rev.toFixed(2)} ₼`}
+                        className="flex-1 bg-orange-400 hover:bg-orange-500 rounded-t-sm transition-colors cursor-default"
+                        style={{ height: `${Math.max((d.rev / maxWeekly) * 100, d.rev > 0 ? 4 : 0)}%`, opacity: d.rev > 0 ? 1 : 0.15 }}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex mt-1.5">
+                    {weeklyData.map(d => (
+                      <span key={d.label} className="flex-1 text-center text-[9px] text-gray-300">{d.label}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Top items */}
+              {topItems.length > 0 && (
+                <div className="bg-white rounded-xl border border-gray-100 p-5">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Star className="w-4 h-4 text-orange-400" />
+                    <h3 className="font-semibold text-gray-800 text-sm">Top məhsullar</h3>
+                  </div>
+                  <div className="space-y-2.5">
+                    {topItems.map((item, idx) => (
+                      <div key={item.name}>
+                        <div className="flex justify-between items-center mb-1">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-[10px] font-bold text-gray-200 w-4 shrink-0">#{idx + 1}</span>
+                            <span className="text-sm text-gray-700 truncate">{item.name}</span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 ml-3">
+                            <span className="text-xs text-gray-400">{item.qty} ədəd</span>
+                            <span className="font-semibold text-gray-800 text-sm">{item.rev.toFixed(2)} ₼</span>
+                          </div>
+                        </div>
+                        <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-orange-400 rounded-full" style={{ width: `${(item.rev / maxItemRev) * 100}%` }} />
                         </div>
                       </div>
                     ))}
@@ -393,30 +640,10 @@ export default function AdminPage() {
                 </div>
               )}
 
-              {todayPaid.length > 0 && (
-                <div className="bg-white rounded-xl shadow-sm p-5">
-                  <h3 className="font-semibold text-gray-800 mb-4">Bu günün ödənilmiş sifarişləri</h3>
-                  <div className="space-y-2">
-                    {todayPaid.map(o => (
-                      <div key={o.id} className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
-                        <div>
-                          <span className="font-medium text-sm text-gray-800">Masa {o.tableNumber}</span>
-                          <span className="ml-2 text-xs text-gray-400">{o.sellerName}</span>
-                        </div>
-                        <div className="text-right">
-                          <span className="font-bold text-sm text-gray-800">{orderTotal(o).toFixed(2)} ₼</span>
-                          <p className="text-xs text-gray-400">{new Date(o.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {todayOrders.length === 0 && (
+              {paidOrders.length === 0 && (
                 <div className="text-center py-16 text-gray-400">
-                  <div className="text-5xl mb-3">📊</div>
-                  <p>Bu gün üçün məlumat yoxdur</p>
+                  <TrendingUp className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">Hələlik heç bir ödəniş yoxdur</p>
                 </div>
               )}
             </div>
@@ -426,44 +653,49 @@ export default function AdminPage() {
           {tab === 'orders' && (
             <div className="space-y-4 max-w-3xl">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-gray-800">Aktiv Sifarişlər</h2>
-                <button onClick={refresh} className="text-sm text-orange-500 hover:text-orange-700">Yenilə</button>
+                <p className="text-sm text-gray-400">{activeOrders.length} aktiv sifariş</p>
+                <button onClick={refresh} className="text-xs font-medium text-orange-500 hover:text-orange-700 px-3 py-1.5 rounded-lg hover:bg-orange-50 transition-colors">Yenilə</button>
               </div>
 
               {activeOrders.length === 0 && (
-                <div className="text-center py-12 text-gray-400">
-                  <div className="text-4xl mb-2">📋</div>
-                  <p>Aktiv sifariş yoxdur</p>
+                <div className="bg-white rounded-xl border border-gray-100 p-16 text-center">
+                  <ClipboardList className="w-10 h-10 mx-auto mb-3 text-gray-200" />
+                  <p className="text-sm text-gray-400">Aktiv sifariş yoxdur</p>
                 </div>
               )}
 
               {activeOrders.map(order => (
-                <div key={order.id} className="bg-white rounded-xl shadow-sm p-5">
+                <div key={order.id} className="bg-white rounded-xl border border-gray-100 p-5">
                   <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <span className="font-bold text-lg">Masa {order.tableNumber}</span>
-                      <span className="ml-3 text-sm text-gray-500">{order.sellerName}</span>
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-orange-50 flex items-center justify-center">
+                        <span className="text-sm font-bold text-orange-600">{order.tableNumber}</span>
+                      </div>
+                      <div>
+                        <p className="font-semibold text-gray-800 text-sm">Masa {order.tableNumber}</p>
+                        <p className="text-xs text-gray-400">{order.sellerName}</p>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLORS[order.status]}`}>{order.status}</span>
+                      <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${STATUS_COLORS[order.status]}`}>{order.status}</span>
                       <select
                         value={order.status}
                         onChange={e => handleStatusChange(order.id, e.target.value as OrderStatus)}
-                        className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none"
+                        className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
                       >
                         {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
                     </div>
                   </div>
-                  <ul className="text-sm space-y-1 mb-3">
+                  <div className="bg-gray-50 rounded-lg p-3 space-y-1 mb-3">
                     {order.items.map((oi, i) => (
-                      <li key={i} className="flex justify-between text-gray-700">
-                        <span>{oi.menuItem.name} × {oi.quantity}</span>
-                        <span>{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
-                      </li>
+                      <div key={i} className="flex justify-between text-sm text-gray-700">
+                        <span>{oi.menuItem.name} <span className="text-gray-400">× {oi.quantity}</span></span>
+                        <span className="font-medium">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
+                      </div>
                     ))}
-                  </ul>
-                  {order.note && <p className="text-xs text-gray-500 italic mb-2">Qeyd: {order.note}</p>}
+                  </div>
+                  {order.note && <p className="text-xs text-gray-400 italic mb-3">Qeyd: {order.note}</p>}
                   <div className="flex justify-between items-center pt-3 border-t border-gray-100">
                     <span className="text-xs text-gray-400">{new Date(order.createdAt).toLocaleTimeString('az-AZ')}</span>
                     <span className="font-bold text-orange-600">{orderTotal(order).toFixed(2)} ₼</span>
@@ -471,15 +703,18 @@ export default function AdminPage() {
                 </div>
               ))}
 
-              {paidOrders.length > 0 && (
-                <details className="mt-6">
-                  <summary className="text-sm text-gray-500 cursor-pointer hover:text-gray-700">Ödənilmiş sifarişlər ({paidOrders.length})</summary>
-                  <div className="mt-3 space-y-3">
-                    {paidOrders.map(order => (
-                      <div key={order.id} className="bg-white rounded-xl shadow-sm p-4 opacity-60">
+              {orders.filter(o => o.status === 'ödənilib').length > 0 && (
+                <details className="mt-4 group">
+                  <summary className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer hover:text-gray-600 list-none">
+                    <ChevronDown className="w-4 h-4 transition-transform group-open:rotate-180" />
+                    Ödənilmiş sifarişlər ({orders.filter(o => o.status === 'ödənilib').length})
+                  </summary>
+                  <div className="mt-3 space-y-2">
+                    {orders.filter(o => o.status === 'ödənilib').map(order => (
+                      <div key={order.id} className="bg-white rounded-xl border border-gray-100 p-4 opacity-60">
                         <div className="flex justify-between items-center">
-                          <span className="font-medium">Masa {order.tableNumber}</span>
-                          <span className="font-bold text-gray-600">{orderTotal(order).toFixed(2)} ₼</span>
+                          <span className="text-sm font-medium text-gray-700">Masa {order.tableNumber}</span>
+                          <span className="font-bold text-sm text-gray-600">{orderTotal(order).toFixed(2)} ₼</span>
                         </div>
                       </div>
                     ))}
@@ -492,69 +727,53 @@ export default function AdminPage() {
           {/* ── MENU ───────────────────────────────────────────────────── */}
           {tab === 'menu' && (
             <div className="max-w-3xl">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-gray-800">Menyu İdarəsi</h2>
-                <button onClick={openAdd} className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
-                  + Yemək əlavə et
+              <div className="flex items-center justify-between mb-5">
+                <p className="text-sm text-gray-400">{menu.length} məhsul</p>
+                <button onClick={openAdd} className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-sm">
+                  <span className="text-base leading-none">+</span>
+                  Yemək əlavə et
                 </button>
               </div>
 
-              {/* Add / Edit form */}
               {showForm && (
-                <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm p-5 mb-5 space-y-4">
+                <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-100 p-6 mb-5 space-y-4">
                   <h3 className="font-semibold text-gray-800">{editingId ? 'Yeməyi düzəlt' : 'Yeni Yemək'}</h3>
 
-                  {/* Name */}
                   <div>
-                    <label className="text-xs text-gray-500 mb-1 block">Ad</label>
-                    <input
-                      type="text"
-                      placeholder="Yeməyin adı"
-                      value={form.name}
+                    <label className="text-xs font-medium text-gray-500 mb-1.5 block">Ad</label>
+                    <input type="text" placeholder="Yeməyin adı" value={form.name}
                       onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                      required
-                    />
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
+                      required />
                   </div>
 
-                  {/* Category + Station */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs text-gray-500 mb-1 block">Kateqoriya</label>
-                      <select
-                        value={form.category}
-                        onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                      >
+                      <label className="text-xs font-medium text-gray-500 mb-1.5 block">Kateqoriya</label>
+                      <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white">
                         {categories.map(c => <option key={c}>{c}</option>)}
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs text-gray-500 mb-1 block">Bişirmə sexi</label>
-                      <select
-                        value={form.cookingStation}
-                        onChange={e => setForm(f => ({ ...f, cookingStation: e.target.value }))}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                      >
+                      <label className="text-xs font-medium text-gray-500 mb-1.5 block">Bişirmə sexi</label>
+                      <select value={form.cookingStation} onChange={e => setForm(f => ({ ...f, cookingStation: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white">
                         <option value="">— Seçin —</option>
                         {COOKING_STATIONS.map(s => <option key={s}>{s}</option>)}
                       </select>
                     </div>
                   </div>
 
-                  {/* Image */}
                   <div>
-                    <label className="text-xs text-gray-500 mb-1 block">Şəkil</label>
+                    <label className="text-xs font-medium text-gray-500 mb-1.5 block">Şəkil</label>
                     <div className="flex gap-3 items-start">
                       <div className="flex-1">
-                        <input
-                          type="text"
-                          placeholder="Şəkil URL-i"
+                        <input type="text" placeholder="Şəkil URL-i"
                           value={form.image.startsWith('data:') ? '' : form.image}
                           onChange={e => setForm(f => ({ ...f, image: e.target.value }))}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                        />
-                        <button type="button" onClick={() => imgRef.current?.click()} className="mt-1.5 text-xs text-orange-500 hover:text-orange-700">
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white" />
+                        <button type="button" onClick={() => imgRef.current?.click()} className="mt-1.5 text-xs text-orange-500 hover:text-orange-700 font-medium">
                           Fayldan yüklə
                         </button>
                         <input ref={imgRef} type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
@@ -568,44 +787,26 @@ export default function AdminPage() {
                     </div>
                   </div>
 
-                  {/* Variants toggle */}
                   <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={form.hasVariants}
-                      onChange={e => setForm(f => ({
-                        ...f,
-                        hasVariants: e.target.checked,
-                        variants: e.target.checked && f.variants.length === 0
-                          ? [{ id: Date.now().toString(), name: '', price: '', costPrice: '' }]
-                          : f.variants,
-                      }))}
-                      className="rounded accent-orange-500"
-                    />
+                    <input type="checkbox" checked={form.hasVariants}
+                      onChange={e => setForm(f => ({ ...f, hasVariants: e.target.checked, variants: e.target.checked && f.variants.length === 0 ? [{ id: Date.now().toString(), name: '', price: '', costPrice: '' }] : f.variants }))}
+                      className="rounded accent-orange-500" />
                     <span className="text-sm text-gray-700">Variantlar var (ölçü, növ…)</span>
                   </label>
 
-                  {/* Price row OR variants */}
                   {!form.hasVariants ? (
                     <div className="grid grid-cols-3 gap-3 items-end">
                       <div>
-                        <label className="text-xs text-gray-500 mb-1 block">Qiymət (₼)</label>
-                        <input
-                          type="number" placeholder="0.00" step="0.5" min="0"
-                          value={form.price}
+                        <label className="text-xs font-medium text-gray-500 mb-1.5 block">Qiymət (₼)</label>
+                        <input type="number" placeholder="0.00" step="0.5" min="0" value={form.price}
                           onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                          required
-                        />
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white" required />
                       </div>
                       <div>
-                        <label className="text-xs text-gray-500 mb-1 block">Maya dəyəri (₼)</label>
-                        <input
-                          type="number" placeholder="0.00" step="0.01" min="0"
-                          value={form.costPrice}
+                        <label className="text-xs font-medium text-gray-500 mb-1.5 block">Maya dəyəri (₼)</label>
+                        <input type="number" placeholder="0.00" step="0.01" min="0" value={form.costPrice}
                           onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                        />
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white" />
                       </div>
                       <div className="pb-2 text-sm font-semibold text-green-600">
                         {calcMargin(form.price, form.costPrice) && `Marja: ${calcMargin(form.price, form.costPrice)}`}
@@ -613,7 +814,7 @@ export default function AdminPage() {
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      <div className="grid grid-cols-9 gap-2 text-xs text-gray-500 px-1">
+                      <div className="grid grid-cols-9 gap-2 text-xs text-gray-400 px-1">
                         <span className="col-span-3">Variant adı</span>
                         <span className="col-span-2">Qiymət (₼)</span>
                         <span className="col-span-2">Maya (₼)</span>
@@ -621,68 +822,51 @@ export default function AdminPage() {
                       </div>
                       {form.variants.map((v, i) => (
                         <div key={v.id} className="grid grid-cols-9 gap-2 items-center">
-                          <input
-                            className="col-span-3 border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                            placeholder={`Variant ${i + 1}`}
-                            value={v.name}
-                            onChange={e => updateVariant(i, 'name', e.target.value)}
-                            required
-                          />
-                          <input
-                            type="number" placeholder="0.00" step="0.5" min="0"
-                            className="col-span-2 border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                            value={v.price}
-                            onChange={e => updateVariant(i, 'price', e.target.value)}
-                            required
-                          />
-                          <input
-                            type="number" placeholder="0.00" step="0.01" min="0"
-                            className="col-span-2 border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                            value={v.costPrice}
-                            onChange={e => updateVariant(i, 'costPrice', e.target.value)}
-                          />
+                          <input className="col-span-3 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
+                            placeholder={`Variant ${i + 1}`} value={v.name} onChange={e => updateVariant(i, 'name', e.target.value)} required />
+                          <input type="number" placeholder="0.00" step="0.5" min="0"
+                            className="col-span-2 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
+                            value={v.price} onChange={e => updateVariant(i, 'price', e.target.value)} required />
+                          <input type="number" placeholder="0.00" step="0.01" min="0"
+                            className="col-span-2 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
+                            value={v.costPrice} onChange={e => updateVariant(i, 'costPrice', e.target.value)} />
                           <div className="col-span-2 flex items-center gap-1">
                             <span className="text-xs text-green-600 font-medium flex-1">{calcMargin(v.price, v.costPrice)}</span>
                             <button type="button" onClick={() => removeVariant(i)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
                           </div>
                         </div>
                       ))}
-                      <button type="button" onClick={addVariant} className="text-sm text-orange-500 hover:text-orange-700">
-                        + Variant əlavə et
-                      </button>
+                      <button type="button" onClick={addVariant} className="text-sm text-orange-500 hover:text-orange-700 font-medium">+ Variant əlavə et</button>
                     </div>
                   )}
 
                   <div className="flex gap-2 pt-1">
-                    <button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white text-sm px-5 py-2 rounded-lg">
+                    <button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-5 py-2 rounded-lg shadow-sm transition-colors">
                       {editingId ? 'Yadda saxla' : 'Əlavə et'}
                     </button>
-                    <button type="button" onClick={cancelForm} className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2">Ləğv et</button>
+                    <button type="button" onClick={cancelForm} className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors">Ləğv et</button>
                   </div>
                 </form>
               )}
 
-              {/* Menu list */}
               {categories.map(cat => {
                 const items = menu.filter(m => m.category === cat);
                 if (items.length === 0) return null;
                 return (
                   <div key={cat} className="mb-5">
-                    <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">{cat}</h3>
-                    <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-1">{cat}</p>
+                    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                       {items.map((item, i) => (
-                        <div key={item.id} className={`flex items-center gap-3 px-4 py-3 ${i < items.length - 1 ? 'border-b border-gray-50' : ''}`}>
+                        <div key={item.id} className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${i < items.length - 1 ? 'border-b border-gray-50' : ''}`}>
                           {item.image
-                            ? <img src={item.image} alt={item.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />
-                            : <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-lg flex-shrink-0">🍴</div>
+                            ? <img src={item.image} alt={item.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-gray-100" />
+                            : <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0"><UtensilsCrossed className="w-4 h-4 text-gray-300" /></div>
                           }
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${item.available ? 'bg-green-400' : 'bg-gray-300'}`} />
                               <span className={`text-sm font-medium ${item.available ? 'text-gray-800' : 'text-gray-400 line-through'}`}>{item.name}</span>
-                              {item.cookingStation && (
-                                <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">{item.cookingStation}</span>
-                              )}
+                              {item.cookingStation && <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-md">{item.cookingStation}</span>}
                             </div>
                             {item.variants?.length ? (
                               <p className="text-xs text-gray-400 mt-0.5">{item.variants.map(v => `${v.name}: ${v.price.toFixed(2)}₼`).join(' · ')}</p>
@@ -693,12 +877,12 @@ export default function AdminPage() {
                               </p>
                             )}
                           </div>
-                          <div className="flex items-center gap-1.5 flex-shrink-0">
-                            <button onClick={() => openEdit(item)} className="text-xs text-blue-500 hover:text-blue-700 px-2 py-1 rounded hover:bg-blue-50">Düzəlt</button>
-                            <button onClick={() => toggleAvailable(item.id)} className={`text-xs px-2 py-1 rounded-lg ${item.available ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <button onClick={() => openEdit(item)} className="text-xs text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors font-medium">Düzəlt</button>
+                            <button onClick={() => toggleAvailable(item.id)} className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${item.available ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
                               {item.available ? 'Bağla' : 'Aç'}
                             </button>
-                            <button onClick={() => deleteItem(item.id)} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50">Sil</button>
+                            <button onClick={() => deleteItem(item.id)} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
                           </div>
                         </div>
                       ))}
@@ -708,9 +892,9 @@ export default function AdminPage() {
               })}
 
               {menu.length === 0 && !showForm && (
-                <div className="text-center py-16 text-gray-400">
-                  <div className="text-5xl mb-3">🍽️</div>
-                  <p>Menyu boşdur</p>
+                <div className="bg-white rounded-xl border border-gray-100 p-16 text-center">
+                  <UtensilsCrossed className="w-10 h-10 mx-auto mb-3 text-gray-200" />
+                  <p className="text-sm text-gray-400">Menyu boşdur</p>
                 </div>
               )}
             </div>
@@ -719,176 +903,33 @@ export default function AdminPage() {
           {/* ── CATEGORIES ─────────────────────────────────────────────── */}
           {tab === 'categories' && (
             <div className="max-w-lg space-y-4">
-              <h2 className="text-lg font-semibold text-gray-800">Kateqoriyalar</h2>
-
               <form onSubmit={addCategory} className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Yeni kateqoriya adı"
-                  value={newCat}
+                <input type="text" placeholder="Yeni kateqoriya adı" value={newCat}
                   onChange={e => setNewCat(e.target.value)}
-                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                />
-                <button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white text-sm px-4 py-2 rounded-lg">Əlavə et</button>
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white" />
+                <button type="submit" className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors">Əlavə et</button>
               </form>
 
-              <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                 {categories.map((cat, i) => (
-                  <div key={cat} className={`flex items-center justify-between px-5 py-3 ${i < categories.length - 1 ? 'border-b border-gray-50' : ''}`}>
+                  <div key={cat} className={`flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors ${i < categories.length - 1 ? 'border-b border-gray-50' : ''}`}>
                     <div className="flex items-center gap-3">
-                      <span className="w-6 h-6 bg-orange-50 text-orange-500 rounded-md flex items-center justify-center text-xs font-bold">{i + 1}</span>
-                      <span className="text-sm text-gray-800">{cat}</span>
+                      <span className="w-6 h-6 bg-orange-50 text-orange-500 rounded-lg flex items-center justify-center text-xs font-bold">{i + 1}</span>
+                      <span className="text-sm text-gray-800 font-medium">{cat}</span>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-xs text-gray-400">{menu.filter(m => m.category === cat).length} məhsul</span>
-                      <button onClick={() => deleteCategory(cat)} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50">Sil</button>
+                      <button onClick={() => deleteCategory(cat)} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
                     </div>
                   </div>
                 ))}
-              </div>
-            </div>
-          )}
-
-          {/* ── REPORTS ────────────────────────────────────────────────── */}
-          {tab === 'reports' && (
-            <div className="space-y-6 max-w-4xl">
-              <h2 className="text-lg font-semibold text-gray-800">Hesabatlar</h2>
-
-              {/* Period selector */}
-              <div className="flex gap-2 flex-wrap">
-                {([
-                  ['today', 'Bugün'], ['yesterday', 'Dünən'], ['week', 'Bu həftə'],
-                  ['month', 'Bu ay'], ['lastmonth', 'Keçən ay'], ['all', 'Hamısı'],
-                ] as [ReportPeriod, string][]).map(([p, label]) => (
-                  <button
-                    key={p}
-                    onClick={() => setReportPeriod(p)}
-                    className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${reportPeriod === p ? 'bg-orange-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              {/* KPI cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                {[
-                  { label: 'Gəlir', value: `${reportRevenue.toFixed(2)} ₼` },
-                  { label: 'Sifarişlər', value: String(reportOrders.length) },
-                  { label: 'Orta qəbz', value: `${reportAvg.toFixed(2)} ₼` },
-                  { label: 'Ən çox satan', value: topItems[0]?.name ?? '—' },
-                ].map(kpi => (
-                  <div key={kpi.label} className="bg-white rounded-xl shadow-sm p-5">
-                    <p className="text-xs text-gray-500 mb-1">{kpi.label}</p>
-                    <p className="text-xl font-bold text-gray-800 truncate">{kpi.value}</p>
+                {categories.length === 0 && (
+                  <div className="p-10 text-center">
+                    <Tag className="w-8 h-8 mx-auto mb-2 text-gray-200" />
+                    <p className="text-sm text-gray-400">Kateqoriya yoxdur</p>
                   </div>
-                ))}
+                )}
               </div>
-
-              {reportOrders.length === 0 ? (
-                <div className="text-center py-16 text-gray-400">
-                  <div className="text-5xl mb-3">📈</div>
-                  <p>Bu dövr üçün məlumat yoxdur</p>
-                </div>
-              ) : (
-                <>
-                  {/* Time breakdown chart */}
-                  {timeSlots.length > 0 && (
-                    <div className="bg-white rounded-xl shadow-sm p-5">
-                      <h3 className="font-semibold text-gray-800 mb-4">Gəlir dinamikası</h3>
-                      <div className="overflow-x-auto">
-                        <div
-                          className="flex items-end gap-1 h-36"
-                          style={{ minWidth: `${Math.max(timeSlots.length * 32, 300)}px` }}
-                        >
-                          {timeSlots.map((slot, i) => (
-                            <div key={i} className="flex flex-col items-center flex-1 group">
-                              <div
-                                className="w-full bg-orange-400 hover:bg-orange-500 rounded-t transition-colors relative"
-                                style={{ height: `${Math.max((slot.rev / maxTimeRev) * 100, slot.rev > 0 ? 3 : 0)}%` }}
-                              >
-                                {slot.rev > 0 && (
-                                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs bg-gray-800 text-white px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap z-10 pointer-events-none">
-                                    {slot.rev.toFixed(2)} ₼
-                                  </div>
-                                )}
-                              </div>
-                              <span className="text-xs text-gray-400 mt-1 truncate max-w-full text-center">{slot.label}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="grid md:grid-cols-2 gap-4">
-                    {/* Top items */}
-                    {topItems.length > 0 && (
-                      <div className="bg-white rounded-xl shadow-sm p-5">
-                        <h3 className="font-semibold text-gray-800 mb-4">Top məhsullar</h3>
-                        <div className="space-y-2.5">
-                          {topItems.map(item => (
-                            <div key={item.name}>
-                              <div className="flex justify-between text-sm mb-1">
-                                <span className="text-gray-700 truncate flex-1 mr-2">{item.name}</span>
-                                <span className="text-gray-400 text-xs mr-2 flex-shrink-0">{item.qty} ədəd</span>
-                                <span className="font-medium text-gray-800 flex-shrink-0">{item.rev.toFixed(2)} ₼</span>
-                              </div>
-                              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                <div className="h-full bg-orange-400 rounded-full" style={{ width: `${(item.rev / maxItemRev) * 100}%` }} />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Category breakdown */}
-                    {repCategories.length > 0 && (
-                      <div className="bg-white rounded-xl shadow-sm p-5">
-                        <h3 className="font-semibold text-gray-800 mb-4">Kateqoriyaya görə</h3>
-                        <div className="space-y-2.5">
-                          {repCategories.map(([cat, rev]) => (
-                            <div key={cat}>
-                              <div className="flex justify-between text-sm mb-1">
-                                <span className="text-gray-700">{cat}</span>
-                                <span className="font-medium text-gray-800">{rev.toFixed(2)} ₼</span>
-                              </div>
-                              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                <div className="h-full bg-blue-400 rounded-full" style={{ width: `${(rev / maxRepCat) * 100}%` }} />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Payment methods */}
-                  {(cashRev > 0 || cardRev > 0) && (
-                    <div className="bg-white rounded-xl shadow-sm p-5">
-                      <h3 className="font-semibold text-gray-800 mb-4">Ödəniş üsulu</h3>
-                      <div className="grid grid-cols-2 gap-6">
-                        {[
-                          { label: 'Nağd', rev: cashRev, color: 'bg-green-400' },
-                          { label: 'Kart', rev: cardRev, color: 'bg-blue-400' },
-                        ].map(pm => {
-                          const pct = (cashRev + cardRev) > 0 ? Math.round((pm.rev / (cashRev + cardRev)) * 100) : 0;
-                          return (
-                            <div key={pm.label}>
-                              <p className="text-2xl font-bold text-gray-800">{pm.rev.toFixed(2)} ₼</p>
-                              <p className="text-sm text-gray-500 mt-0.5">{pm.label} · {pct}%</p>
-                              <div className="mt-2 h-2 bg-gray-100 rounded-full overflow-hidden">
-                                <div className={`h-full ${pm.color} rounded-full`} style={{ width: `${pct}%` }} />
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
             </div>
           )}
 
