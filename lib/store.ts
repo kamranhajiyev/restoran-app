@@ -97,7 +97,7 @@ async function pushMenuToSupabase(menu: MenuItem[]) {
     const { error: delErr } = await supabase.from('menu_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     if (delErr) { console.error('[menu push] delete:', delErr.message); return; }
     const rows = menu.map(m => ({
-      id: isValidUUID(m.id) ? m.id : undefined,
+      id: isValidUUID(m.id) ? m.id : crypto.randomUUID(),
       name: m.name,
       price: m.price,
       category: m.category,
