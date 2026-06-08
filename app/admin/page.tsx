@@ -21,7 +21,8 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
 
-type Tab = 'dashboard' | 'orders' | 'menu' | 'categories';
+type Tab = 'dashboard' | 'orders' | 'menu' | 'categories' | 'reports';
+type ReportPeriod = 'today' | 'yesterday' | 'week' | 'month' | 'lastmonth' | 'all';
 
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
 
@@ -48,6 +49,7 @@ export default function AdminPage() {
   const [adminName, setAdminName] = useState('Admin');
   const [online, setOnline] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('today');
 
   // menu form
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -212,11 +214,81 @@ export default function AdminPage() {
   const topCategories = Object.entries(categoryMap).sort((a, b) => b[1] - a[1]);
   const maxCatRevenue = topCategories[0]?.[1] ?? 1;
 
+  // ── report computations ──────────────────────────────────────────────────────
+  const rNow = new Date();
+  const rTodayStart = new Date(rNow.getFullYear(), rNow.getMonth(), rNow.getDate());
+  function getReportRange(p: ReportPeriod): [Date, Date] {
+    switch (p) {
+      case 'today': return [rTodayStart, rNow];
+      case 'yesterday': { const y = new Date(rTodayStart); y.setDate(y.getDate() - 1); return [y, rTodayStart]; }
+      case 'week': { const w = new Date(rTodayStart); w.setDate(w.getDate() - 6); return [w, rNow]; }
+      case 'month': return [new Date(rNow.getFullYear(), rNow.getMonth(), 1), rNow];
+      case 'lastmonth': return [new Date(rNow.getFullYear(), rNow.getMonth() - 1, 1), new Date(rNow.getFullYear(), rNow.getMonth(), 1)];
+      case 'all': return [new Date(0), rNow];
+    }
+  }
+  const [rStart, rEnd] = getReportRange(reportPeriod);
+  const reportOrders = orders.filter(o => { const d = new Date(o.createdAt); return o.status === 'ödənilib' && d >= rStart && d < rEnd; });
+  const reportRevenue = reportOrders.reduce((s, o) => s + orderTotal(o), 0);
+  const reportAvg = reportOrders.length > 0 ? reportRevenue / reportOrders.length : 0;
+
+  const itemMap: Record<string, { name: string; qty: number; rev: number }> = {};
+  reportOrders.forEach(o => o.items.forEach(oi => {
+    const k = oi.menuItem.name;
+    if (!itemMap[k]) itemMap[k] = { name: k, qty: 0, rev: 0 };
+    itemMap[k].qty += oi.quantity;
+    itemMap[k].rev += oi.menuItem.price * oi.quantity;
+  }));
+  const topItems = Object.values(itemMap).sort((a, b) => b.rev - a.rev).slice(0, 10);
+  const maxItemRev = topItems[0]?.rev ?? 1;
+
+  const repCatMap: Record<string, number> = {};
+  reportOrders.forEach(o => o.items.forEach(oi => {
+    repCatMap[oi.menuItem.category] = (repCatMap[oi.menuItem.category] ?? 0) + oi.menuItem.price * oi.quantity;
+  }));
+  const repCategories = Object.entries(repCatMap).sort((a, b) => b[1] - a[1]);
+  const maxRepCat = repCategories[0]?.[1] ?? 1;
+
+  const cashRev = reportOrders.filter(o => o.paymentMethod === 'nağd').reduce((s, o) => s + orderTotal(o), 0);
+  const cardRev = reportOrders.filter(o => o.paymentMethod === 'kart').reduce((s, o) => s + orderTotal(o), 0);
+
+  const timeSlots: { label: string; rev: number }[] = (() => {
+    if (reportPeriod === 'today' || reportPeriod === 'yesterday') {
+      const hours = Array.from({ length: 24 }, (_, h) => ({ label: `${h}:00`, rev: 0 }));
+      reportOrders.forEach(o => { hours[new Date(o.createdAt).getHours()].rev += orderTotal(o); });
+      return hours.filter(h => h.rev > 0);
+    }
+    if (reportPeriod === 'week') {
+      return Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(rTodayStart); d.setDate(d.getDate() - (6 - i));
+        return {
+          label: d.toLocaleDateString('az-AZ', { weekday: 'short', day: 'numeric' }),
+          rev: reportOrders.filter(o => new Date(o.createdAt).toDateString() === d.toDateString()).reduce((s, o) => s + orderTotal(o), 0),
+        };
+      });
+    }
+    if (reportPeriod === 'month' || reportPeriod === 'lastmonth') {
+      const slots: { label: string; rev: number }[] = [];
+      const d = new Date(rStart);
+      while (d < rEnd) {
+        const ds = d.toDateString();
+        slots.push({ label: String(d.getDate()), rev: reportOrders.filter(o => new Date(o.createdAt).toDateString() === ds).reduce((s, o) => s + orderTotal(o), 0) });
+        d.setDate(d.getDate() + 1);
+      }
+      return slots;
+    }
+    const monthMap: Record<string, number> = {};
+    reportOrders.forEach(o => { const d = new Date(o.createdAt); const k = `${d.getFullYear()}/${d.getMonth() + 1}`; monthMap[k] = (monthMap[k] ?? 0) + orderTotal(o); });
+    return Object.entries(monthMap).sort().map(([k, rev]) => ({ label: k, rev }));
+  })();
+  const maxTimeRev = Math.max(...timeSlots.map(t => t.rev), 1);
+
   const NAV: { id: Tab; label: string; icon: string }[] = [
     { id: 'dashboard', label: 'Statistika', icon: '📊' },
     { id: 'orders', label: 'Sifarişlər', icon: '📋' },
     { id: 'menu', label: 'Menyu', icon: '🍽️' },
     { id: 'categories', label: 'Kateqoriyalar', icon: '🗂️' },
+    { id: 'reports', label: 'Hesabatlar', icon: '📈' },
   ];
 
   function navClick(t: Tab) {
@@ -674,6 +746,149 @@ export default function AdminPage() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* ── REPORTS ────────────────────────────────────────────────── */}
+          {tab === 'reports' && (
+            <div className="space-y-6 max-w-4xl">
+              <h2 className="text-lg font-semibold text-gray-800">Hesabatlar</h2>
+
+              {/* Period selector */}
+              <div className="flex gap-2 flex-wrap">
+                {([
+                  ['today', 'Bugün'], ['yesterday', 'Dünən'], ['week', 'Bu həftə'],
+                  ['month', 'Bu ay'], ['lastmonth', 'Keçən ay'], ['all', 'Hamısı'],
+                ] as [ReportPeriod, string][]).map(([p, label]) => (
+                  <button
+                    key={p}
+                    onClick={() => setReportPeriod(p)}
+                    className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${reportPeriod === p ? 'bg-orange-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* KPI cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {[
+                  { label: 'Gəlir', value: `${reportRevenue.toFixed(2)} ₼` },
+                  { label: 'Sifarişlər', value: String(reportOrders.length) },
+                  { label: 'Orta qəbz', value: `${reportAvg.toFixed(2)} ₼` },
+                  { label: 'Ən çox satan', value: topItems[0]?.name ?? '—' },
+                ].map(kpi => (
+                  <div key={kpi.label} className="bg-white rounded-xl shadow-sm p-5">
+                    <p className="text-xs text-gray-500 mb-1">{kpi.label}</p>
+                    <p className="text-xl font-bold text-gray-800 truncate">{kpi.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {reportOrders.length === 0 ? (
+                <div className="text-center py-16 text-gray-400">
+                  <div className="text-5xl mb-3">📈</div>
+                  <p>Bu dövr üçün məlumat yoxdur</p>
+                </div>
+              ) : (
+                <>
+                  {/* Time breakdown chart */}
+                  {timeSlots.length > 0 && (
+                    <div className="bg-white rounded-xl shadow-sm p-5">
+                      <h3 className="font-semibold text-gray-800 mb-4">Gəlir dinamikası</h3>
+                      <div className="overflow-x-auto">
+                        <div
+                          className="flex items-end gap-1 h-36"
+                          style={{ minWidth: `${Math.max(timeSlots.length * 32, 300)}px` }}
+                        >
+                          {timeSlots.map((slot, i) => (
+                            <div key={i} className="flex flex-col items-center flex-1 group">
+                              <div
+                                className="w-full bg-orange-400 hover:bg-orange-500 rounded-t transition-colors relative"
+                                style={{ height: `${Math.max((slot.rev / maxTimeRev) * 100, slot.rev > 0 ? 3 : 0)}%` }}
+                              >
+                                {slot.rev > 0 && (
+                                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs bg-gray-800 text-white px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap z-10 pointer-events-none">
+                                    {slot.rev.toFixed(2)} ₼
+                                  </div>
+                                )}
+                              </div>
+                              <span className="text-xs text-gray-400 mt-1 truncate max-w-full text-center">{slot.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {/* Top items */}
+                    {topItems.length > 0 && (
+                      <div className="bg-white rounded-xl shadow-sm p-5">
+                        <h3 className="font-semibold text-gray-800 mb-4">Top məhsullar</h3>
+                        <div className="space-y-2.5">
+                          {topItems.map(item => (
+                            <div key={item.name}>
+                              <div className="flex justify-between text-sm mb-1">
+                                <span className="text-gray-700 truncate flex-1 mr-2">{item.name}</span>
+                                <span className="text-gray-400 text-xs mr-2 flex-shrink-0">{item.qty} ədəd</span>
+                                <span className="font-medium text-gray-800 flex-shrink-0">{item.rev.toFixed(2)} ₼</span>
+                              </div>
+                              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                <div className="h-full bg-orange-400 rounded-full" style={{ width: `${(item.rev / maxItemRev) * 100}%` }} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Category breakdown */}
+                    {repCategories.length > 0 && (
+                      <div className="bg-white rounded-xl shadow-sm p-5">
+                        <h3 className="font-semibold text-gray-800 mb-4">Kateqoriyaya görə</h3>
+                        <div className="space-y-2.5">
+                          {repCategories.map(([cat, rev]) => (
+                            <div key={cat}>
+                              <div className="flex justify-between text-sm mb-1">
+                                <span className="text-gray-700">{cat}</span>
+                                <span className="font-medium text-gray-800">{rev.toFixed(2)} ₼</span>
+                              </div>
+                              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                <div className="h-full bg-blue-400 rounded-full" style={{ width: `${(rev / maxRepCat) * 100}%` }} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Payment methods */}
+                  {(cashRev > 0 || cardRev > 0) && (
+                    <div className="bg-white rounded-xl shadow-sm p-5">
+                      <h3 className="font-semibold text-gray-800 mb-4">Ödəniş üsulu</h3>
+                      <div className="grid grid-cols-2 gap-6">
+                        {[
+                          { label: 'Nağd', rev: cashRev, color: 'bg-green-400' },
+                          { label: 'Kart', rev: cardRev, color: 'bg-blue-400' },
+                        ].map(pm => {
+                          const pct = (cashRev + cardRev) > 0 ? Math.round((pm.rev / (cashRev + cardRev)) * 100) : 0;
+                          return (
+                            <div key={pm.label}>
+                              <p className="text-2xl font-bold text-gray-800">{pm.rev.toFixed(2)} ₼</p>
+                              <p className="text-sm text-gray-500 mt-0.5">{pm.label} · {pct}%</p>
+                              <div className="mt-2 h-2 bg-gray-100 rounded-full overflow-hidden">
+                                <div className={`h-full ${pm.color} rounded-full`} style={{ width: `${pct}%` }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 
