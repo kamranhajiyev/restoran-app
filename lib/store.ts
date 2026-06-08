@@ -104,7 +104,7 @@ async function pushMenuToSupabase(menu: MenuItem[]) {
       available: m.available,
       variants: m.variants ?? null,
       cost_price: m.costPrice ?? null,
-      image: m.image && m.image.startsWith('data:') ? null : (m.image ?? null),
+      image: m.image ?? null,
       cooking_station: m.cookingStation ?? null,
     }));
     const { error: insErr } = await supabase.from('menu_items').insert(rows);

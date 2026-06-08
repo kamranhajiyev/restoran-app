@@ -8,6 +8,7 @@ import {
   getCategories, saveCategories, pullCategoriesFromSupabase,
   syncMenuToSupabase,
 } from '@/lib/store';
+import { supabase } from '@/lib/supabase';
 import { MenuItem, MenuItemVariant, Order, OrderStatus } from '@/types';
 
 const COOKING_STATIONS = ['Mətbəx', 'Bar', 'Soyuq mətbəx', 'Pizza', 'Mangal'];
@@ -80,12 +81,18 @@ export default function AdminPage() {
   function refresh() { setOrders(getOrders()); }
 
   // ── image ──────────────────────────────────────────────────────────────────
-  function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => setForm(f => ({ ...f, image: ev.target?.result as string }));
-    reader.readAsDataURL(file);
+    const ext = file.name.split('.').pop();
+    const path = `${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('menu-images').upload(path, file, { upsert: true });
+    if (error) {
+      alert('Şəkil yüklənmədi: ' + error.message);
+      return;
+    }
+    const { data } = supabase.storage.from('menu-images').getPublicUrl(path);
+    setForm(f => ({ ...f, image: data.publicUrl }));
   }
 
   // ── menu form ──────────────────────────────────────────────────────────────
