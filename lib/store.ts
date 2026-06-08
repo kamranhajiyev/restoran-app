@@ -132,8 +132,7 @@ export async function pullMenuFromSupabase(): Promise<boolean> {
       image: r.image ?? undefined,
       cookingStation: r.cooking_station ?? undefined,
     }));
-    const localCount = localMenu().length;
-    if (menu.length > 0 && menu.length >= localCount) {
+    if (menu.length > 0) {
       localStorage.setItem(MENU_KEY, JSON.stringify(menu));
     }
     return true;

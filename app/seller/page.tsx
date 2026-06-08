@@ -72,11 +72,15 @@ export default function SellerPage() {
       setMenu(fresh);
       setOrders(getOrders());
     }
+    async function syncMenuFromSupabase() {
+      await Promise.all([pullMenuFromSupabase(), pullOrdersFromSupabase()]);
+      syncMenu();
+    }
     window.addEventListener('storage', syncMenu);
-    window.addEventListener('focus', syncMenu);
+    window.addEventListener('focus', syncMenuFromSupabase);
     return () => {
       window.removeEventListener('storage', syncMenu);
-      window.removeEventListener('focus', syncMenu);
+      window.removeEventListener('focus', syncMenuFromSupabase);
     };
   }, []);
 
