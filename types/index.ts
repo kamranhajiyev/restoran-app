@@ -1,11 +1,22 @@
 export type Role = 'admin' | 'seller';
 
+export interface MenuItemVariant {
+  id: string;
+  name: string;
+  price: number;
+  costPrice?: number;
+}
+
 export interface MenuItem {
   id: string;
   name: string;
   price: number;
   category: string;
   available: boolean;
+  variants?: MenuItemVariant[];
+  costPrice?: number;
+  image?: string;
+  cookingStation?: string;
 }
 
 export interface OrderItem {

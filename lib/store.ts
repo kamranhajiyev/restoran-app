@@ -4,6 +4,38 @@ import { supabase } from './supabase';
 const MENU_KEY = 'restoran_menu';
 const ORDERS_KEY = 'restoran_orders';
 const ORDER_COUNTER_KEY = 'restoran_order_counter';
+const CATEGORIES_KEY = 'restoran_categories';
+
+const DEFAULT_CATEGORIES = ['Salatlar', 'Şorbalar', 'Əsas Yeməklər', 'Qəlyanaltı', 'İçkilər', 'Desertlər'];
+
+export function getCategories(): string[] {
+  if (typeof window === 'undefined') return DEFAULT_CATEGORIES;
+  const raw = localStorage.getItem(CATEGORIES_KEY);
+  return raw ? JSON.parse(raw) : DEFAULT_CATEGORIES;
+}
+
+export function saveCategories(categories: string[]): void {
+  localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories));
+  void pushCategoriesToSupabase(categories);
+}
+
+async function pushCategoriesToSupabase(categories: string[]): Promise<void> {
+  try {
+    await supabase.from('categories').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('categories').insert(
+      categories.map((name, position) => ({ name, position }))
+    );
+  } catch { /* offline */ }
+}
+
+export async function pullCategoriesFromSupabase(): Promise<void> {
+  try {
+    const { data, error } = await supabase.from('categories').select('name').order('position');
+    if (error || !data || data.length === 0) return;
+    const cats = data.map((r: { name: string }) => r.name);
+    localStorage.setItem(CATEGORIES_KEY, JSON.stringify(cats));
+  } catch { /* offline */ }
+}
 
 // ─── default menu ────────────────────────────────────────────────────────────
 
@@ -60,7 +92,17 @@ async function pushMenuToSupabase(menu: MenuItem[]) {
   try {
     await supabase.from('menu_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     await supabase.from('menu_items').insert(
-      menu.map(m => ({ id: m.id, name: m.name, price: m.price, category: m.category, available: m.available }))
+      menu.map(m => ({
+        id: m.id,
+        name: m.name,
+        price: m.price,
+        category: m.category,
+        available: m.available,
+        variants: m.variants ?? null,
+        cost_price: m.costPrice ?? null,
+        image: m.image ?? null,
+        cooking_station: m.cookingStation ?? null,
+      }))
     );
   } catch { /* offline */ }
 }
@@ -75,6 +117,10 @@ export async function pullMenuFromSupabase(): Promise<boolean> {
       price: Number(r.price),
       category: r.category,
       available: r.available,
+      variants: r.variants ?? undefined,
+      costPrice: r.cost_price ? Number(r.cost_price) : undefined,
+      image: r.image ?? undefined,
+      cookingStation: r.cooking_station ?? undefined,
     }));
     if (menu.length > 0) localStorage.setItem(MENU_KEY, JSON.stringify(menu));
     return true;
