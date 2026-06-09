@@ -226,6 +226,15 @@ export default function AdminPage() {
     saveMenu(updated);
   }
   function deleteItem(id: string) {
+    const item = menu.find(m => m.id === id);
+    if (item?.image) {
+      const marker = '/menu-images/';
+      const idx = item.image.indexOf(marker);
+      if (idx !== -1) {
+        const path = item.image.slice(idx + marker.length);
+        supabase.storage.from('menu-images').remove([path]);
+      }
+    }
     const updated = menu.filter(m => m.id !== id);
     setMenu(updated);
     saveMenu(updated);
