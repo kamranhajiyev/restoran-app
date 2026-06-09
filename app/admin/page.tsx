@@ -288,6 +288,19 @@ export default function AdminPage() {
     setCategories(reordered);
     saveCategories(reordered);
   }
+  function moveItemOrder(cat: string, indexInCat: number, dir: -1 | 1) {
+    const catItems = menu.filter(m => m.category === cat);
+    const targetInCat = indexInCat + dir;
+    if (targetInCat < 0 || targetInCat >= catItems.length) return;
+    const aId = catItems[indexInCat].id;
+    const bId = catItems[targetInCat].id;
+    const reordered = [...menu];
+    const aIdx = reordered.findIndex(m => m.id === aId);
+    const bIdx = reordered.findIndex(m => m.id === bId);
+    [reordered[aIdx], reordered[bIdx]] = [reordered[bIdx], reordered[aIdx]];
+    setMenu(reordered);
+    saveMenu(reordered);
+  }
   function toggleCategoryAvailable(name: string) {
     const updated = categories.map(c => c.name === name ? { ...c, available: !c.available } : c);
     setCategories(updated);
@@ -976,6 +989,14 @@ export default function AdminPage() {
                     <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
                       {items.map((item, i) => (
                         <div key={item.id} className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${i < items.length - 1 ? 'border-b border-gray-50' : ''}`}>
+                          <div className="flex flex-col gap-0.5 shrink-0">
+                            <button onClick={() => moveItemOrder(cat, i, -1)} disabled={i === 0} className="text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => moveItemOrder(cat, i, 1)} disabled={i === items.length - 1} className="text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                           {item.image
                             ? <img src={item.image} alt={item.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-gray-100" />
                             : <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0"><Coffee className="w-4 h-4 text-gray-300" /></div>
