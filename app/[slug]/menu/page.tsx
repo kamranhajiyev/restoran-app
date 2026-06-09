@@ -1,14 +1,15 @@
 'use client';
 import { use, useEffect, useState } from 'react';
-import { ShoppingCart, X, Plus, Minus, ChevronLeft, Coffee } from 'lucide-react';
+import { ShoppingCart, X, Plus, Minus, Coffee } from 'lucide-react';
 import { fetchCompanyBySlug, fetchMenu, fetchCategories, setCompanyContext, addOrder, fetchTables } from '@/lib/store';
-import { Category, MenuItem, OrderItem, RestaurantTable } from '@/types';
+import { Category, MenuItem, MenuItemVariant, RestaurantTable } from '@/types';
 
 type Screen = 'menu' | 'confirm';
 
 interface CartItem {
   menuItem: MenuItem;
   quantity: number;
+  variantName?: string;
 }
 
 export default function CustomerMenuPage({
@@ -34,6 +35,10 @@ export default function CustomerMenuPage({
   const [cartOpen, setCartOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // Variant picker state
+  const [variantItem, setVariantItem] = useState<MenuItem | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState<MenuItemVariant | null>(null);
+
   useEffect(() => {
     async function load() {
       const company = await fetchCompanyBySlug(slug);
@@ -57,20 +62,44 @@ export default function CustomerMenuPage({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, tableId]);
 
-  function addToCart(item: MenuItem) {
-    setCart(prev => {
-      const ex = prev.find(c => c.menuItem.id === item.id);
-      if (ex) return prev.map(c => c.menuItem.id === item.id ? { ...c, quantity: c.quantity + 1 } : c);
-      return [...prev, { menuItem: item, quantity: 1 }];
-    });
+  function handleTapItem(item: MenuItem) {
+    if ((item.variants?.length ?? 0) > 0) {
+      setSelectedVariant(item.variants![0]);
+      setVariantItem(item);
+    } else {
+      addToCart(item);
+    }
   }
 
-  function removeFromCart(itemId: string) {
+  function confirmVariant() {
+    if (!variantItem || !selectedVariant) return;
+    addToCart({ ...variantItem, price: selectedVariant.price }, selectedVariant.name);
+    setVariantItem(null);
+    setSelectedVariant(null);
+  }
+
+  function addToCart(item: MenuItem, variantName?: string) {
+    const key = item.id + (variantName ?? '');
     setCart(prev => {
-      const ex = prev.find(c => c.menuItem.id === itemId);
+      const ex = prev.find(c => c.menuItem.id === item.id && (c.variantName ?? '') === (variantName ?? ''));
+      if (ex) return prev.map(c =>
+        c.menuItem.id === item.id && (c.variantName ?? '') === (variantName ?? '')
+          ? { ...c, quantity: c.quantity + 1 } : c
+      );
+      return [...prev, { menuItem: item, quantity: 1, variantName }];
+    });
+    void key;
+  }
+
+  function removeFromCart(itemId: string, variantName?: string) {
+    setCart(prev => {
+      const ex = prev.find(c => c.menuItem.id === itemId && (c.variantName ?? '') === (variantName ?? ''));
       if (!ex) return prev;
-      if (ex.quantity === 1) return prev.filter(c => c.menuItem.id !== itemId);
-      return prev.map(c => c.menuItem.id === itemId ? { ...c, quantity: c.quantity - 1 } : c);
+      if (ex.quantity === 1) return prev.filter(c => !(c.menuItem.id === itemId && (c.variantName ?? '') === (variantName ?? '')));
+      return prev.map(c =>
+        c.menuItem.id === itemId && (c.variantName ?? '') === (variantName ?? '')
+          ? { ...c, quantity: c.quantity - 1 } : c
+      );
     });
   }
 
@@ -88,7 +117,11 @@ export default function CustomerMenuPage({
       sellerName: table ? table.name : 'Müştəri',
       status: 'gözləyir',
       createdAt: new Date().toISOString(),
-      items: cart.map(c => ({ menuItem: c.menuItem, quantity: c.quantity })),
+      items: cart.map(c => ({
+        menuItem: c.menuItem,
+        quantity: c.quantity,
+        modifiers: c.variantName,
+      })),
     });
     setSubmitting(false);
     setCart([]);
@@ -181,7 +214,9 @@ export default function CustomerMenuPage({
       <main className="flex-1 p-4">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-w-2xl mx-auto">
           {visibleItems.map(item => {
-            const inCart = cart.find(c => c.menuItem.id === item.id);
+            const hasVariants = (item.variants?.length ?? 0) > 0;
+            const inCart = cart.filter(c => c.menuItem.id === item.id);
+            const totalInCart = inCart.reduce((s, c) => s + c.quantity, 0);
             return (
               <div key={item.id} className="bg-white rounded-xl border border-gray-100 overflow-hidden flex flex-col">
                 {item.image
@@ -190,21 +225,33 @@ export default function CustomerMenuPage({
                 }
                 <div className="p-3 flex flex-col flex-1">
                   <p className="text-sm font-semibold text-gray-800 flex-1">{item.name}</p>
-                  <p className="text-xs text-amber-800 font-bold mt-1">{item.price.toFixed(2)} ₼</p>
+                  <p className="text-xs text-amber-800 font-bold mt-1">
+                    {hasVariants
+                      ? `${Math.min(...item.variants!.map(v => v.price)).toFixed(2)} ₼ →`
+                      : `${item.price.toFixed(2)} ₼`}
+                  </p>
                   <div className="mt-2">
-                    {inCart ? (
+                    {hasVariants ? (
+                      <button
+                        onClick={() => handleTapItem(item)}
+                        className="w-full py-1.5 rounded-lg bg-amber-800 text-white text-xs font-semibold transition-colors hover:bg-amber-900 flex items-center justify-center gap-1"
+                      >
+                        {totalInCart > 0 && <span className="bg-white/25 px-1.5 rounded-md">{totalInCart}</span>}
+                        Seç
+                      </button>
+                    ) : totalInCart > 0 ? (
                       <div className="flex items-center justify-between">
                         <button onClick={() => removeFromCart(item.id)} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center">
                           <Minus className="w-3.5 h-3.5" />
                         </button>
-                        <span className="text-sm font-semibold">{inCart.quantity}</span>
+                        <span className="text-sm font-semibold">{totalInCart}</span>
                         <button onClick={() => addToCart(item)} className="w-7 h-7 rounded-lg bg-amber-800 text-white flex items-center justify-center">
                           <Plus className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     ) : (
                       <button
-                        onClick={() => addToCart(item)}
+                        onClick={() => handleTapItem(item)}
                         className="w-full py-1.5 rounded-lg bg-amber-800 text-white text-xs font-semibold transition-colors hover:bg-amber-900"
                       >
                         Əlavə et
@@ -244,18 +291,21 @@ export default function CustomerMenuPage({
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-5 space-y-3">
-              {cart.map(c => (
-                <div key={c.menuItem.id} className="flex items-center gap-3">
+              {cart.map((c, idx) => (
+                <div key={`${c.menuItem.id}-${c.variantName ?? ''}-${idx}`} className="flex items-center gap-3">
                   <div className="flex items-center gap-2">
-                    <button onClick={() => removeFromCart(c.menuItem.id)} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center">
+                    <button onClick={() => removeFromCart(c.menuItem.id, c.variantName)} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center">
                       <Minus className="w-3.5 h-3.5" />
                     </button>
                     <span className="w-5 text-center text-sm font-semibold">{c.quantity}</span>
-                    <button onClick={() => addToCart(c.menuItem)} className="w-7 h-7 rounded-lg bg-amber-800 text-white flex items-center justify-center">
+                    <button onClick={() => addToCart(c.menuItem, c.variantName)} className="w-7 h-7 rounded-lg bg-amber-800 text-white flex items-center justify-center">
                       <Plus className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  <span className="flex-1 text-sm text-gray-800">{c.menuItem.name}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-800">{c.menuItem.name}</p>
+                    {c.variantName && <p className="text-xs text-gray-400">{c.variantName}</p>}
+                  </div>
                   <span className="text-sm font-semibold text-gray-800">{(c.menuItem.price * c.quantity).toFixed(2)} ₼</span>
                 </div>
               ))}
@@ -273,6 +323,43 @@ export default function CustomerMenuPage({
                 {submitting ? 'Göndərilir...' : 'Sifariş ver'}
               </button>
             </div>
+          </div>
+        </>
+      )}
+
+      {/* Variant picker modal */}
+      {variantItem && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-50" onClick={() => setVariantItem(null)} />
+          <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl shadow-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800">{variantItem.name}</h3>
+              <button onClick={() => setVariantItem(null)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-5">
+              {variantItem.variants!.map(v => (
+                <button
+                  key={v.id}
+                  onClick={() => setSelectedVariant(v)}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 text-sm font-medium transition-colors ${
+                    selectedVariant?.id === v.id
+                      ? 'border-amber-800 bg-amber-50 text-amber-900'
+                      : 'border-gray-200 text-gray-700'
+                  }`}
+                >
+                  {v.name}
+                  <span className="text-xs opacity-70">{v.price.toFixed(2)} ₼</span>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={confirmVariant}
+              className="w-full bg-amber-800 hover:bg-amber-900 text-white font-semibold py-3.5 rounded-xl text-sm transition-colors"
+            >
+              Əlavə et · {selectedVariant?.price.toFixed(2)} ₼
+            </button>
           </div>
         </>
       )}
