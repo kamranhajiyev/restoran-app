@@ -76,8 +76,8 @@ export default function SellerPage() {
 
   // payment modal
   const [payingOrder, setPayingOrder] = useState<Order | null>(null);
-  const [payMethod, setPayMethod]     = useState<PayMethod>('nağd');
-  const [received, setReceived]       = useState('');
+  const [cashInput, setCashInput]     = useState('');
+  const [cardInput, setCardInput]     = useState('');
 
   // modifier / variant modal
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
@@ -188,15 +188,17 @@ export default function SellerPage() {
     setView('orders');
     await addOrder(order);
     setPayingOrder(order);
-    setPayMethod('nağd');
-    setReceived('');
+    setCashInput('');
+    setCardInput('');
   }
 
   async function confirmPayment() {
     if (!payingOrder) return;
-    setOrders(prev => prev.map(o => o.id === payingOrder.id ? { ...o, status: 'ödənilib', paymentMethod: payMethod } : o));
+    const cash = parseFloat(cashInput) || 0;
+    const card = parseFloat(cardInput) || 0;
+    setOrders(prev => prev.map(o => o.id === payingOrder.id ? { ...o, status: 'ödənilib', cashAmount: cash, cardAmount: card } : o));
     setPayingOrder(null);
-    await updateOrderStatus(payingOrder.id, 'ödənilib', payMethod);
+    await updateOrderStatus(payingOrder.id, 'ödənilib', cash, card);
   }
 
   async function handleStatusChange(id: string, status: OrderStatus) {
@@ -651,9 +653,11 @@ export default function SellerPage() {
       {/* Payment modal — bottom sheet on mobile */}
       {payingOrder && (() => {
         const total = orderTotal(payingOrder);
-        const recv = parseFloat(received) || 0;
-        const change = recv - total;
-        const canPay = payMethod === 'kart' || recv >= total;
+        const cash = parseFloat(cashInput) || 0;
+        const card = parseFloat(cardInput) || 0;
+        const paid = cash + card;
+        const change = paid - total;
+        const canPay = paid >= total;
         return (
           <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
             <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
@@ -661,7 +665,7 @@ export default function SellerPage() {
               <p className="text-sm text-gray-500 mb-4">
                 №{payingOrder.orderNumber} · {payingOrder.tableNumber === 0 ? 'Takeaway' : `Masa ${payingOrder.tableNumber}`}
               </p>
-              <ul className="text-sm space-y-2 mb-4 border-t pt-3 max-h-48 overflow-y-auto">
+              <ul className="text-sm space-y-2 mb-4 border-t pt-3 max-h-40 overflow-y-auto">
                 {payingOrder.items.map((oi, i) => (
                   <li key={i} className="flex justify-between text-gray-700">
                     <div>
@@ -672,42 +676,35 @@ export default function SellerPage() {
                   </li>
                 ))}
               </ul>
-              <div className="flex justify-between items-center font-bold text-xl border-t pt-3 mb-4">
+              <div className="flex justify-between items-center font-bold text-xl border-t pt-3 mb-5">
                 <span>Cəmi</span>
                 <span className="text-amber-700">{total.toFixed(2)} ₼</span>
               </div>
-              <div className="flex gap-2 mb-4">
-                {(['nağd', 'kart'] as PayMethod[]).map(m => (
-                  <button
-                    key={m}
-                    onClick={() => { setPayMethod(m); setReceived(''); }}
-                    className={`flex-1 py-3 rounded-xl text-sm font-medium border-2 transition-colors ${payMethod === m ? 'border-amber-800 bg-amber-50 text-amber-800' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}
-                  >
-                    {m === 'nağd' ? '💵 Nağd' : '💳 Kart'}
-                  </button>
-                ))}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1 block">💵 Nağd (₼)</label>
+                  <input
+                    type="number" min="0" step="0.5" placeholder="0.00"
+                    value={cashInput}
+                    onChange={e => setCashInput(e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700 text-center"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1 block">💳 Kart (₼)</label>
+                  <input
+                    type="number" min="0" step="0.5" placeholder="0.00"
+                    value={cardInput}
+                    onChange={e => setCardInput(e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700 text-center"
+                  />
+                </div>
               </div>
-              {payMethod === 'nağd' && (
-                <div className="mb-4 space-y-2">
-                  <div>
-                    <label className="text-xs font-medium text-gray-500 mb-1 block">Alınan məbləğ (₼)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.5"
-                      placeholder={total.toFixed(2)}
-                      value={received}
-                      onChange={e => setReceived(e.target.value)}
-                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700 text-center"
-                      autoFocus
-                    />
-                  </div>
-                  {recv > 0 && (
-                    <div className={`flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base ${change >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
-                      <span>Qaytarılacaq</span>
-                      <span>{change >= 0 ? change.toFixed(2) : '–'} ₼</span>
-                    </div>
-                  )}
+              {paid > 0 && (
+                <div className={`flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base mb-4 ${change >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                  <span>{change >= 0 ? 'Qaytarılacaq' : 'Çatışmır'}</span>
+                  <span>{Math.abs(change).toFixed(2)} ₼</span>
                 </div>
               )}
               <div className="flex gap-2">

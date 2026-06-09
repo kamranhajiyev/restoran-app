@@ -48,5 +48,6 @@ export interface Order {
   createdAt: string;
   sellerName: string;
   note?: string;
-  paymentMethod?: 'nağd' | 'kart';
+  cashAmount?: number;
+  cardAmount?: number;
 }

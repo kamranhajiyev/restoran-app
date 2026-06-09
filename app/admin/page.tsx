@@ -469,8 +469,8 @@ export default function AdminPage() {
   const chartMarginPct = chartRevenue > 0 ? (chartProfit / chartRevenue) * 100 : 0;
   const chartAvg = chartPaid.length > 0 ? chartRevenue / chartPaid.length : 0;
 
-  const cashRev = chartPaid.filter(o => o.paymentMethod === 'nağd').reduce((s, o) => s + orderTotal(o), 0);
-  const cardRev = chartPaid.filter(o => o.paymentMethod === 'kart').reduce((s, o) => s + orderTotal(o), 0);
+  const cashRev = chartPaid.reduce((s, o) => s + (o.cashAmount ?? 0), 0);
+  const cardRev = chartPaid.reduce((s, o) => s + (o.cardAmount ?? 0), 0);
   const totalPayRev = cashRev + cardRev;
 
   const repCatMap: Record<string, { rev: number; cost: number }> = {};
@@ -952,7 +952,11 @@ export default function AdminPage() {
                                   {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                                 </select>
                               )}
-                              {order.paymentMethod && <span className="text-xs text-gray-400">{order.paymentMethod}</span>}
+                              {(order.cashAmount || order.cardAmount) && (
+                                <span className="text-xs text-gray-400">
+                                  {[order.cashAmount ? `💵 ${order.cashAmount.toFixed(2)}` : '', order.cardAmount ? `💳 ${order.cardAmount.toFixed(2)}` : ''].filter(Boolean).join(' · ')}
+                                </span>
+                              )}
                             </div>
                             <span className="font-bold text-amber-900">{orderTotal(order).toFixed(2)} ₼</span>
                           </div>

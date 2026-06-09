@@ -117,7 +117,8 @@ export async function fetchOrders(): Promise<Order[]> {
       status: o.status as Order['status'],
       note: o.note ?? undefined,
       createdAt: o.created_at,
-      paymentMethod: o.payment_method ?? undefined,
+      cashAmount: o.cash_amount ? Number(o.cash_amount) : undefined,
+      cardAmount: o.card_amount ? Number(o.card_amount) : undefined,
       items: (o.order_items ?? []).map((oi: { menu_item_id: string; menu_item_name: string; menu_item_price: number; quantity: number; modifiers?: string }) => ({
         menuItem: {
           id: oi.menu_item_id,
@@ -163,11 +164,12 @@ export async function addOrder(order: Order): Promise<void> {
 export async function updateOrderStatus(
   orderId: string,
   status: Order['status'],
-  paymentMethod?: Order['paymentMethod'],
+  cashAmount?: number,
+  cardAmount?: number,
 ): Promise<void> {
   const { error } = await supabase
     .from('orders')
-    .update({ status, payment_method: paymentMethod ?? null })
+    .update({ status, cash_amount: cashAmount ?? 0, card_amount: cardAmount ?? 0 })
     .eq('id', orderId);
   if (error) console.error('[updateOrderStatus]', error.message);
 }
