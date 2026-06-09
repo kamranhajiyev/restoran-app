@@ -78,9 +78,10 @@ export default function SellerPage() {
   const [payingOrder, setPayingOrder] = useState<Order | null>(null);
   const [payMethod, setPayMethod]     = useState<PayMethod>('nağd');
 
-  // modifier modal
+  // modifier / variant modal
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
   const [selectedMods, setSelectedMods] = useState<Record<string, string>>({});
+  const [selectedVariant, setSelectedVariant] = useState<{ id: string; name: string; price: number } | null>(null);
 
   const refreshOrders = useCallback(() => { fetchOrders().then(setOrders); }, []);
 
@@ -133,11 +134,13 @@ export default function SellerPage() {
   }
 
   function handleMenuItemTap(item: MenuItem) {
-    const groups = MOD_GROUPS[item.category];
-    if (groups) {
+    const groups = MOD_GROUPS[item.category] ?? [];
+    const hasVariants = (item.variants?.length ?? 0) > 0;
+    if (hasVariants || groups.length > 0) {
       const init: Record<string, string> = {};
       groups.forEach(g => { init[g.label] = g.options[0]; });
       setSelectedMods(init);
+      setSelectedVariant(hasVariants ? { id: item.variants![0].id, name: item.variants![0].name, price: item.variants![0].price } : null);
       setModifierItem(item);
     } else {
       addToCart(item);
@@ -147,9 +150,12 @@ export default function SellerPage() {
   function confirmModifiers() {
     if (!modifierItem) return;
     const groups = MOD_GROUPS[modifierItem.category] ?? [];
-    const modsStr = groups.map(g => selectedMods[g.label]).join(' · ');
-    addToCart(modifierItem, modsStr);
+    const modsStr = groups.map(g => selectedMods[g.label]).filter(Boolean).join(' · ');
+    const itemToAdd = selectedVariant ? { ...modifierItem, price: selectedVariant.price } : modifierItem;
+    const label = [selectedVariant?.name, modsStr].filter(Boolean).join(' · ');
+    addToCart(itemToAdd, label || undefined);
     setModifierItem(null);
+    setSelectedVariant(null);
   }
 
   function startNewOrder(type: OrderType, tableNum?: number) {
@@ -683,6 +689,22 @@ export default function SellerPage() {
             <h3 className="font-bold text-lg text-gray-800 mb-1">{modifierItem.name}</h3>
             <p className="text-sm text-gray-400 mb-4">Seçimləri edin</p>
             <div className="space-y-4">
+              {(modifierItem.variants?.length ?? 0) > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Variant</p>
+                  <div className="flex flex-wrap gap-2">
+                    {modifierItem.variants!.map(v => (
+                      <button
+                        key={v.id}
+                        onClick={() => setSelectedVariant({ id: v.id, name: v.name, price: v.price })}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${selectedVariant?.id === v.id ? 'border-amber-800 bg-amber-50 text-amber-800' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}
+                      >
+                        {v.name} — {v.price.toFixed(2)} ₼
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {(MOD_GROUPS[modifierItem.category] ?? []).map(group => (
                 <div key={group.label}>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{group.label}</p>
