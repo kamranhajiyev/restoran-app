@@ -122,6 +122,7 @@ export default function AdminPage() {
   const [deleteCatTarget, setDeleteCatTarget] = useState<string | null>(null);
   const [editCatTarget, setEditCatTarget] = useState<string | null>(null);
   const [editCatValue, setEditCatValue] = useState('');
+  const [deleteItemTarget, setDeleteItemTarget] = useState<string | null>(null);
 
   // stats chart
   const [chartView, setChartView] = useState<ChartView>('gün');
@@ -220,6 +221,7 @@ export default function AdminPage() {
     const updated = menu.filter(m => m.id !== id);
     setMenu(updated);
     saveMenu(updated);
+    setDeleteItemTarget(null);
   }
   function handleStatusChange(orderId: string, status: OrderStatus) {
     updateOrderStatus(orderId, status);
@@ -964,7 +966,7 @@ export default function AdminPage() {
                             <button onClick={() => toggleAvailable(item.id)} className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${item.available ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
                               {item.available ? 'Bağla' : 'Aç'}
                             </button>
-                            <button onClick={() => deleteItem(item.id)} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
+                            <button onClick={() => setDeleteItemTarget(item.id)} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
                           </div>
                         </div>
                       ))}
@@ -1034,6 +1036,22 @@ export default function AdminPage() {
             <div className="flex gap-2 justify-end">
               <button onClick={() => setDeleteCatTarget(null)} className="px-4 py-2 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">Ləğv et</button>
               <button onClick={() => deleteCategory(deleteCatTarget)} className="px-4 py-2 text-sm rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition-colors">Sil</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete product confirmation dialog ──────────────────────────── */}
+      {deleteItemTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
+            <h3 className="text-base font-semibold text-gray-800">Məhsulu sil?</h3>
+            <p className="text-sm text-gray-500">
+              <span className="font-medium text-gray-700">&ldquo;{menu.find(m => m.id === deleteItemTarget)?.name}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleteItemTarget(null)} className="px-4 py-2 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">Ləğv et</button>
+              <button onClick={() => deleteItem(deleteItemTarget)} className="px-4 py-2 text-sm rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition-colors">Sil</button>
             </div>
           </div>
         </div>
