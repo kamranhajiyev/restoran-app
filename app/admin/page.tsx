@@ -469,7 +469,7 @@ export default function AdminPage() {
   const chartMarginPct = chartRevenue > 0 ? (chartProfit / chartRevenue) * 100 : 0;
   const chartAvg = chartPaid.length > 0 ? chartRevenue / chartPaid.length : 0;
 
-  const cashRev = chartPaid.reduce((s, o) => s + (o.cashAmount ?? 0), 0);
+  const cashRev = chartPaid.reduce((s, o) => s + Math.max(0, (o.cashAmount ?? 0) - (o.tipAmount ?? 0)), 0);
   const cardRev = chartPaid.reduce((s, o) => s + (o.cardAmount ?? 0), 0);
   const totalPayRev = cashRev + cardRev;
   const totalTips = chartPaid.reduce((s, o) => s + (o.tipAmount ?? 0), 0);
