@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Tag,
   PanelLeftClose, PanelLeftOpen, LogOut, Menu, X,
   TrendingUp, Receipt, Star, ChevronDown, Percent,
-  Coffee, BarChart2, Package, Wallet,
+  Coffee, BarChart2, Package, Wallet, ChevronUp,
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
 import {
@@ -255,6 +255,14 @@ export default function AdminPage() {
     saveCategories(updated);
     setMenu(prev => prev.map(m => m.category === oldName ? { ...m, category: trimmed } : m));
     setEditCatTarget(null);
+  }
+  function moveCategoryOrder(index: number, dir: -1 | 1) {
+    const target = index + dir;
+    if (target < 0 || target >= categories.length) return;
+    const reordered = [...categories];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    setCategories(reordered);
+    saveCategories(reordered);
   }
   function toggleCategoryAvailable(name: string) {
     const updated = categories.map(c => c.name === name ? { ...c, available: !c.available } : c);
@@ -998,6 +1006,14 @@ export default function AdminPage() {
                 {categories.map(({ name: cat, available: catAvailable }, i) => (
                   <div key={cat} className={`flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors ${i < categories.length - 1 ? 'border-b border-gray-50' : ''}`}>
                     <div className="flex items-center gap-3">
+                      <div className="flex flex-col gap-0.5">
+                        <button onClick={() => moveCategoryOrder(i, -1)} disabled={i === 0} className="text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => moveCategoryOrder(i, 1)} disabled={i === categories.length - 1} className="text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                       <span className="w-6 h-6 bg-amber-50 text-amber-800 rounded-lg flex items-center justify-center text-xs font-bold">{i + 1}</span>
                       <span className={`text-sm font-medium ${catAvailable ? 'text-gray-800' : 'text-gray-400'}`}>{cat}</span>
                       {!catAvailable && <span className="text-xs bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded font-medium">Gizli</span>}
