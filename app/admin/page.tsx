@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Tag,
   PanelLeftClose, PanelLeftOpen, LogOut, Menu, X,
   TrendingUp, Receipt, Star, ChevronDown, Percent,
-  Coffee, BarChart2, Package, Wallet, ChevronUp,
+  Coffee, BarChart2, Package, Wallet, ChevronUp, ImageIcon,
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
 import {
@@ -864,17 +864,12 @@ export default function AdminPage() {
 
                   <div>
                     <label className="text-xs font-medium text-gray-500 mb-1.5 block">Şəkil</label>
-                    <div className="flex gap-3 items-start">
-                      <div className="flex-1">
-                        <input type="text" placeholder="Şəkil URL-i"
-                          value={form.image.startsWith('data:') ? '' : form.image}
-                          onChange={e => setForm(f => ({ ...f, image: e.target.value }))}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
-                        <button type="button" onClick={() => imgRef.current?.click()} className="mt-1.5 text-xs text-amber-800 hover:text-amber-950 font-medium">
-                          Fayldan yüklə
-                        </button>
-                        <input ref={imgRef} type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
-                      </div>
+                    <div className="flex gap-3 items-center">
+                      <button type="button" onClick={() => imgRef.current?.click()}
+                        className="w-16 h-16 rounded-lg border-2 border-dashed border-gray-200 hover:border-amber-400 flex items-center justify-center text-gray-300 hover:text-amber-500 transition-colors shrink-0">
+                        <ImageIcon className="w-6 h-6" />
+                      </button>
+                      <input ref={imgRef} type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
                       {form.image && (
                         <div className="relative">
                           <img src={form.image} alt="" className="w-16 h-16 rounded-lg object-cover border border-gray-200" />
