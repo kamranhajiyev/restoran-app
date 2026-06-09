@@ -237,9 +237,12 @@ export default function AdminPage() {
     saveCategories(updated);
   }
   function deleteCategory(cat: string) {
-    const updated = categories.filter(c => c.name !== cat);
-    setCategories(updated);
-    saveCategories(updated);
+    const updatedCats = categories.filter(c => c.name !== cat);
+    const updatedMenu = menu.filter(m => m.category !== cat);
+    setCategories(updatedCats);
+    setMenu(updatedMenu);
+    saveCategories(updatedCats);
+    saveMenu(updatedMenu);
     setDeleteCatTarget(null);
   }
   function renameCategory(oldName: string, newName: string) {
@@ -814,7 +817,7 @@ export default function AdminPage() {
           {tab === 'menu' && (
             <div className="max-w-3xl">
               <div className="flex items-center justify-between mb-5">
-                <p className="text-sm text-gray-400">{menu.length} məhsul</p>
+                <p className="text-sm text-gray-400">{menu.filter(m => categories.some(c => c.name === m.category)).length} məhsul</p>
                 <button onClick={openAdd} className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-sm">
                   <span className="text-base leading-none">+</span>
                   Məhsul əlavə et
