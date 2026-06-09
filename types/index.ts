@@ -1,5 +1,10 @@
 export type Role = 'admin' | 'seller';
 
+export interface Category {
+  name: string;
+  available: boolean;
+}
+
 export interface MenuItemVariant {
   id: string;
   name: string;

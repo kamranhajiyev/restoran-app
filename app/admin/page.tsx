@@ -13,7 +13,7 @@ import {
   fetchCategories, saveCategories,
 } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
-import { MenuItem, MenuItemVariant, Order, OrderStatus } from '@/types';
+import { Category, MenuItem, MenuItemVariant, Order, OrderStatus } from '@/types';
 
 const COOKING_STATIONS = ['Mətbəx', 'Bar', 'Soyuq mətbəx', 'Pizza', 'Mangal'];
 
@@ -99,15 +99,10 @@ function LineChartSvg({ data }: { data: { label: string; rev: number }[] }) {
 
 export default function AdminPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>(() => {
-    if (typeof window === 'undefined') return 'stats';
-    const saved = localStorage.getItem('admin_tab') as Tab;
-    const valid: Tab[] = ['stats', 'orders', 'menu', 'categories'];
-    return valid.includes(saved) ? saved : 'stats';
-  });
+  const [tab, setTab] = useState<Tab>('stats');
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [adminName, setAdminName] = useState('Admin');
   const [online, setOnline] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
@@ -123,6 +118,9 @@ export default function AdminPage() {
 
   // categories form
   const [newCat, setNewCat] = useState('');
+  const [deleteCatTarget, setDeleteCatTarget] = useState<string | null>(null);
+  const [editCatTarget, setEditCatTarget] = useState<string | null>(null);
+  const [editCatValue, setEditCatValue] = useState('');
 
   // stats chart
   const [chartView, setChartView] = useState<ChartView>('gün');
@@ -140,7 +138,7 @@ export default function AdminPage() {
   }, [router]);
 
   function refresh() { fetchOrders().then(setOrders); }
-  function navigate(t: Tab) { setTab(t); localStorage.setItem('admin_tab', t); }
+  function navigate(t: Tab) { setTab(t); }
 
   // ── image ──────────────────────────────────────────────────────────────────
   async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -157,7 +155,7 @@ export default function AdminPage() {
   // ── menu form ──────────────────────────────────────────────────────────────
   function openAdd() {
     setEditingId(null);
-    setForm(emptyForm(categories[0] ?? ''));
+    setForm(emptyForm(categories[0]?.name ?? ''));
     setShowForm(true);
   }
 
@@ -231,14 +229,29 @@ export default function AdminPage() {
   function addCategory(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = newCat.trim();
-    if (!trimmed || categories.includes(trimmed)) return;
-    const updated = [...categories, trimmed];
+    if (!trimmed || categories.some(c => c.name === trimmed)) return;
+    const updated = [...categories, { name: trimmed, available: true }];
     setCategories(updated);
     setNewCat('');
     saveCategories(updated);
   }
   function deleteCategory(cat: string) {
-    const updated = categories.filter(c => c !== cat);
+    const updated = categories.filter(c => c.name !== cat);
+    setCategories(updated);
+    saveCategories(updated);
+    setDeleteCatTarget(null);
+  }
+  function renameCategory(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || categories.some(c => c.name === trimmed)) return;
+    const updated = categories.map(c => c.name === oldName ? { ...c, name: trimmed } : c);
+    setCategories(updated);
+    saveCategories(updated);
+    setMenu(prev => prev.map(m => m.category === oldName ? { ...m, category: trimmed } : m));
+    setEditCatTarget(null);
+  }
+  function toggleCategoryAvailable(name: string) {
+    const updated = categories.map(c => c.name === name ? { ...c, available: !c.available } : c);
     setCategories(updated);
     saveCategories(updated);
   }
@@ -818,7 +831,7 @@ export default function AdminPage() {
                     <label className="text-xs font-medium text-gray-500 mb-1.5 block">Kateqoriya</label>
                     <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white">
-                      {categories.map(c => <option key={c}>{c}</option>)}
+                      {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                     </select>
                   </div>
 
@@ -907,12 +920,15 @@ export default function AdminPage() {
                 </form>
               )}
 
-              {categories.map(cat => {
+              {categories.map(({ name: cat, available: catAvailable }) => {
                 const items = menu.filter(m => m.category === cat);
                 if (items.length === 0) return null;
                 return (
                   <div key={cat} className="mb-5">
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-1">{cat}</p>
+                    <div className="flex items-center gap-2 mb-2 px-1">
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{cat}</p>
+                      {!catAvailable && <span className="text-xs bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded font-medium">Gizli</span>}
+                    </div>
                     <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
                       {items.map((item, i) => (
                         <div key={item.id} className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${i < items.length - 1 ? 'border-b border-gray-50' : ''}`}>
@@ -968,15 +984,20 @@ export default function AdminPage() {
               </form>
 
               <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
-                {categories.map((cat, i) => (
+                {categories.map(({ name: cat, available: catAvailable }, i) => (
                   <div key={cat} className={`flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors ${i < categories.length - 1 ? 'border-b border-gray-50' : ''}`}>
                     <div className="flex items-center gap-3">
                       <span className="w-6 h-6 bg-amber-50 text-amber-800 rounded-lg flex items-center justify-center text-xs font-bold">{i + 1}</span>
-                      <span className="text-sm text-gray-800 font-medium">{cat}</span>
+                      <span className={`text-sm font-medium ${catAvailable ? 'text-gray-800' : 'text-gray-400'}`}>{cat}</span>
+                      {!catAvailable && <span className="text-xs bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded font-medium">Gizli</span>}
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-xs text-gray-400">{menu.filter(m => m.category === cat).length} məhsul</span>
-                      <button onClick={() => deleteCategory(cat)} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
+                      <button onClick={() => toggleCategoryAvailable(cat)} className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${catAvailable ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
+                        {catAvailable ? 'Bağla' : 'Aç'}
+                      </button>
+                      <button onClick={() => { setEditCatTarget(cat); setEditCatValue(cat); }} className="text-xs text-amber-600 hover:text-amber-800 px-2 py-1 rounded-lg hover:bg-amber-50 transition-colors font-medium">Dəyiş</button>
+                      <button onClick={() => setDeleteCatTarget(cat)} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
                     </div>
                   </div>
                 ))}
@@ -992,6 +1013,44 @@ export default function AdminPage() {
 
         </main>
       </div>
+
+      {/* ── Delete category confirmation dialog ─────────────────────────── */}
+      {deleteCatTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
+            <h3 className="text-base font-semibold text-gray-800">Kateqoriyanı sil?</h3>
+            <p className="text-sm text-gray-500">
+              <span className="font-medium text-gray-700">&ldquo;{deleteCatTarget}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleteCatTarget(null)} className="px-4 py-2 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">Ləğv et</button>
+              <button onClick={() => deleteCategory(deleteCatTarget)} className="px-4 py-2 text-sm rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition-colors">Sil</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Rename category dialog ───────────────────────────────────────── */}
+      {editCatTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
+            <h3 className="text-base font-semibold text-gray-800">Kateqoriyanı dəyiş</h3>
+            <input
+              autoFocus
+              type="text"
+              value={editCatValue}
+              onChange={e => setEditCatValue(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') renameCategory(editCatTarget, editCatValue); }}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+            />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setEditCatTarget(null)} className="px-4 py-2 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">Ləğv et</button>
+              <button onClick={() => renameCategory(editCatTarget, editCatValue)} className="px-4 py-2 text-sm rounded-lg bg-amber-800 hover:bg-amber-900 text-white font-medium transition-colors">Yadda saxla</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

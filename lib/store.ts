@@ -1,4 +1,4 @@
-import { MenuItem, Order } from '@/types';
+import { Category, MenuItem, Order } from '@/types';
 import { supabase } from './supabase';
 
 const DEFAULT_CATEGORIES = ['Qəhvə', 'Çay', 'Soyuq içkilər', 'Şirniyyat', 'Snack', 'Xüsusi'];
@@ -51,20 +51,20 @@ export async function saveMenu(menu: MenuItem[]): Promise<void> {
 
 // ─── Categories ───────────────────────────────────────────────────────────────
 
-export async function fetchCategories(): Promise<string[]> {
+export async function fetchCategories(): Promise<Category[]> {
   try {
-    const { data, error } = await supabase.from('categories').select('name').order('position');
-    if (error || !data || data.length === 0) return DEFAULT_CATEGORIES;
-    return data.map((r: { name: string }) => r.name);
+    const { data, error } = await supabase.from('categories').select('name, available').order('position');
+    if (error || !data || data.length === 0) return DEFAULT_CATEGORIES.map(name => ({ name, available: true }));
+    return data.map((r: { name: string; available: boolean }) => ({ name: r.name, available: r.available }));
   } catch {
-    return DEFAULT_CATEGORIES;
+    return DEFAULT_CATEGORIES.map(name => ({ name, available: true }));
   }
 }
 
-export async function saveCategories(categories: string[]): Promise<void> {
+export async function saveCategories(categories: Category[]): Promise<void> {
   try {
     await supabase.from('categories').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('categories').insert(categories.map((name, position) => ({ name, position })));
+    await supabase.from('categories').insert(categories.map((c, position) => ({ name: c.name, available: c.available, position })));
   } catch (e) {
     console.error('[saveCategories]', e);
   }

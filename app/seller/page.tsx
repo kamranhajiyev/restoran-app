@@ -7,8 +7,8 @@ import {
   ShoppingCart, ChevronLeft, Minus, Plus,
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
-import { fetchMenu, addOrder, fetchOrders, updateOrderStatus } from '@/lib/store';
-import { MenuItem, Order, OrderItem, OrderStatus } from '@/types';
+import { fetchMenu, addOrder, fetchOrders, updateOrderStatus, fetchCategories } from '@/lib/store';
+import { Category, MenuItem, Order, OrderItem, OrderStatus } from '@/types';
 
 type View = 'orders' | 'new-order' | 'menu';
 type PayMethod = 'nağd' | 'kart';
@@ -60,6 +60,7 @@ export default function SellerPage() {
   const router = useRouter();
   const [view, setView]             = useState<View>('orders');
   const [menu, setMenu]             = useState<MenuItem[]>([]);
+  const [availableCategories, setAvailableCategories] = useState<Category[]>([]);
   const [orders, setOrders]         = useState<Order[]>([]);
   const [sellerName, setSellerName] = useState('Satıcı');
   const [online, setOnline]         = useState(true);
@@ -87,17 +88,20 @@ export default function SellerPage() {
     const session = getSession();
     if (!session || session.role !== 'seller') { router.replace('/login'); return; }
     setSellerName(session.name);
-    Promise.all([fetchMenu(), fetchOrders()]).then(([m, o]) => {
+    Promise.all([fetchMenu(), fetchOrders(), fetchCategories()]).then(([m, o, c]) => {
       setOnline(true); setMenu(m); setOrders(o);
-      const cats = [...new Set(m.map(i => i.category))];
+      const available = c.filter(cat => cat.available);
+      setAvailableCategories(available);
+      const cats = [...new Set(m.map(i => i.category))].filter(cat => available.some(a => a.name === cat));
       if (cats.length > 0) setActiveCategory(cats[0]);
     }).catch(() => setOnline(false));
   }, [router]);
 
   useEffect(() => {
     async function sync() {
-      const [m, o] = await Promise.all([fetchMenu(), fetchOrders()]);
+      const [m, o, c] = await Promise.all([fetchMenu(), fetchOrders(), fetchCategories()]);
       setMenu(m); setOrders(o);
+      setAvailableCategories(c.filter(cat => cat.available));
     }
     window.addEventListener('focus', sync);
     return () => window.removeEventListener('focus', sync);
@@ -153,7 +157,7 @@ export default function SellerPage() {
     setSelectedTable(tableNum ?? null);
     setCart([]);
     setNote('');
-    const cats = [...new Set(menu.map(i => i.category))];
+    const cats = [...new Set(menu.map(i => i.category))].filter(cat => availableCategories.some(a => a.name === cat));
     if (cats.length > 0) setActiveCategory(cats[0]);
     setView('menu');
   }
@@ -192,7 +196,7 @@ export default function SellerPage() {
 
   const cartTotal   = cart.reduce((s, ci) => s + ci.menuItem.price * ci.quantity, 0);
   const cartCount   = cart.reduce((s, ci) => s + ci.quantity, 0);
-  const categories  = [...new Set(menu.map(i => i.category))];
+  const categories  = [...new Set(menu.map(i => i.category))].filter(cat => availableCategories.some(a => a.name === cat));
   const filtered    = menu.filter(m => m.category === activeCategory && m.available);
   const active      = orders.filter(o => o.status !== 'ödənilib');
   const todayOrders = active.filter(o => isToday(o.createdAt));
