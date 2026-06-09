@@ -256,6 +256,12 @@ export default function AdminPage() {
     saveCategories(updated);
   }
   function deleteCategory(cat: string) {
+    const marker = '/menu-images/';
+    const toDelete = menu.filter(m => m.category === cat);
+    const imagePaths = toDelete
+      .filter(m => m.image && m.image.includes(marker))
+      .map(m => m.image!.slice(m.image!.indexOf(marker) + marker.length));
+    if (imagePaths.length > 0) supabase.storage.from('menu-images').remove(imagePaths);
     const updatedCats = categories.filter(c => c.name !== cat);
     const updatedMenu = menu.filter(m => m.category !== cat);
     setCategories(updatedCats);
