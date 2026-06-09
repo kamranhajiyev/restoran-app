@@ -11,7 +11,7 @@ function isValidUUID(id: string): boolean {
 
 export async function fetchMenu(): Promise<MenuItem[]> {
   try {
-    const { data, error } = await supabase.from('menu_items').select('*').order('created_at');
+    const { data, error } = await supabase.from('menu_items').select('*').order('position');
     if (error || !data) return [];
     return data.map(r => ({
       id: r.id,
@@ -32,7 +32,7 @@ export async function fetchMenu(): Promise<MenuItem[]> {
 export async function saveMenu(menu: MenuItem[]): Promise<void> {
   try {
     await supabase.from('menu_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    const rows = menu.map(m => ({
+    const rows = menu.map((m, i) => ({
       id: isValidUUID(m.id) ? m.id : crypto.randomUUID(),
       name: m.name,
       price: m.price,
@@ -42,6 +42,7 @@ export async function saveMenu(menu: MenuItem[]): Promise<void> {
       cost_price: m.costPrice ?? null,
       image: m.image ?? null,
       cooking_station: m.cookingStation ?? null,
+      position: i,
     }));
     if (rows.length > 0) await supabase.from('menu_items').insert(rows);
   } catch (e) {

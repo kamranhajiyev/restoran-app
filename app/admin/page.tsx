@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Tag,
@@ -115,6 +115,7 @@ export default function AdminPage() {
   const [form, setForm] = useState(emptyForm(''));
   const imgRef = useRef<HTMLInputElement>(null);
 
+  const formRef = useRef<HTMLFormElement>(null);
   const [saving, setSaving] = useState(false);
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
 
@@ -177,7 +178,8 @@ export default function AdminPage() {
       hasVariants: !!item.variants?.length,
       variants: item.variants?.map(v => ({ id: v.id, name: v.name, price: String(v.price), costPrice: v.costPrice ? String(v.costPrice) : '' })) ?? [],
     });
-    setShowForm(true);
+    setShowForm(false);
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
   }
 
   function cancelForm() { setShowForm(false); setEditingId(null); }
@@ -305,6 +307,109 @@ export default function AdminPage() {
     const updated = categories.map(c => c.name === name ? { ...c, available: !c.available } : c);
     setCategories(updated);
     saveCategories(updated);
+  }
+
+  // ── item form renderer ────────────────────────────────────────────────────
+  function renderItemForm(className: string) {
+    return (
+      <form ref={formRef} onSubmit={handleSubmit} className={className}>
+        <h3 className="font-semibold text-gray-800">{editingId ? 'Məhsulu düzəlt' : 'Yeni Məhsul'}</h3>
+
+        <div>
+          <label className="text-xs font-medium text-gray-500 mb-1.5 block">Ad</label>
+          <input type="text" placeholder="Məhsulun adı" value={form.name}
+            onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+            required />
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-gray-500 mb-1.5 block">Kateqoriya</label>
+          <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white">
+            {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-gray-500 mb-1.5 block">Şəkil</label>
+          <div className="flex gap-3 items-center">
+            <button type="button" onClick={() => imgRef.current?.click()}
+              className="w-16 h-16 rounded-lg border-2 border-dashed border-gray-200 hover:border-amber-400 flex items-center justify-center text-gray-300 hover:text-amber-500 transition-colors shrink-0">
+              <ImageIcon className="w-6 h-6" />
+            </button>
+            <input ref={imgRef} type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
+            {form.image && (
+              <div className="relative">
+                <img src={form.image} alt="" className="w-16 h-16 rounded-lg object-cover border border-gray-200" />
+                <button type="button" onClick={() => setForm(f => ({ ...f, image: '' }))} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-4 h-4 text-xs flex items-center justify-center">×</button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input type="checkbox" checked={form.hasVariants}
+            onChange={e => setForm(f => ({ ...f, hasVariants: e.target.checked, variants: e.target.checked && f.variants.length === 0 ? [{ id: Date.now().toString(), name: '', price: '', costPrice: '' }] : f.variants }))}
+            className="rounded accent-amber-800" />
+          <span className="text-sm text-gray-700">Variantlar var (ölçü, növ…)</span>
+        </label>
+
+        {!form.hasVariants ? (
+          <div className="grid grid-cols-3 gap-3 items-end">
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1.5 block">Qiymət (₼)</label>
+              <input type="number" placeholder="0.00" step="0.5" min="0" value={form.price}
+                onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" required />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1.5 block">Maya dəyəri (₼)</label>
+              <input type="number" placeholder="0.00" step="0.01" min="0" value={form.costPrice}
+                onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
+            </div>
+            <div className="pb-2 text-sm font-semibold text-green-600">
+              {calcMargin(form.price, form.costPrice) && `Marja: ${calcMargin(form.price, form.costPrice)}`}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="grid grid-cols-9 gap-2 text-xs text-gray-400 px-1">
+              <span className="col-span-3">Variant adı</span>
+              <span className="col-span-2">Qiymət (₼)</span>
+              <span className="col-span-2">Maya (₼)</span>
+              <span className="col-span-2">Marja</span>
+            </div>
+            {form.variants.map((v, i) => (
+              <div key={v.id} className="grid grid-cols-9 gap-2 items-center">
+                <input className="col-span-3 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                  placeholder={`Variant ${i + 1}`} value={v.name} onChange={e => updateVariant(i, 'name', e.target.value)} required />
+                <input type="number" placeholder="0.00" step="0.5" min="0"
+                  className="col-span-2 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                  value={v.price} onChange={e => updateVariant(i, 'price', e.target.value)} required />
+                <input type="number" placeholder="0.00" step="0.01" min="0"
+                  className="col-span-2 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                  value={v.costPrice} onChange={e => updateVariant(i, 'costPrice', e.target.value)} />
+                <div className="col-span-2 flex items-center gap-1">
+                  <span className="text-xs text-green-600 font-medium flex-1">{calcMargin(v.price, v.costPrice)}</span>
+                  <button type="button" onClick={() => removeVariant(i)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
+                </div>
+              </div>
+            ))}
+            <button type="button" onClick={addVariant} className="text-sm text-amber-800 hover:text-amber-950 font-medium">+ Variant əlavə et</button>
+          </div>
+        )}
+
+        <div className="flex gap-2 pt-1">
+          <button type="submit" disabled={saving} className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 disabled:opacity-60 text-white text-sm font-medium px-5 py-2 rounded-lg shadow-sm transition-colors">
+            {saving && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+            {saving ? 'Saxlanır…' : editingId ? 'Yadda saxla' : 'Əlavə et'}
+          </button>
+          <button type="button" onClick={cancelForm} disabled={saving} className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-40">Ləğv et</button>
+        </div>
+      </form>
+    );
   }
 
   // ── stats computations ────────────────────────────────────────────────────
@@ -877,105 +982,7 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {showForm && (
-                <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-100 card p-6 mb-5 space-y-4">
-                  <h3 className="font-semibold text-gray-800">{editingId ? 'Məhsulu düzəlt' : 'Yeni Məhsul'}</h3>
-
-                  <div>
-                    <label className="text-xs font-medium text-gray-500 mb-1.5 block">Ad</label>
-                    <input type="text" placeholder="Məhsulun adı" value={form.name}
-                      onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
-                      required />
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-medium text-gray-500 mb-1.5 block">Kateqoriya</label>
-                    <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white">
-                      {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-medium text-gray-500 mb-1.5 block">Şəkil</label>
-                    <div className="flex gap-3 items-center">
-                      <button type="button" onClick={() => imgRef.current?.click()}
-                        className="w-16 h-16 rounded-lg border-2 border-dashed border-gray-200 hover:border-amber-400 flex items-center justify-center text-gray-300 hover:text-amber-500 transition-colors shrink-0">
-                        <ImageIcon className="w-6 h-6" />
-                      </button>
-                      <input ref={imgRef} type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
-                      {form.image && (
-                        <div className="relative">
-                          <img src={form.image} alt="" className="w-16 h-16 rounded-lg object-cover border border-gray-200" />
-                          <button type="button" onClick={() => setForm(f => ({ ...f, image: '' }))} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-4 h-4 text-xs flex items-center justify-center">×</button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input type="checkbox" checked={form.hasVariants}
-                      onChange={e => setForm(f => ({ ...f, hasVariants: e.target.checked, variants: e.target.checked && f.variants.length === 0 ? [{ id: Date.now().toString(), name: '', price: '', costPrice: '' }] : f.variants }))}
-                      className="rounded accent-amber-800" />
-                    <span className="text-sm text-gray-700">Variantlar var (ölçü, növ…)</span>
-                  </label>
-
-                  {!form.hasVariants ? (
-                    <div className="grid grid-cols-3 gap-3 items-end">
-                      <div>
-                        <label className="text-xs font-medium text-gray-500 mb-1.5 block">Qiymət (₼)</label>
-                        <input type="number" placeholder="0.00" step="0.5" min="0" value={form.price}
-                          onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" required />
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-gray-500 mb-1.5 block">Maya dəyəri (₼)</label>
-                        <input type="number" placeholder="0.00" step="0.01" min="0" value={form.costPrice}
-                          onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
-                      </div>
-                      <div className="pb-2 text-sm font-semibold text-green-600">
-                        {calcMargin(form.price, form.costPrice) && `Marja: ${calcMargin(form.price, form.costPrice)}`}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="grid grid-cols-9 gap-2 text-xs text-gray-400 px-1">
-                        <span className="col-span-3">Variant adı</span>
-                        <span className="col-span-2">Qiymət (₼)</span>
-                        <span className="col-span-2">Maya (₼)</span>
-                        <span className="col-span-2">Marja</span>
-                      </div>
-                      {form.variants.map((v, i) => (
-                        <div key={v.id} className="grid grid-cols-9 gap-2 items-center">
-                          <input className="col-span-3 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
-                            placeholder={`Variant ${i + 1}`} value={v.name} onChange={e => updateVariant(i, 'name', e.target.value)} required />
-                          <input type="number" placeholder="0.00" step="0.5" min="0"
-                            className="col-span-2 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
-                            value={v.price} onChange={e => updateVariant(i, 'price', e.target.value)} required />
-                          <input type="number" placeholder="0.00" step="0.01" min="0"
-                            className="col-span-2 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
-                            value={v.costPrice} onChange={e => updateVariant(i, 'costPrice', e.target.value)} />
-                          <div className="col-span-2 flex items-center gap-1">
-                            <span className="text-xs text-green-600 font-medium flex-1">{calcMargin(v.price, v.costPrice)}</span>
-                            <button type="button" onClick={() => removeVariant(i)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
-                          </div>
-                        </div>
-                      ))}
-                      <button type="button" onClick={addVariant} className="text-sm text-amber-800 hover:text-amber-950 font-medium">+ Variant əlavə et</button>
-                    </div>
-                  )}
-
-                  <div className="flex gap-2 pt-1">
-                    <button type="submit" disabled={saving} className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 disabled:opacity-60 text-white text-sm font-medium px-5 py-2 rounded-lg shadow-sm transition-colors">
-                      {saving && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
-                      {saving ? 'Saxlanır…' : editingId ? 'Yadda saxla' : 'Əlavə et'}
-                    </button>
-                    <button type="button" onClick={cancelForm} disabled={saving} className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-40">Ləğv et</button>
-                  </div>
-                </form>
-              )}
+              {showForm && !editingId && renderItemForm('bg-white rounded-xl border border-gray-100 card p-6 mb-5 space-y-4')}
 
               {categories.map(({ name: cat, available: catAvailable }) => {
                 const items = menu.filter(m => m.category === cat);
@@ -988,7 +995,8 @@ export default function AdminPage() {
                     </div>
                     <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
                       {items.map((item, i) => (
-                        <div key={item.id} className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${i < items.length - 1 ? 'border-b border-gray-50' : ''}`}>
+                        <React.Fragment key={item.id}>
+                        <div className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${(i < items.length - 1 && editingId !== item.id) ? 'border-b border-gray-50' : ''}`}>
                           <div className="flex flex-col gap-0.5 shrink-0">
                             <button onClick={() => moveItemOrder(cat, i, -1)} disabled={i === 0} className="text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
                               <ChevronUp className="w-3.5 h-3.5" />
@@ -1024,6 +1032,8 @@ export default function AdminPage() {
                             <button onClick={() => setDeleteItemTarget(item.id)} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
                           </div>
                         </div>
+                        {editingId === item.id && renderItemForm(`border-t border-amber-100 bg-amber-50/20 px-5 py-4 space-y-4${i < items.length - 1 ? ' border-b border-gray-50' : ''}`)}
+                        </React.Fragment>
                       ))}
                     </div>
                   </div>
