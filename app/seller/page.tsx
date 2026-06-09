@@ -77,6 +77,7 @@ export default function SellerPage() {
   // payment modal
   const [payingOrder, setPayingOrder] = useState<Order | null>(null);
   const [payMethod, setPayMethod]     = useState<PayMethod>('nağd');
+  const [received, setReceived]       = useState('');
 
   // modifier / variant modal
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
@@ -186,6 +187,9 @@ export default function SellerPage() {
     setMobileCartOpen(false);
     setView('orders');
     await addOrder(order);
+    setPayingOrder(order);
+    setPayMethod('nağd');
+    setReceived('');
   }
 
   async function confirmPayment() {
@@ -645,46 +649,81 @@ export default function SellerPage() {
       )}
 
       {/* Payment modal — bottom sheet on mobile */}
-      {payingOrder && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
-            <h3 className="font-bold text-lg text-gray-800 mb-1">Ödəniş</h3>
-            <p className="text-sm text-gray-500 mb-4">
-              №{payingOrder.orderNumber} · {payingOrder.tableNumber === 0 ? 'Takeaway' : `Masa ${payingOrder.tableNumber}`}
-            </p>
-            <ul className="text-sm space-y-2 mb-4 border-t pt-3 max-h-48 overflow-y-auto">
-              {payingOrder.items.map((oi, i) => (
-                <li key={i} className="flex justify-between text-gray-700">
+      {payingOrder && (() => {
+        const total = orderTotal(payingOrder);
+        const recv = parseFloat(received) || 0;
+        const change = recv - total;
+        const canPay = payMethod === 'kart' || recv >= total;
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
+            <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
+              <h3 className="font-bold text-lg text-gray-800 mb-1">Ödəniş</h3>
+              <p className="text-sm text-gray-500 mb-4">
+                №{payingOrder.orderNumber} · {payingOrder.tableNumber === 0 ? 'Takeaway' : `Masa ${payingOrder.tableNumber}`}
+              </p>
+              <ul className="text-sm space-y-2 mb-4 border-t pt-3 max-h-48 overflow-y-auto">
+                {payingOrder.items.map((oi, i) => (
+                  <li key={i} className="flex justify-between text-gray-700">
+                    <div>
+                      <span>{oi.menuItem.name} × {oi.quantity}</span>
+                      {oi.modifiers && <p className="text-xs text-amber-600">{oi.modifiers}</p>}
+                    </div>
+                    <span className="shrink-0 ml-2">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex justify-between items-center font-bold text-xl border-t pt-3 mb-4">
+                <span>Cəmi</span>
+                <span className="text-amber-700">{total.toFixed(2)} ₼</span>
+              </div>
+              <div className="flex gap-2 mb-4">
+                {(['nağd', 'kart'] as PayMethod[]).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => { setPayMethod(m); setReceived(''); }}
+                    className={`flex-1 py-3 rounded-xl text-sm font-medium border-2 transition-colors ${payMethod === m ? 'border-amber-800 bg-amber-50 text-amber-800' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}
+                  >
+                    {m === 'nağd' ? '💵 Nağd' : '💳 Kart'}
+                  </button>
+                ))}
+              </div>
+              {payMethod === 'nağd' && (
+                <div className="mb-4 space-y-2">
                   <div>
-                    <span>{oi.menuItem.name} × {oi.quantity}</span>
-                    {oi.modifiers && <p className="text-xs text-amber-600">{oi.modifiers}</p>}
+                    <label className="text-xs font-medium text-gray-500 mb-1 block">Alınan məbləğ (₼)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      placeholder={total.toFixed(2)}
+                      value={received}
+                      onChange={e => setReceived(e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700 text-center"
+                      autoFocus
+                    />
                   </div>
-                  <span className="shrink-0 ml-2">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
-                </li>
-              ))}
-            </ul>
-            <div className="flex justify-between items-center font-bold text-lg border-t pt-3 mb-4">
-              <span>Cəmi</span>
-              <span className="text-amber-700">{orderTotal(payingOrder).toFixed(2)} ₼</span>
-            </div>
-            <div className="flex gap-2 mb-4">
-              {(['nağd', 'kart'] as PayMethod[]).map(m => (
+                  {recv > 0 && (
+                    <div className={`flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base ${change >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                      <span>Qaytarılacaq</span>
+                      <span>{change >= 0 ? change.toFixed(2) : '–'} ₼</span>
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button onClick={() => setPayingOrder(null)} className="py-3 px-5 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">Ləğv et</button>
                 <button
-                  key={m}
-                  onClick={() => setPayMethod(m)}
-                  className={`flex-1 py-3 rounded-xl text-sm font-medium border-2 transition-colors ${payMethod === m ? 'border-amber-800 bg-amber-50 text-amber-800' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}
+                  onClick={confirmPayment}
+                  disabled={!canPay}
+                  className="flex-1 py-3 rounded-xl bg-green-500 hover:bg-green-600 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors"
                 >
-                  {m === 'nağd' ? '💵 Nağd' : '💳 Kart'}
+                  Ödənildi ✓
                 </button>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => setPayingOrder(null)} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">Ləğv et</button>
-              <button onClick={confirmPayment} className="flex-1 py-3 rounded-xl bg-green-500 hover:bg-green-600 text-white font-semibold text-sm active:scale-95">Ödənildi ✓</button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Modifier modal — bottom sheet on mobile */}
       {modifierItem && (
@@ -808,25 +847,12 @@ function OrderRow({ order, onPay, onStatusChange }: {
         </div>
         <p className="text-xs text-gray-500 truncate mb-3">{itemsPreview}</p>
         {order.status !== 'ödənilib' && (
-          <div className="flex gap-2">
-            {order.status !== 'hazırdır' && (
-              <select
-                value={order.status}
-                onChange={e => onStatusChange(order.id, e.target.value as OrderStatus)}
-                className="flex-1 text-sm border border-gray-200 rounded-xl px-3 py-2.5 focus:outline-none text-gray-600 bg-white"
-              >
-                <option value="gözləyir">Gözləyir</option>
-                <option value="hazırlanır">Hazırlanır</option>
-                <option value="hazırdır">Hazırdır</option>
-              </select>
-            )}
-            <button
-              onClick={onPay}
-              className="bg-amber-800 hover:bg-amber-900 active:scale-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-all whitespace-nowrap"
-            >
-              Ödəniş
-            </button>
-          </div>
+          <button
+            onClick={onPay}
+            className="w-full bg-amber-800 hover:bg-amber-900 active:scale-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-all"
+          >
+            Ödəniş
+          </button>
         )}
       </div>
 
@@ -851,22 +877,9 @@ function OrderRow({ order, onPay, onStatusChange }: {
         </div>
         <div>
           {order.status !== 'ödənilib' && (
-            <div className="flex gap-2">
-              {order.status !== 'hazırdır' && (
-                <select
-                  value={order.status}
-                  onChange={e => onStatusChange(order.id, e.target.value as OrderStatus)}
-                  className="text-xs border border-gray-200 rounded px-2 py-1.5 focus:outline-none text-gray-600"
-                >
-                  <option value="gözləyir">Gözləyir</option>
-                  <option value="hazırlanır">Hazırlanır</option>
-                  <option value="hazırdır">Hazırdır</option>
-                </select>
-              )}
-              <button onClick={onPay} className="bg-amber-800 hover:bg-amber-900 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
-                Ödəniş
-              </button>
-            </div>
+            <button onClick={onPay} className="bg-amber-800 hover:bg-amber-900 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
+              Ödəniş
+            </button>
           )}
         </div>
         <div className="text-right">

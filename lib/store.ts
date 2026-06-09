@@ -112,7 +112,7 @@ export async function fetchOrders(): Promise<Order[]> {
     return data.map((o, i) => ({
       id: o.id,
       orderNumber: data.length - i,
-      tableNumber: o.table_id,
+      tableNumber: o.table_id ?? 0,
       sellerName: o.waiter_name,
       status: o.status as Order['status'],
       note: o.note ?? undefined,
@@ -139,7 +139,7 @@ export async function addOrder(order: Order): Promise<void> {
   try {
     await supabase.from('orders').insert({
       id: order.id,
-      table_id: order.tableNumber,
+      table_id: order.tableNumber === 0 ? null : order.tableNumber,
       waiter_name: order.sellerName,
       status: order.status,
       note: order.note ?? null,
