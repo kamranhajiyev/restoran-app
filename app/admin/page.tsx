@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   LayoutDashboard, Tag,
@@ -113,7 +113,7 @@ function LineChartSvg({ data }: { data: { label: string; rev: number }[] }) {
   );
 }
 
-export default function AdminPage() {
+function AdminPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tab = (searchParams.get('tab') as Tab | null) ?? 'stats';
@@ -1647,5 +1647,13 @@ export default function AdminPage() {
       )}
 
     </div>
+  );
+}
+
+export default function AdminPage() {
+  return (
+    <Suspense>
+      <AdminPageContent />
+    </Suspense>
   );
 }
