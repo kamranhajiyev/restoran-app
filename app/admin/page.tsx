@@ -14,7 +14,7 @@ import {
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash,
   setCompanyContext, fetchAllUsers, createUser, deleteUser, toggleUserActive, updateUser,
-  fetchTables, createTable, updateTable, deleteTable, fetchCompanySlug,
+  fetchTables, createTable, updateTable, updateTableLayout, deleteTable, fetchCompanySlug,
 } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, TrashItem } from '@/types';
@@ -155,6 +155,11 @@ function AdminPageContent() {
   const [tCapacity, setTCapacity] = useState('4');
   const [tSaving, setTSaving] = useState(false);
   const [qrTable, setQrTable] = useState<RestaurantTable | null>(null);
+  const [tableView, setTableView] = useState<'list' | 'floor'>('floor');
+  const [tShape, setTShape] = useState<'rect' | 'round'>('rect');
+  const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
+  const [dragging, setDragging] = useState<{ id: number; ox: number; oy: number; mx: number; my: number } | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
 
   // users tab
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
@@ -349,6 +354,35 @@ function AdminPageContent() {
     const updated = categories.map(c => c.name === name ? { ...c, available: !c.available } : c);
     setCategories(updated);
     saveCategories(updated);
+  }
+
+  // ── table canvas drag ─────────────────────────────────────────────────────
+  function autoPos(id: number, existing: typeof tables): { x: number; y: number } {
+    const col = existing.length % 5;
+    const row = Math.floor(existing.length / 5);
+    return { x: 20 + col * 130, y: 20 + row * 110 };
+  }
+  function handleTableDragStart(e: React.MouseEvent, t: typeof tables[0]) {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedTableId(t.id);
+    setDragging({ id: t.id, ox: t.x ?? 20, oy: t.y ?? 20, mx: e.clientX, my: e.clientY });
+  }
+  function handleCanvasMouseMove(e: React.MouseEvent) {
+    if (!dragging || !canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const t = tables.find(x => x.id === dragging.id);
+    if (!t) return;
+    const w = t.w ?? 100; const h = t.h ?? 70;
+    const newX = Math.max(0, Math.min(rect.width - w, dragging.ox + e.clientX - dragging.mx));
+    const newY = Math.max(0, Math.min(rect.height - h, dragging.oy + e.clientY - dragging.my));
+    setTables(prev => prev.map(x => x.id === dragging.id ? { ...x, x: newX, y: newY } : x));
+  }
+  function handleCanvasMouseUp() {
+    if (!dragging) return;
+    const t = tables.find(x => x.id === dragging.id);
+    if (t) updateTableLayout(t.id, t.x ?? 20, t.y ?? 20, t.w ?? 100, t.h ?? 70, t.shape ?? 'rect');
+    setDragging(null);
   }
 
   // ── item form renderer ────────────────────────────────────────────────────
@@ -1286,11 +1320,17 @@ function AdminPageContent() {
 
           {/* ── TABLES ─────────────────────────────────────────────────── */}
           {tab === 'tables' && (
-            <div className="max-w-2xl space-y-4">
+            <div className="max-w-3xl space-y-4">
               <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-400">{tables.length} masa</p>
+                <div className="flex items-center gap-3">
+                  <p className="text-sm text-gray-400">{tables.length} masa</p>
+                  <div className="flex bg-gray-100 rounded-lg p-0.5 gap-0.5">
+                    <button onClick={() => setTableView('floor')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${tableView === 'floor' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>Plan</button>
+                    <button onClick={() => setTableView('list')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${tableView === 'list' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>Siyahı</button>
+                  </div>
+                </div>
                 <button
-                  onClick={() => { setEditingTable(null); setTName(''); setTCapacity('4'); setShowTableForm(true); }}
+                  onClick={() => { setEditingTable(null); setTName(''); setTCapacity('4'); setTShape('rect'); setShowTableForm(true); }}
                   className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors"
                 >
                   <Plus className="w-4 h-4" /> Masa əlavə et
@@ -1304,55 +1344,114 @@ function AdminPageContent() {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {tables.map(t => {
-                  const busy = orders.some(o => o.tableNumber === t.id && o.status !== 'ödənilib');
-                  return (
-                    <div key={t.id} className="bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-800 font-bold text-sm shrink-0">
-                        {t.id}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-800 truncate">{t.name}</p>
-                        <p className="text-xs text-gray-400">{t.capacity} nəfər</p>
-                      </div>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${busy ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
-                        {busy ? 'Dolu' : 'Boş'}
-                      </span>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          onClick={() => setQrTable(t)}
-                          title="QR kod"
-                          className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-amber-700 transition-colors"
-                        >
-                          <Star className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => { setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setShowTableForm(true); }}
-                          title="Düzəlt"
-                          className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-amber-700 transition-colors"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (busy) { alert('Aktiv sifarişi olan masanı silmək olmaz.'); return; }
-                            if (confirm(`"${t.name}" silinsin?`)) {
-                              deleteTable(t.id).then(err => {
-                                if (err) alert('Silinmədi: ' + err);
-                                else setTables(prev => prev.filter(x => x.id !== t.id));
-                              });
-                            }
+              {/* Floor plan / canvas view */}
+              {tableView === 'floor' && tables.length > 0 && (
+                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                  <div className="flex items-center gap-4 px-4 py-3 border-b border-gray-50 text-xs text-gray-400">
+                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-green-400 inline-block" />Boş</span>
+                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-red-400 inline-block" />Dolu</span>
+                    <span className="ml-auto text-gray-300">Masaları sürükləyərək yerini dəyiş</span>
+                  </div>
+                  <div
+                    ref={canvasRef}
+                    className="relative bg-[#f9f9f7] select-none"
+                    style={{ height: 480, backgroundImage: 'radial-gradient(circle, #e5e7eb 1px, transparent 1px)', backgroundSize: '24px 24px' }}
+                    onMouseMove={handleCanvasMouseMove}
+                    onMouseUp={handleCanvasMouseUp}
+                    onMouseLeave={handleCanvasMouseUp}
+                    onClick={() => setSelectedTableId(null)}
+                  >
+                    {tables.map((t, idx) => {
+                      const busy = orders.some(o => o.tableNumber === t.id && o.status !== 'ödənilib');
+                      const activeOrder = orders.find(o => o.tableNumber === t.id && o.status !== 'ödənilib');
+                      const isSelected = selectedTableId === t.id;
+                      const isRound = t.shape === 'round';
+                      const pos = autoPos(idx, tables);
+                      const x = t.x ?? pos.x;
+                      const y = t.y ?? pos.y;
+                      const w = t.w ?? 100;
+                      const h = isRound ? w : (t.h ?? 70);
+                      const activeStatus = activeOrder?.status;
+                      const statusColor = activeStatus === 'gözləyir' ? 'bg-amber-400' : activeStatus === 'hazırlanır' ? 'bg-blue-400' : activeStatus === 'hazırdır' ? 'bg-green-500' : '';
+                      return (
+                        <div
+                          key={t.id}
+                          style={{
+                            left: x, top: y, width: w, height: h,
+                            borderRadius: isRound ? '50%' : 10,
+                            cursor: dragging?.id === t.id ? 'grabbing' : 'grab',
                           }}
-                          className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                          className={`absolute flex flex-col items-center justify-center border-2 transition-shadow ${
+                            isSelected ? 'shadow-xl' : 'shadow-sm hover:shadow-md'
+                          } ${busy ? 'bg-red-50 border-red-300' : 'bg-white border-gray-200'}`}
+                          onMouseDown={e => handleTableDragStart(e, { ...t, x, y, w, h })}
+                          onClick={e => { e.stopPropagation(); setSelectedTableId(t.id); }}
                         >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                          {isSelected && (
+                            <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex gap-1 bg-white rounded-lg shadow border border-gray-100 px-1.5 py-1">
+                              <button onClick={e => { e.stopPropagation(); setQrTable(t); }} className="w-5 h-5 flex items-center justify-center text-gray-400 hover:text-amber-700"><Star className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} className="w-5 h-5 flex items-center justify-center text-gray-400 hover:text-amber-700"><Pencil className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); if (busy) { alert('Aktiv sifarişi olan masanı silmək olmaz.'); return; } if (confirm(`"${t.name}" silinsin?`)) deleteTable(t.id).then(err => { if (err) alert('Silinmədi: ' + err); else setTables(prev => prev.filter(x => x.id !== t.id)); }); }} className="w-5 h-5 flex items-center justify-center text-gray-400 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
+                            </div>
+                          )}
+                          <span className={`text-xs font-bold ${busy ? 'text-red-600' : 'text-gray-600'}`}>{t.name}</span>
+                          {busy && activeOrder && (
+                            <>
+                              <span className={`text-[9px] font-semibold text-white px-1.5 py-0.5 rounded-full mt-0.5 ${statusColor}`}>{activeOrder.status}</span>
+                              <span className="text-[10px] font-bold text-red-500 mt-0.5">{activeOrder.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0).toFixed(2)} ₼</span>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* List view */}
+              {tableView === 'list' && tables.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {tables.map(t => {
+                    const busy = orders.some(o => o.tableNumber === t.id && o.status !== 'ödənilib');
+                    return (
+                      <div key={t.id} className="bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-800 font-bold text-sm shrink-0">
+                          {t.id}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-800 truncate">{t.name}</p>
+                          <p className="text-xs text-gray-400">{t.capacity} nəfər</p>
+                        </div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${busy ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
+                          {busy ? 'Dolu' : 'Boş'}
+                        </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button onClick={() => setQrTable(t)} title="QR kod" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-amber-700 transition-colors">
+                            <Star className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => { setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} title="Düzəlt" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-amber-700 transition-colors">
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (busy) { alert('Aktiv sifarişi olan masanı silmək olmaz.'); return; }
+                              if (confirm(`"${t.name}" silinsin?`)) {
+                                deleteTable(t.id).then(err => {
+                                  if (err) alert('Silinmədi: ' + err);
+                                  else setTables(prev => prev.filter(x => x.id !== t.id));
+                                });
+                              }
+                            }}
+                            className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -1376,9 +1475,10 @@ function AdminPageContent() {
                 const cap = Math.max(1, parseInt(tCapacity) || 4);
                 if (editingTable) {
                   await updateTable(editingTable.id, tName.trim(), cap);
-                  setTables(prev => prev.map(x => x.id === editingTable.id ? { ...x, name: tName.trim(), capacity: cap } : x));
+                  await updateTableLayout(editingTable.id, editingTable.x ?? 20, editingTable.y ?? 20, tShape === 'round' ? 90 : 100, tShape === 'round' ? 90 : 70, tShape);
+                  setTables(prev => prev.map(x => x.id === editingTable.id ? { ...x, name: tName.trim(), capacity: cap, shape: tShape, w: tShape === 'round' ? 90 : 100, h: tShape === 'round' ? 90 : 70 } : x));
                 } else {
-                  const err = await createTable(tName.trim(), cap);
+                  const err = await createTable(tName.trim(), cap, tShape);
                   if (err) { alert('Xəta: ' + err); setTSaving(false); return; }
                   const fresh = await fetchTables();
                   setTables(fresh);
@@ -1409,6 +1509,18 @@ function AdminPageContent() {
                   className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
                   required
                 />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-2">Forma</label>
+                <div className="flex gap-2">
+                  {(['rect', 'round'] as const).map(s => (
+                    <button key={s} type="button" onClick={() => setTShape(s)}
+                      className={`flex-1 py-2 rounded-xl border-2 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${tShape === s ? 'border-amber-600 bg-amber-50 text-amber-800' : 'border-gray-200 text-gray-400 hover:border-gray-300'}`}>
+                      <span className={`inline-block w-5 h-4 border-2 ${tShape === s ? 'border-amber-600' : 'border-gray-300'} ${s === 'round' ? 'rounded-full w-4' : 'rounded-sm'}`} />
+                      {s === 'rect' ? 'Düzbucaqlı' : 'Dairəvi'}
+                    </button>
+                  ))}
+                </div>
               </div>
               <button
                 type="submit"

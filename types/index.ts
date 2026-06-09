@@ -4,6 +4,11 @@ export interface RestaurantTable {
   id: number;
   name: string;
   capacity: number;
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+  shape?: 'rect' | 'round';
 }
 
 export interface TrashItem {

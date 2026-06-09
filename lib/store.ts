@@ -218,18 +218,27 @@ export async function fetchCompanySlug(id: string): Promise<string | null> {
 
 export async function fetchTables(): Promise<RestaurantTable[]> {
   try {
-    let q = supabase.from('restaurant_tables').select('id, name, capacity').order('id');
+    let q = supabase.from('restaurant_tables').select('id, name, capacity, x, y, w, h, shape').order('id');
     if (_companyId) q = q.eq('company_id', _companyId);
     const { data, error } = await q;
     if (error || !data) return [];
-    return data.map(r => ({ id: r.id, name: r.name ?? `Masa ${r.id}`, capacity: r.capacity ?? 4 }));
+    return data.map(r => ({
+      id: r.id,
+      name: r.name ?? `Masa ${r.id}`,
+      capacity: r.capacity ?? 4,
+      x: r.x ?? undefined,
+      y: r.y ?? undefined,
+      w: r.w ?? 100,
+      h: r.h ?? 70,
+      shape: (r.shape ?? 'rect') as 'rect' | 'round',
+    }));
   } catch { return []; }
 }
 
-export async function createTable(name: string, capacity: number): Promise<string | null> {
+export async function createTable(name: string, capacity: number, shape: string = 'rect'): Promise<string | null> {
   const { data, error } = await supabase
     .from('restaurant_tables')
-    .insert({ name, capacity, company_id: _companyId })
+    .insert({ name, capacity, shape, company_id: _companyId })
     .select('id')
     .single();
   if (error) { console.error('[createTable]', error); return error.message; }
@@ -240,6 +249,12 @@ export async function updateTable(id: number, name: string, capacity: number): P
   try {
     await supabase.from('restaurant_tables').update({ name, capacity }).eq('id', id);
   } catch (e) { console.error('[updateTable]', e); }
+}
+
+export async function updateTableLayout(id: number, x: number, y: number, w: number, h: number, shape: string): Promise<void> {
+  try {
+    await supabase.from('restaurant_tables').update({ x, y, w, h, shape }).eq('id', id);
+  } catch (e) { console.error('[updateTableLayout]', e); }
 }
 
 export async function deleteTable(id: number): Promise<string | null> {
