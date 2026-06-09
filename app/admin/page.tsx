@@ -1032,6 +1032,11 @@ export default function AdminPage() {
                                   {[order.cashAmount ? `💵 ${order.cashAmount.toFixed(2)}` : '', order.cardAmount ? `💳 ${order.cardAmount.toFixed(2)}` : ''].filter(Boolean).join(' · ')}
                                 </span>
                               )}
+                              {(order.tipAmount ?? 0) > 0 && (
+                                <span className="text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                                  ⭐ bəxşiş {order.tipAmount!.toFixed(2)} ₼
+                                </span>
+                              )}
                             </div>
                             <span className="font-bold text-amber-900">{orderTotal(order).toFixed(2)} ₼</span>
                           </div>
