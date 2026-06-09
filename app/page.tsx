@@ -7,13 +7,10 @@ export default function Home() {
   const router = useRouter();
   useEffect(() => {
     const session = getSession();
-    if (!session) {
-      router.replace('/login');
-    } else if (session.role === 'admin') {
-      router.replace('/admin');
-    } else {
-      router.replace('/seller');
-    }
+    if (!session)                          router.replace('/login');
+    else if (session.role === 'superadmin') router.replace('/superadmin');
+    else if (session.role === 'owner')      router.replace('/admin');
+    else                                    router.replace('/seller');
   }, [router]);
 
   return (

@@ -1,4 +1,4 @@
-export type Role = 'admin' | 'seller';
+export type Role = 'superadmin' | 'owner' | 'seller';
 
 export interface TrashItem {
   id: string;

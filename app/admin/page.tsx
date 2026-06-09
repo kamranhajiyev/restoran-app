@@ -1,17 +1,19 @@
 'use client';
 import React, { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   LayoutDashboard, Tag,
   PanelLeftClose, PanelLeftOpen, LogOut, Menu, X,
   TrendingUp, Receipt, Star, ChevronDown, Percent,
   Coffee, BarChart2, Package, Wallet, ChevronUp, ImageIcon, Trash2, RotateCcw,
+  Users, EyeOff, Eye, Plus, Pencil,
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
 import {
   fetchMenu, saveMenu, fetchOrders, updateOrderStatus,
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash,
+  setCompanyContext, fetchAllUsers, createUser, deleteUser, toggleUserActive, updateUser,
 } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { Category, MenuItem, MenuItemVariant, Order, OrderStatus, TrashItem } from '@/types';
@@ -26,7 +28,14 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
 
-type Tab = 'stats' | 'orders' | 'menu' | 'categories';
+type Tab = 'stats' | 'orders' | 'menu' | 'categories' | 'users';
+
+interface StaffUser {
+  id: string;
+  username: string;
+  name: string;
+  active: boolean;
+}
 type ChartView = 'gün' | 'həftə' | 'ay';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
 
@@ -49,6 +58,7 @@ const NAV_ITEMS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'orders',     label: 'Sifarişlər',    icon: Receipt },
   { id: 'menu',       label: 'Menyu',         icon: Coffee },
   { id: 'categories', label: 'Kateqoriyalar', icon: Tag },
+  { id: 'users',      label: 'Əməkdaşlar', icon: Users },
 ];
 
 const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
@@ -56,6 +66,7 @@ const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
   orders:     { title: 'Sifarişlər',              subtitle: 'Aktiv sifarişlər' },
   menu:       { title: 'Menyu',                    subtitle: 'Məhsulları əlavə et, düzəlt, sil' },
   categories: { title: 'Kateqoriyalar',           subtitle: 'Menyu kateqoriyaları' },
+  users:      { title: 'Əməkdaşlar',              subtitle: 'Satıcıları idarə et' },
 };
 
 function LineChartSvg({ data }: { data: { label: string; rev: number }[] }) {
@@ -100,7 +111,8 @@ function LineChartSvg({ data }: { data: { label: string; rev: number }[] }) {
 
 export default function AdminPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>('stats');
+  const searchParams = useSearchParams();
+  const tab = (searchParams.get('tab') as Tab | null) ?? 'stats';
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -131,21 +143,35 @@ export default function AdminPage() {
   // stats chart
   const [chartView, setChartView] = useState<ChartView>('gün');
 
+  // users tab
+  const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
+  const [showUserForm, setShowUserForm] = useState(false);
+  const [editingUser, setEditingUser] = useState<StaffUser | null>(null);
+  const [uName, setUName] = useState('');
+  const [uUsername, setUUsername] = useState('');
+  const [uPassword, setUPassword] = useState('');
+  const [uSaving, setUSaving] = useState(false);
+  const [uError, setUError] = useState('');
+  const [companyId, setCompanyId] = useState<string | null>(null);
+
   useEffect(() => {
     const session = getSession();
-    if (!session || session.role !== 'admin') { router.replace('/login'); return; }
+    if (!session || session.role !== 'owner') { router.replace('/login'); return; }
+    setCompanyContext(session.companyId);
     setAdminName(session.name);
-    Promise.all([fetchMenu(), fetchOrders(), fetchCategories(), fetchTrash()]).then(([m, o, c, t]) => {
+    setCompanyId(session.companyId);
+    Promise.all([fetchMenu(), fetchOrders(), fetchCategories(), fetchTrash(), fetchAllUsers()]).then(([m, o, c, t, u]) => {
       setMenu(m);
       setOrders(o);
       setCategories(c);
       setTrash(t);
       setOnline(m.length > 0 || o.length > 0);
+      setStaffUsers(u.filter(x => x.companyId === session.companyId && x.role === 'seller').map(x => ({ id: x.id, username: x.username, name: x.name, active: x.active })));
     });
   }, [router]);
 
   function refresh() { fetchOrders().then(setOrders); }
-  function navigate(t: Tab) { setTab(t); }
+  function navigate(t: Tab) { router.replace(`/admin?tab=${t}`); }
 
   // ── image ──────────────────────────────────────────────────────────────────
   async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1133,6 +1159,65 @@ export default function AdminPage() {
             </div>
           )}
 
+          {/* ── USERS ──────────────────────────────────────────────────── */}
+          {tab === 'users' && (
+            <div className="max-w-lg space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-400">{staffUsers.length} əməkdaş</p>
+                <button
+                  onClick={() => { setEditingUser(null); setUName(''); setUUsername(''); setUPassword(''); setUError(''); setShowUserForm(true); }}
+                  className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors"
+                >
+                  <Plus className="w-4 h-4" /> Əməkdaş əlavə et
+                </button>
+              </div>
+
+              {staffUsers.length === 0 && !showUserForm && (
+                <div className="bg-white rounded-xl border border-gray-100 p-16 text-center">
+                  <Users className="w-10 h-10 mx-auto mb-3 text-gray-200" />
+                  <p className="text-sm text-gray-400">Əməkdaş yoxdur</p>
+                </div>
+              )}
+
+              {staffUsers.map(u => (
+                <div key={u.id} className="bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-sm font-bold shrink-0">
+                    {u.name[0]?.toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-800">{u.name}</p>
+                    <p className="text-xs text-gray-400">@{u.username}</p>
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${u.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                    {u.active ? 'Aktiv' : 'Deaktiv'}
+                  </span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => { setEditingUser(u); setUName(u.name); setUUsername(u.username); setUPassword(''); setUError(''); setShowUserForm(true); }}
+                      title="Düzəlt"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-amber-700 transition-colors"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => toggleUserActive(u.id, !u.active).then(() => setStaffUsers(prev => prev.map(x => x.id === u.id ? { ...x, active: !x.active } : x)))}
+                      title={u.active ? 'Deaktiv et' : 'Aktiv et'}
+                      className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 transition-colors"
+                    >
+                      {u.active ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                    <button
+                      onClick={() => { if (confirm(`"${u.name}" silinsin?`)) deleteUser(u.id).then(err => { if (err) alert('Silinmədi: ' + err); else setStaffUsers(prev => prev.filter(x => x.id !== u.id)); }); }}
+                      className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* ── CATEGORIES ─────────────────────────────────────────────── */}
           {tab === 'categories' && (
             <div className="max-w-lg space-y-4">
@@ -1185,6 +1270,88 @@ export default function AdminPage() {
 
         </main>
       </div>
+
+      {/* ── Create / Edit user modal ────────────────────────────────────── */}
+      {showUserForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-gray-800">{editingUser ? 'Əməkdaşı düzəlt' : 'Yeni əməkdaş'}</h3>
+              <button onClick={() => setShowUserForm(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form
+              onSubmit={async e => {
+                e.preventDefault();
+                setUError('');
+                setUSaving(true);
+                if (editingUser) {
+                  await updateUser(editingUser.id, uName.trim(), uPassword);
+                  setStaffUsers(prev => prev.map(x => x.id === editingUser.id ? { ...x, name: uName.trim() } : x));
+                  setUSaving(false);
+                  setShowUserForm(false);
+                } else {
+                  const err = await createUser(uUsername.trim(), uPassword, uName.trim(), 'seller', companyId);
+                  setUSaving(false);
+                  if (err) {
+                    setUError('Bu istifadəçi adı artıq mövcuddur');
+                    return;
+                  }
+                  const all = await fetchAllUsers();
+                  setStaffUsers(all.filter(x => x.companyId === companyId && x.role === 'seller').map(x => ({ id: x.id, username: x.username, name: x.name, active: x.active })));
+                  setShowUserForm(false);
+                }
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Ad</label>
+                <input
+                  value={uName}
+                  onChange={e => setUName(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="Tam ad"
+                  required
+                />
+              </div>
+              {!editingUser && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500 block mb-1">İstifadəçi adı</label>
+                  <input
+                    value={uUsername}
+                    onChange={e => setUUsername(e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="login"
+                    required
+                  />
+                </div>
+              )}
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">
+                  {editingUser ? 'Yeni şifrə' : 'Şifrə'}
+                </label>
+                <input
+                  type="password"
+                  value={uPassword}
+                  onChange={e => setUPassword(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder={editingUser ? 'Dəyişmək üçün daxil edin' : ''}
+                  required={!editingUser}
+                />
+              </div>
+              {uError && <p className="text-red-500 text-sm">{uError}</p>}
+              <button
+                type="submit"
+                disabled={uSaving}
+                className="w-full bg-amber-800 hover:bg-amber-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors mt-2"
+              >
+                {uSaving ? 'Saxlanır...' : editingUser ? 'Yadda saxla' : 'Yarat'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ── Delete category confirmation dialog ─────────────────────────── */}
       {deleteCatTarget && (

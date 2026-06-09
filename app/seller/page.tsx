@@ -7,7 +7,7 @@ import {
   ShoppingCart, ChevronLeft, Minus, Plus,
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
-import { fetchMenu, addOrder, fetchOrders, updateOrderStatus, fetchCategories } from '@/lib/store';
+import { fetchMenu, addOrder, fetchOrders, updateOrderStatus, fetchCategories, setCompanyContext } from '@/lib/store';
 import { Category, MenuItem, Order, OrderItem, OrderStatus } from '@/types';
 
 type View = 'orders' | 'new-order' | 'menu';
@@ -90,6 +90,7 @@ export default function SellerPage() {
   useEffect(() => {
     const session = getSession();
     if (!session || session.role !== 'seller') { router.replace('/login'); return; }
+    setCompanyContext(session.companyId);
     setSellerName(session.name);
     Promise.all([fetchMenu(), fetchOrders(), fetchCategories()]).then(([m, o, c]) => {
       setOnline(true); setMenu(m); setOrders(o);

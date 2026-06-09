@@ -1,24 +1,42 @@
+import { supabase } from './supabase';
 import { Role } from '@/types';
 
 const AUTH_KEY = 'restoran_auth';
 
-const USERS: { username: string; password: string; role: Role; name: string }[] = [
-  { username: 'admin', password: 'admin123', role: 'admin', name: 'Admin' },
-  { username: 'satici', password: '1234', role: 'seller', name: 'Satıcı' },
-];
-
-export function login(username: string, password: string) {
-  const user = USERS.find(u => u.username === username && u.password === password);
-  if (!user) return null;
-  const session = { role: user.role, name: user.name };
-  localStorage.setItem(AUTH_KEY, JSON.stringify(session));
-  return session;
+export interface Session {
+  id: string;
+  name: string;
+  role: Role;
+  companyId: string | null;
 }
 
-export function getSession(): { role: Role; name: string } | null {
+export async function login(username: string, password: string): Promise<Session | null> {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, name, role, company_id')
+      .eq('username', username.trim())
+      .eq('password', password)
+      .eq('active', true)
+      .single();
+    if (error || !data) return null;
+    const session: Session = {
+      id: data.id,
+      name: data.name,
+      role: data.role as Role,
+      companyId: data.company_id ?? null,
+    };
+    localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+export function getSession(): Session | null {
   if (typeof window === 'undefined') return null;
-  const data = localStorage.getItem(AUTH_KEY);
-  return data ? JSON.parse(data) : null;
+  const raw = localStorage.getItem(AUTH_KEY);
+  return raw ? JSON.parse(raw) : null;
 }
 
 export function logout() {
