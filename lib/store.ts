@@ -195,6 +195,23 @@ export async function updateOrderStatus(
   if (error) console.error('[updateOrderStatus]', error.message);
 }
 
+// ─── Public: company by slug ──────────────────────────────────────────────────
+
+export async function fetchCompanyBySlug(slug: string): Promise<{ id: string; name: string } | null> {
+  try {
+    const { data, error } = await supabase.from('companies').select('id, name').eq('slug', slug).eq('active', true).single();
+    if (error || !data) return null;
+    return { id: data.id, name: data.name };
+  } catch { return null; }
+}
+
+export async function fetchCompanySlug(id: string): Promise<string | null> {
+  try {
+    const { data } = await supabase.from('companies').select('slug').eq('id', id).single();
+    return data?.slug ?? null;
+  } catch { return null; }
+}
+
 // ─── Tables ───────────────────────────────────────────────────────────────────
 
 export async function fetchTables(): Promise<RestaurantTable[]> {

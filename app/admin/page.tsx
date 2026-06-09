@@ -14,7 +14,7 @@ import {
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash,
   setCompanyContext, fetchAllUsers, createUser, deleteUser, toggleUserActive, updateUser,
-  fetchTables, createTable, updateTable, deleteTable,
+  fetchTables, createTable, updateTable, deleteTable, fetchCompanySlug,
 } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, TrashItem } from '@/types';
@@ -166,6 +166,7 @@ function AdminPageContent() {
   const [uSaving, setUSaving] = useState(false);
   const [uError, setUError] = useState('');
   const [companyId, setCompanyId] = useState<string | null>(null);
+  const [companySlug, setCompanySlug] = useState<string | null>(null);
 
   useEffect(() => {
     const session = getSession();
@@ -173,7 +174,7 @@ function AdminPageContent() {
     setCompanyContext(session.companyId);
     setAdminName(session.name);
     setCompanyId(session.companyId);
-    Promise.all([fetchMenu(), fetchOrders(), fetchCategories(), fetchTrash(), fetchAllUsers(), fetchTables()]).then(([m, o, c, t, u, tb]) => {
+    Promise.all([fetchMenu(), fetchOrders(), fetchCategories(), fetchTrash(), fetchAllUsers(), fetchTables(), fetchCompanySlug(session.companyId ?? '')]).then(([m, o, c, t, u, tb, slug]) => {
       setMenu(m);
       setOrders(o);
       setCategories(c);
@@ -181,6 +182,7 @@ function AdminPageContent() {
       setOnline(m.length > 0 || o.length > 0);
       setStaffUsers(u.filter(x => x.companyId === session.companyId && x.role === 'seller').map(x => ({ id: x.id, username: x.username, name: x.name, active: x.active })));
       setTables(tb);
+      setCompanySlug(slug);
     });
   }, [router]);
 
@@ -1431,9 +1433,9 @@ function AdminPageContent() {
               </button>
             </div>
             <div className="flex justify-center p-4 bg-white rounded-xl border border-gray-100">
-              <QRCode value={`${typeof window !== 'undefined' ? window.location.origin : ''}/menu?table=${qrTable.id}`} size={180} />
+              <QRCode value={`${typeof window !== 'undefined' ? window.location.origin : ''}/${companySlug}/menu?table=${qrTable.id}`} size={180} />
             </div>
-            <p className="text-xs text-gray-400 mt-3">/menu?table={qrTable.id}</p>
+            <p className="text-xs text-gray-400 mt-3">/{companySlug}/menu?table={qrTable.id}</p>
           </div>
         </div>
       )}
