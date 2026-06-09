@@ -217,6 +217,14 @@ export default function AdminPage() {
     setMenu(updated);
     saveMenu(updated);
   }
+  function duplicateItem(id: string) {
+    const original = menu.find(m => m.id === id);
+    if (!original) return;
+    const copy = { ...original, id: crypto.randomUUID(), name: `${original.name} (kopya)` };
+    const updated = [...menu, copy];
+    setMenu(updated);
+    saveMenu(updated);
+  }
   function deleteItem(id: string) {
     const updated = menu.filter(m => m.id !== id);
     setMenu(updated);
@@ -971,6 +979,7 @@ export default function AdminPage() {
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <button onClick={() => openEdit(item)} className="text-xs text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors font-medium">Düzəlt</button>
+                            <button onClick={() => duplicateItem(item.id)} className="text-xs text-purple-500 hover:text-purple-700 px-2 py-1 rounded-lg hover:bg-purple-50 transition-colors font-medium">Kopyala</button>
                             <button onClick={() => toggleAvailable(item.id)} className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${item.available ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
                               {item.available ? 'Bağla' : 'Aç'}
                             </button>
