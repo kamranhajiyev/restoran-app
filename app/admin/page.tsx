@@ -115,6 +115,7 @@ export default function AdminPage() {
   const imgRef = useRef<HTMLInputElement>(null);
 
   const [saving, setSaving] = useState(false);
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
 
   // categories form
   const [newCat, setNewCat] = useState('');
@@ -731,76 +732,81 @@ export default function AdminPage() {
 
           {/* ── ORDERS ─────────────────────────────────────────────────── */}
           {tab === 'orders' && (
-            <div className="space-y-4 max-w-3xl">
+            <div className="max-w-3xl space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-400">{activeOrders.length} aktiv sifariş</p>
+                <p className="text-sm text-gray-400">{orders.length} sifariş · {activeOrders.length} aktiv</p>
                 <button onClick={refresh} className="text-xs font-medium text-amber-800 hover:text-amber-950 px-3 py-1.5 rounded-lg hover:bg-amber-50 transition-colors">Yenilə</button>
               </div>
 
-              {activeOrders.length === 0 && (
+              {orders.length === 0 && (
                 <div className="bg-white rounded-xl border border-gray-100 card p-16 text-center">
                   <Coffee className="w-10 h-10 mx-auto mb-3 text-gray-200" />
-                  <p className="text-sm text-gray-400">Aktiv sifariş yoxdur</p>
+                  <p className="text-sm text-gray-400">Sifariş yoxdur</p>
                 </div>
               )}
 
-              {activeOrders.map(order => (
-                <div key={order.id} className="bg-white rounded-xl border border-gray-100 card p-5">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-lg bg-amber-50 flex items-center justify-center">
-                        <span className="text-sm font-bold text-amber-900">#{order.orderNumber}</span>
-                      </div>
-                      <div>
-                        <p className="font-semibold text-gray-800 text-sm">Sifariş #{order.orderNumber}</p>
-                        <p className="text-xs text-gray-400">{order.sellerName}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${STATUS_COLORS[order.status]}`}>{order.status}</span>
-                      <select
-                        value={order.status}
-                        onChange={e => handleStatusChange(order.id, e.target.value as OrderStatus)}
-                        className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+              <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
+                {orders.map((order, i) => {
+                  const isPaid = order.status === 'ödənilib';
+                  const isExpanded = expandedOrderId === order.id;
+                  return (
+                    <div key={order.id} className={i < orders.length - 1 ? 'border-b border-gray-50' : ''}>
+                      {/* Row */}
+                      <button
+                        onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
                       >
-                        {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                  <div className="bg-gray-50 rounded-lg p-3 space-y-1 mb-3">
-                    {order.items.map((oi, i) => (
-                      <div key={i} className="flex justify-between text-sm text-gray-700">
-                        <span>{oi.menuItem.name} <span className="text-gray-400">× {oi.quantity}</span></span>
-                        <span className="font-medium">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
-                      </div>
-                    ))}
-                  </div>
-                  {order.note && <p className="text-xs text-gray-400 italic mb-3">Qeyd: {order.note}</p>}
-                  <div className="flex justify-between items-center pt-3 border-t border-gray-100">
-                    <span className="text-xs text-gray-400">{new Date(order.createdAt).toLocaleTimeString('az-AZ')}</span>
-                    <span className="font-bold text-amber-900">{orderTotal(order).toFixed(2)} ₼</span>
-                  </div>
-                </div>
-              ))}
+                        <ChevronDown className={`w-4 h-4 text-gray-300 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                        <span className="w-14 text-xs font-bold text-amber-900 flex-shrink-0">#{order.orderNumber}</span>
+                        <span className="flex-1 text-sm text-gray-700 truncate">{order.sellerName}</span>
+                        <span className="text-xs text-gray-400 flex-shrink-0 hidden sm:block">
+                          {new Date(order.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })},{' '}
+                          {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        <span className="text-sm font-semibold text-gray-800 flex-shrink-0 w-20 text-right">{orderTotal(order).toFixed(2)} ₼</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 w-24 text-center ${STATUS_COLORS[order.status]}`}>{order.status}</span>
+                      </button>
 
-              {orders.filter(o => o.status === 'ödənilib').length > 0 && (
-                <details className="mt-4 group">
-                  <summary className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer hover:text-gray-600 list-none">
-                    <ChevronDown className="w-4 h-4 transition-transform group-open:rotate-180" />
-                    Ödənilmiş sifarişlər ({orders.filter(o => o.status === 'ödənilib').length})
-                  </summary>
-                  <div className="mt-3 space-y-2">
-                    {orders.filter(o => o.status === 'ödənilib').map(order => (
-                      <div key={order.id} className="bg-white rounded-xl border border-gray-100 card p-4 opacity-60">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm font-medium text-gray-700">Sifariş #{order.orderNumber}</span>
-                          <span className="font-bold text-sm text-gray-600">{orderTotal(order).toFixed(2)} ₼</span>
+                      {/* Expanded items */}
+                      {isExpanded && (
+                        <div className="px-4 pb-4 bg-gray-50 border-t border-gray-100">
+                          <div className="pt-3 space-y-1 mb-3">
+                            <div className="hidden sm:grid grid-cols-[1fr_80px_80px] gap-2 text-xs font-medium text-gray-400 uppercase tracking-wide pb-1 border-b border-gray-200 mb-2">
+                              <span>Məhsul</span><span className="text-right">Say</span><span className="text-right">Cəmi</span>
+                            </div>
+                            {order.items.map((oi, j) => (
+                              <div key={j} className="flex justify-between text-sm text-gray-700 py-0.5">
+                                <span className="flex-1">
+                                  {oi.menuItem.name}
+                                  {oi.modifiers && <span className="text-xs text-amber-600 ml-1">({oi.modifiers})</span>}
+                                </span>
+                                <span className="text-gray-400 mx-4">{oi.quantity} əd</span>
+                                <span className="font-medium">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
+                              </div>
+                            ))}
+                          </div>
+                          {order.note && <p className="text-xs text-gray-400 italic mb-3">Qeyd: {order.note}</p>}
+                          <div className="flex items-center justify-between pt-2 border-t border-gray-200">
+                            <div className="flex items-center gap-2">
+                              {!isPaid && (
+                                <select
+                                  value={order.status}
+                                  onChange={e => handleStatusChange(order.id, e.target.value as OrderStatus)}
+                                  className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                                >
+                                  {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                                </select>
+                              )}
+                              {order.paymentMethod && <span className="text-xs text-gray-400">{order.paymentMethod}</span>}
+                            </div>
+                            <span className="font-bold text-amber-900">{orderTotal(order).toFixed(2)} ₼</span>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
