@@ -6,7 +6,7 @@ import {
   PanelLeftClose, PanelLeftOpen, LogOut, Menu, X,
   TrendingUp, Receipt, Star, ChevronDown, Percent,
   Coffee, BarChart2, Package, Wallet, ChevronUp, ImageIcon, Trash2, RotateCcw,
-  Users, EyeOff, Eye, Plus, Pencil,
+  Users, EyeOff, Eye, Plus, Pencil, QrCode,
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
 import {
@@ -1389,7 +1389,7 @@ function AdminPageContent() {
                         >
                           {isSelected && (
                             <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex gap-1 bg-white rounded-lg shadow border border-gray-100 px-1.5 py-1">
-                              <button onClick={e => { e.stopPropagation(); setQrTable(t); }} className="w-5 h-5 flex items-center justify-center text-gray-400 hover:text-amber-700"><Star className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); setQrTable(t); }} className="w-5 h-5 flex items-center justify-center text-gray-400 hover:text-amber-700"><QrCode className="w-3 h-3" /></button>
                               <button onClick={e => { e.stopPropagation(); setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} className="w-5 h-5 flex items-center justify-center text-gray-400 hover:text-amber-700"><Pencil className="w-3 h-3" /></button>
                               <button onClick={e => { e.stopPropagation(); if (busy) { alert('Aktiv sifarişi olan masanı silmək olmaz.'); return; } if (confirm(`"${t.name}" silinsin?`)) deleteTable(t.id).then(err => { if (err) alert('Silinmədi: ' + err); else setTables(prev => prev.filter(x => x.id !== t.id)); }); }} className="w-5 h-5 flex items-center justify-center text-gray-400 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
                             </div>
@@ -1427,7 +1427,7 @@ function AdminPageContent() {
                         </span>
                         <div className="flex items-center gap-1 shrink-0">
                           <button onClick={() => setQrTable(t)} title="QR kod" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-amber-700 transition-colors">
-                            <Star className="w-4 h-4" />
+                            <QrCode className="w-4 h-4" />
                           </button>
                           <button onClick={() => { setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} title="Düzəlt" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-amber-700 transition-colors">
                             <Pencil className="w-4 h-4" />
