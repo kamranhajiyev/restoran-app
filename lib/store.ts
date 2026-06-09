@@ -1,4 +1,4 @@
-import { Category, MenuItem, Order, TrashItem } from '@/types';
+import { Category, MenuItem, Order, RestaurantTable, TrashItem } from '@/types';
 import { supabase } from './supabase';
 
 const DEFAULT_CATEGORIES = ['Qəhvə', 'Çay', 'Soyuq içkilər', 'Şirniyyat', 'Snack', 'Xüsusi'];
@@ -193,6 +193,40 @@ export async function updateOrderStatus(
     .update({ status, cash_amount: cashAmount ?? 0, card_amount: cardAmount ?? 0, tip_amount: tipAmount ?? 0 })
     .eq('id', orderId);
   if (error) console.error('[updateOrderStatus]', error.message);
+}
+
+// ─── Tables ───────────────────────────────────────────────────────────────────
+
+export async function fetchTables(): Promise<RestaurantTable[]> {
+  try {
+    let q = supabase.from('restaurant_tables').select('id, name, capacity').order('id');
+    if (_companyId) q = q.eq('company_id', _companyId);
+    const { data, error } = await q;
+    if (error || !data) return [];
+    return data.map(r => ({ id: r.id, name: r.name ?? `Masa ${r.id}`, capacity: r.capacity ?? 4 }));
+  } catch { return []; }
+}
+
+export async function createTable(name: string, capacity: number): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('restaurant_tables')
+    .insert({ name, capacity, company_id: _companyId })
+    .select('id')
+    .single();
+  if (error) { console.error('[createTable]', error); return error.message; }
+  return null;
+}
+
+export async function updateTable(id: number, name: string, capacity: number): Promise<void> {
+  try {
+    await supabase.from('restaurant_tables').update({ name, capacity }).eq('id', id);
+  } catch (e) { console.error('[updateTable]', e); }
+}
+
+export async function deleteTable(id: number): Promise<string | null> {
+  const { error } = await supabase.from('restaurant_tables').delete().eq('id', id);
+  if (error) { console.error('[deleteTable]', error); return error.message; }
+  return null;
 }
 
 // ─── Superadmin: Companies ────────────────────────────────────────────────────

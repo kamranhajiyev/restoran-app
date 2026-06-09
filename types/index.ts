@@ -1,5 +1,11 @@
 export type Role = 'superadmin' | 'owner' | 'seller';
 
+export interface RestaurantTable {
+  id: number;
+  name: string;
+  capacity: number;
+}
+
 export interface TrashItem {
   id: string;
   type: string;

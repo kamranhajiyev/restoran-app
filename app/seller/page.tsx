@@ -7,8 +7,8 @@ import {
   ShoppingCart, ChevronLeft, Minus, Plus,
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
-import { fetchMenu, addOrder, fetchOrders, updateOrderStatus, fetchCategories, setCompanyContext } from '@/lib/store';
-import { Category, MenuItem, Order, OrderItem, OrderStatus } from '@/types';
+import { fetchMenu, addOrder, fetchOrders, updateOrderStatus, fetchCategories, setCompanyContext, fetchTables } from '@/lib/store';
+import { Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable } from '@/types';
 
 type View = 'orders' | 'new-order' | 'menu';
 type PayMethod = 'nağd' | 'kart';
@@ -28,8 +28,6 @@ const MOD_GROUPS: Record<string, { label: string; options: string[] }[]> = {
     { label: 'Ölçü', options: ['Kiçik', 'Böyük'] },
   ],
 };
-
-const TOTAL_TABLES = 20;
 
 const STATUS_COLORS: Record<OrderStatus, string> = {
   'gözləyir':  'bg-amber-100 text-amber-700',
@@ -67,6 +65,7 @@ export default function SellerPage() {
   const [collapsed, setCollapsed]   = useState(false);
 
   // new order
+  const [tables, setTables]                 = useState<RestaurantTable[]>([]);
   const [orderType, setOrderType]           = useState<OrderType | null>(null);
   const [selectedTable, setSelectedTable]   = useState<number | null>(null);
   const [cart, setCart]                     = useState<OrderItem[]>([]);
@@ -92,8 +91,8 @@ export default function SellerPage() {
     if (!session || session.role !== 'seller') { router.replace('/login'); return; }
     setCompanyContext(session.companyId);
     setSellerName(session.name);
-    Promise.all([fetchMenu(), fetchOrders(), fetchCategories()]).then(([m, o, c]) => {
-      setOnline(true); setMenu(m); setOrders(o);
+    Promise.all([fetchMenu(), fetchOrders(), fetchCategories(), fetchTables()]).then(([m, o, c, tb]) => {
+      setOnline(true); setMenu(m); setOrders(o); setTables(tb);
       const available = c.filter(cat => cat.available);
       setAvailableCategories(available);
       const cats = [...new Set(m.map(i => i.category))].filter(cat => available.some(a => a.name === cat));
@@ -439,16 +438,17 @@ export default function SellerPage() {
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block" /> Dolu</span>
                   </div>
                   <div className="grid grid-cols-4 sm:grid-cols-5 gap-3 max-w-xl">
-                    {Array.from({ length: TOTAL_TABLES }, (_, i) => i + 1).map(n => {
-                      const busy = tableHasActive(n, orders);
+                    {tables.map(t => {
+                      const busy = tableHasActive(t.id, orders);
                       return (
                         <button
-                          key={n}
-                          onClick={() => startNewOrder('masa', n)}
+                          key={t.id}
+                          onClick={() => startNewOrder('masa', t.id)}
                           className={`border-2 rounded-xl py-4 text-center font-bold transition-all active:scale-95 ${busy ? 'bg-red-50 border-red-200 hover:border-red-400 text-red-800' : 'bg-green-50 border-green-200 hover:border-green-400 text-green-800'}`}
                         >
-                          <div className="text-xl">{n}</div>
-                          <div className="text-xs font-normal mt-0.5">{busy ? 'Dolu' : 'Boş'}</div>
+                          <div className="text-xl">{t.id}</div>
+                          <div className="text-xs font-normal mt-0.5 truncate px-1">{t.name}</div>
+                          <div className="text-xs font-normal opacity-70">{busy ? 'Dolu' : 'Boş'}</div>
                         </button>
                       );
                     })}

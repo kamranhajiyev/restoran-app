@@ -14,9 +14,11 @@ import {
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash,
   setCompanyContext, fetchAllUsers, createUser, deleteUser, toggleUserActive, updateUser,
+  fetchTables, createTable, updateTable, deleteTable,
 } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
-import { Category, MenuItem, MenuItemVariant, Order, OrderStatus, TrashItem } from '@/types';
+import { Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, TrashItem } from '@/types';
+import QRCode from 'react-qr-code';
 
 const COOKING_STATIONS = ['Mətbəx', 'Bar', 'Soyuq mətbəx', 'Pizza', 'Mangal'];
 
@@ -28,7 +30,7 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
 
-type Tab = 'stats' | 'orders' | 'menu' | 'categories' | 'users';
+type Tab = 'stats' | 'orders' | 'menu' | 'categories' | 'users' | 'tables';
 
 interface StaffUser {
   id: string;
@@ -59,6 +61,7 @@ const NAV_ITEMS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'menu',       label: 'Menyu',         icon: Coffee },
   { id: 'categories', label: 'Kateqoriyalar', icon: Tag },
   { id: 'users',      label: 'Əməkdaşlar', icon: Users },
+  { id: 'tables',     label: 'Masalar',     icon: LayoutDashboard },
 ];
 
 const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
@@ -67,6 +70,7 @@ const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
   menu:       { title: 'Menyu',                    subtitle: 'Məhsulları əlavə et, düzəlt, sil' },
   categories: { title: 'Kateqoriyalar',           subtitle: 'Menyu kateqoriyaları' },
   users:      { title: 'Əməkdaşlar',              subtitle: 'Satıcıları idarə et' },
+  tables:     { title: 'Masalar',                 subtitle: 'Restoran masalarını idarə et' },
 };
 
 function LineChartSvg({ data }: { data: { label: string; rev: number }[] }) {
@@ -143,6 +147,15 @@ export default function AdminPage() {
   // stats chart
   const [chartView, setChartView] = useState<ChartView>('gün');
 
+  // tables tab
+  const [tables, setTables] = useState<RestaurantTable[]>([]);
+  const [showTableForm, setShowTableForm] = useState(false);
+  const [editingTable, setEditingTable] = useState<RestaurantTable | null>(null);
+  const [tName, setTName] = useState('');
+  const [tCapacity, setTCapacity] = useState('4');
+  const [tSaving, setTSaving] = useState(false);
+  const [qrTable, setQrTable] = useState<RestaurantTable | null>(null);
+
   // users tab
   const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
   const [showUserForm, setShowUserForm] = useState(false);
@@ -160,13 +173,14 @@ export default function AdminPage() {
     setCompanyContext(session.companyId);
     setAdminName(session.name);
     setCompanyId(session.companyId);
-    Promise.all([fetchMenu(), fetchOrders(), fetchCategories(), fetchTrash(), fetchAllUsers()]).then(([m, o, c, t, u]) => {
+    Promise.all([fetchMenu(), fetchOrders(), fetchCategories(), fetchTrash(), fetchAllUsers(), fetchTables()]).then(([m, o, c, t, u, tb]) => {
       setMenu(m);
       setOrders(o);
       setCategories(c);
       setTrash(t);
       setOnline(m.length > 0 || o.length > 0);
       setStaffUsers(u.filter(x => x.companyId === session.companyId && x.role === 'seller').map(x => ({ id: x.id, username: x.username, name: x.name, active: x.active })));
+      setTables(tb);
     });
   }, [router]);
 
@@ -1268,8 +1282,161 @@ export default function AdminPage() {
             </div>
           )}
 
+          {/* ── TABLES ─────────────────────────────────────────────────── */}
+          {tab === 'tables' && (
+            <div className="max-w-2xl space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-400">{tables.length} masa</p>
+                <button
+                  onClick={() => { setEditingTable(null); setTName(''); setTCapacity('4'); setShowTableForm(true); }}
+                  className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors"
+                >
+                  <Plus className="w-4 h-4" /> Masa əlavə et
+                </button>
+              </div>
+
+              {tables.length === 0 && (
+                <div className="bg-white rounded-xl border border-gray-100 p-16 text-center">
+                  <LayoutDashboard className="w-10 h-10 mx-auto mb-3 text-gray-200" />
+                  <p className="text-sm text-gray-400">Masa yoxdur</p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {tables.map(t => {
+                  const busy = orders.some(o => o.tableNumber === t.id && o.status !== 'ödənilib');
+                  return (
+                    <div key={t.id} className="bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-800 font-bold text-sm shrink-0">
+                        {t.id}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-gray-800 truncate">{t.name}</p>
+                        <p className="text-xs text-gray-400">{t.capacity} nəfər</p>
+                      </div>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${busy ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
+                        {busy ? 'Dolu' : 'Boş'}
+                      </span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => setQrTable(t)}
+                          title="QR kod"
+                          className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-amber-700 transition-colors"
+                        >
+                          <Star className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => { setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setShowTableForm(true); }}
+                          title="Düzəlt"
+                          className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-amber-700 transition-colors"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (busy) { alert('Aktiv sifarişi olan masanı silmək olmaz.'); return; }
+                            if (confirm(`"${t.name}" silinsin?`)) {
+                              deleteTable(t.id).then(err => {
+                                if (err) alert('Silinmədi: ' + err);
+                                else setTables(prev => prev.filter(x => x.id !== t.id));
+                              });
+                            }
+                          }}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
         </main>
       </div>
+
+      {/* ── Create / Edit table modal ───────────────────────────────────── */}
+      {showTableForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-gray-800">{editingTable ? 'Masanı düzəlt' : 'Yeni masa'}</h3>
+              <button onClick={() => setShowTableForm(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form
+              onSubmit={async e => {
+                e.preventDefault();
+                setTSaving(true);
+                const cap = Math.max(1, parseInt(tCapacity) || 4);
+                if (editingTable) {
+                  await updateTable(editingTable.id, tName.trim(), cap);
+                  setTables(prev => prev.map(x => x.id === editingTable.id ? { ...x, name: tName.trim(), capacity: cap } : x));
+                } else {
+                  const err = await createTable(tName.trim(), cap);
+                  if (err) { alert('Xəta: ' + err); setTSaving(false); return; }
+                  const fresh = await fetchTables();
+                  setTables(fresh);
+                }
+                setTSaving(false);
+                setShowTableForm(false);
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Ad</label>
+                <input
+                  value={tName}
+                  onChange={e => setTName(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="Masa 1"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Tutum (nəfər)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={tCapacity}
+                  onChange={e => setTCapacity(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  required
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={tSaving}
+                className="w-full bg-amber-800 hover:bg-amber-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors mt-2"
+              >
+                {tSaving ? 'Saxlanır...' : editingTable ? 'Yadda saxla' : 'Yarat'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── QR code modal ──────────────────────────────────────────────── */}
+      {qrTable && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-xl text-center">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-gray-800">{qrTable.name} — QR Kod</h3>
+              <button onClick={() => setQrTable(null)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex justify-center p-4 bg-white rounded-xl border border-gray-100">
+              <QRCode value={`${typeof window !== 'undefined' ? window.location.origin : ''}/menu?table=${qrTable.id}`} size={180} />
+            </div>
+            <p className="text-xs text-gray-400 mt-3">/menu?table={qrTable.id}</p>
+          </div>
+        </div>
+      )}
 
       {/* ── Create / Edit user modal ────────────────────────────────────── */}
       {showUserForm && (
