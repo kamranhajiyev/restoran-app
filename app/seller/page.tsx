@@ -432,23 +432,53 @@ export default function SellerPage() {
 
               {orderType === 'masa' && (
                 <div>
-                  <p className="text-sm font-medium text-gray-700 mb-3">Masa seçin</p>
+                  <p className="text-sm font-medium text-gray-700 mb-3">Masanı seçin</p>
                   <div className="flex items-center gap-3 text-xs text-gray-500 mb-4">
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-100 border border-green-300 inline-block" /> Boş</span>
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block" /> Dolu</span>
                   </div>
-                  <div className="grid grid-cols-4 sm:grid-cols-5 gap-3 max-w-xl">
-                    {tables.map(t => {
+                  <div
+                    className="relative border border-gray-200 rounded-xl bg-white overflow-auto"
+                    style={{
+                      height: 440,
+                      maxWidth: 700,
+                      backgroundImage: 'radial-gradient(circle, #d1d5db 1px, transparent 1px)',
+                      backgroundSize: '24px 24px',
+                    }}
+                  >
+                    {tables.map((t, i) => {
                       const busy = tableHasActive(t.id, orders);
+                      const posX = t.x ?? (20 + (i % 5) * 130);
+                      const posY = t.y ?? (20 + Math.floor(i / 5) * 110);
+                      const w = t.w ?? 100;
+                      const h = t.h ?? 70;
+                      const isRound = t.shape === 'round';
+                      const busyTotal = orders
+                        .filter(o => o.tableNumber === t.id && o.status !== 'ödənilib')
+                        .reduce((s, o) => s + orderTotal(o), 0);
                       return (
                         <button
                           key={t.id}
                           onClick={() => startNewOrder('masa', t.id)}
-                          className={`border-2 rounded-xl py-4 text-center font-bold transition-all active:scale-95 ${busy ? 'bg-red-50 border-red-200 hover:border-red-400 text-red-800' : 'bg-green-50 border-green-200 hover:border-green-400 text-green-800'}`}
+                          style={{
+                            position: 'absolute',
+                            left: posX,
+                            top: posY,
+                            width: w,
+                            height: h,
+                            borderRadius: isRound ? '50%' : 12,
+                          }}
+                          className={`flex flex-col items-center justify-center border-2 shadow-sm transition-all active:scale-95 hover:shadow-md hover:scale-105 ${
+                            busy
+                              ? 'bg-red-50 border-red-300 text-red-800 hover:bg-red-100'
+                              : 'bg-green-50 border-green-300 text-green-800 hover:bg-green-100'
+                          }`}
                         >
-                          <div className="text-xl">{t.id}</div>
-                          <div className="text-xs font-normal mt-0.5 truncate px-1">{t.name}</div>
-                          <div className="text-xs font-normal opacity-70">{busy ? 'Dolu' : 'Boş'}</div>
+                          <span className="font-bold text-sm leading-tight truncate px-1 max-w-full">{t.name}</span>
+                          {busy && busyTotal > 0
+                            ? <span className="text-[10px] opacity-80 font-semibold">{busyTotal.toFixed(0)} ₼</span>
+                            : <span className="text-[10px] opacity-60">{t.capacity} nəfər</span>
+                          }
                         </button>
                       );
                     })}

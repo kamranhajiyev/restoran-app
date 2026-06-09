@@ -8,7 +8,7 @@ export interface RestaurantTable {
   y?: number;
   w?: number;
   h?: number;
-  shape?: 'rect' | 'round';
+  shape?: 'rect' | 'round' | 'rect-v';
 }
 
 export interface TrashItem {

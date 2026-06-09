@@ -230,15 +230,15 @@ export async function fetchTables(): Promise<RestaurantTable[]> {
       y: r.y ?? undefined,
       w: r.w ?? 100,
       h: r.h ?? 70,
-      shape: (r.shape ?? 'rect') as 'rect' | 'round',
+      shape: (r.shape ?? 'rect') as 'rect' | 'round' | 'rect-v',
     }));
   } catch { return []; }
 }
 
-export async function createTable(name: string, capacity: number, shape: string = 'rect'): Promise<string | null> {
+export async function createTable(name: string, capacity: number, shape: string = 'rect', w?: number, h?: number): Promise<string | null> {
   const { data, error } = await supabase
     .from('restaurant_tables')
-    .insert({ name, capacity, shape, company_id: _companyId })
+    .insert({ name, capacity, shape, w: w ?? null, h: h ?? null, company_id: _companyId })
     .select('id')
     .single();
   if (error) { console.error('[createTable]', error); return error.message; }

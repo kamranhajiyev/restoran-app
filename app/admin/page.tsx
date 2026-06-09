@@ -156,7 +156,7 @@ function AdminPageContent() {
   const [tSaving, setTSaving] = useState(false);
   const [qrTable, setQrTable] = useState<RestaurantTable | null>(null);
   const [tableView, setTableView] = useState<'list' | 'floor'>('floor');
-  const [tShape, setTShape] = useState<'rect' | 'round'>('rect');
+  const [tShape, setTShape] = useState<'rect' | 'round' | 'rect-v'>('rect');
   const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
   const [dragging, setDragging] = useState<{ id: number; ox: number; oy: number; mx: number; my: number } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -1473,12 +1473,14 @@ function AdminPageContent() {
                 e.preventDefault();
                 setTSaving(true);
                 const cap = Math.max(1, parseInt(tCapacity) || 4);
+                const sw = tShape === 'round' ? 90 : tShape === 'rect-v' ? 70 : 100;
+                const sh = tShape === 'round' ? 90 : tShape === 'rect-v' ? 100 : 70;
                 if (editingTable) {
                   await updateTable(editingTable.id, tName.trim(), cap);
-                  await updateTableLayout(editingTable.id, editingTable.x ?? 20, editingTable.y ?? 20, tShape === 'round' ? 90 : 100, tShape === 'round' ? 90 : 70, tShape);
-                  setTables(prev => prev.map(x => x.id === editingTable.id ? { ...x, name: tName.trim(), capacity: cap, shape: tShape, w: tShape === 'round' ? 90 : 100, h: tShape === 'round' ? 90 : 70 } : x));
+                  await updateTableLayout(editingTable.id, editingTable.x ?? 20, editingTable.y ?? 20, sw, sh, tShape);
+                  setTables(prev => prev.map(x => x.id === editingTable.id ? { ...x, name: tName.trim(), capacity: cap, shape: tShape, w: sw, h: sh } : x));
                 } else {
-                  const err = await createTable(tName.trim(), cap, tShape);
+                  const err = await createTable(tName.trim(), cap, tShape, sw, sh);
                   if (err) { alert('Xəta: ' + err); setTSaving(false); return; }
                   const fresh = await fetchTables();
                   setTables(fresh);
@@ -1513,11 +1515,15 @@ function AdminPageContent() {
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-2">Forma</label>
                 <div className="flex gap-2">
-                  {(['rect', 'round'] as const).map(s => (
-                    <button key={s} type="button" onClick={() => setTShape(s)}
-                      className={`flex-1 py-2 rounded-xl border-2 text-sm font-medium transition-colors flex items-center justify-center gap-2 ${tShape === s ? 'border-amber-600 bg-amber-50 text-amber-800' : 'border-gray-200 text-gray-400 hover:border-gray-300'}`}>
-                      <span className={`inline-block w-5 h-4 border-2 ${tShape === s ? 'border-amber-600' : 'border-gray-300'} ${s === 'round' ? 'rounded-full w-4' : 'rounded-sm'}`} />
-                      {s === 'rect' ? 'Düzbucaqlı' : 'Dairəvi'}
+                  {([
+                    { value: 'rect' as const,   label: 'Üfüqi',   w: 'w-6', h: 'h-4', round: false },
+                    { value: 'rect-v' as const, label: 'Şaquli',  w: 'w-4', h: 'h-6', round: false },
+                    { value: 'round' as const,  label: 'Dairəvi', w: 'w-5', h: 'h-5', round: true },
+                  ]).map(s => (
+                    <button key={s.value} type="button" onClick={() => setTShape(s.value)}
+                      className={`flex-1 py-2 rounded-xl border-2 text-xs font-medium transition-colors flex flex-col items-center justify-center gap-1.5 ${tShape === s.value ? 'border-amber-600 bg-amber-50 text-amber-800' : 'border-gray-200 text-gray-400 hover:border-gray-300'}`}>
+                      <span className={`inline-block border-2 ${s.w} ${s.h} ${s.round ? 'rounded-full' : 'rounded-sm'} ${tShape === s.value ? 'border-amber-600' : 'border-gray-300'}`} />
+                      {s.label}
                     </button>
                   ))}
                 </div>
