@@ -1,5 +1,12 @@
 export type Role = 'admin' | 'seller';
 
+export interface TrashItem {
+  id: string;
+  type: string;
+  data: Record<string, unknown>;
+  deletedAt: string;
+}
+
 export interface Category {
   name: string;
   available: boolean;

@@ -1,4 +1,4 @@
-import { Category, MenuItem, Order } from '@/types';
+import { Category, MenuItem, Order, TrashItem } from '@/types';
 import { supabase } from './supabase';
 
 const DEFAULT_CATEGORIES = ['Qəhvə', 'Çay', 'Soyuq içkilər', 'Şirniyyat', 'Snack', 'Xüsusi'];
@@ -68,6 +68,35 @@ export async function saveCategories(categories: Category[]): Promise<void> {
   } catch (e) {
     console.error('[saveCategories]', e);
   }
+}
+
+// ─── Trash ────────────────────────────────────────────────────────────────────
+
+export async function fetchTrash(): Promise<TrashItem[]> {
+  try {
+    await supabase.from('trash_items').delete().lt('deleted_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+    const { data, error } = await supabase.from('trash_items').select('*').order('deleted_at', { ascending: false });
+    if (error || !data) return [];
+    return data.map(r => ({ id: r.id, type: r.type, data: r.data, deletedAt: r.deleted_at }));
+  } catch { return []; }
+}
+
+export async function moveToTrash(type: string, item: Record<string, unknown>): Promise<void> {
+  try {
+    await supabase.from('trash_items').insert({ type, data: item });
+  } catch (e) { console.error('[moveToTrash]', e); }
+}
+
+export async function restoreFromTrash(id: string): Promise<void> {
+  try {
+    await supabase.from('trash_items').delete().eq('id', id);
+  } catch (e) { console.error('[restoreFromTrash]', e); }
+}
+
+export async function permanentlyDeleteFromTrash(id: string): Promise<void> {
+  try {
+    await supabase.from('trash_items').delete().eq('id', id);
+  } catch (e) { console.error('[permanentlyDeleteFromTrash]', e); }
 }
 
 // ─── Orders ───────────────────────────────────────────────────────────────────

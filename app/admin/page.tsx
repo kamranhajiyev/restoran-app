@@ -5,15 +5,16 @@ import {
   LayoutDashboard, Tag,
   PanelLeftClose, PanelLeftOpen, LogOut, Menu, X,
   TrendingUp, Receipt, Star, ChevronDown, Percent,
-  Coffee, BarChart2, Package, Wallet, ChevronUp, ImageIcon,
+  Coffee, BarChart2, Package, Wallet, ChevronUp, ImageIcon, Trash2, RotateCcw,
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
 import {
   fetchMenu, saveMenu, fetchOrders, updateOrderStatus,
   fetchCategories, saveCategories,
+  fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash,
 } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
-import { Category, MenuItem, MenuItemVariant, Order, OrderStatus } from '@/types';
+import { Category, MenuItem, MenuItemVariant, Order, OrderStatus, TrashItem } from '@/types';
 
 const COOKING_STATIONS = ['Mətbəx', 'Bar', 'Soyuq mətbəx', 'Pizza', 'Mangal'];
 
@@ -123,6 +124,8 @@ export default function AdminPage() {
   const [editCatTarget, setEditCatTarget] = useState<string | null>(null);
   const [editCatValue, setEditCatValue] = useState('');
   const [deleteItemTarget, setDeleteItemTarget] = useState<string | null>(null);
+  const [trash, setTrash] = useState<TrashItem[]>([]);
+  const [showTrash, setShowTrash] = useState(false);
 
   // stats chart
   const [chartView, setChartView] = useState<ChartView>('gün');
@@ -131,10 +134,11 @@ export default function AdminPage() {
     const session = getSession();
     if (!session || session.role !== 'admin') { router.replace('/login'); return; }
     setAdminName(session.name);
-    Promise.all([fetchMenu(), fetchOrders(), fetchCategories()]).then(([m, o, c]) => {
+    Promise.all([fetchMenu(), fetchOrders(), fetchCategories(), fetchTrash()]).then(([m, o, c, t]) => {
       setMenu(m);
       setOrders(o);
       setCategories(c);
+      setTrash(t);
       setOnline(m.length > 0 || o.length > 0);
     });
   }, [router]);
@@ -227,14 +231,10 @@ export default function AdminPage() {
   }
   function deleteItem(id: string) {
     const item = menu.find(m => m.id === id);
-    if (item?.image) {
-      const marker = '/menu-images/';
-      const idx = item.image.indexOf(marker);
-      if (idx !== -1) {
-        const path = item.image.slice(idx + marker.length);
-        supabase.storage.from('menu-images').remove([path]);
-      }
-    }
+    if (!item) return;
+    moveToTrash('menu', item as unknown as Record<string, unknown>).then(() =>
+      fetchTrash().then(setTrash)
+    );
     const updated = menu.filter(m => m.id !== id);
     setMenu(updated);
     saveMenu(updated);
@@ -256,12 +256,13 @@ export default function AdminPage() {
     saveCategories(updated);
   }
   function deleteCategory(cat: string) {
-    const marker = '/menu-images/';
-    const toDelete = menu.filter(m => m.category === cat);
-    const imagePaths = toDelete
-      .filter(m => m.image && m.image.includes(marker))
-      .map(m => m.image!.slice(m.image!.indexOf(marker) + marker.length));
-    if (imagePaths.length > 0) supabase.storage.from('menu-images').remove(imagePaths);
+    const catObj = categories.find(c => c.name === cat);
+    const itemsInCat = menu.filter(m => m.category === cat);
+    const trashMoves = [
+      ...(catObj ? [moveToTrash('category', catObj as unknown as Record<string, unknown>)] : []),
+      ...itemsInCat.map(m => moveToTrash('menu', m as unknown as Record<string, unknown>)),
+    ];
+    Promise.all(trashMoves).then(() => fetchTrash().then(setTrash));
     const updatedCats = categories.filter(c => c.name !== cat);
     const updatedMenu = menu.filter(m => m.category !== cat);
     setCategories(updatedCats);
@@ -851,10 +852,16 @@ export default function AdminPage() {
             <div className="max-w-3xl">
               <div className="flex items-center justify-between mb-5">
                 <p className="text-sm text-gray-400">{menu.filter(m => categories.some(c => c.name === m.category)).length} məhsul</p>
-                <button onClick={openAdd} className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-sm">
-                  <span className="text-base leading-none">+</span>
-                  Məhsul əlavə et
-                </button>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setShowTrash(true)} className="relative flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors">
+                    <Trash2 className="w-4 h-4" />
+                    {trash.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-400 text-white text-[10px] rounded-full flex items-center justify-center font-bold">{trash.length}</span>}
+                  </button>
+                  <button onClick={openAdd} className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-sm">
+                    <span className="text-base leading-none">+</span>
+                    Məhsul əlavə et
+                  </button>
+                </div>
               </div>
 
               {showForm && (
@@ -1019,6 +1026,10 @@ export default function AdminPage() {
                   onChange={e => setNewCat(e.target.value)}
                   className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
                 <button type="submit" className="bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors">Əlavə et</button>
+                <button type="button" onClick={() => setShowTrash(true)} className="relative flex items-center justify-center text-gray-400 hover:text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors border border-gray-200">
+                  <Trash2 className="w-4 h-4" />
+                  {trash.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-400 text-white text-[10px] rounded-full flex items-center justify-center font-bold">{trash.length}</span>}
+                </button>
               </form>
 
               <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
@@ -1087,6 +1098,79 @@ export default function AdminPage() {
             <div className="flex gap-2 justify-end">
               <button onClick={() => setDeleteItemTarget(null)} className="px-4 py-2 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">Ləğv et</button>
               <button onClick={() => deleteItem(deleteItemTarget)} className="px-4 py-2 text-sm rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition-colors">Sil</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Trash modal ─────────────────────────────────────────────────── */}
+      {showTrash && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <Trash2 className="w-4 h-4 text-gray-400" />
+                <h3 className="text-base font-semibold text-gray-800">Zibil qutusu</h3>
+                <span className="text-xs text-gray-400">(30 gün saxlanılır)</span>
+              </div>
+              <button onClick={() => setShowTrash(false)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4 space-y-2">
+              {trash.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-8">Zibil qutusu boşdur</p>
+              )}
+              {trash.map(item => {
+                const d = item.data as Record<string, unknown>;
+                const label = item.type === 'menu' ? String(d.name ?? '') : String(d.name ?? '');
+                const sub = item.type === 'menu' ? String(d.category ?? '') : 'Kateqoriya';
+                const daysLeft = Math.max(0, 30 - Math.floor((Date.now() - new Date(item.deletedAt).getTime()) / 86400000));
+                return (
+                  <div key={item.id} className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-gray-100 hover:bg-gray-50">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{label}</p>
+                      <p className="text-xs text-gray-400">{sub} · {daysLeft} gün qalıb</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={async () => {
+                          await restoreFromTrash(item.id);
+                          if (item.type === 'menu') {
+                            const restored = item.data as unknown as MenuItem;
+                            const updatedMenu = [...menu, restored];
+                            setMenu(updatedMenu);
+                            await saveMenu(updatedMenu);
+                          } else if (item.type === 'category') {
+                            const restored = item.data as unknown as Category;
+                            const updatedCats = [...categories, restored];
+                            setCategories(updatedCats);
+                            await saveCategories(updatedCats);
+                          }
+                          setTrash(t => t.filter(x => x.id !== item.id));
+                        }}
+                        className="flex items-center gap-1 text-xs text-green-600 hover:text-green-800 px-2 py-1 rounded-lg hover:bg-green-50 transition-colors font-medium"
+                      >
+                        <RotateCcw className="w-3 h-3" /> Bərpa et
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const d2 = item.data as Record<string, unknown>;
+                          const img = d2.image as string | undefined;
+                          if (img) {
+                            const marker = '/menu-images/';
+                            const idx = img.indexOf(marker);
+                            if (idx !== -1) supabase.storage.from('menu-images').remove([img.slice(idx + marker.length)]);
+                          }
+                          await permanentlyDeleteFromTrash(item.id);
+                          setTrash(t => t.filter(x => x.id !== item.id));
+                        }}
+                        className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium"
+                      >
+                        Sil
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
