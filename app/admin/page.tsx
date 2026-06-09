@@ -472,6 +472,19 @@ export default function AdminPage() {
   const cashRev = chartPaid.reduce((s, o) => s + (o.cashAmount ?? 0), 0);
   const cardRev = chartPaid.reduce((s, o) => s + (o.cardAmount ?? 0), 0);
   const totalPayRev = cashRev + cardRev;
+  const totalTips = chartPaid.reduce((s, o) => s + (o.tipAmount ?? 0), 0);
+
+  const sellerTipMap: Record<string, { tips: number; orders: number; rev: number }> = {};
+  chartPaid.forEach(o => {
+    const name = o.sellerName || 'Naməlum';
+    if (!sellerTipMap[name]) sellerTipMap[name] = { tips: 0, orders: 0, rev: 0 };
+    sellerTipMap[name].tips += o.tipAmount ?? 0;
+    sellerTipMap[name].orders += 1;
+    sellerTipMap[name].rev += orderTotal(o);
+  });
+  const sellerStats = Object.entries(sellerTipMap)
+    .map(([name, s]) => ({ name, ...s }))
+    .sort((a, b) => b.rev - a.rev);
 
   const repCatMap: Record<string, { rev: number; cost: number }> = {};
   chartPaid.forEach(o => o.items.forEach(oi => {
@@ -774,6 +787,68 @@ export default function AdminPage() {
                             <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                               <div className={`h-full rounded-full transition-all ${profit >= 0 ? 'bg-green-400' : 'bg-red-400'}`}
                                 style={{ width: `${(Math.abs(profit) / maxRepCatProfit) * 100}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Seller stats + Tips */}
+              <div className="grid md:grid-cols-2 gap-5">
+                <div className="bg-white rounded-xl border border-gray-100 card p-5">
+                  <h3 className="font-semibold text-gray-800 text-sm mb-4">Satıcı statistikası</h3>
+                  {sellerStats.length === 0 ? (
+                    <p className="text-sm text-gray-300 text-center py-4">Məlumat yoxdur</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {sellerStats.map(s => (
+                        <div key={s.name} className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold shrink-0">
+                              {s.name[0]?.toUpperCase()}
+                            </div>
+                            <span className="text-sm text-gray-700 truncate">{s.name}</span>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0 text-sm">
+                            <span className="text-gray-400">{s.orders} sif.</span>
+                            <span className="font-semibold text-gray-800">{s.rev.toFixed(2)} ₼</span>
+                            {s.tips > 0 && (
+                              <span className="bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-2 py-0.5 text-xs font-semibold">
+                                ⭐ bəxşiş {s.tips.toFixed(2)} ₼
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-white rounded-xl border border-gray-100 card p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold text-gray-800 text-sm">Bəxşiş gəliri</h3>
+                    {totalTips > 0 && <span className="text-lg font-bold text-amber-600">⭐ {totalTips.toFixed(2)} ₼</span>}
+                  </div>
+                  {totalTips === 0 ? (
+                    <p className="text-sm text-gray-300 text-center py-4">Bəxşiş yoxdur</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {sellerStats.filter(s => s.tips > 0).map(s => {
+                        const pct = totalTips > 0 ? (s.tips / totalTips) * 100 : 0;
+                        return (
+                          <div key={s.name}>
+                            <div className="flex justify-between items-center mb-1.5">
+                              <span className="text-sm text-gray-600">{s.name}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-gray-400">{pct.toFixed(0)}%</span>
+                                <span className="font-semibold text-amber-700 text-sm">{s.tips.toFixed(2)} ₼</span>
+                              </div>
+                            </div>
+                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                              <div className="h-full bg-amber-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
                             </div>
                           </div>
                         );

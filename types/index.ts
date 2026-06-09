@@ -50,4 +50,5 @@ export interface Order {
   note?: string;
   cashAmount?: number;
   cardAmount?: number;
+  tipAmount?: number;
 }

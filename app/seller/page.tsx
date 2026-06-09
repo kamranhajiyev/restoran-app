@@ -78,6 +78,7 @@ export default function SellerPage() {
   const [payingOrder, setPayingOrder] = useState<Order | null>(null);
   const [cashInput, setCashInput]     = useState('');
   const [cardInput, setCardInput]     = useState('');
+  const [isTip, setIsTip]             = useState(false);
 
   // modifier / variant modal
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
@@ -190,15 +191,19 @@ export default function SellerPage() {
     setPayingOrder(order);
     setCashInput('');
     setCardInput('');
+    setIsTip(false);
   }
 
   async function confirmPayment() {
     if (!payingOrder) return;
     const cash = parseFloat(cashInput) || 0;
     const card = parseFloat(cardInput) || 0;
-    setOrders(prev => prev.map(o => o.id === payingOrder.id ? { ...o, status: 'ödənilib', cashAmount: cash, cardAmount: card } : o));
+    const total = orderTotal(payingOrder);
+    const tip = isTip ? Math.max(0, (cash + card) - total) : 0;
+    setOrders(prev => prev.map(o => o.id === payingOrder.id ? { ...o, status: 'ödənilib', cashAmount: cash, cardAmount: card, tipAmount: tip } : o));
     setPayingOrder(null);
-    await updateOrderStatus(payingOrder.id, 'ödənilib', cash, card);
+    setIsTip(false);
+    await updateOrderStatus(payingOrder.id, 'ödənilib', cash, card, tip);
   }
 
   async function handleStatusChange(id: string, status: OrderStatus) {
@@ -213,6 +218,7 @@ export default function SellerPage() {
   const active      = orders.filter(o => o.status !== 'ödənilib');
   const todayOrders = active.filter(o => isToday(o.createdAt));
   const prevOrders  = active.filter(o => !isToday(o.createdAt));
+  const myTodayTips = orders.filter(o => o.sellerName === sellerName && isToday(o.createdAt) && (o.tipAmount ?? 0) > 0).reduce((s, o) => s + (o.tipAmount ?? 0), 0);
 
   // ── sidebar (desktop only) ────────────────────────────────────────────────
 
@@ -365,6 +371,11 @@ export default function SellerPage() {
                   <span className="text-gray-500">Cəmi <span className="font-semibold text-gray-800">{active.length}</span></span>
                   <span className="text-gray-500">Gözləyir <span className="font-semibold text-amber-700">{orders.filter(o => o.status === 'gözləyir').length}</span></span>
                   <span className="text-gray-500">Hazır <span className="font-semibold text-green-600">{orders.filter(o => o.status === 'hazırdır').length}</span></span>
+                  {myTodayTips > 0 && (
+                    <span className="flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-2 py-0.5 font-semibold">
+                      ⭐ Bəxşiş: {myTodayTips.toFixed(2)} ₼
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -701,10 +712,34 @@ export default function SellerPage() {
                   />
                 </div>
               </div>
-              {paid > 0 && (
-                <div className={`flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base mb-4 ${change >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
-                  <span>{change >= 0 ? 'Qaytarılacaq' : 'Çatışmır'}</span>
+                      {paid > 0 && change < 0 && (
+                <div className="flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base mb-4 bg-red-50 text-red-600">
+                  <span>Çatışmır</span>
                   <span>{Math.abs(change).toFixed(2)} ₼</span>
+                </div>
+              )}
+              {paid > 0 && change > 0 && (
+                <div className="mb-4 rounded-xl overflow-hidden border border-gray-200">
+                  <div className="flex">
+                    <button
+                      onClick={() => setIsTip(false)}
+                      className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${!isTip ? 'bg-green-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                    >
+                      💸 Qaytarılacaq {change.toFixed(2)} ₼
+                    </button>
+                    <button
+                      onClick={() => setIsTip(true)}
+                      className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${isTip ? 'bg-amber-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                    >
+                      ⭐ Bəxşiş {change.toFixed(2)} ₼
+                    </button>
+                  </div>
+                </div>
+              )}
+              {paid > 0 && change === 0 && (
+                <div className="flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base mb-4 bg-green-50 text-green-700">
+                  <span>Dəqiq ödəniş</span>
+                  <span>✓</span>
                 </div>
               )}
               <div className="flex gap-2">
