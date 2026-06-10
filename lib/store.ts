@@ -265,11 +265,11 @@ export async function deleteTable(id: number): Promise<string | null> {
 
 // ─── Superadmin: Companies ────────────────────────────────────────────────────
 
-export async function fetchCompanies(): Promise<{ id: string; name: string; slug: string; active: boolean; createdAt: string }[]> {
+export async function fetchCompanies(): Promise<{ id: string; name: string; slug: string; active: boolean; createdAt: string; expiresAt: string | null }[]> {
   try {
     const { data, error } = await supabase.from('companies').select('*').order('created_at');
     if (error || !data) return [];
-    return data.map(c => ({ id: c.id, name: c.name, slug: c.slug, active: c.active, createdAt: c.created_at }));
+    return data.map(c => ({ id: c.id, name: c.name, slug: c.slug, active: c.active, createdAt: c.created_at, expiresAt: c.expires_at ?? null }));
   } catch { return []; }
 }
 
@@ -295,6 +295,12 @@ export async function updateCompanyName(id: string, name: string): Promise<void>
   try {
     await supabase.from('companies').update({ name }).eq('id', id);
   } catch (e) { console.error('[updateCompanyName]', e); }
+}
+
+export async function updateCompanyExpiry(id: string, expiresAt: string | null): Promise<void> {
+  try {
+    await supabase.from('companies').update({ expires_at: expiresAt }).eq('id', id);
+  } catch (e) { console.error('[updateCompanyExpiry]', e); }
 }
 
 // ─── Superadmin: Users ────────────────────────────────────────────────────────

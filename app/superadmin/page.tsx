@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
 import {
-  fetchCompanies, createCompany, deleteCompany, toggleCompanyActive, updateCompanyName,
+  fetchCompanies, createCompany, deleteCompany, toggleCompanyActive, updateCompanyName, updateCompanyExpiry,
   fetchAllUsers, createUser, deleteUser, toggleUserActive,
 } from '@/lib/store';
 
@@ -18,6 +18,7 @@ interface Company {
   slug: string;
   active: boolean;
   createdAt: string;
+  expiresAt: string | null;
   userCount?: number;
 }
 
@@ -53,6 +54,9 @@ export default function SuperadminPage() {
   // inline name edit
   const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
   const [editingCompanyName, setEditingCompanyName] = useState('');
+
+  // inline expiry edit
+  const [editingExpiryId, setEditingExpiryId] = useState<string | null>(null);
 
   // company form
   const [showCompanyForm, setShowCompanyForm] = useState(false);
@@ -109,6 +113,14 @@ export default function SuperadminPage() {
     setShowUserForm(false);
     setSaving(false);
     loadData();
+  }
+
+  function expiryBadge(expiresAt: string | null) {
+    if (!expiresAt) return null;
+    const days = Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86400000);
+    if (days < 0)  return <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-600 shrink-0">Müddəti bitib</span>;
+    if (days <= 10) return <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-yellow-100 text-yellow-700 shrink-0">{days} gün qaldı</span>;
+    return <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700 shrink-0">{days} gün</span>;
   }
 
   const visibleUsers = users.filter(u => u.role !== 'superadmin');
@@ -211,7 +223,35 @@ export default function SuperadminPage() {
                           {c.name}
                         </p>
                       )}
-                      <p className="text-xs text-gray-400">/{c.slug} · {c.userCount} istifadəçi</p>
+                      <p className="text-xs text-gray-400">{c.userCount} istifadəçi</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {expiryBadge(c.expiresAt)}
+                      {editingExpiryId === c.id ? (
+                        <input
+                          type="date"
+                          autoFocus
+                          defaultValue={c.expiresAt ? c.expiresAt.slice(0, 10) : ''}
+                          onBlur={async e => {
+                            const val = e.target.value;
+                            await updateCompanyExpiry(c.id, val ? new Date(val).toISOString() : null);
+                            setEditingExpiryId(null);
+                            loadData();
+                          }}
+                          onKeyDown={e => {
+                            if (e.key === 'Escape') setEditingExpiryId(null);
+                          }}
+                          className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-purple-400"
+                        />
+                      ) : (
+                        <button
+                          onClick={() => setEditingExpiryId(c.id)}
+                          className="text-xs text-gray-400 hover:text-purple-700 transition-colors"
+                          title="Tarix təyin et"
+                        >
+                          {c.expiresAt ? new Date(c.expiresAt).toLocaleDateString('az-AZ') : '+ tarix'}
+                        </button>
+                      )}
                     </div>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${c.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                       {c.active ? 'Aktiv' : 'Deaktiv'}
