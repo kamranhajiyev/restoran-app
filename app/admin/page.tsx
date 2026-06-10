@@ -179,6 +179,7 @@ function AdminPageContent() {
 
   // stats chart
   const [chartView, setChartView] = useState<ChartView>('gün');
+  const [topSort, setTopSort] = useState<'rev' | 'profit' | 'qty' | 'margin'>('rev');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
 
@@ -681,8 +682,20 @@ function AdminPageContent() {
     itemMap[k].rev += oi.menuItem.price * oi.quantity;
     itemMap[k].cost += (menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity;
   }));
-  const topItems = Object.values(itemMap).sort((a, b) => b.rev - a.rev).slice(0, 8);
-  const maxItemRev = topItems[0]?.rev ?? 1;
+  const topItemsSorted = Object.values(itemMap).sort((a, b) => {
+    if (topSort === 'profit') return (b.rev - b.cost) - (a.rev - a.cost);
+    if (topSort === 'qty') return b.qty - a.qty;
+    if (topSort === 'margin') return (b.cost > 0 ? (b.rev - b.cost) / b.rev : 1) - (a.cost > 0 ? (a.rev - a.cost) / a.rev : 1);
+    return b.rev - a.rev;
+  }).slice(0, 8);
+  const topItems = topItemsSorted;
+  const topMetricVal = (item: typeof topItems[0]) => {
+    if (topSort === 'profit') return item.rev - item.cost;
+    if (topSort === 'qty') return item.qty;
+    if (topSort === 'margin') return item.cost > 0 ? (item.rev - item.cost) / item.rev : 1;
+    return item.rev;
+  };
+  const maxItemMetric = Math.max(...topItems.map(topMetricVal), 0.01);
 
   const hourlyData = Array.from({ length: 24 }, (_, h) => ({
     label: String(h),
@@ -1056,33 +1069,57 @@ function AdminPageContent() {
               {/* Top items */}
               {topItems.length > 0 && (
                 <div className="bg-white rounded-xl border border-gray-100 card p-5">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Star className="w-4 h-4 text-amber-700" />
-                    <h3 className="font-semibold text-gray-800 text-sm">Top məhsullar</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <Star className="w-4 h-4 text-amber-700" />
+                      <h3 className="font-semibold text-gray-800 text-sm">Top məhsullar</h3>
+                    </div>
+                    <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5">
+                      {([['rev','Gəlir'],['profit','Mənfəət'],['qty','Ədəd'],['margin','Marja']] as const).map(([v, l]) => (
+                        <button key={v} onClick={() => setTopSort(v)}
+                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${topSort === v ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
+                          {l}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="space-y-2.5">
-                    {topItems.map((item, idx) => (
-                      <div key={item.name}>
-                        <div className="flex justify-between items-center mb-1">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-[10px] font-bold text-gray-200 w-4 shrink-0">#{idx + 1}</span>
-                            <span className="text-sm text-gray-700 truncate">{item.name}</span>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0 ml-3">
-                            {item.cost > 0 && (
-                              <span className="text-xs font-medium text-green-500">
-                                {Math.round((1 - item.cost / item.rev) * 100)}%
+                    {topItems.map((item, idx) => {
+                      const margin = item.cost > 0 ? Math.round((1 - item.cost / item.rev) * 100) : null;
+                      const profit = item.rev - item.cost;
+                      const metricVal = topMetricVal(item);
+                      return (
+                        <div key={item.name}>
+                          <div className="flex justify-between items-center mb-1">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-[10px] font-bold text-gray-200 w-4 shrink-0">#{idx + 1}</span>
+                              <span className="text-sm text-gray-700 truncate">{item.name}</span>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0 ml-3">
+                              {topSort === 'margin' && margin !== null && (
+                                <span className="text-sm font-bold text-green-500">{margin}%</span>
+                              )}
+                              {topSort === 'profit' && (
+                                <span className="text-sm font-bold text-green-600">{profit.toFixed(2)} ₼</span>
+                              )}
+                              {topSort === 'qty' && (
+                                <span className="text-sm font-bold text-amber-700">{item.qty} ədəd</span>
+                              )}
+                              {topSort === 'rev' && (
+                                <span className="font-semibold text-gray-800 text-sm">{item.rev.toFixed(2)} ₼</span>
+                              )}
+                              <span className="text-xs text-gray-300">
+                                {topSort !== 'qty' && `${item.qty} ədəd`}
+                                {topSort !== 'rev' && topSort !== 'qty' && ` · ${item.rev.toFixed(2)} ₼`}
                               </span>
-                            )}
-                            <span className="text-xs text-gray-400">{item.qty} ədəd</span>
-                            <span className="font-semibold text-gray-800 text-sm">{item.rev.toFixed(2)} ₼</span>
+                            </div>
+                          </div>
+                          <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-amber-700 rounded-full transition-all" style={{ width: `${(metricVal / maxItemMetric) * 100}%` }} />
                           </div>
                         </div>
-                        <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-amber-700 rounded-full" style={{ width: `${(item.rev / maxItemRev) * 100}%` }} />
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
