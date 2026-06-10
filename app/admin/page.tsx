@@ -74,6 +74,7 @@ const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
 };
 
 function LineChartSvg({ data }: { data: { label: string; rev: number }[] }) {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const W = 800, H = 160, PL = 44, PR = 12, PT = 14, PB = 26;
   const plotW = W - PL - PR, plotH = H - PT - PB;
   const n = data.length;
@@ -85,8 +86,29 @@ function LineChartSvg({ data }: { data: { label: string; rev: number }[] }) {
   const areaStr = [`${pts[0][0].toFixed(1)},${(PT + plotH).toFixed(1)}`, ...pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`), `${pts[n - 1][0].toFixed(1)},${(PT + plotH).toFixed(1)}`].join(' ');
   const yTicks = [0, Math.round(maxV / 2), Math.round(maxV)];
   const step = Math.max(1, Math.floor(n / 6));
+
+  function handleMouseMove(e: React.MouseEvent<SVGSVGElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const relX = ((e.clientX - rect.left) / rect.width) * W;
+    let best = 0, bestDist = Infinity;
+    pts.forEach(([x], i) => { const d = Math.abs(x - relX); if (d < bestDist) { bestDist = d; best = i; } });
+    setHoveredIdx(best);
+  }
+
+  const hovered = hoveredIdx !== null ? data[hoveredIdx] : null;
+  const hx = hoveredIdx !== null ? pts[hoveredIdx][0] : 0;
+  const hy = hoveredIdx !== null ? pts[hoveredIdx][1] : 0;
+  const tooltipW = 110, tooltipH = 36, tooltipPad = 6;
+  const tooltipX = Math.min(Math.max(hx - tooltipW / 2, PL), W - PR - tooltipW);
+  const tooltipY = Math.max(hy - tooltipH - tooltipPad, PT);
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ width: '100%', height: 'auto', display: 'block', cursor: 'crosshair' }}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={() => setHoveredIdx(null)}
+    >
       <defs>
         <linearGradient id="lc-g" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#92400e" stopOpacity="0.18" />
@@ -104,11 +126,19 @@ function LineChartSvg({ data }: { data: { label: string; rev: number }[] }) {
       {n > 1 && <polygon points={areaStr} fill="url(#lc-g)" />}
       {n > 1 && <polyline points={lineStr} fill="none" stroke="#92400e" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
       {pts.map(([x, y], i) => data[i].rev > 0 && (
-        <circle key={i} cx={x} cy={y} r="3" fill="#92400e" stroke="white" strokeWidth="1.5" />
+        <circle key={i} cx={x} cy={y} r={hoveredIdx === i ? 5 : 3} fill="#92400e" stroke="white" strokeWidth="1.5" />
       ))}
       {data.map((d, i) => (i % step === 0 || i === n - 1) && (
         <text key={i} x={px(i)} y={H - 4} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize="10" fill="#9ca3af">{d.label}</text>
       ))}
+      {hovered && hoveredIdx !== null && (
+        <g>
+          <line x1={hx} y1={PT} x2={hx} y2={PT + plotH} stroke="#92400e" strokeWidth="1" strokeDasharray="3 3" opacity="0.4" />
+          <rect x={tooltipX} y={tooltipY} width={tooltipW} height={tooltipH} rx="5" fill="white" stroke="#e5e7eb" strokeWidth="1" filter="drop-shadow(0 1px 4px rgba(0,0,0,0.10))" />
+          <text x={tooltipX + tooltipW / 2} y={tooltipY + 13} textAnchor="middle" fontSize="10" fill="#6b7280">{hovered.label}</text>
+          <text x={tooltipX + tooltipW / 2} y={tooltipY + 28} textAnchor="middle" fontSize="12" fontWeight="700" fill="#92400e">₼ {hovered.rev.toFixed(2)}</text>
+        </g>
+      )}
     </svg>
   );
 }
@@ -146,6 +176,8 @@ function AdminPageContent() {
 
   // stats chart
   const [chartView, setChartView] = useState<ChartView>('gün');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
 
   // tables tab
   const [tables, setTables] = useState<RestaurantTable[]>([]);
@@ -500,14 +532,61 @@ function AdminPageContent() {
     m.variants?.forEach(v => { if (v.costPrice) menuCostMap[v.id] = v.costPrice; });
   });
 
-  const chartRangeStart: Date = (() => {
-    const d = new Date(rTodayStart);
-    if (chartView === 'gün') { d.setDate(d.getDate() - 29); return d; }
-    if (chartView === 'həftə') { d.setDate(d.getDate() - 83); return d; }
-    return new Date(rNow.getFullYear(), rNow.getMonth() - 11, 1);
-  })();
+  const isCustom = !!(customFrom && customTo && customFrom <= customTo);
+
+  const chartRangeStart: Date = isCustom
+    ? new Date(customFrom)
+    : (() => {
+        const d = new Date(rTodayStart);
+        if (chartView === 'gün') { d.setDate(d.getDate() - 29); return d; }
+        if (chartView === 'həftə') { d.setDate(d.getDate() - 83); return d; }
+        return new Date(rNow.getFullYear(), rNow.getMonth() - 11, 1);
+      })();
+
+  const chartRangeEnd: Date = isCustom
+    ? new Date(new Date(customTo).setHours(23, 59, 59, 999))
+    : new Date();
 
   const chartData: { label: string; rev: number }[] = (() => {
+    if (isCustom) {
+      const fromDate = new Date(customFrom);
+      const toDate = new Date(customTo);
+      const msPerDay = 86400000;
+      const dayCount = Math.round((toDate.getTime() - fromDate.getTime()) / msPerDay) + 1;
+      if (dayCount <= 60) {
+        return Array.from({ length: dayCount }, (_, i) => {
+          const d = new Date(fromDate); d.setDate(d.getDate() + i);
+          const ds = d.toDateString();
+          return {
+            label: i === 0 || d.getDate() === 1 ? `${d.getDate()} ${d.toLocaleDateString('az-AZ', { month: 'short' })}` : String(d.getDate()),
+            rev: paidOrders.filter(o => new Date(o.createdAt).toDateString() === ds).reduce((s, o) => s + orderTotal(o), 0),
+          };
+        });
+      }
+      if (dayCount <= 180) {
+        const weekCount = Math.ceil(dayCount / 7);
+        return Array.from({ length: weekCount }, (_, i) => {
+          const wS = new Date(fromDate); wS.setDate(wS.getDate() + i * 7);
+          const wE = new Date(wS); wE.setDate(wE.getDate() + 7);
+          return {
+            label: `${wS.getDate()} ${wS.toLocaleDateString('az-AZ', { month: 'short' })}`,
+            rev: paidOrders.filter(o => { const d = new Date(o.createdAt); return d >= wS && d < wE; }).reduce((s, o) => s + orderTotal(o), 0),
+          };
+        });
+      }
+      const monthSet: { year: number; month: number }[] = [];
+      for (let d = new Date(fromDate.getFullYear(), fromDate.getMonth(), 1); d <= toDate; d.setMonth(d.getMonth() + 1)) {
+        monthSet.push({ year: d.getFullYear(), month: d.getMonth() });
+      }
+      return monthSet.map(({ year, month }) => {
+        const mS = new Date(year, month, 1);
+        const mE = new Date(year, month + 1, 1);
+        return {
+          label: mS.toLocaleDateString('az-AZ', { month: 'short' }),
+          rev: paidOrders.filter(o => { const d = new Date(o.createdAt); return d >= mS && d < mE; }).reduce((s, o) => s + orderTotal(o), 0),
+        };
+      });
+    }
     if (chartView === 'gün') {
       return Array.from({ length: 30 }, (_, i) => {
         const d = new Date(rTodayStart); d.setDate(d.getDate() - (29 - i));
@@ -538,7 +617,10 @@ function AdminPageContent() {
     });
   })();
 
-  const chartPaid = paidOrders.filter(o => new Date(o.createdAt) >= chartRangeStart);
+  const chartPaid = paidOrders.filter(o => {
+    const d = new Date(o.createdAt);
+    return d >= chartRangeStart && d <= chartRangeEnd;
+  });
   const chartRevenue = chartPaid.reduce((s, o) => s + orderTotal(o), 0);
   const chartCost = chartPaid.reduce((s, o) => s + o.items.reduce((os, oi) => os + (menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity, 0), 0);
   const chartProfit = chartRevenue - chartCost;
@@ -776,15 +858,39 @@ function AdminPageContent() {
 
               {/* Main chart card */}
               <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
-                <div className="flex items-center justify-between px-6 pt-5 pb-3">
+                <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-5 pb-3">
                   <h3 className="font-semibold text-gray-800">Gəlir</h3>
-                  <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5">
-                    {([['gün', 'Gün'], ['həftə', 'Həftə'], ['ay', 'Ay']] as [ChartView, string][]).map(([v, l]) => (
-                      <button key={v} onClick={() => setChartView(v)}
-                        className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${chartView === v ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
-                        {l}
-                      </button>
-                    ))}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className={`flex gap-0.5 bg-gray-100 rounded-lg p-0.5 transition-opacity ${isCustom ? 'opacity-40 pointer-events-none' : ''}`}>
+                      {([['gün', 'Gün'], ['həftə', 'Həftə'], ['ay', 'Ay']] as [ChartView, string][]).map(([v, l]) => (
+                        <button key={v} onClick={() => setChartView(v as ChartView)}
+                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${chartView === v ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
+                          {l}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1">
+                      <input
+                        type="date"
+                        value={customFrom}
+                        onChange={e => setCustomFrom(e.target.value)}
+                        className="text-xs text-gray-600 bg-transparent border-none outline-none w-[118px]"
+                      />
+                      <span className="text-gray-300 text-xs">—</span>
+                      <input
+                        type="date"
+                        value={customTo}
+                        onChange={e => setCustomTo(e.target.value)}
+                        className="text-xs text-gray-600 bg-transparent border-none outline-none w-[118px]"
+                      />
+                      {isCustom && (
+                        <button
+                          onClick={() => { setCustomFrom(''); setCustomTo(''); }}
+                          className="ml-1 text-gray-400 hover:text-gray-600 transition-colors text-xs leading-none"
+                          title="Təmizlə"
+                        >✕</button>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div className="px-4 pb-2">
