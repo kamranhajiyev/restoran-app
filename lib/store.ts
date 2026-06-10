@@ -119,11 +119,19 @@ export async function permanentlyDeleteFromTrash(id: string): Promise<void> {
 
 // ─── Orders ───────────────────────────────────────────────────────────────────
 
-export async function fetchOrders(opts?: { from?: string; to?: string; limit?: number }): Promise<Order[]> {
+export async function fetchOrdersCount(): Promise<number> {
+  try {
+    const { count } = await supabase.from('orders').select('*', { count: 'exact', head: true });
+    return count ?? 0;
+  } catch { return 0; }
+}
+
+export async function fetchOrders(opts?: { from?: string; to?: string; limit?: number; offset?: number }): Promise<Order[]> {
   try {
     const { count: totalCount } = await supabase.from('orders').select('*', { count: 'exact', head: true });
 
     const PAGE = 1000;
+    const offset = opts?.offset ?? 0;
     const all: Awaited<ReturnType<typeof runPage>> = [];
     async function runPage(start: number, end: number) {
       let q = supabase.from('orders').select('*, order_items(*)').order('created_at', { ascending: false }).range(start, end);
@@ -133,15 +141,15 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
       if (error || !data) throw error ?? new Error('fetchOrders: no data');
       return data;
     }
-    for (let start = 0; ; start += PAGE) {
-      const end = opts?.limit ? Math.min(start + PAGE, opts.limit) - 1 : start + PAGE - 1;
+    for (let start = offset; ; start += PAGE) {
+      const end = opts?.limit ? Math.min(start + PAGE, offset + opts.limit) - 1 : start + PAGE - 1;
       const page = await runPage(start, end);
       all.push(...page);
       if (page.length < end - start + 1 || (opts?.limit && all.length >= opts.limit)) break;
     }
     return all.map((o, i) => ({
       id: o.id,
-      orderNumber: (totalCount ?? all.length) - i,
+      orderNumber: (totalCount ?? all.length) - offset - i,
       tableNumber: o.table_id ?? 0,
       sellerName: o.waiter_name,
       status: o.status as Order['status'],

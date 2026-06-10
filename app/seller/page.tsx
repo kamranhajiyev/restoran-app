@@ -84,7 +84,11 @@ export default function SellerPage() {
   const [selectedMods, setSelectedMods] = useState<Record<string, string>>({});
   const [selectedVariant, setSelectedVariant] = useState<{ id: string; name: string; price: number } | null>(null);
 
-  const refreshOrders = useCallback(() => { fetchOrders({ limit: 200 }).then(setOrders); }, []);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshOrders = useCallback(async () => {
+    setRefreshing(true);
+    try { setOrders(await fetchOrders({ limit: 200 })); } finally { setRefreshing(false); }
+  }, []);
 
   useEffect(() => {
     const session = getSession();
@@ -161,6 +165,11 @@ export default function SellerPage() {
     addToCart(itemToAdd, label || undefined);
     setModifierItem(null);
     setSelectedVariant(null);
+  }
+
+  function tableName(id: number | null): string {
+    if (!id) return 'Takeaway';
+    return tables.find(t => t.id === id)?.name ?? `Masa ${id}`;
   }
 
   function startNewOrder(type: OrderType, tableNum?: number) {
@@ -367,8 +376,15 @@ export default function SellerPage() {
               </div>
 
               <div className="px-4 md:px-6 py-2 flex items-center gap-3 flex-wrap">
-                <button onClick={refreshOrders} className="text-sm text-gray-400 hover:text-gray-600 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white">
-                  ↻ Yenilə
+                <button
+                  onClick={refreshOrders}
+                  disabled={refreshing}
+                  className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
+                >
+                  {refreshing
+                    ? <span className="w-3.5 h-3.5 border-2 border-gray-200 border-t-[#92400e] rounded-full animate-spin" />
+                    : <span>↻</span>}
+                  Yenilə
                 </button>
                 <div className="flex gap-3 text-sm flex-wrap">
                   <span className="text-gray-500">Cəmi <span className="font-semibold text-gray-800">{active.length}</span></span>
@@ -397,13 +413,13 @@ export default function SellerPage() {
                 {prevOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
-                    {prevOrders.map(o => <OrderRow key={o.id} order={o} onPay={() => setPayingOrder(o)} onStatusChange={handleStatusChange} />)}
+                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} onPay={() => setPayingOrder(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
-                    {todayOrders.map(o => <OrderRow key={o.id} order={o} onPay={() => setPayingOrder(o)} onStatusChange={handleStatusChange} />)}
+                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} onPay={() => setPayingOrder(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
               </div>
@@ -505,7 +521,7 @@ export default function SellerPage() {
                     <ChevronLeft className="w-5 h-5" />
                   </button>
                   <span className="font-semibold text-gray-800 text-sm flex-1">
-                    {orderType === 'takeaway' ? '🛍 Takeaway' : `Masa ${selectedTable}`}
+                    {orderType === 'takeaway' ? '🛍 Takeaway' : tableName(selectedTable)}
                   </span>
                   {/* Cart icon — mobile only */}
                   <button
@@ -570,7 +586,7 @@ export default function SellerPage() {
               <div className="hidden md:flex w-72 bg-white border-l flex-col">
                 <div className="px-4 py-3 border-b">
                   <h2 className="font-bold text-gray-800">Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}</h2>
-                  <p className="text-xs text-gray-400">{orderType === 'takeaway' ? 'Takeaway' : `Masa ${selectedTable}`}</p>
+                  <p className="text-xs text-gray-400">{orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
                 </div>
                 <div className="flex-1 overflow-y-auto px-4 py-3">
                   {cart.length === 0
@@ -659,7 +675,7 @@ export default function SellerPage() {
                 <h2 className="font-bold text-gray-800">
                   Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}
                 </h2>
-                <p className="text-xs text-gray-400">{orderType === 'takeaway' ? 'Takeaway' : `Masa ${selectedTable}`}</p>
+                <p className="text-xs text-gray-400">{orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
               </div>
               <button onClick={() => setMobileCartOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-xl bg-gray-100 text-gray-500">
                 <X className="w-4 h-4" />
@@ -708,7 +724,7 @@ export default function SellerPage() {
             <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
               <h3 className="font-bold text-lg text-gray-800 mb-1">Ödəniş</h3>
               <p className="text-sm text-gray-500 mb-4">
-                №{payingOrder.orderNumber} · {payingOrder.tableNumber === 0 ? 'Takeaway' : `Masa ${payingOrder.tableNumber}`}
+                №{payingOrder.orderNumber} · {tableName(payingOrder.tableNumber)}
               </p>
               <ul className="text-sm space-y-2 mb-4 border-t pt-3 max-h-40 overflow-y-auto">
                 {payingOrder.items.map((oi, i) => (
@@ -881,13 +897,13 @@ function CartItems({ cart, addToCart, removeFromCart }: {
 
 // ── OrderRow — mobile card + desktop table row ────────────────────────────
 
-function OrderRow({ order, onPay, onStatusChange }: {
+function OrderRow({ order, tableLabel, onPay, onStatusChange }: {
   order: Order;
+  tableLabel: string;
   onPay: () => void;
   onStatusChange: (id: string, s: OrderStatus) => void;
 }) {
   const total = orderTotal(order);
-  const tableLabel = order.tableNumber === 0 ? 'Takeaway' : `Masa ${order.tableNumber}`;
   const itemsPreview = order.items.map(oi =>
     oi.modifiers ? `${oi.menuItem.name} (${oi.modifiers})` : oi.menuItem.name
   ).join(', ');

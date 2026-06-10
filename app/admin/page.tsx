@@ -6,11 +6,11 @@ import {
   PanelLeftClose, PanelLeftOpen, LogOut, Menu, X,
   TrendingUp, Receipt, Star, ChevronDown, Percent,
   Coffee, BarChart2, Package, Wallet, ChevronUp, ImageIcon, Trash2, RotateCcw,
-  Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User,
+  Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search,
 } from 'lucide-react';
 import { getSession, logout, validateSession } from '@/lib/auth';
 import {
-  fetchMenu, saveMenu, fetchOrders, updateOrderStatus,
+  fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus,
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash,
   setCompanyContext, fetchAllUsers, createUser, deleteUser, toggleUserActive, updateUser,
@@ -190,6 +190,12 @@ function AdminPageContent() {
   const [trash, setTrash] = useState<TrashItem[]>([]);
   const [showTrash, setShowTrash] = useState(false);
 
+  // orders tab
+  const [totalOrders, setTotalOrders] = useState(0);
+  const [orderSearch, setOrderSearch] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   // stats chart
   const [topSort, setTopSort] = useState<'rev' | 'profit' | 'qty' | 'margin'>('rev');
   const [customFrom, setCustomFrom] = useState(() => presetRange('bugün')[0]);
@@ -292,6 +298,7 @@ function AdminPageContent() {
     setCompanyId(session.companyId);
     setUserId(session.id);
     setSessionReady(true);
+    fetchOrdersCount().then(setTotalOrders);
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchAllUsers(), fetchTables(), fetchCompanySlug(session.companyId ?? '')]).then(([m, o, c, t, u, tb, slug]) => {
       setMenu(m);
       setOrders(o);
@@ -329,7 +336,22 @@ function AdminPageContent() {
     }).finally(() => { setDataLoading(false); setStatsLoaded(true); });
   }, [sessionReady, customFrom, customTo]);
 
-  function refresh() { fetchOrders({ limit: 200 }).then(setOrders); }
+  async function refresh() {
+    setRefreshing(true);
+    try {
+      const [o, total] = await Promise.all([fetchOrders({ limit: 200 }), fetchOrdersCount()]);
+      setOrders(o);
+      setTotalOrders(total);
+    } finally { setRefreshing(false); }
+  }
+
+  async function loadMoreOrders() {
+    setLoadingMore(true);
+    try {
+      const more = await fetchOrders({ limit: 200, offset: orders.length });
+      setOrders(prev => [...prev, ...more]);
+    } finally { setLoadingMore(false); }
+  }
   function navigate(t: Tab) { router.replace(`/admin?tab=${t}`); }
 
   // ── image ──────────────────────────────────────────────────────────────────
@@ -678,6 +700,10 @@ function AdminPageContent() {
   // While a new range is loading, show empty charts — old orders plotted on the new axis would be misleading
   const paidOrders = (dataLoading ? [] : statsOrders).filter(o => o.status === 'ödənilib');
   const activeOrders = orders.filter(o => o.status !== 'ödənilib');
+  const orderQuery = orderSearch.trim().toLowerCase();
+  const visibleOrders = orderQuery
+    ? orders.filter(o => String(o.orderNumber).includes(orderQuery) || (o.sellerName ?? '').toLowerCase().includes(orderQuery))
+    : orders;
 
   const menuCostMap: Record<string, number> = {};
   menu.forEach(m => {
@@ -1373,8 +1399,27 @@ function AdminPageContent() {
           {tab === 'orders' && (
             <div className="max-w-3xl space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-400">{orders.length} sifariş · {activeOrders.length} aktiv</p>
-                <button onClick={refresh} className="text-xs font-medium text-amber-800 hover:text-amber-950 px-3 py-1.5 rounded-lg hover:bg-amber-50 transition-colors">Yenilə</button>
+                <p className="text-sm text-gray-400">
+                  {totalOrders > orders.length ? `${totalOrders} sifariş · son ${orders.length}` : `${orders.length} sifariş`} · {activeOrders.length} aktiv
+                </p>
+                <button
+                  onClick={refresh}
+                  disabled={refreshing}
+                  className="flex items-center gap-1.5 text-xs font-medium text-amber-800 hover:text-amber-950 px-3 py-1.5 rounded-lg hover:bg-amber-50 transition-colors disabled:opacity-60"
+                >
+                  {refreshing && <span className="w-3 h-3 border-2 border-amber-200 border-t-amber-800 rounded-full animate-spin" />}
+                  Yenilə
+                </button>
+              </div>
+
+              <div className="relative">
+                <Search className="w-4 h-4 text-gray-300 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  value={orderSearch}
+                  onChange={e => setOrderSearch(e.target.value)}
+                  placeholder="Sifariş № və ya satıcı adı ilə axtar"
+                  className="w-full bg-white border border-gray-200 rounded-xl pl-9 pr-3 py-2 text-sm text-gray-700 placeholder:text-gray-300 focus:outline-none focus:border-amber-300"
+                />
               </div>
 
               {orders.length === 0 && (
@@ -1384,12 +1429,18 @@ function AdminPageContent() {
                 </div>
               )}
 
+              {orders.length > 0 && visibleOrders.length === 0 && (
+                <div className="bg-white rounded-xl border border-gray-100 card p-10 text-center">
+                  <p className="text-sm text-gray-400">Axtarışa uyğun sifariş tapılmadı (yüklənmiş {orders.length} sifariş arasında)</p>
+                </div>
+              )}
+
               <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
-                {orders.map((order, i) => {
+                {visibleOrders.map((order, i) => {
                   const isPaid = order.status === 'ödənilib';
                   const isExpanded = expandedOrderId === order.id;
                   return (
-                    <div key={order.id} className={i < orders.length - 1 ? 'border-b border-gray-50' : ''}>
+                    <div key={order.id} className={i < visibleOrders.length - 1 ? 'border-b border-gray-50' : ''}>
                       {/* Row */}
                       <button
                         onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
@@ -1455,6 +1506,17 @@ function AdminPageContent() {
                   );
                 })}
               </div>
+
+              {!orderQuery && orders.length < totalOrders && (
+                <button
+                  onClick={loadMoreOrders}
+                  disabled={loadingMore}
+                  className="w-full flex items-center justify-center gap-2 bg-white border border-gray-200 rounded-xl py-2.5 text-sm font-medium text-amber-800 hover:bg-amber-50 transition-colors disabled:opacity-60"
+                >
+                  {loadingMore && <span className="w-3.5 h-3.5 border-2 border-amber-200 border-t-amber-800 rounded-full animate-spin" />}
+                  Daha çox göstər ({totalOrders - orders.length} qalıb)
+                </button>
+              )}
             </div>
           )}
 
