@@ -31,7 +31,7 @@ export async function requireSuperadmin(req: Request): Promise<{ id: string } | 
   return { id: user.id };
 }
 
-export async function requireAuth(req: Request): Promise<{ id: string; role: string } | Response> {
+export async function requireAuth(req: Request): Promise<{ id: string; role: string; companyId: string | null } | Response> {
   const token = req.headers.get('authorization')?.replace('Bearer ', '');
   if (!token) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -39,8 +39,16 @@ export async function requireAuth(req: Request): Promise<{ id: string; role: str
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const db = createServerClient();
-  const { data: profile } = await db.from('profiles').select('role').eq('id', user.id).single();
+  const { data: profile } = await db.from('profiles').select('role, company_id').eq('id', user.id).single();
   if (!profile) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-  return { id: user.id, role: profile.role };
+  return { id: user.id, role: profile.role, companyId: profile.company_id ?? null };
+}
+
+// Owners may manage only seller accounts inside their own company.
+export async function ownerManages(callerCompanyId: string | null, targetId: string): Promise<boolean> {
+  if (!callerCompanyId) return false;
+  const db = createServerClient();
+  const { data } = await db.from('profiles').select('role, company_id').eq('id', targetId).single();
+  return !!data && data.role === 'seller' && data.company_id === callerCompanyId;
 }

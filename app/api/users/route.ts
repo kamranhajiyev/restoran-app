@@ -1,21 +1,37 @@
 import { NextRequest } from 'next/server';
-import { createServerClient, requireSuperadmin } from '@/lib/supabase-server';
+import { createServerClient, requireAuth } from '@/lib/supabase-server';
 
+// Superadmin sees/creates everything; owners are limited to seller accounts
+// inside their own company.
 export async function GET(req: NextRequest) {
-  const auth = await requireSuperadmin(req);
+  const auth = await requireAuth(req);
   if (auth instanceof Response) return auth;
+  if (auth.role !== 'superadmin' && auth.role !== 'owner') {
+    return Response.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
   const db = createServerClient();
-  const { data, error } = await db.from('profiles').select('*').order('created_at');
+  let q = db.from('profiles').select('*').order('created_at');
+  if (auth.role === 'owner') {
+    if (!auth.companyId) return Response.json([]);
+    q = q.eq('company_id', auth.companyId);
+  }
+  const { data, error } = await q;
   if (error) return Response.json([]);
   return Response.json(data ?? []);
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireSuperadmin(req);
+  const auth = await requireAuth(req);
   if (auth instanceof Response) return auth;
+  if (auth.role !== 'superadmin' && auth.role !== 'owner') {
+    return Response.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
-  const { username, password, name, role, companyId } = await req.json();
+  const body = await req.json();
+  const { username, password, name } = body;
+  const role = auth.role === 'owner' ? 'seller' : body.role;
+  const companyId = auth.role === 'owner' ? auth.companyId : body.companyId;
   const db = createServerClient();
 
   const { data: authUser, error: authError } = await db.auth.admin.createUser({
