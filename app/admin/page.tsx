@@ -38,7 +38,7 @@ interface StaffUser {
   name: string;
   active: boolean;
 }
-type ChartView = 'gün' | 'həftə' | 'ay';
+type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
 
 function emptyForm(cat: string) {
@@ -50,6 +50,18 @@ const AZ_MON_LONG  = ['Yanvar','Fevral','Mart','Aprel','May','İyun','İyul','Av
 
 function orderTotal(order: Order) {
   return order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
+}
+
+function presetRange(p: ChartPreset): [string, string] {
+  const toStr = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const today = new Date();
+  const from = new Date(today);
+  if (p === '7g') from.setDate(from.getDate() - 6);
+  else if (p === '30g') from.setDate(from.getDate() - 29);
+  else if (p === 'ay') from.setDate(1);
+  else if (p === '6ay') { from.setMonth(from.getMonth() - 6); from.setDate(from.getDate() + 1); }
+  else if (p === '1il') { from.setFullYear(from.getFullYear() - 1); from.setDate(from.getDate() + 1); }
+  return [toStr(from), toStr(today)];
 }
 
 function calcMargin(price: string, cost: string): string {
@@ -178,10 +190,14 @@ function AdminPageContent() {
   const [showTrash, setShowTrash] = useState(false);
 
   // stats chart
-  const [chartView, setChartView] = useState<ChartView>('gün');
   const [topSort, setTopSort] = useState<'rev' | 'profit' | 'qty' | 'margin'>('rev');
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
+  const [customFrom, setCustomFrom] = useState(() => presetRange('bugün')[0]);
+  const [customTo, setCustomTo] = useState(() => presetRange('bugün')[1]);
+  const [statsOrders, setStatsOrders] = useState<Order[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
+  const [statsLoaded, setStatsLoaded] = useState(false);
+  const statsCache = useRef<Map<string, { at: number; data: Order[] }>>(new Map());
+  const [sessionReady, setSessionReady] = useState(false);
 
   // tables tab
   const [tables, setTables] = useState<RestaurantTable[]>([]);
@@ -217,7 +233,8 @@ function AdminPageContent() {
     setCompanyContext(session.companyId);
     setAdminName(session.name);
     setCompanyId(session.companyId);
-    Promise.all([fetchMenu(), fetchOrders(), fetchCategories(), fetchTrash(), fetchAllUsers(), fetchTables(), fetchCompanySlug(session.companyId ?? '')]).then(([m, o, c, t, u, tb, slug]) => {
+    setSessionReady(true);
+    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchAllUsers(), fetchTables(), fetchCompanySlug(session.companyId ?? '')]).then(([m, o, c, t, u, tb, slug]) => {
       setMenu(m);
       setOrders(o);
       setCategories(c);
@@ -229,7 +246,32 @@ function AdminPageContent() {
     });
   }, [router]);
 
-  function refresh() { fetchOrders().then(setOrders); }
+  // Stats orders are fetched per selected range — only the period being viewed is downloaded.
+  // Fetched ranges are cached in memory: fully-past ranges forever, ranges touching today for 60s.
+  useEffect(() => {
+    if (!sessionReady) return;
+    const valid = !!(customFrom && customTo && customFrom <= customTo);
+    const [f, t] = valid ? [customFrom, customTo] : presetRange('bugün');
+    const localDay = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+    const from = localDay(f).toISOString();
+    const to = new Date(localDay(t).getTime() + 86399999).toISOString();
+    const key = `${from}|${to}`;
+    const ttl = t >= presetRange('bugün')[1] ? 60000 : Infinity;
+    const cached = statsCache.current.get(key);
+    if (cached && Date.now() - cached.at < ttl) {
+      setStatsOrders(cached.data);
+      setDataLoading(false);
+      setStatsLoaded(true);
+      return;
+    }
+    setDataLoading(true);
+    fetchOrders({ from, to }).then(o => {
+      statsCache.current.set(key, { at: Date.now(), data: o });
+      setStatsOrders(o);
+    }).finally(() => { setDataLoading(false); setStatsLoaded(true); });
+  }, [sessionReady, customFrom, customTo]);
+
+  function refresh() { fetchOrders({ limit: 200 }).then(setOrders); }
   function navigate(t: Tab) { router.replace(`/admin?tab=${t}`); }
 
   // ── image ──────────────────────────────────────────────────────────────────
@@ -575,9 +617,8 @@ function AdminPageContent() {
   }
 
   // ── stats computations ────────────────────────────────────────────────────
-  const rNow = new Date();
-  const rTodayStart = new Date(rNow.getFullYear(), rNow.getMonth(), rNow.getDate());
-  const paidOrders = orders.filter(o => o.status === 'ödənilib');
+  // While a new range is loading, show empty charts — old orders plotted on the new axis would be misleading
+  const paidOrders = (dataLoading ? [] : statsOrders).filter(o => o.status === 'ödənilib');
   const activeOrders = orders.filter(o => o.status !== 'ödənilib');
 
   const menuCostMap: Record<string, number> = {};
@@ -586,20 +627,11 @@ function AdminPageContent() {
     m.variants?.forEach(v => { if (v.costPrice) menuCostMap[v.id] = v.costPrice; });
   });
 
-  const isCustom = !!(customFrom && customTo && customFrom <= customTo);
+  const isValidRange = !!(customFrom && customTo && customFrom <= customTo);
+  const [rangeFrom, rangeTo] = isValidRange ? [customFrom, customTo] : presetRange('bugün');
 
-  const chartRangeStart: Date = isCustom
-    ? new Date(customFrom)
-    : (() => {
-        const d = new Date(rTodayStart);
-        if (chartView === 'gün') { d.setDate(d.getDate() - 29); return d; }
-        if (chartView === 'həftə') { d.setDate(d.getDate() - 83); return d; }
-        return new Date(rNow.getFullYear(), rNow.getMonth() - 11, 1);
-      })();
-
-  const chartRangeEnd: Date = isCustom
-    ? new Date(new Date(customTo).setHours(23, 59, 59, 999))
-    : new Date();
+  const chartRangeStart: Date = new Date(rangeFrom);
+  const chartRangeEnd: Date = new Date(new Date(rangeTo).setHours(23, 59, 59, 999));
 
   const chartData: { label: string; fullLabel: string; rev: number }[] = (() => {
     const dayFull = (d: Date) => `${d.getDate()} ${AZ_MON_LONG[d.getMonth()]} ${d.getFullYear()}`;
@@ -609,51 +641,22 @@ function AdminPageContent() {
     };
     const monthFull = (m: Date) => `${AZ_MON_LONG[m.getMonth()]} ${m.getFullYear()}`;
 
-    if (isCustom) {
-      const fromDate = new Date(customFrom);
-      const toDate = new Date(customTo);
-      const msPerDay = 86400000;
-      const dayCount = Math.round((toDate.getTime() - fromDate.getTime()) / msPerDay) + 1;
-      if (dayCount <= 60) {
-        return Array.from({ length: dayCount }, (_, i) => {
-          const d = new Date(fromDate); d.setDate(d.getDate() + i);
-          const ds = d.toDateString();
-          return {
-            label: i === 0 || d.getDate() === 1 ? `${d.getDate()} ${AZ_MON_SHORT[d.getMonth()]}` : String(d.getDate()),
-            fullLabel: dayFull(d),
-            rev: paidOrders.filter(o => new Date(o.createdAt).toDateString() === ds).reduce((s, o) => s + orderTotal(o), 0),
-          };
-        });
-      }
-      if (dayCount <= 180) {
-        const weekCount = Math.ceil(dayCount / 7);
-        return Array.from({ length: weekCount }, (_, i) => {
-          const wS = new Date(fromDate); wS.setDate(wS.getDate() + i * 7);
-          const wE = new Date(wS); wE.setDate(wE.getDate() + 7);
-          return {
-            label: `${wS.getDate()} ${AZ_MON_SHORT[wS.getMonth()]}`,
-            fullLabel: weekFull(wS, wE),
-            rev: paidOrders.filter(o => { const d = new Date(o.createdAt); return d >= wS && d < wE; }).reduce((s, o) => s + orderTotal(o), 0),
-          };
-        });
-      }
-      const monthSet: { year: number; month: number }[] = [];
-      for (let d = new Date(fromDate.getFullYear(), fromDate.getMonth(), 1); d <= toDate; d.setMonth(d.getMonth() + 1)) {
-        monthSet.push({ year: d.getFullYear(), month: d.getMonth() });
-      }
-      return monthSet.map(({ year, month }) => {
-        const mS = new Date(year, month, 1);
-        const mE = new Date(year, month + 1, 1);
-        return {
-          label: mS.toLocaleDateString('az-AZ', { month: 'short' }),
-          fullLabel: monthFull(mS),
-          rev: paidOrders.filter(o => { const d = new Date(o.createdAt); return d >= mS && d < mE; }).reduce((s, o) => s + orderTotal(o), 0),
-        };
-      });
+    const fromDate = new Date(rangeFrom);
+    const toDate = new Date(rangeTo);
+    const msPerDay = 86400000;
+    const dayCount = Math.round((toDate.getTime() - fromDate.getTime()) / msPerDay) + 1;
+    if (dayCount === 1) {
+      const ds = fromDate.toDateString();
+      const dayOrders = paidOrders.filter(o => new Date(o.createdAt).toDateString() === ds);
+      return Array.from({ length: 24 }, (_, h) => ({
+        label: `${String(h).padStart(2, '0')}:00`,
+        fullLabel: `${dayFull(fromDate)}, ${String(h).padStart(2, '0')}:00–${String(h + 1).padStart(2, '0')}:00`,
+        rev: dayOrders.filter(o => new Date(o.createdAt).getHours() === h).reduce((s, o) => s + orderTotal(o), 0),
+      }));
     }
-    if (chartView === 'gün') {
-      return Array.from({ length: 30 }, (_, i) => {
-        const d = new Date(rTodayStart); d.setDate(d.getDate() - (29 - i));
+    if (dayCount <= 60) {
+      return Array.from({ length: dayCount }, (_, i) => {
+        const d = new Date(fromDate); d.setDate(d.getDate() + i);
         const ds = d.toDateString();
         return {
           label: i === 0 || d.getDate() === 1 ? `${d.getDate()} ${AZ_MON_SHORT[d.getMonth()]}` : String(d.getDate()),
@@ -662,9 +665,10 @@ function AdminPageContent() {
         };
       });
     }
-    if (chartView === 'həftə') {
-      return Array.from({ length: 12 }, (_, i) => {
-        const wS = new Date(rTodayStart); wS.setDate(wS.getDate() - (11 - i) * 7);
+    if (dayCount <= 200) {
+      const weekCount = Math.ceil(dayCount / 7);
+      return Array.from({ length: weekCount }, (_, i) => {
+        const wS = new Date(fromDate); wS.setDate(wS.getDate() + i * 7);
         const wE = new Date(wS); wE.setDate(wE.getDate() + 7);
         return {
           label: `${wS.getDate()} ${AZ_MON_SHORT[wS.getMonth()]}`,
@@ -673,13 +677,17 @@ function AdminPageContent() {
         };
       });
     }
-    return Array.from({ length: 12 }, (_, i) => {
-      const m = new Date(rNow.getFullYear(), rNow.getMonth() - (11 - i), 1);
-      const mE = new Date(rNow.getFullYear(), rNow.getMonth() - (10 - i), 1);
+    const monthSet: { year: number; month: number }[] = [];
+    for (let d = new Date(fromDate.getFullYear(), fromDate.getMonth(), 1); d <= toDate; d.setMonth(d.getMonth() + 1)) {
+      monthSet.push({ year: d.getFullYear(), month: d.getMonth() });
+    }
+    return monthSet.map(({ year, month }) => {
+      const mS = new Date(year, month, 1);
+      const mE = new Date(year, month + 1, 1);
       return {
-        label: AZ_MON_SHORT[m.getMonth()],
-        fullLabel: monthFull(m),
-        rev: paidOrders.filter(o => { const d = new Date(o.createdAt); return d >= m && d < mE; }).reduce((s, o) => s + orderTotal(o), 0),
+        label: mS.toLocaleDateString('az-AZ', { month: 'short' }),
+        fullLabel: monthFull(mS),
+        rev: paidOrders.filter(o => { const d = new Date(o.createdAt); return d >= mS && d < mE; }).reduce((s, o) => s + orderTotal(o), 0),
       };
     });
   })();
@@ -749,14 +757,14 @@ function AdminPageContent() {
 
   const hourlyData = Array.from({ length: 24 }, (_, h) => ({
     label: String(h),
-    rev: paidOrders.filter(o => new Date(o.createdAt).getHours() === h).reduce((s, o) => s + orderTotal(o), 0),
+    rev: chartPaid.filter(o => new Date(o.createdAt).getHours() === h).reduce((s, o) => s + orderTotal(o), 0),
   }));
   const maxHourly = Math.max(...hourlyData.map(h => h.rev), 0.01);
 
   const WEEKDAYS = ['Be', 'Ça', 'Çə', 'Ca', 'Cü', 'Şə', 'Ba'];
   const weeklyData = WEEKDAYS.map((label, i) => {
     const jsDay = i === 6 ? 0 : i + 1;
-    return { label, rev: paidOrders.filter(o => new Date(o.createdAt).getDay() === jsDay).reduce((s, o) => s + orderTotal(o), 0) };
+    return { label, rev: chartPaid.filter(o => new Date(o.createdAt).getDay() === jsDay).reduce((s, o) => s + orderTotal(o), 0) };
   });
   const maxWeekly = Math.max(...weeklyData.map(w => w.rev), 0.01);
 
@@ -966,21 +974,42 @@ function AdminPageContent() {
           </div>
 
           {/* ── STATS ─────────────────────────────────────────────────── */}
-          {tab === 'stats' && (
-            <div className="space-y-5 max-w-5xl">
+          {tab === 'stats' && !statsLoaded && (
+            <div className="flex flex-col items-center justify-center gap-3 py-24 max-w-5xl">
+              <span className="w-8 h-8 border-2 border-gray-200 border-t-[#92400e] rounded-full animate-spin" />
+              <p className="text-sm text-gray-400">Yüklənir...</p>
+            </div>
+          )}
+          {tab === 'stats' && statsLoaded && (
+            <div className={`relative space-y-5 max-w-5xl transition-opacity duration-300 ${dataLoading ? 'opacity-60' : ''}`}>
+              {dataLoading && (
+                <div className="absolute inset-x-0 top-32 z-10 flex justify-center pointer-events-none">
+                  <div className="flex flex-col items-center gap-2 bg-white/95 rounded-xl px-8 py-5 shadow-lg border border-gray-100">
+                    <span className="w-7 h-7 border-2 border-gray-200 border-t-[#92400e] rounded-full animate-spin" />
+                    <p className="text-sm text-gray-500">Yüklənir...</p>
+                  </div>
+                </div>
+              )}
 
               {/* Main chart card */}
               <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-5 pb-3">
-                  <h3 className="font-semibold text-gray-800">Gəlir</h3>
+                  <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                    Gəlir
+                    {dataLoading && <span className="w-3.5 h-3.5 border-2 border-gray-200 border-t-[#92400e] rounded-full animate-spin" />}
+                  </h3>
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className={`flex gap-0.5 bg-gray-100 rounded-lg p-0.5 transition-opacity ${isCustom ? 'opacity-40 pointer-events-none' : ''}`}>
-                      {([['gün', 'Gün'], ['həftə', 'Həftə'], ['ay', 'Ay']] as [ChartView, string][]).map(([v, l]) => (
-                        <button key={v} onClick={() => setChartView(v as ChartView)}
-                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${chartView === v ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
-                          {l}
-                        </button>
-                      ))}
+                    <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5">
+                      {([['bugün', 'Bu gün'], ['7g', '7 gün'], ['30g', '30 gün'], ['ay', 'Bu ay'], ['6ay', '6 ay'], ['1il', '1 il']] as [ChartPreset, string][]).map(([p, l]) => {
+                        const [f, t] = presetRange(p);
+                        const active = customFrom === f && customTo === t;
+                        return (
+                          <button key={p} onClick={() => { setCustomFrom(f); setCustomTo(t); }}
+                            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${active ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
+                            {l}
+                          </button>
+                        );
+                      })}
                     </div>
                     <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1">
                       <input
@@ -996,13 +1025,6 @@ function AdminPageContent() {
                         onChange={e => setCustomTo(e.target.value)}
                         className="text-xs text-gray-600 bg-transparent border-none outline-none w-[118px]"
                       />
-                      {isCustom && (
-                        <button
-                          onClick={() => { setCustomFrom(''); setCustomTo(''); }}
-                          className="ml-1 text-gray-400 hover:text-gray-600 transition-colors text-xs leading-none"
-                          title="Təmizlə"
-                        >✕</button>
-                      )}
                     </div>
                   </div>
                 </div>

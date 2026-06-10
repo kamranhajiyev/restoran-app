@@ -121,15 +121,34 @@ export async function permanentlyDeleteFromTrash(id: string): Promise<void> {
 
 // ─── Orders ───────────────────────────────────────────────────────────────────
 
-export async function fetchOrders(): Promise<Order[]> {
+export async function fetchOrders(opts?: { from?: string; to?: string; limit?: number }): Promise<Order[]> {
   try {
-    let q = supabase.from('orders').select('*, order_items(*)').order('created_at', { ascending: false });
-    if (_companyId) q = q.eq('company_id', _companyId);
-    const { data, error } = await q;
-    if (error || !data) return [];
-    return data.map((o, i) => ({
+    // Total company-wide count so orderNumber stays stable regardless of range/limit
+    let countQ = supabase.from('orders').select('*', { count: 'exact', head: true });
+    if (_companyId) countQ = countQ.eq('company_id', _companyId);
+    const { count: totalCount } = await countQ;
+
+    // Supabase caps each response at 1000 rows — page until a short page comes back
+    const PAGE = 1000;
+    const all: Awaited<ReturnType<typeof runPage>> = [];
+    async function runPage(start: number, end: number) {
+      let q = supabase.from('orders').select('*, order_items(*)').order('created_at', { ascending: false }).range(start, end);
+      if (_companyId) q = q.eq('company_id', _companyId);
+      if (opts?.from) q = q.gte('created_at', opts.from);
+      if (opts?.to) q = q.lte('created_at', opts.to);
+      const { data, error } = await q;
+      if (error || !data) throw error ?? new Error('fetchOrders: no data');
+      return data;
+    }
+    for (let start = 0; ; start += PAGE) {
+      const end = opts?.limit ? Math.min(start + PAGE, opts.limit) - 1 : start + PAGE - 1;
+      const page = await runPage(start, end);
+      all.push(...page);
+      if (page.length < end - start + 1 || (opts?.limit && all.length >= opts.limit)) break;
+    }
+    return all.map((o, i) => ({
       id: o.id,
-      orderNumber: data.length - i,
+      orderNumber: (totalCount ?? all.length) - i,
       tableNumber: o.table_id ?? 0,
       sellerName: o.waiter_name,
       status: o.status as Order['status'],

@@ -84,14 +84,14 @@ export default function SellerPage() {
   const [selectedMods, setSelectedMods] = useState<Record<string, string>>({});
   const [selectedVariant, setSelectedVariant] = useState<{ id: string; name: string; price: number } | null>(null);
 
-  const refreshOrders = useCallback(() => { fetchOrders().then(setOrders); }, []);
+  const refreshOrders = useCallback(() => { fetchOrders({ limit: 200 }).then(setOrders); }, []);
 
   useEffect(() => {
     const session = getSession();
     if (!session || session.role !== 'seller') { router.replace('/login'); return; }
     setCompanyContext(session.companyId);
     setSellerName(session.name);
-    Promise.all([fetchMenu(), fetchOrders(), fetchCategories(), fetchTables()]).then(([m, o, c, tb]) => {
+    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables()]).then(([m, o, c, tb]) => {
       setOnline(true); setMenu(m); setOrders(o); setTables(tb);
       const available = c.filter(cat => cat.available);
       setAvailableCategories(available);
@@ -102,7 +102,7 @@ export default function SellerPage() {
 
   useEffect(() => {
     async function sync() {
-      const [m, o, c] = await Promise.all([fetchMenu(), fetchOrders(), fetchCategories()]);
+      const [m, o, c] = await Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories()]);
       setMenu(m); setOrders(o);
       setAvailableCategories(c.filter(cat => cat.available));
     }
@@ -175,7 +175,7 @@ export default function SellerPage() {
     if (orderType === 'masa' && !selectedTable) return;
     const order: Order = {
       id: Date.now().toString(),
-      orderNumber: orders.length + 1,
+      orderNumber: (orders[0]?.orderNumber ?? 0) + 1,
       tableNumber: orderType === 'takeaway' ? 0 : selectedTable!,
       items: cart,
       status: 'gözləyir',
