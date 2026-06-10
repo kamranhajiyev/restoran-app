@@ -25,8 +25,9 @@ export async function requireSuperadmin(req: Request): Promise<{ id: string } | 
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const db = createServerClient();
-  const { data: profile } = await db.from('profiles').select('role').eq('id', user.id).single();
+  const { data: profile } = await db.from('profiles').select('role, active').eq('id', user.id).single();
   if (profile?.role !== 'superadmin') return Response.json({ error: 'Forbidden' }, { status: 403 });
+  if (profile.active === false) return Response.json({ error: 'Hesab deaktivdir' }, { status: 403 });
 
   return { id: user.id };
 }
@@ -39,8 +40,9 @@ export async function requireAuth(req: Request): Promise<{ id: string; role: str
   if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const db = createServerClient();
-  const { data: profile } = await db.from('profiles').select('role, company_id').eq('id', user.id).single();
+  const { data: profile } = await db.from('profiles').select('role, company_id, active').eq('id', user.id).single();
   if (!profile) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (profile.active === false) return Response.json({ error: 'Hesab deaktivdir' }, { status: 403 });
 
   return { id: user.id, role: profile.role, companyId: profile.company_id ?? null };
 }

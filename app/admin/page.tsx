@@ -11,7 +11,7 @@ import {
 import { getSession, logout, validateSession } from '@/lib/auth';
 import {
   fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus,
-  fetchShifts, fetchShiftSales, closeShift,
+  fetchShifts, fetchShiftSales, closeShift, fetchOpenShift,
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash,
   setCompanyContext, fetchAllUsers, createUser, deleteUser, toggleUserActive, updateUser,
@@ -355,15 +355,28 @@ function AdminPageContent() {
       const open = s.find(x => !x.closedAt);
       if (open) setOpenShiftSales(await fetchShiftSales(open.openedAt));
     }).finally(() => setShiftsLoading(false));
+    const interval = setInterval(async () => {
+      const open = await fetchOpenShift();
+      if (open) setOpenShiftSales(await fetchShiftSales(open.openedAt));
+    }, 30_000);
+    return () => clearInterval(interval);
   }, [sessionReady, tab]);
+
+  async function refreshKassa() {
+    const s = await fetchShifts();
+    setShifts(s);
+    const open = s.find(x => !x.closedAt);
+    if (open) setOpenShiftSales(await fetchShiftSales(open.openedAt));
+  }
 
   async function handleAdminCloseShift(open: CashShift) {
     if (adminCountedInput === '') return;
     setClosingShift(true);
     try {
-      const sales = await fetchShiftSales(open.openedAt);
-      const expected = open.openingCash + sales.cash + open.movements.reduce((t, m) => t + m.amount, 0);
-      await closeShift(open.id, expected, parseFloat(adminCountedInput) || 0, adminName);
+      const fresh = (await fetchOpenShift()) ?? open;
+      const sales = await fetchShiftSales(fresh.openedAt);
+      const expected = fresh.openingCash + sales.cash + fresh.movements.reduce((t, m) => t + m.amount, 0);
+      await closeShift(fresh.id, expected, parseFloat(adminCountedInput) || 0, adminName);
       setAdminCountedInput('');
       setShifts(await fetchShifts());
     } finally { setClosingShift(false); }
@@ -382,7 +395,7 @@ function AdminPageContent() {
     setLoadingMore(true);
     try {
       const more = await fetchOrders({ limit: 200, offset: orders.length });
-      setOrders(prev => [...prev, ...more]);
+      setOrders(prev => [...prev, ...more.filter(m => !prev.some(p => p.id === m.id))]);
     } finally { setLoadingMore(false); }
   }
   function navigate(t: Tab) { router.replace(`/admin?tab=${t}`); }
@@ -482,9 +495,13 @@ function AdminPageContent() {
     saveMenu(updated);
     setDeleteItemTarget(null);
   }
-  function handleStatusChange(orderId: string, status: OrderStatus) {
-    updateOrderStatus(orderId, status);
+  async function handleStatusChange(orderId: string, status: OrderStatus) {
+    const prevStatus = orders.find(o => o.id === orderId)?.status;
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
+    const ok = await updateOrderStatus(orderId, status);
+    if (!ok && prevStatus) {
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: prevStatus } : o));
+    }
   }
 
   // ── categories ─────────────────────────────────────────────────────────────
@@ -519,7 +536,9 @@ function AdminPageContent() {
     const updated = categories.map(c => c.name === oldName ? { ...c, name: trimmed } : c);
     setCategories(updated);
     saveCategories(updated);
-    setMenu(prev => prev.map(m => m.category === oldName ? { ...m, category: trimmed } : m));
+    const updatedMenu = menu.map(m => m.category === oldName ? { ...m, category: trimmed } : m);
+    setMenu(updatedMenu);
+    saveMenu(updatedMenu);
     setEditCatTarget(null);
   }
   function moveCategoryOrder(index: number, dir: -1 | 1) {
@@ -1593,9 +1612,17 @@ function AdminPageContent() {
                           <h3 className="font-bold text-stone-800 flex items-center gap-2">
                             <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Açıq növbə
                           </h3>
-                          <span className="text-xs text-stone-400">
-                            {new Date(open.openedAt).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {open.openedBy}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-stone-400">
+                              {new Date(open.openedAt).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {open.openedBy}
+                            </span>
+                            <button
+                              onClick={refreshKassa}
+                              className="text-xs font-semibold text-stone-500 hover:text-stone-700 border border-stone-200 rounded-lg px-2 py-1 flex items-center gap-1 transition-colors"
+                            >
+                              <RotateCcw className="w-3 h-3" /> Yenilə
+                            </button>
+                          </div>
                         </div>
                         <div className="flex justify-between text-sm text-stone-600">
                           <span>Başlanğıc məbləğ</span><span className="font-semibold">{open.openingCash.toFixed(2)} ₼</span>

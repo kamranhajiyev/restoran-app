@@ -15,6 +15,16 @@ export async function PATCH(req: Request, ctx: RouteContext<'/api/users/[id]'>) 
   const { name, password, username, active } = await req.json();
   const db = createServerClient();
 
+  if (username !== undefined) {
+    if (!/^[a-z0-9_.-]{2,30}$/i.test(username ?? '')) {
+      return Response.json({ error: 'İstifadəçi adı yanlış formatdadır' }, { status: 400 });
+    }
+    const { data: existing } = await db.from('profiles').select('id').eq('username', username).neq('id', id).maybeSingle();
+    if (existing) {
+      return Response.json({ error: 'Bu istifadəçi adı artıq mövcuddur' }, { status: 400 });
+    }
+  }
+
   // Self-edits can't change active status — only a manager can
   const profileUpdates: Record<string, unknown> = {};
   if (name !== undefined) profileUpdates.name = name;

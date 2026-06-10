@@ -32,7 +32,17 @@ export async function POST(req: NextRequest) {
   const { username, password, name } = body;
   const role = auth.role === 'owner' ? 'seller' : body.role;
   const companyId = auth.role === 'owner' ? auth.companyId : body.companyId;
+
+  if (!/^[a-z0-9_.-]{2,30}$/i.test(username ?? '')) {
+    return Response.json({ error: 'İstifadəçi adı yanlış formatdadır' }, { status: 400 });
+  }
+
   const db = createServerClient();
+
+  const { data: existing } = await db.from('profiles').select('id').eq('username', username).maybeSingle();
+  if (existing) {
+    return Response.json({ error: 'Bu istifadəçi adı artıq mövcuddur' }, { status: 400 });
+  }
 
   const { data: authUser, error: authError } = await db.auth.admin.createUser({
     email: `${username}@restoran.internal`,

@@ -23,10 +23,16 @@ function isValidUUID(id: string): boolean {
 
 // ─── Menu ─────────────────────────────────────────────────────────────────────
 
+// Guards against the "failed fetch → empty screen → save wipes real data" chain:
+// saves are refused until the corresponding fetch has succeeded at least once.
+let _menuLoaded = false;
+let _categoriesLoaded = false;
+
 export async function fetchMenu(): Promise<MenuItem[]> {
   try {
     const { data, error } = await supabase.from('menu_items').select('*').order('position');
     if (error || !data) return [];
+    _menuLoaded = true;
     return data.map(r => ({
       id: r.id,
       name: r.name,
@@ -44,8 +50,9 @@ export async function fetchMenu(): Promise<MenuItem[]> {
 }
 
 export async function saveMenu(menu: MenuItem[]): Promise<void> {
+  if (!_companyId || !_menuLoaded) { console.error('[saveMenu] refused: no company context or menu never loaded'); return; }
   try {
-    await supabase.from('menu_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('menu_items').delete().eq('company_id', _companyId);
     const rows = menu.map((m, i) => ({
       id: isValidUUID(m.id) ? m.id : crypto.randomUUID(),
       name: m.name,
@@ -70,7 +77,9 @@ export async function saveMenu(menu: MenuItem[]): Promise<void> {
 export async function fetchCategories(): Promise<Category[]> {
   try {
     const { data, error } = await supabase.from('categories').select('name, available').order('position');
-    if (error || !data || data.length === 0) return DEFAULT_CATEGORIES.map(name => ({ name, available: true }));
+    if (error || !data) return DEFAULT_CATEGORIES.map(name => ({ name, available: true }));
+    _categoriesLoaded = true;
+    if (data.length === 0) return DEFAULT_CATEGORIES.map(name => ({ name, available: true }));
     return data.map((r: { name: string; available: boolean }) => ({ name: r.name, available: r.available }));
   } catch {
     return DEFAULT_CATEGORIES.map(name => ({ name, available: true }));
@@ -78,8 +87,9 @@ export async function fetchCategories(): Promise<Category[]> {
 }
 
 export async function saveCategories(categories: Category[]): Promise<void> {
+  if (!_companyId || !_categoriesLoaded) { console.error('[saveCategories] refused: no company context or categories never loaded'); return; }
   try {
-    await supabase.from('categories').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('categories').delete().eq('company_id', _companyId);
     await supabase.from('categories').insert(
       categories.map((c, position) => ({ name: c.name, available: c.available, position, company_id: _companyId }))
     );
@@ -92,7 +102,10 @@ export async function saveCategories(categories: Category[]): Promise<void> {
 
 export async function fetchTrash(): Promise<TrashItem[]> {
   try {
-    await supabase.from('trash_items').delete().lt('deleted_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+    if (_companyId) {
+      await supabase.from('trash_items').delete().eq('company_id', _companyId)
+        .lt('deleted_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+    }
     const { data, error } = await supabase.from('trash_items').select('*').order('deleted_at', { ascending: false });
     if (error || !data) return [];
     return data.map(r => ({ id: r.id, type: r.type, data: r.data, deletedAt: r.deleted_at }));
@@ -128,7 +141,10 @@ export async function fetchOrdersCount(): Promise<number> {
 
 export async function fetchOrders(opts?: { from?: string; to?: string; limit?: number; offset?: number }): Promise<Order[]> {
   try {
-    const { count: totalCount } = await supabase.from('orders').select('*', { count: 'exact', head: true });
+    let countQ = supabase.from('orders').select('*', { count: 'exact', head: true });
+    if (opts?.from) countQ = countQ.gte('created_at', opts.from);
+    if (opts?.to) countQ = countQ.lte('created_at', opts.to);
+    const { count: totalCount } = await countQ;
 
     const PAGE = 1000;
     const offset = opts?.offset ?? 0;
@@ -211,12 +227,23 @@ export async function updateOrderStatus(
   cardAmount?: number,
   tipAmount?: number,
   changeAmount?: number,
-): Promise<void> {
-  const { error } = await supabase
-    .from('orders')
-    .update({ status, cash_amount: cashAmount ?? 0, card_amount: cardAmount ?? 0, tip_amount: tipAmount ?? 0, change_amount: changeAmount ?? 0 })
-    .eq('id', orderId);
-  if (error) console.error('[updateOrderStatus]', error.message);
+): Promise<boolean> {
+  const updates: Record<string, unknown> = { status };
+  // Plain status changes must not touch payment data
+  const hasAmounts = cashAmount !== undefined || cardAmount !== undefined || tipAmount !== undefined || changeAmount !== undefined;
+  if (hasAmounts) {
+    updates.cash_amount = cashAmount ?? 0;
+    updates.card_amount = cardAmount ?? 0;
+    updates.tip_amount = tipAmount ?? 0;
+    updates.change_amount = changeAmount ?? 0;
+  }
+  if (status === 'ödənilib') updates.paid_at = new Date().toISOString();
+  let q = supabase.from('orders').update(updates).eq('id', orderId);
+  // An order can only be paid once — second concurrent payment is a no-op
+  if (status === 'ödənilib') q = q.neq('status', 'ödənilib');
+  const { data, error } = await q.select('id');
+  if (error) { console.error('[updateOrderStatus]', error.message); return false; }
+  return (data?.length ?? 0) > 0;
 }
 
 // ─── Public: company by slug ──────────────────────────────────────────────────
@@ -490,12 +517,20 @@ export async function openShift(openingCash: number, openedBy: string): Promise<
     .from('cash_shifts')
     .insert({ company_id: _companyId, opening_cash: openingCash, opened_by: openedBy })
     .select('*').single();
-  if (error || !data) { console.error('[openShift]', error); return null; }
+  if (error || !data) {
+    // Unique index allows one open shift per company — if someone else just
+    // opened one, join theirs instead of failing
+    const existing = await fetchOpenShift();
+    if (existing) return existing;
+    console.error('[openShift]', error);
+    return null;
+  }
   return mapShift(data);
 }
 
-export async function addShiftMovement(shiftId: string, movements: ShiftMovement[]): Promise<void> {
-  const { error } = await supabase.from('cash_shifts').update({ movements }).eq('id', shiftId);
+export async function addShiftMovement(shiftId: string, movement: ShiftMovement): Promise<void> {
+  // Atomic jsonb append in the DB — concurrent movements can't overwrite each other
+  const { error } = await supabase.rpc('append_shift_movement', { shift_id: shiftId, movement });
   if (error) console.error('[addShiftMovement]', error);
 }
 
@@ -507,7 +542,8 @@ export async function closeShift(shiftId: string, expectedCash: number, countedC
   if (error) console.error('[closeShift]', error);
 }
 
-// Cash/card taken since the shift opened (paid orders only). cash_amount is
+// Cash/card taken since the shift opened (paid orders only, by payment time —
+// an order created yesterday but paid during this shift counts). cash_amount is
 // net of change and includes tips — i.e. exactly what went into the drawer.
 export async function fetchShiftSales(openedAt: string): Promise<{ cash: number; card: number }> {
   try {
@@ -515,7 +551,7 @@ export async function fetchShiftSales(openedAt: string): Promise<{ cash: number;
       .from('orders')
       .select('cash_amount, card_amount')
       .eq('status', 'ödənilib')
-      .gte('created_at', openedAt);
+      .gte('paid_at', openedAt);
     if (error || !data) return { cash: 0, card: 0 };
     return {
       cash: data.reduce((s, o) => s + Number(o.cash_amount ?? 0), 0),

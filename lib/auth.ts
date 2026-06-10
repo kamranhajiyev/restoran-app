@@ -88,10 +88,11 @@ export async function validateSession(session: Session): Promise<boolean> {
     if (session.companyId) {
       const { data: co } = await supabase
         .from('companies')
-        .select('active')
+        .select('active, expires_at')
         .eq('id', session.companyId)
         .single();
       if (!co?.active) return false;
+      if (co.expires_at && new Date(co.expires_at) < new Date()) return false;
     }
 
     return true;

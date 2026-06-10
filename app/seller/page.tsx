@@ -89,6 +89,7 @@ export default function SellerPage() {
   const [activeCategory, setActiveCategory] = useState('');
   const [note, setNote]                     = useState('');
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
+  const [submitting, setSubmitting]         = useState(false);
 
   // payment modal
   const [payingOrder, setPayingOrder] = useState<Order | null>(null);
@@ -215,10 +216,11 @@ export default function SellerPage() {
   }
 
   async function submitOrder() {
-    if (cart.length === 0) return;
+    if (cart.length === 0 || submitting) return;
     if (orderType === 'masa' && !selectedTable) return;
+    setSubmitting(true);
     const order: Order = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       orderNumber: (orders[0]?.orderNumber ?? 0) + 1,
       tableNumber: orderType === 'takeaway' ? 0 : selectedTable!,
       items: cart,
@@ -232,6 +234,7 @@ export default function SellerPage() {
     setMobileCartOpen(false);
     setView('orders');
     await addOrder(order);
+    setSubmitting(false);
     openPayment(order);
   }
 
@@ -252,12 +255,17 @@ export default function SellerPage() {
     const total = orderTotal(payingOrder);
     const { tip, change } = paymentBreakdown(total, cash, card, isTip, tipInput);
     const cashKept = cash - change;
-    setOrders(prev => prev.map(o => o.id === payingOrder.id
-      ? { ...o, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, tipAmount: tip, changeAmount: change }
-      : o));
     setPayingOrder(null);
     setIsTip(false);
-    await updateOrderStatus(payingOrder.id, 'ödənilib', cashKept, card, tip, change);
+    // The DB update is conditional — a no-op if someone else already paid this order
+    const paid = await updateOrderStatus(payingOrder.id, 'ödənilib', cashKept, card, tip, change);
+    if (paid) {
+      setOrders(prev => prev.map(o => o.id === payingOrder.id
+        ? { ...o, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, tipAmount: tip, changeAmount: change }
+        : o));
+    } else {
+      refreshOrders();
+    }
   }
 
   // ── kassa (cash shift) ────────────────────────────────────────────────────
@@ -282,28 +290,33 @@ export default function SellerPage() {
     const raw = parseFloat(movAmount) || 0;
     if (raw <= 0 || !movReason.trim()) return;
     const mv: ShiftMovement = { at: new Date().toISOString(), amount: movOut ? -raw : raw, reason: movReason.trim(), by: sellerName };
-    const movements = [...shift.movements, mv];
-    setShift({ ...shift, movements });
+    setShift({ ...shift, movements: [...shift.movements, mv] });
     setShowMovForm(false); setMovAmount(''); setMovReason('');
-    await addShiftMovement(shift.id, movements);
+    await addShiftMovement(shift.id, mv);
   }
 
   async function handleCloseShift() {
     if (!shift || countedInput === '') return;
     const counted = parseFloat(countedInput) || 0;
     setShiftBusy(true);
-    // re-fetch sales right before closing so the snapshot is exact
-    const sales = await fetchShiftSales(shift.openedAt);
-    const expected = shift.openingCash + sales.cash + movementsTotal(shift);
-    await closeShift(shift.id, expected, counted, sellerName);
+    // re-fetch shift + sales right before closing so movements added elsewhere
+    // and last-second payments are all in the snapshot
+    const fresh = (await fetchOpenShift()) ?? shift;
+    const sales = await fetchShiftSales(fresh.openedAt);
+    const expected = fresh.openingCash + sales.cash + movementsTotal(fresh);
+    await closeShift(fresh.id, expected, counted, sellerName);
     setShiftBusy(false);
     setShift(null); setCountedInput(''); setView('orders');
     setJustClosed(true);
   }
 
   async function handleStatusChange(id: string, status: OrderStatus) {
+    const prevStatus = orders.find(o => o.id === id)?.status;
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
-    await updateOrderStatus(id, status);
+    const ok = await updateOrderStatus(id, status);
+    if (!ok && prevStatus) {
+      setOrders(prev => prev.map(o => o.id === id ? { ...o, status: prevStatus } : o));
+    }
   }
 
   const cartTotal   = cart.reduce((s, ci) => s + ci.menuItem.price * ci.quantity, 0);
@@ -874,7 +887,7 @@ export default function SellerPage() {
                   </div>
                   <button
                     onClick={submitOrder}
-                    disabled={cart.length === 0}
+                    disabled={cart.length === 0 || submitting}
                     className="w-full bg-amber-800 hover:bg-amber-900 disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors"
                   >
                     Sifariş ver
@@ -968,7 +981,7 @@ export default function SellerPage() {
               </div>
               <button
                 onClick={submitOrder}
-                disabled={cart.length === 0}
+                disabled={cart.length === 0 || submitting}
                 className="w-full bg-amber-800 hover:bg-amber-900 disabled:bg-stone-300 text-white font-semibold py-4 rounded-2xl transition-colors text-base active:scale-95"
               >
                 Sifariş ver
