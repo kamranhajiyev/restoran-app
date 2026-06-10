@@ -4,13 +4,16 @@ import { useRouter } from 'next/navigation';
 import {
   PanelLeftClose, PanelLeftOpen, LogOut, X,
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
-  ShoppingCart, ChevronLeft, Minus, Plus,
+  ShoppingCart, ChevronLeft, Minus, Plus, Wallet,
 } from 'lucide-react';
 import { getSession, logout, validateSession } from '@/lib/auth';
-import { fetchMenu, addOrder, fetchOrders, updateOrderStatus, fetchCategories, setCompanyContext, fetchTables } from '@/lib/store';
-import { Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable } from '@/types';
+import {
+  fetchMenu, addOrder, fetchOrders, updateOrderStatus, fetchCategories, setCompanyContext, fetchTables,
+  fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
+} from '@/lib/store';
+import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement } from '@/types';
 
-type View = 'orders' | 'new-order' | 'menu';
+type View = 'orders' | 'new-order' | 'menu' | 'kassa';
 type PayMethod = 'nağd' | 'kart';
 type OrderType = 'masa' | 'takeaway';
 
@@ -94,6 +97,19 @@ export default function SellerPage() {
   const [isTip, setIsTip]             = useState(false);
   const [tipInput, setTipInput]       = useState('');
 
+  // kassa (cash shift)
+  const [shift, setShift]               = useState<CashShift | null>(null);
+  const [shiftChecked, setShiftChecked] = useState(false);
+  const [openCashInput, setOpenCashInput] = useState('');
+  const [shiftBusy, setShiftBusy]       = useState(false);
+  const [shiftSales, setShiftSales]     = useState({ cash: 0, card: 0 });
+  const [countedInput, setCountedInput] = useState('');
+  const [movAmount, setMovAmount]       = useState('');
+  const [movReason, setMovReason]       = useState('');
+  const [movOut, setMovOut]             = useState(true);
+  const [showMovForm, setShowMovForm]   = useState(false);
+  const [justClosed, setJustClosed]     = useState(false);
+
   // modifier / variant modal
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
   const [selectedMods, setSelectedMods] = useState<Record<string, string>>({});
@@ -113,6 +129,7 @@ export default function SellerPage() {
     });
     setCompanyContext(session.companyId);
     setSellerName(session.name);
+    fetchOpenShift().then(s => { setShift(s); setShiftChecked(true); });
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables()]).then(([m, o, c, tb]) => {
       setOnline(true); setMenu(m); setOrders(o); setTables(tb);
       const available = c.filter(cat => cat.available);
@@ -243,6 +260,47 @@ export default function SellerPage() {
     await updateOrderStatus(payingOrder.id, 'ödənilib', cashKept, card, tip, change);
   }
 
+  // ── kassa (cash shift) ────────────────────────────────────────────────────
+
+  const movementsTotal = (s: CashShift) => s.movements.reduce((t, m) => t + m.amount, 0);
+  const expectedCash = shift ? shift.openingCash + shiftSales.cash + movementsTotal(shift) : 0;
+
+  useEffect(() => {
+    if (view === 'kassa' && shift) fetchShiftSales(shift.openedAt).then(setShiftSales);
+  }, [view, shift]);
+
+  async function handleOpenShift() {
+    const cash = parseFloat(openCashInput) || 0;
+    setShiftBusy(true);
+    const s = await openShift(cash, sellerName);
+    setShiftBusy(false);
+    if (s) { setShift(s); setOpenCashInput(''); setJustClosed(false); }
+  }
+
+  async function handleAddMovement() {
+    if (!shift) return;
+    const raw = parseFloat(movAmount) || 0;
+    if (raw <= 0 || !movReason.trim()) return;
+    const mv: ShiftMovement = { at: new Date().toISOString(), amount: movOut ? -raw : raw, reason: movReason.trim(), by: sellerName };
+    const movements = [...shift.movements, mv];
+    setShift({ ...shift, movements });
+    setShowMovForm(false); setMovAmount(''); setMovReason('');
+    await addShiftMovement(shift.id, movements);
+  }
+
+  async function handleCloseShift() {
+    if (!shift || countedInput === '') return;
+    const counted = parseFloat(countedInput) || 0;
+    setShiftBusy(true);
+    // re-fetch sales right before closing so the snapshot is exact
+    const sales = await fetchShiftSales(shift.openedAt);
+    const expected = shift.openingCash + sales.cash + movementsTotal(shift);
+    await closeShift(shift.id, expected, counted, sellerName);
+    setShiftBusy(false);
+    setShift(null); setCountedInput(''); setView('orders');
+    setJustClosed(true);
+  }
+
   async function handleStatusChange(id: string, status: OrderStatus) {
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
     await updateOrderStatus(id, status);
@@ -283,6 +341,7 @@ export default function SellerPage() {
           {[
             { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
             { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
+            { id: 'kassa' as View,     label: 'Kassa',        icon: Wallet },
           ].map(n => {
             const Icon = n.icon;
             const isActive = view === n.id || (n.id === 'new-order' && view === 'menu');
@@ -354,6 +413,56 @@ export default function SellerPage() {
   }
 
   // ── render ────────────────────────────────────────────────────────────────
+
+  // No taking money without an open shift: until one exists, the only screen
+  // a seller can see is the open-shift form.
+  if (!shiftChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <span className="w-8 h-8 border-2 border-gray-200 border-t-amber-800 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!shift) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+        <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm">
+          <div className="text-center mb-6">
+            <div className="w-12 h-12 rounded-2xl bg-amber-800 flex items-center justify-center mx-auto mb-3">
+              <Wallet className="w-6 h-6 text-white" />
+            </div>
+            <h1 className="text-xl font-bold text-gray-800">{justClosed ? 'Növbə bağlandı ✓' : 'Növbəni aç'}</h1>
+            <p className="text-gray-500 text-sm mt-1">
+              {justClosed ? 'Yeni növbə açmaq üçün başlanğıc məbləği daxil et' : 'İşə başlamaq üçün kassadakı məbləği daxil et'}
+            </p>
+          </div>
+          <label className="block text-sm font-medium text-gray-700 mb-1.5">Kassada başlanğıc məbləğ (₼)</label>
+          <input
+            type="number" min="0" step="0.5" placeholder="0.00"
+            value={openCashInput}
+            onChange={e => setOpenCashInput(e.target.value)}
+            className="w-full border border-gray-200 rounded-xl px-4 py-3 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-amber-700 mb-4"
+            autoFocus
+          />
+          <button
+            onClick={handleOpenShift}
+            disabled={shiftBusy || openCashInput === ''}
+            className="w-full bg-amber-800 hover:bg-amber-900 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+          >
+            {shiftBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+            Növbəni aç
+          </button>
+          <button
+            onClick={() => { logout(); router.push('/login'); }}
+            className="w-full mt-3 text-sm text-gray-400 hover:text-red-500 transition-colors flex items-center justify-center gap-1.5"
+          >
+            <LogOut className="w-3.5 h-3.5" /> Çıxış
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -447,6 +556,138 @@ export default function SellerPage() {
                     {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} onPay={() => openPayment(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* ── KASSA ── */}
+          {view === 'kassa' && (
+            <div className="flex-1 p-4 md:p-8 overflow-y-auto">
+              <div className="max-w-md space-y-4">
+                <div>
+                  <h1 className="text-lg font-semibold text-gray-900">Kassa</h1>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    Açılıb: {new Date(shift.openedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })} · {shift.openedBy}
+                  </p>
+                </div>
+
+                {/* Summary */}
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-2.5">
+                  <div className="flex justify-between text-sm text-gray-600">
+                    <span>Başlanğıc məbləğ</span><span className="font-semibold">{shift.openingCash.toFixed(2)} ₼</span>
+                  </div>
+                  <div className="flex justify-between text-sm text-gray-600">
+                    <span>Nağd satış (bəxşiş daxil)</span><span className="font-semibold">{shiftSales.cash.toFixed(2)} ₼</span>
+                  </div>
+                  {movementsTotal(shift) !== 0 && (
+                    <div className="flex justify-between text-sm text-gray-600">
+                      <span>Mədaxil / məxaric</span>
+                      <span className={`font-semibold ${movementsTotal(shift) < 0 ? 'text-red-500' : 'text-green-600'}`}>
+                        {movementsTotal(shift) > 0 ? '+' : ''}{movementsTotal(shift).toFixed(2)} ₼
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center border-t pt-3 font-bold text-lg">
+                    <span>Kassada olmalıdır</span><span className="text-amber-700">{expectedCash.toFixed(2)} ₼</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-400">
+                    <span>💳 Kart (terminal üçün)</span><span>{shiftSales.card.toFixed(2)} ₼</span>
+                  </div>
+                </div>
+
+                {/* Movements */}
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="font-semibold text-gray-800 text-sm">Mədaxil / məxaric</h2>
+                    <button
+                      onClick={() => setShowMovForm(v => !v)}
+                      className="text-xs font-semibold text-amber-800 hover:text-amber-950 px-2.5 py-1 rounded-lg hover:bg-amber-50 transition-colors"
+                    >
+                      {showMovForm ? 'Bağla' : '+ Əlavə et'}
+                    </button>
+                  </div>
+                  {showMovForm && (
+                    <div className="mb-3 p-3 bg-gray-50 rounded-xl space-y-2">
+                      <div className="flex rounded-lg overflow-hidden border border-gray-200">
+                        <button
+                          onClick={() => setMovOut(true)}
+                          className={`flex-1 py-2 text-xs font-semibold transition-colors ${movOut ? 'bg-red-500 text-white' : 'bg-white text-gray-500'}`}
+                        >− Məxaric</button>
+                        <button
+                          onClick={() => setMovOut(false)}
+                          className={`flex-1 py-2 text-xs font-semibold transition-colors ${!movOut ? 'bg-green-500 text-white' : 'bg-white text-gray-500'}`}
+                        >+ Mədaxil</button>
+                      </div>
+                      <input
+                        type="number" min="0" step="0.5" placeholder="Məbləğ (₼)"
+                        value={movAmount} onChange={e => setMovAmount(e.target.value)}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700"
+                      />
+                      <input
+                        type="text" placeholder="Səbəb (məs. su kuryeri)"
+                        value={movReason} onChange={e => setMovReason(e.target.value)}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700"
+                      />
+                      <button
+                        onClick={handleAddMovement}
+                        disabled={!(parseFloat(movAmount) > 0) || !movReason.trim()}
+                        className="w-full bg-amber-800 hover:bg-amber-900 disabled:opacity-40 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+                      >Yadda saxla</button>
+                    </div>
+                  )}
+                  {shift.movements.length === 0
+                    ? <p className="text-xs text-gray-400">Hərəkət yoxdur</p>
+                    : (
+                      <ul className="space-y-1.5">
+                        {shift.movements.map((m, i) => (
+                          <li key={i} className="flex justify-between text-sm">
+                            <span className="text-gray-600 truncate mr-3">
+                              {m.reason}
+                              <span className="text-xs text-gray-400 ml-1.5">
+                                {new Date(m.at).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })} · {m.by}
+                              </span>
+                            </span>
+                            <span className={`font-semibold shrink-0 ${m.amount < 0 ? 'text-red-500' : 'text-green-600'}`}>
+                              {m.amount > 0 ? '+' : ''}{m.amount.toFixed(2)} ₼
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                </div>
+
+                {/* Close shift */}
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                  <h2 className="font-semibold text-gray-800 text-sm mb-3">Növbəni bağla</h2>
+                  <label className="block text-xs font-medium text-gray-500 mb-1.5">Sayılan məbləğ (₼)</label>
+                  <input
+                    type="number" min="0" step="0.5" placeholder="0.00"
+                    value={countedInput} onChange={e => setCountedInput(e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-amber-700 mb-3"
+                  />
+                  {countedInput !== '' && (
+                    <div className={`flex justify-between items-center px-4 py-2.5 rounded-xl font-semibold text-sm mb-3 ${
+                      Math.abs((parseFloat(countedInput) || 0) - expectedCash) < 0.005
+                        ? 'bg-green-50 text-green-700'
+                        : (parseFloat(countedInput) || 0) < expectedCash ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
+                    }`}>
+                      <span>
+                        {Math.abs((parseFloat(countedInput) || 0) - expectedCash) < 0.005
+                          ? 'Dəqiq ✓'
+                          : (parseFloat(countedInput) || 0) < expectedCash ? 'Kəsir' : 'Artıq'}
+                      </span>
+                      <span>{((parseFloat(countedInput) || 0) - expectedCash).toFixed(2)} ₼</span>
+                    </div>
+                  )}
+                  <button
+                    onClick={handleCloseShift}
+                    disabled={shiftBusy || countedInput === ''}
+                    className="w-full bg-gray-900 hover:bg-gray-800 disabled:opacity-40 text-white font-semibold py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"
+                  >
+                    {shiftBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                    Növbəni bağla
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -664,6 +905,7 @@ export default function SellerPage() {
         {[
           { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
           { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
+          { id: 'kassa' as View,     label: 'Kassa',        icon: Wallet },
         ].map(n => {
           const Icon = n.icon;
           const isActive = view === n.id || (n.id === 'new-order' && view === 'menu');

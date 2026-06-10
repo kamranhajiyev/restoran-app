@@ -1,4 +1,4 @@
-import { Category, MenuItem, Order, RestaurantTable, TrashItem } from '@/types';
+import { CashShift, Category, MenuItem, Order, RestaurantTable, ShiftMovement, TrashItem } from '@/types';
 import { supabase } from './supabase';
 
 const DEFAULT_CATEGORIES = ['Çay', 'Soyuq içkilər', 'Şirniyyat', 'Snack', 'Xüsusi'];
@@ -440,4 +440,86 @@ export async function updateOwnerAccount(id: string, name: string, username: str
     return error ?? 'Xəta baş verdi';
   }
   return null;
+}
+
+// ─── Cash shifts (kassa) ──────────────────────────────────────────────────────
+
+function mapShift(r: {
+  id: string; opened_at: string; opened_by: string; opening_cash: number;
+  closed_at: string | null; closed_by: string | null;
+  expected_cash: number | null; counted_cash: number | null; movements: unknown;
+}): CashShift {
+  return {
+    id: r.id,
+    openedAt: r.opened_at,
+    openedBy: r.opened_by,
+    openingCash: Number(r.opening_cash),
+    closedAt: r.closed_at ?? undefined,
+    closedBy: r.closed_by ?? undefined,
+    expectedCash: r.expected_cash !== null ? Number(r.expected_cash) : undefined,
+    countedCash: r.counted_cash !== null ? Number(r.counted_cash) : undefined,
+    movements: Array.isArray(r.movements) ? (r.movements as ShiftMovement[]) : [],
+  };
+}
+
+export async function fetchOpenShift(): Promise<CashShift | null> {
+  try {
+    const { data, error } = await supabase
+      .from('cash_shifts').select('*')
+      .is('closed_at', null)
+      .order('opened_at', { ascending: false })
+      .limit(1).maybeSingle();
+    if (error || !data) return null;
+    return mapShift(data);
+  } catch { return null; }
+}
+
+export async function fetchShifts(limit = 60): Promise<CashShift[]> {
+  try {
+    const { data, error } = await supabase
+      .from('cash_shifts').select('*')
+      .order('opened_at', { ascending: false })
+      .limit(limit);
+    if (error || !data) return [];
+    return data.map(mapShift);
+  } catch { return []; }
+}
+
+export async function openShift(openingCash: number, openedBy: string): Promise<CashShift | null> {
+  const { data, error } = await supabase
+    .from('cash_shifts')
+    .insert({ company_id: _companyId, opening_cash: openingCash, opened_by: openedBy })
+    .select('*').single();
+  if (error || !data) { console.error('[openShift]', error); return null; }
+  return mapShift(data);
+}
+
+export async function addShiftMovement(shiftId: string, movements: ShiftMovement[]): Promise<void> {
+  const { error } = await supabase.from('cash_shifts').update({ movements }).eq('id', shiftId);
+  if (error) console.error('[addShiftMovement]', error);
+}
+
+export async function closeShift(shiftId: string, expectedCash: number, countedCash: number, closedBy: string): Promise<void> {
+  const { error } = await supabase
+    .from('cash_shifts')
+    .update({ closed_at: new Date().toISOString(), closed_by: closedBy, expected_cash: expectedCash, counted_cash: countedCash })
+    .eq('id', shiftId);
+  if (error) console.error('[closeShift]', error);
+}
+
+// Cash/card taken since the shift opened (paid orders only). cash_amount is
+// net of change and includes tips — i.e. exactly what went into the drawer.
+export async function fetchShiftSales(openedAt: string): Promise<{ cash: number; card: number }> {
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('cash_amount, card_amount')
+      .eq('status', 'ödənilib')
+      .gte('created_at', openedAt);
+    if (error || !data) return { cash: 0, card: 0 };
+    return {
+      cash: data.reduce((s, o) => s + Number(o.cash_amount ?? 0), 0),
+      card: data.reduce((s, o) => s + Number(o.card_amount ?? 0), 0),
+    };
+  } catch { return { cash: 0, card: 0 }; }
 }

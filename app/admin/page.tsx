@@ -11,6 +11,7 @@ import {
 import { getSession, logout, validateSession } from '@/lib/auth';
 import {
   fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus,
+  fetchShifts, fetchShiftSales, closeShift,
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash,
   setCompanyContext, fetchAllUsers, createUser, deleteUser, toggleUserActive, updateUser,
@@ -18,7 +19,7 @@ import {
   fetchCompanyProfile, updateCompanyProfile, verifyPassword,
 } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
-import { Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, TrashItem } from '@/types';
+import { CashShift, Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, TrashItem } from '@/types';
 import QRCode from 'react-qr-code';
 
 const COOKING_STATIONS = ['Mətbəx', 'Bar', 'Soyuq mətbəx', 'Pizza', 'Mangal'];
@@ -31,7 +32,7 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
 
-type Tab = 'stats' | 'orders' | 'menu' | 'categories' | 'users' | 'tables';
+type Tab = 'stats' | 'orders' | 'kassa' | 'menu' | 'categories' | 'users' | 'tables';
 
 interface StaffUser {
   id: string;
@@ -74,6 +75,7 @@ function calcMargin(price: string, cost: string): string {
 const NAV_ITEMS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'stats',      label: 'Statistika',    icon: BarChart2 },
   { id: 'orders',     label: 'Sifarişlər',    icon: Receipt },
+  { id: 'kassa',      label: 'Kassa',         icon: Wallet },
   { id: 'menu',       label: 'Menyu',         icon: Coffee },
   { id: 'categories', label: 'Kateqoriyalar', icon: Tag },
   { id: 'users',      label: 'Əməkdaşlar', icon: Users },
@@ -83,6 +85,7 @@ const NAV_ITEMS: { id: Tab; label: string; icon: React.ElementType }[] = [
 const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
   stats:      { title: 'Statistika & Hesabatlar', subtitle: 'Satış analitikası' },
   orders:     { title: 'Sifarişlər',              subtitle: 'Aktiv sifarişlər' },
+  kassa:      { title: 'Kassa',                   subtitle: 'Növbələr və nağd pul nəzarəti' },
   menu:       { title: 'Menyu',                    subtitle: 'Məhsulları əlavə et, düzəlt, sil' },
   categories: { title: 'Kateqoriyalar',           subtitle: 'Menyu kateqoriyaları' },
   users:      { title: 'Əməkdaşlar',              subtitle: 'Satıcıları idarə et' },
@@ -189,6 +192,14 @@ function AdminPageContent() {
   const [deleteItemTarget, setDeleteItemTarget] = useState<string | null>(null);
   const [trash, setTrash] = useState<TrashItem[]>([]);
   const [showTrash, setShowTrash] = useState(false);
+
+  // kassa tab
+  const [shifts, setShifts] = useState<CashShift[]>([]);
+  const [shiftsLoading, setShiftsLoading] = useState(false);
+  const [openShiftSales, setOpenShiftSales] = useState({ cash: 0, card: 0 });
+  const [expandedShiftId, setExpandedShiftId] = useState<string | null>(null);
+  const [adminCountedInput, setAdminCountedInput] = useState('');
+  const [closingShift, setClosingShift] = useState(false);
 
   // orders tab
   const [totalOrders, setTotalOrders] = useState(0);
@@ -335,6 +346,28 @@ function AdminPageContent() {
       setStatsOrders(o);
     }).finally(() => { setDataLoading(false); setStatsLoaded(true); });
   }, [sessionReady, customFrom, customTo]);
+
+  useEffect(() => {
+    if (!sessionReady || tab !== 'kassa') return;
+    setShiftsLoading(true);
+    fetchShifts().then(async s => {
+      setShifts(s);
+      const open = s.find(x => !x.closedAt);
+      if (open) setOpenShiftSales(await fetchShiftSales(open.openedAt));
+    }).finally(() => setShiftsLoading(false));
+  }, [sessionReady, tab]);
+
+  async function handleAdminCloseShift(open: CashShift) {
+    if (adminCountedInput === '') return;
+    setClosingShift(true);
+    try {
+      const sales = await fetchShiftSales(open.openedAt);
+      const expected = open.openingCash + sales.cash + open.movements.reduce((t, m) => t + m.amount, 0);
+      await closeShift(open.id, expected, parseFloat(adminCountedInput) || 0, adminName);
+      setAdminCountedInput('');
+      setShifts(await fetchShifts());
+    } finally { setClosingShift(false); }
+  }
 
   async function refresh() {
     setRefreshing(true);
@@ -1536,6 +1569,155 @@ function AdminPageContent() {
                   Daha çox göstər ({totalOrders - orders.length} qalıb)
                 </button>
               )}
+            </div>
+          )}
+
+          {/* ── KASSA ──────────────────────────────────────────────────── */}
+          {tab === 'kassa' && (
+            <div className="max-w-3xl space-y-4">
+              {shiftsLoading ? (
+                <div className="flex justify-center py-16">
+                  <span className="w-7 h-7 border-2 border-gray-200 border-t-[#92400e] rounded-full animate-spin" />
+                </div>
+              ) : (() => {
+                const open = shifts.find(s => !s.closedAt);
+                const movTotal = (s: CashShift) => s.movements.reduce((t, m) => t + m.amount, 0);
+                const expected = open ? open.openingCash + openShiftSales.cash + movTotal(open) : 0;
+                const closed = shifts.filter(s => s.closedAt);
+                return (
+                  <>
+                    {/* Current shift */}
+                    {open ? (
+                      <div className="bg-white rounded-xl border border-green-200 card p-5 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Açıq növbə
+                          </h3>
+                          <span className="text-xs text-gray-400">
+                            {new Date(open.openedAt).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {open.openedBy}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm text-gray-600">
+                          <span>Başlanğıc məbləğ</span><span className="font-semibold">{open.openingCash.toFixed(2)} ₼</span>
+                        </div>
+                        <div className="flex justify-between text-sm text-gray-600">
+                          <span>Nağd satış (bəxşiş daxil)</span><span className="font-semibold">{openShiftSales.cash.toFixed(2)} ₼</span>
+                        </div>
+                        {movTotal(open) !== 0 && (
+                          <div className="flex justify-between text-sm text-gray-600">
+                            <span>Mədaxil / məxaric</span>
+                            <span className={`font-semibold ${movTotal(open) < 0 ? 'text-red-500' : 'text-green-600'}`}>
+                              {movTotal(open) > 0 ? '+' : ''}{movTotal(open).toFixed(2)} ₼
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center border-t pt-2.5 font-bold">
+                          <span>Kassada olmalıdır</span><span className="text-amber-800 text-lg">{expected.toFixed(2)} ₼</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-gray-400">
+                          <span>💳 Kart (terminal üçün)</span><span>{openShiftSales.card.toFixed(2)} ₼</span>
+                        </div>
+                        {open.movements.length > 0 && (
+                          <ul className="border-t pt-2.5 space-y-1">
+                            {open.movements.map((m, i) => (
+                              <li key={i} className="flex justify-between text-xs text-gray-500">
+                                <span className="truncate mr-3">{m.reason} · {m.by}</span>
+                                <span className={`font-semibold shrink-0 ${m.amount < 0 ? 'text-red-500' : 'text-green-600'}`}>
+                                  {m.amount > 0 ? '+' : ''}{m.amount.toFixed(2)} ₼
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <div className="border-t pt-3 flex gap-2">
+                          <input
+                            type="number" min="0" step="0.5" placeholder="Sayılan məbləğ (₼)"
+                            value={adminCountedInput}
+                            onChange={e => setAdminCountedInput(e.target.value)}
+                            className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700"
+                          />
+                          <button
+                            onClick={() => handleAdminCloseShift(open)}
+                            disabled={closingShift || adminCountedInput === ''}
+                            className="bg-gray-900 hover:bg-gray-800 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors flex items-center gap-2"
+                          >
+                            {closingShift && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                            Bağla
+                          </button>
+                        </div>
+                        {adminCountedInput !== '' && (
+                          <p className={`text-xs font-semibold text-right ${
+                            Math.abs((parseFloat(adminCountedInput) || 0) - expected) < 0.005 ? 'text-green-600'
+                            : (parseFloat(adminCountedInput) || 0) < expected ? 'text-red-500' : 'text-amber-600'
+                          }`}>
+                            Fərq: {((parseFloat(adminCountedInput) || 0) - expected).toFixed(2)} ₼
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="bg-white rounded-xl border border-gray-100 card p-8 text-center">
+                        <Wallet className="w-8 h-8 mx-auto mb-2 text-gray-200" />
+                        <p className="text-sm text-gray-400">Hazırda açıq növbə yoxdur — satıcı işə başlayanda açır</p>
+                      </div>
+                    )}
+
+                    {/* History */}
+                    {closed.length > 0 && (
+                      <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
+                        <div className="px-4 py-3 border-b border-gray-50 text-xs font-semibold text-gray-400 uppercase tracking-wide">Bağlanmış növbələr</div>
+                        {closed.map((s, i) => {
+                          const diff = (s.countedCash ?? 0) - (s.expectedCash ?? 0);
+                          const isExp = expandedShiftId === s.id;
+                          return (
+                            <div key={s.id} className={i < closed.length - 1 ? 'border-b border-gray-50' : ''}>
+                              <button
+                                onClick={() => setExpandedShiftId(isExp ? null : s.id)}
+                                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+                              >
+                                <ChevronDown className={`w-4 h-4 text-gray-300 shrink-0 transition-transform ${isExp ? 'rotate-180' : ''}`} />
+                                <span className="text-sm text-gray-700 flex-1 truncate">
+                                  {new Date(s.openedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                                  <span className="text-xs text-gray-400 ml-2">
+                                    {new Date(s.openedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })}
+                                    –{s.closedAt ? new Date(s.closedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' }) : ''}
+                                  </span>
+                                </span>
+                                <span className="text-sm font-semibold text-gray-700 shrink-0">{(s.countedCash ?? 0).toFixed(2)} ₼</span>
+                                <span className={`text-xs px-2 py-0.5 rounded-full font-semibold shrink-0 w-20 text-center ${
+                                  Math.abs(diff) < 0.005 ? 'bg-green-50 text-green-600'
+                                  : diff < 0 ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
+                                }`}>
+                                  {Math.abs(diff) < 0.005 ? 'Dəqiq ✓' : `${diff > 0 ? '+' : ''}${diff.toFixed(2)} ₼`}
+                                </span>
+                              </button>
+                              {isExp && (
+                                <div className="px-11 pb-4 text-sm text-gray-600 space-y-1.5 bg-gray-50 pt-3 border-t border-gray-100">
+                                  <div className="flex justify-between"><span>Açdı / bağladı</span><span>{s.openedBy} / {s.closedBy}</span></div>
+                                  <div className="flex justify-between"><span>Başlanğıc</span><span>{s.openingCash.toFixed(2)} ₼</span></div>
+                                  <div className="flex justify-between"><span>Olmalı idi</span><span>{(s.expectedCash ?? 0).toFixed(2)} ₼</span></div>
+                                  <div className="flex justify-between"><span>Sayıldı</span><span>{(s.countedCash ?? 0).toFixed(2)} ₼</span></div>
+                                  {s.movements.length > 0 && (
+                                    <ul className="pt-1.5 border-t border-gray-200 space-y-1">
+                                      {s.movements.map((m, j) => (
+                                        <li key={j} className="flex justify-between text-xs text-gray-500">
+                                          <span className="truncate mr-3">{m.reason} · {m.by}</span>
+                                          <span className={m.amount < 0 ? 'text-red-500' : 'text-green-600'}>
+                                            {m.amount > 0 ? '+' : ''}{m.amount.toFixed(2)} ₼
+                                          </span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           )}
 

@@ -50,6 +50,25 @@ export interface OrderItem {
 
 export type OrderStatus = 'gözləyir' | 'hazırlanır' | 'hazırdır' | 'ödənilib';
 
+export interface ShiftMovement {
+  at: string;
+  amount: number; // positive = into drawer, negative = out
+  reason: string;
+  by: string;
+}
+
+export interface CashShift {
+  id: string;
+  openedAt: string;
+  openedBy: string;
+  openingCash: number;
+  closedAt?: string;
+  closedBy?: string;
+  expectedCash?: number; // snapshot at close
+  countedCash?: number;
+  movements: ShiftMovement[];
+}
+
 export interface Order {
   id: string;
   orderNumber: number;
