@@ -291,6 +291,12 @@ export async function toggleCompanyActive(id: string, active: boolean): Promise<
   } catch (e) { console.error('[toggleCompanyActive]', e); }
 }
 
+export async function updateCompanyName(id: string, name: string): Promise<void> {
+  try {
+    await supabase.from('companies').update({ name }).eq('id', id);
+  } catch (e) { console.error('[updateCompanyName]', e); }
+}
+
 // ─── Superadmin: Users ────────────────────────────────────────────────────────
 
 export async function fetchAllUsers(): Promise<{ id: string; username: string; name: string; role: string; companyId: string | null; active: boolean; createdAt: string }[]> {

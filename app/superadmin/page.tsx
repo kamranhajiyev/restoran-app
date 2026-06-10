@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
 import {
-  fetchCompanies, createCompany, deleteCompany, toggleCompanyActive,
+  fetchCompanies, createCompany, deleteCompany, toggleCompanyActive, updateCompanyName,
   fetchAllUsers, createUser, deleteUser, toggleUserActive,
 } from '@/lib/store';
 
@@ -49,6 +49,10 @@ export default function SuperadminPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [users, setUsers]         = useState<SAUser[]>([]);
   const [loading, setLoading]     = useState(true);
+
+  // inline name edit
+  const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
+  const [editingCompanyName, setEditingCompanyName] = useState('');
 
   // company form
   const [showCompanyForm, setShowCompanyForm] = useState(false);
@@ -179,7 +183,34 @@ export default function SuperadminPage() {
                       <Building2 className="w-4 h-4 text-blue-600" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-gray-800">{c.name}</p>
+                      {editingCompanyId === c.id ? (
+                        <input
+                          autoFocus
+                          value={editingCompanyName}
+                          onChange={e => setEditingCompanyName(e.target.value)}
+                          onBlur={async () => {
+                            const trimmed = editingCompanyName.trim();
+                            if (trimmed && trimmed !== c.name) {
+                              await updateCompanyName(c.id, trimmed);
+                              loadData();
+                            }
+                            setEditingCompanyId(null);
+                          }}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') e.currentTarget.blur();
+                            if (e.key === 'Escape') setEditingCompanyId(null);
+                          }}
+                          className="font-semibold text-gray-800 text-sm border-b border-purple-400 focus:outline-none bg-transparent w-full"
+                        />
+                      ) : (
+                        <p
+                          className="font-semibold text-gray-800 cursor-pointer hover:text-purple-700 transition-colors"
+                          onClick={() => { setEditingCompanyId(c.id); setEditingCompanyName(c.name); }}
+                          title="Adı dəyişmək üçün klikləyin"
+                        >
+                          {c.name}
+                        </p>
+                      )}
                       <p className="text-xs text-gray-400">/{c.slug} · {c.userCount} istifadəçi</p>
                     </div>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${c.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>

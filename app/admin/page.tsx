@@ -890,7 +890,12 @@ function AdminPageContent() {
           <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
             {adminName[0]?.toUpperCase()}
           </div>
-          <span className="text-sm font-medium text-gray-700 hidden sm:inline">{adminName}</span>
+          <div className="hidden sm:flex flex-col leading-tight">
+            <span className="text-sm font-medium text-gray-700">{adminName}</span>
+            {getSession()?.companyName && (
+              <span className="text-xs text-gray-400">{getSession()?.companyName}</span>
+            )}
+          </div>
         </div>
 
         <button

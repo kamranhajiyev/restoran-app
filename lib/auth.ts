@@ -8,6 +8,7 @@ export interface Session {
   name: string;
   role: Role;
   companyId: string | null;
+  companyName: string | null;
 }
 
 export async function login(username: string, password: string): Promise<Session | null> {
@@ -20,11 +21,17 @@ export async function login(username: string, password: string): Promise<Session
       .eq('active', true)
       .single();
     if (error || !data) return null;
+    let companyName: string | null = null;
+    if (data.company_id) {
+      const { data: co } = await supabase.from('companies').select('name').eq('id', data.company_id).single();
+      companyName = co?.name ?? null;
+    }
     const session: Session = {
       id: data.id,
       name: data.name,
       role: data.role as Role,
       companyId: data.company_id ?? null,
+      companyName,
     };
     localStorage.setItem(AUTH_KEY, JSON.stringify(session));
     return session;
