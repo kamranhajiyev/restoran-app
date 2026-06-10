@@ -304,6 +304,37 @@ export async function deleteCompany(id: string): Promise<void> {
   } catch (e) { console.error('[deleteCompany]', e); }
 }
 
+export async function fetchCompanyTrash(): Promise<TrashItem[]> {
+  try {
+    await supabase.from('trash_items').delete().eq('type', 'company').lt('deleted_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+    const { data, error } = await supabase.from('trash_items').select('*').eq('type', 'company').order('deleted_at', { ascending: false });
+    if (error || !data) return [];
+    return data.map(r => ({ id: r.id, type: r.type, data: r.data, deletedAt: r.deleted_at }));
+  } catch { return []; }
+}
+
+export async function trashCompany(company: { id: string; name: string; slug: string; active: boolean; expiresAt: string | null; ownerName: string | null; address: string | null; phone: string | null }): Promise<void> {
+  try {
+    await supabase.from('trash_items').insert({ type: 'company', data: company, company_id: null });
+    await supabase.from('companies').delete().eq('id', company.id);
+  } catch (e) { console.error('[trashCompany]', e); }
+}
+
+export async function restoreCompany(item: TrashItem): Promise<void> {
+  try {
+    const c = item.data as Record<string, unknown>;
+    await supabase.from('companies').insert({ id: c.id, name: c.name, slug: c.slug, active: c.active, expires_at: c.expiresAt ?? null, owner_name: c.ownerName ?? null, address: c.address ?? null, phone: c.phone ?? null });
+    await supabase.from('trash_items').delete().eq('id', item.id);
+  } catch (e) { console.error('[restoreCompany]', e); }
+}
+
+export async function permanentlyDeleteCompany(trashId: string, companyId: string): Promise<void> {
+  try {
+    await supabase.from('users').delete().eq('company_id', companyId);
+    await supabase.from('trash_items').delete().eq('id', trashId);
+  } catch (e) { console.error('[permanentlyDeleteCompany]', e); }
+}
+
 export async function toggleCompanyActive(id: string, active: boolean): Promise<void> {
   try {
     await supabase.from('companies').update({ active }).eq('id', id);
@@ -375,4 +406,14 @@ export async function updateUser(id: string, name: string, password: string): Pr
   try {
     await supabase.from('users').update({ name, password }).eq('id', id);
   } catch (e) { console.error('[updateUser]', e); }
+}
+
+export async function updateOwnerAccount(id: string, name: string, username: string, password?: string): Promise<string | null> {
+  try {
+    const updates: Record<string, unknown> = { name, username };
+    if (password) updates.password = password;
+    const { error } = await supabase.from('users').update(updates).eq('id', id);
+    if (error) return error.message;
+    return null;
+  } catch (e) { console.error('[updateOwnerAccount]', e); return 'Xəta baş verdi'; }
 }
