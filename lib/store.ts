@@ -158,6 +158,7 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
       cashAmount: o.cash_amount ? Number(o.cash_amount) : undefined,
       cardAmount: o.card_amount ? Number(o.card_amount) : undefined,
       tipAmount: o.tip_amount ? Number(o.tip_amount) : undefined,
+      changeAmount: o.change_amount ? Number(o.change_amount) : undefined,
       items: (o.order_items ?? []).map((oi: { menu_item_id: string; menu_item_name: string; menu_item_price: number; quantity: number; modifiers?: string }) => ({
         menuItem: {
           id: oi.menu_item_id,
@@ -209,10 +210,11 @@ export async function updateOrderStatus(
   cashAmount?: number,
   cardAmount?: number,
   tipAmount?: number,
+  changeAmount?: number,
 ): Promise<void> {
   const { error } = await supabase
     .from('orders')
-    .update({ status, cash_amount: cashAmount ?? 0, card_amount: cardAmount ?? 0, tip_amount: tipAmount ?? 0 })
+    .update({ status, cash_amount: cashAmount ?? 0, card_amount: cardAmount ?? 0, tip_amount: tipAmount ?? 0, change_amount: changeAmount ?? 0 })
     .eq('id', orderId);
   if (error) console.error('[updateOrderStatus]', error.message);
 }

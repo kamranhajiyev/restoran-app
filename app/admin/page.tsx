@@ -786,8 +786,22 @@ function AdminPageContent() {
   const chartMarginPct = chartRevenue > 0 ? (chartProfit / chartRevenue) * 100 : 0;
   const chartAvg = chartPaid.length > 0 ? chartRevenue / chartPaid.length : 0;
 
-  const cashRev = chartPaid.reduce((s, o) => s + Math.max(0, (o.cashAmount ?? 0) - (o.tipAmount ?? 0)), 0);
-  const cardRev = chartPaid.reduce((s, o) => s + (o.cardAmount ?? 0), 0);
+  // Per-method revenue counts only the goods price: tips are excluded (shown
+  // separately) and excess beyond the order total is attributed card-first,
+  // since card overpayment is always a tip. Orders saved before payment
+  // tracking (no amounts) contribute nothing, as before.
+  const methodRev = chartPaid.reduce((acc, o) => {
+    const t = orderTotal(o);
+    const cashPaid = o.cashAmount ?? 0;
+    const cardPaid = o.cardAmount ?? 0;
+    if (cashPaid + cardPaid === 0) return acc;
+    const cardPart = Math.min(cardPaid, t);
+    acc.card += cardPart;
+    acc.cash += Math.min(cashPaid, t - cardPart);
+    return acc;
+  }, { cash: 0, card: 0 });
+  const cashRev = methodRev.cash;
+  const cardRev = methodRev.card;
   const totalPayRev = cashRev + cardRev;
   const totalTips = chartPaid.reduce((s, o) => s + (o.tipAmount ?? 0), 0);
 
@@ -1495,6 +1509,11 @@ function AdminPageContent() {
                               {(order.tipAmount ?? 0) > 0 && (
                                 <span className="text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
                                   ⭐ bəxşiş {order.tipAmount!.toFixed(2)} ₼
+                                </span>
+                              )}
+                              {(order.changeAmount ?? 0) > 0 && (
+                                <span className="text-xs text-gray-400">
+                                  💸 {((order.cashAmount ?? 0) + order.changeAmount!).toFixed(2)} alındı · {order.changeAmount!.toFixed(2)} qaytarıldı
                                 </span>
                               )}
                             </div>

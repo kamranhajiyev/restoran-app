@@ -50,6 +50,20 @@ function orderTotal(order: Order): number {
   return order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
 }
 
+// Overpayment splits into tip + change. Change can only come from cash —
+// a card terminal can't give money back, so card excess is always tip.
+function paymentBreakdown(total: number, cash: number, card: number, isTip: boolean, tipInput: string) {
+  const overpay = Math.max(0, cash + card - total);
+  const maxChange = Math.min(overpay, cash);
+  const forcedTip = overpay - maxChange;
+  const tip = maxChange === 0
+    ? overpay
+    : isTip
+      ? Math.min(overpay, Math.max(forcedTip, parseFloat(tipInput) || 0))
+      : forcedTip;
+  return { overpay, maxChange, forcedTip, tip, change: overpay - tip };
+}
+
 function tableHasActive(n: number, orders: Order[]): boolean {
   return orders.some(o => o.tableNumber === n && o.status !== 'ödənilib');
 }
@@ -78,6 +92,7 @@ export default function SellerPage() {
   const [cashInput, setCashInput]     = useState('');
   const [cardInput, setCardInput]     = useState('');
   const [isTip, setIsTip]             = useState(false);
+  const [tipInput, setTipInput]       = useState('');
 
   // modifier / variant modal
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
@@ -200,10 +215,17 @@ export default function SellerPage() {
     setMobileCartOpen(false);
     setView('orders');
     await addOrder(order);
+    openPayment(order);
+  }
+
+  // Pre-fill cash with the total — the common case is exact cash payment;
+  // the field selects on focus so a different amount can be typed straight over it.
+  function openPayment(order: Order) {
     setPayingOrder(order);
-    setCashInput('');
+    setCashInput(orderTotal(order).toFixed(2));
     setCardInput('');
     setIsTip(false);
+    setTipInput('');
   }
 
   async function confirmPayment() {
@@ -211,11 +233,14 @@ export default function SellerPage() {
     const cash = parseFloat(cashInput) || 0;
     const card = parseFloat(cardInput) || 0;
     const total = orderTotal(payingOrder);
-    const tip = isTip ? Math.max(0, (cash + card) - total) : 0;
-    setOrders(prev => prev.map(o => o.id === payingOrder.id ? { ...o, status: 'ödənilib', cashAmount: cash, cardAmount: card, tipAmount: tip } : o));
+    const { tip, change } = paymentBreakdown(total, cash, card, isTip, tipInput);
+    const cashKept = cash - change;
+    setOrders(prev => prev.map(o => o.id === payingOrder.id
+      ? { ...o, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, tipAmount: tip, changeAmount: change }
+      : o));
     setPayingOrder(null);
     setIsTip(false);
-    await updateOrderStatus(payingOrder.id, 'ödənilib', cash, card, tip);
+    await updateOrderStatus(payingOrder.id, 'ödənilib', cashKept, card, tip, change);
   }
 
   async function handleStatusChange(id: string, status: OrderStatus) {
@@ -413,13 +438,13 @@ export default function SellerPage() {
                 {prevOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
-                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} onPay={() => setPayingOrder(o)} onStatusChange={handleStatusChange} />)}
+                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} onPay={() => openPayment(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
-                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} onPay={() => setPayingOrder(o)} onStatusChange={handleStatusChange} />)}
+                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} onPay={() => openPayment(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
               </div>
@@ -717,8 +742,9 @@ export default function SellerPage() {
         const cash = parseFloat(cashInput) || 0;
         const card = parseFloat(cardInput) || 0;
         const paid = cash + card;
-        const change = paid - total;
+        const missing = total - paid;
         const canPay = paid >= total;
+        const { overpay, maxChange, forcedTip, tip, change } = paymentBreakdown(total, cash, card, isTip, tipInput);
         return (
           <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
             <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
@@ -748,6 +774,14 @@ export default function SellerPage() {
                     type="number" min="0" step="0.5" placeholder="0.00"
                     value={cashInput}
                     onChange={e => setCashInput(e.target.value)}
+                    onFocus={e => {
+                      const el = e.target;
+                      if (!(parseFloat(cashInput) || 0) && (parseFloat(cardInput) || 0) === total) {
+                        setCardInput('');
+                        setCashInput(total.toFixed(2));
+                      }
+                      requestAnimationFrame(() => el.select());
+                    }}
                     className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700 text-center"
                     autoFocus
                   />
@@ -758,35 +792,75 @@ export default function SellerPage() {
                     type="number" min="0" step="0.5" placeholder="0.00"
                     value={cardInput}
                     onChange={e => setCardInput(e.target.value)}
+                    onFocus={e => {
+                      const el = e.target;
+                      if (!(parseFloat(cardInput) || 0) && (parseFloat(cashInput) || 0) === total) {
+                        setCashInput('');
+                        setCardInput(total.toFixed(2));
+                      }
+                      requestAnimationFrame(() => el.select());
+                    }}
                     className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700 text-center"
                   />
                 </div>
               </div>
-                      {paid > 0 && change < 0 && (
+              {paid > 0 && missing > 0 && (
                 <div className="flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base mb-4 bg-red-50 text-red-600">
                   <span>Çatışmır</span>
-                  <span>{Math.abs(change).toFixed(2)} ₼</span>
+                  <span>{missing.toFixed(2)} ₼</span>
                 </div>
               )}
-              {paid > 0 && change > 0 && (
-                <div className="mb-4 rounded-xl overflow-hidden border border-gray-200">
-                  <div className="flex">
-                    <button
-                      onClick={() => setIsTip(false)}
-                      className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${!isTip ? 'bg-green-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
-                    >
-                      💸 Qaytarılacaq {change.toFixed(2)} ₼
-                    </button>
-                    <button
-                      onClick={() => setIsTip(true)}
-                      className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${isTip ? 'bg-amber-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
-                    >
-                      ⭐ Bəxşiş {change.toFixed(2)} ₼
-                    </button>
-                  </div>
+              {paid > 0 && overpay > 0 && (
+                <div className="mb-4 space-y-2">
+                  {maxChange > 0 && (
+                    <div className="rounded-xl overflow-hidden border border-gray-200 flex">
+                      <button
+                        onClick={() => setIsTip(false)}
+                        className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${!isTip ? 'bg-green-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                      >
+                        💸 Qaytar {maxChange.toFixed(2)} ₼
+                      </button>
+                      <button
+                        onClick={() => { setIsTip(true); setTipInput(overpay.toFixed(2)); }}
+                        className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${isTip ? 'bg-amber-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                      >
+                        ⭐ Bəxşiş
+                      </button>
+                    </div>
+                  )}
+                  {maxChange === 0 ? (
+                    <div className="flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base bg-amber-50 text-amber-700">
+                      <span>⭐ Bəxşiş (kartla)</span>
+                      <span>{overpay.toFixed(2)} ₼</span>
+                    </div>
+                  ) : isTip ? (
+                    <>
+                      <div className="flex justify-between items-center gap-3 px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200">
+                        <span className="text-sm font-semibold text-amber-700">⭐ Bəxşiş (₼)</span>
+                        <input
+                          type="number" min={forcedTip} max={overpay} step="0.1"
+                          value={tipInput}
+                          onChange={e => setTipInput(e.target.value)}
+                          onFocus={e => e.target.select()}
+                          className="w-24 border border-amber-200 rounded-lg px-2 py-1.5 text-base font-semibold text-amber-800 text-right bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                      </div>
+                      {change > 0 && (
+                        <div className="flex justify-between items-center px-4 py-2.5 rounded-xl font-semibold text-sm bg-green-50 text-green-700">
+                          <span>💸 Qaytarılacaq</span>
+                          <span>{change.toFixed(2)} ₼</span>
+                        </div>
+                      )}
+                    </>
+                  ) : forcedTip > 0 ? (
+                    <div className="flex justify-between items-center px-4 py-2.5 rounded-xl font-semibold text-sm bg-amber-50 text-amber-700">
+                      <span>⭐ Bəxşiş (kartla)</span>
+                      <span>{forcedTip.toFixed(2)} ₼</span>
+                    </div>
+                  ) : null}
                 </div>
               )}
-              {paid > 0 && change === 0 && (
+              {paid > 0 && missing === 0 && overpay === 0 && (
                 <div className="flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base mb-4 bg-green-50 text-green-700">
                   <span>Dəqiq ödəniş</span>
                   <span>✓</span>

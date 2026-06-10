@@ -59,7 +59,8 @@ export interface Order {
   createdAt: string;
   sellerName: string;
   note?: string;
-  cashAmount?: number;
+  cashAmount?: number;   // money kept in the till (net of change given back)
   cardAmount?: number;
   tipAmount?: number;
+  changeAmount?: number; // returned to the customer — display only, never revenue
 }
