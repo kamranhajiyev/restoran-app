@@ -191,10 +191,11 @@ function AdminPageContent() {
   const [tCapacity, setTCapacity] = useState('4');
   const [tSaving, setTSaving] = useState(false);
   const [qrTable, setQrTable] = useState<RestaurantTable | null>(null);
-  const [tableView, setTableView] = useState<'list' | 'floor'>('floor');
+  const [tableView, setTableView] = useState<'list' | 'floor'>(() => typeof window !== 'undefined' && window.innerWidth < 768 ? 'list' : 'floor');
   const [tShape, setTShape] = useState<'rect' | 'round' | 'rect-v'>('rect');
   const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
   const [dragging, setDragging] = useState<{ id: number; ox: number; oy: number; mx: number; my: number } | null>(null);
+  const [tableSavedToast, setTableSavedToast] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
 
   // users tab
@@ -402,24 +403,34 @@ function AdminPageContent() {
     e.preventDefault();
     e.stopPropagation();
     setSelectedTableId(t.id);
-    setDragging({ id: t.id, ox: t.x ?? 20, oy: t.y ?? 20, mx: e.clientX, my: e.clientY });
+    const dragState = { id: t.id, ox: t.x ?? 20, oy: t.y ?? 20, mx: e.clientX, my: e.clientY };
+    setDragging(dragState);
+
+    function onMove(ev: MouseEvent) {
+      if (!canvasRef.current) return;
+      const rect = canvasRef.current.getBoundingClientRect();
+      const w = t.w ?? 100; const h = t.h ?? 70;
+      const newX = Math.max(0, Math.min(rect.width - w, dragState.ox + ev.clientX - dragState.mx));
+      const newY = Math.max(0, Math.min(rect.height - h, dragState.oy + ev.clientY - dragState.my));
+      setTables(prev => prev.map(x => x.id === dragState.id ? { ...x, x: newX, y: newY } : x));
+    }
+    function onUp() {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      setDragging(null);
+      setTables(prev => {
+        const updated = prev.find(x => x.id === dragState.id);
+        if (updated) updateTableLayout(updated.id, updated.x ?? 20, updated.y ?? 20, updated.w ?? 100, updated.h ?? 70, updated.shape ?? 'rect');
+        return prev;
+      });
+      setTableSavedToast(true);
+      setTimeout(() => setTableSavedToast(false), 2000);
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   }
-  function handleCanvasMouseMove(e: React.MouseEvent) {
-    if (!dragging || !canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const t = tables.find(x => x.id === dragging.id);
-    if (!t) return;
-    const w = t.w ?? 100; const h = t.h ?? 70;
-    const newX = Math.max(0, Math.min(rect.width - w, dragging.ox + e.clientX - dragging.mx));
-    const newY = Math.max(0, Math.min(rect.height - h, dragging.oy + e.clientY - dragging.my));
-    setTables(prev => prev.map(x => x.id === dragging.id ? { ...x, x: newX, y: newY } : x));
-  }
-  function handleCanvasMouseUp() {
-    if (!dragging) return;
-    const t = tables.find(x => x.id === dragging.id);
-    if (t) updateTableLayout(t.id, t.x ?? 20, t.y ?? 20, t.w ?? 100, t.h ?? 70, t.shape ?? 'rect');
-    setDragging(null);
-  }
+  function handleCanvasMouseMove() {}
+  function handleCanvasMouseUp() {}
 
   // ── item form renderer ────────────────────────────────────────────────────
   function renderItemForm(className: string) {
@@ -1510,14 +1521,14 @@ function AdminPageContent() {
                     <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-green-400 inline-block" />Boş</span>
                     <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-red-400 inline-block" />Dolu</span>
                     <span className="ml-auto text-gray-300">Masaları sürükləyərək yerini dəyiş</span>
+                    {tableSavedToast && (
+                      <span className="ml-2 text-xs text-green-600 font-medium transition-opacity">✓ Saxlanıldı</span>
+                    )}
                   </div>
                   <div
                     ref={canvasRef}
                     className="relative bg-[#f9f9f7] select-none"
                     style={{ height: 480, backgroundImage: 'radial-gradient(circle, #e5e7eb 1px, transparent 1px)', backgroundSize: '24px 24px' }}
-                    onMouseMove={handleCanvasMouseMove}
-                    onMouseUp={handleCanvasMouseUp}
-                    onMouseLeave={handleCanvasMouseUp}
                     onClick={() => setSelectedTableId(null)}
                   >
                     {tables.map((t, idx) => {
