@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { login } from '@/lib/auth';
-import { Coffee } from 'lucide-react';
+import { Store } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -33,11 +33,10 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="bg-white rounded-2xl shadow-lg p-10 w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="w-12 h-12 rounded-2xl bg-amber-800 flex items-center justify-center mx-auto mb-3">
-            <Coffee className="w-6 h-6 text-white" />
+          <div className="w-12 h-12 rounded-2xl bg-gray-900 flex items-center justify-center mx-auto mb-3">
+            <Store className="w-6 h-6 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-800">Restoran</h1>
-          <p className="text-gray-500 text-sm mt-1">Sistemə daxil olun</p>
+          <h1 className="text-2xl font-bold text-gray-800">Sistemə daxil olun</h1>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -47,7 +46,7 @@ export default function LoginPage() {
               type="text"
               value={username}
               onChange={e => setUsername(e.target.value)}
-              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
               autoFocus
               required
             />
@@ -58,7 +57,7 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
-              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-400"
               required
             />
           </div>
@@ -84,7 +83,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-amber-800 hover:bg-amber-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl transition-colors"
+            className="w-full bg-gray-900 hover:bg-gray-800 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl transition-colors"
           >
             {loading ? 'Yüklənir...' : 'Daxil ol'}
           </button>

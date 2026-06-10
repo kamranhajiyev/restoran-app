@@ -268,7 +268,7 @@ export default function SellerPage() {
               <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
                 <Coffee className="w-4 h-4 text-white" />
               </div>
-              <span className="font-semibold text-gray-800 text-sm">Satıcı Paneli</span>
+              <span className="font-semibold text-gray-800 text-sm truncate max-w-[140px]">{getSession()?.companyName || 'Satıcı Paneli'}</span>
             </div>
           )}
           <button
@@ -364,7 +364,7 @@ export default function SellerPage() {
           <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
             <Coffee className="w-4 h-4 text-white" />
           </div>
-          <span className="font-semibold text-gray-800 text-sm md:hidden">Restoran</span>
+          <span className="font-semibold text-gray-800 text-sm md:hidden truncate max-w-[160px]">{getSession()?.companyName || 'Kafe'}</span>
         </div>
         <div className="flex-1" />
         <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-gray-100 rounded-xl">
