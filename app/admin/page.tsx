@@ -45,6 +45,9 @@ function emptyForm(cat: string) {
   return { name: '', price: '', costPrice: '', category: cat, image: '', cookingStation: '', hasVariants: false, variants: [] as FormVariant[] };
 }
 
+const AZ_MON_SHORT = ['Yan','Fev','Mar','Apr','May','İyn','İyl','Avq','Sen','Okt','Noy','Dek'];
+const AZ_MON_LONG  = ['Yanvar','Fevral','Mart','Aprel','May','İyun','İyul','Avqust','Sentyabr','Oktyabr','Noyabr','Dekabr'];
+
 function orderTotal(order: Order) {
   return order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
 }
@@ -73,7 +76,7 @@ const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
   tables:     { title: 'Masalar',                 subtitle: 'Restoran masalarını idarə et' },
 };
 
-function LineChartSvg({ data }: { data: { label: string; rev: number }[] }) {
+function LineChartSvg({ data }: { data: { label: string; fullLabel: string; rev: number }[] }) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const W = 800, H = 160, PL = 44, PR = 12, PT = 14, PB = 26;
   const plotW = W - PL - PR, plotH = H - PT - PB;
@@ -98,7 +101,7 @@ function LineChartSvg({ data }: { data: { label: string; rev: number }[] }) {
   const hovered = hoveredIdx !== null ? data[hoveredIdx] : null;
   const hx = hoveredIdx !== null ? pts[hoveredIdx][0] : 0;
   const hy = hoveredIdx !== null ? pts[hoveredIdx][1] : 0;
-  const tooltipW = 110, tooltipH = 36, tooltipPad = 6;
+  const tooltipW = 130, tooltipH = 36, tooltipPad = 6;
   const tooltipX = Math.min(Math.max(hx - tooltipW / 2, PL), W - PR - tooltipW);
   const tooltipY = Math.max(hy - tooltipH - tooltipPad, PT);
 
@@ -135,7 +138,7 @@ function LineChartSvg({ data }: { data: { label: string; rev: number }[] }) {
         <g>
           <line x1={hx} y1={PT} x2={hx} y2={PT + plotH} stroke="#92400e" strokeWidth="1" strokeDasharray="3 3" opacity="0.4" />
           <rect x={tooltipX} y={tooltipY} width={tooltipW} height={tooltipH} rx="5" fill="white" stroke="#e5e7eb" strokeWidth="1" filter="drop-shadow(0 1px 4px rgba(0,0,0,0.10))" />
-          <text x={tooltipX + tooltipW / 2} y={tooltipY + 13} textAnchor="middle" fontSize="10" fill="#6b7280">{hovered.label}</text>
+          <text x={tooltipX + tooltipW / 2} y={tooltipY + 13} textAnchor="middle" fontSize="10" fill="#6b7280">{hovered.fullLabel}</text>
           <text x={tooltipX + tooltipW / 2} y={tooltipY + 28} textAnchor="middle" fontSize="12" fontWeight="700" fill="#92400e">₼ {hovered.rev.toFixed(2)}</text>
         </g>
       )}
@@ -547,7 +550,14 @@ function AdminPageContent() {
     ? new Date(new Date(customTo).setHours(23, 59, 59, 999))
     : new Date();
 
-  const chartData: { label: string; rev: number }[] = (() => {
+  const chartData: { label: string; fullLabel: string; rev: number }[] = (() => {
+    const dayFull = (d: Date) => `${d.getDate()} ${AZ_MON_LONG[d.getMonth()]} ${d.getFullYear()}`;
+    const weekFull = (wS: Date, wE: Date) => {
+      const eDay = new Date(wE); eDay.setDate(eDay.getDate() - 1);
+      return `${wS.getDate()} ${AZ_MON_SHORT[wS.getMonth()]} – ${eDay.getDate()} ${AZ_MON_SHORT[eDay.getMonth()]}`;
+    };
+    const monthFull = (m: Date) => `${AZ_MON_LONG[m.getMonth()]} ${m.getFullYear()}`;
+
     if (isCustom) {
       const fromDate = new Date(customFrom);
       const toDate = new Date(customTo);
@@ -558,7 +568,8 @@ function AdminPageContent() {
           const d = new Date(fromDate); d.setDate(d.getDate() + i);
           const ds = d.toDateString();
           return {
-            label: i === 0 || d.getDate() === 1 ? `${d.getDate()} ${d.toLocaleDateString('az-AZ', { month: 'short' })}` : String(d.getDate()),
+            label: i === 0 || d.getDate() === 1 ? `${d.getDate()} ${AZ_MON_SHORT[d.getMonth()]}` : String(d.getDate()),
+            fullLabel: dayFull(d),
             rev: paidOrders.filter(o => new Date(o.createdAt).toDateString() === ds).reduce((s, o) => s + orderTotal(o), 0),
           };
         });
@@ -569,7 +580,8 @@ function AdminPageContent() {
           const wS = new Date(fromDate); wS.setDate(wS.getDate() + i * 7);
           const wE = new Date(wS); wE.setDate(wE.getDate() + 7);
           return {
-            label: `${wS.getDate()} ${wS.toLocaleDateString('az-AZ', { month: 'short' })}`,
+            label: `${wS.getDate()} ${AZ_MON_SHORT[wS.getMonth()]}`,
+            fullLabel: weekFull(wS, wE),
             rev: paidOrders.filter(o => { const d = new Date(o.createdAt); return d >= wS && d < wE; }).reduce((s, o) => s + orderTotal(o), 0),
           };
         });
@@ -583,6 +595,7 @@ function AdminPageContent() {
         const mE = new Date(year, month + 1, 1);
         return {
           label: mS.toLocaleDateString('az-AZ', { month: 'short' }),
+          fullLabel: monthFull(mS),
           rev: paidOrders.filter(o => { const d = new Date(o.createdAt); return d >= mS && d < mE; }).reduce((s, o) => s + orderTotal(o), 0),
         };
       });
@@ -592,7 +605,8 @@ function AdminPageContent() {
         const d = new Date(rTodayStart); d.setDate(d.getDate() - (29 - i));
         const ds = d.toDateString();
         return {
-          label: i === 0 || d.getDate() === 1 ? `${d.getDate()} ${d.toLocaleDateString('az-AZ', { month: 'short' })}` : String(d.getDate()),
+          label: i === 0 || d.getDate() === 1 ? `${d.getDate()} ${AZ_MON_SHORT[d.getMonth()]}` : String(d.getDate()),
+          fullLabel: dayFull(d),
           rev: paidOrders.filter(o => new Date(o.createdAt).toDateString() === ds).reduce((s, o) => s + orderTotal(o), 0),
         };
       });
@@ -602,7 +616,8 @@ function AdminPageContent() {
         const wS = new Date(rTodayStart); wS.setDate(wS.getDate() - (11 - i) * 7);
         const wE = new Date(wS); wE.setDate(wE.getDate() + 7);
         return {
-          label: `${wS.getDate()} ${wS.toLocaleDateString('az-AZ', { month: 'short' })}`,
+          label: `${wS.getDate()} ${AZ_MON_SHORT[wS.getMonth()]}`,
+          fullLabel: weekFull(wS, wE),
           rev: paidOrders.filter(o => { const d = new Date(o.createdAt); return d >= wS && d < wE; }).reduce((s, o) => s + orderTotal(o), 0),
         };
       });
@@ -611,7 +626,8 @@ function AdminPageContent() {
       const m = new Date(rNow.getFullYear(), rNow.getMonth() - (11 - i), 1);
       const mE = new Date(rNow.getFullYear(), rNow.getMonth() - (10 - i), 1);
       return {
-        label: m.toLocaleDateString('az-AZ', { month: 'short' }),
+        label: AZ_MON_SHORT[m.getMonth()],
+        fullLabel: monthFull(m),
         rev: paidOrders.filter(o => { const d = new Date(o.createdAt); return d >= m && d < mE; }).reduce((s, o) => s + orderTotal(o), 0),
       };
     });
@@ -978,68 +994,6 @@ function AdminPageContent() {
                 </div>
               </div>
 
-              {/* Seller stats + Tips */}
-              <div className="grid md:grid-cols-2 gap-5">
-                <div className="bg-white rounded-xl border border-gray-100 card p-5">
-                  <h3 className="font-semibold text-gray-800 text-sm mb-4">Satıcı statistikası</h3>
-                  {sellerStats.length === 0 ? (
-                    <p className="text-sm text-gray-300 text-center py-4">Məlumat yoxdur</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {sellerStats.map(s => (
-                        <div key={s.name} className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold shrink-0">
-                              {s.name[0]?.toUpperCase()}
-                            </div>
-                            <span className="text-sm text-gray-700 truncate">{s.name}</span>
-                          </div>
-                          <div className="flex items-center gap-3 shrink-0 text-sm">
-                            <span className="text-gray-400">{s.orders} sif.</span>
-                            <span className="font-semibold text-gray-800">{s.rev.toFixed(2)} ₼</span>
-                            {s.tips > 0 && (
-                              <span className="bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-2 py-0.5 text-xs font-semibold">
-                                ⭐ bəxşiş {s.tips.toFixed(2)} ₼
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="bg-white rounded-xl border border-gray-100 card p-5">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold text-gray-800 text-sm">Bəxşiş gəliri</h3>
-                    {totalTips > 0 && <span className="text-lg font-bold text-amber-600">⭐ {totalTips.toFixed(2)} ₼</span>}
-                  </div>
-                  {totalTips === 0 ? (
-                    <p className="text-sm text-gray-300 text-center py-4">Bəxşiş yoxdur</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {sellerStats.filter(s => s.tips > 0).map(s => {
-                        const pct = totalTips > 0 ? (s.tips / totalTips) * 100 : 0;
-                        return (
-                          <div key={s.name}>
-                            <div className="flex justify-between items-center mb-1.5">
-                              <span className="text-sm text-gray-600">{s.name}</span>
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-400">{pct.toFixed(0)}%</span>
-                                <span className="font-semibold text-amber-700 text-sm">{s.tips.toFixed(2)} ₼</span>
-                              </div>
-                            </div>
-                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                              <div className="h-full bg-amber-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
               {/* Hourly + Weekly */}
               <div className="grid md:grid-cols-2 gap-5">
                 <div className="bg-white rounded-xl border border-gray-100 card p-5">
@@ -1132,6 +1086,68 @@ function AdminPageContent() {
                   </div>
                 </div>
               )}
+
+              {/* Seller stats + Tips */}
+              <div className="grid md:grid-cols-2 gap-5">
+                <div className="bg-white rounded-xl border border-gray-100 card p-5">
+                  <h3 className="font-semibold text-gray-800 text-sm mb-4">Satıcı statistikası</h3>
+                  {sellerStats.length === 0 ? (
+                    <p className="text-sm text-gray-300 text-center py-4">Məlumat yoxdur</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {sellerStats.map(s => (
+                        <div key={s.name} className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold shrink-0">
+                              {s.name[0]?.toUpperCase()}
+                            </div>
+                            <span className="text-sm text-gray-700 truncate">{s.name}</span>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0 text-sm">
+                            <span className="text-gray-400">{s.orders} sif.</span>
+                            <span className="font-semibold text-gray-800">{s.rev.toFixed(2)} ₼</span>
+                            {s.tips > 0 && (
+                              <span className="bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-2 py-0.5 text-xs font-semibold">
+                                ⭐ bəxşiş {s.tips.toFixed(2)} ₼
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-white rounded-xl border border-gray-100 card p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold text-gray-800 text-sm">Bəxşiş gəliri</h3>
+                    {totalTips > 0 && <span className="text-lg font-bold text-amber-600">⭐ {totalTips.toFixed(2)} ₼</span>}
+                  </div>
+                  {totalTips === 0 ? (
+                    <p className="text-sm text-gray-300 text-center py-4">Bəxşiş yoxdur</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {sellerStats.filter(s => s.tips > 0).map(s => {
+                        const pct = totalTips > 0 ? (s.tips / totalTips) * 100 : 0;
+                        return (
+                          <div key={s.name}>
+                            <div className="flex justify-between items-center mb-1.5">
+                              <span className="text-sm text-gray-600">{s.name}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-gray-400">{pct.toFixed(0)}%</span>
+                                <span className="font-semibold text-amber-700 text-sm">{s.tips.toFixed(2)} ₼</span>
+                              </div>
+                            </div>
+                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                              <div className="h-full bg-amber-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
 
               {paidOrders.length === 0 && (
                 <div className="text-center py-16 text-gray-400">
