@@ -284,11 +284,11 @@ export async function deleteTable(id: number): Promise<string | null> {
 
 // ─── Superadmin: Companies ────────────────────────────────────────────────────
 
-export async function fetchCompanies(): Promise<{ id: string; name: string; slug: string; active: boolean; createdAt: string; expiresAt: string | null }[]> {
+export async function fetchCompanies(): Promise<{ id: string; name: string; slug: string; active: boolean; createdAt: string; expiresAt: string | null; ownerName: string | null; address: string | null; phone: string | null }[]> {
   try {
     const { data, error } = await supabase.from('companies').select('*').order('created_at');
     if (error || !data) return [];
-    return data.map(c => ({ id: c.id, name: c.name, slug: c.slug, active: c.active, createdAt: c.created_at, expiresAt: c.expires_at ?? null }));
+    return data.map(c => ({ id: c.id, name: c.name, slug: c.slug, active: c.active, createdAt: c.created_at, expiresAt: c.expires_at ?? null, ownerName: c.owner_name ?? null, address: c.address ?? null, phone: c.phone ?? null }));
   } catch { return []; }
 }
 
@@ -320,6 +320,27 @@ export async function updateCompanyExpiry(id: string, expiresAt: string | null):
   try {
     await supabase.from('companies').update({ expires_at: expiresAt }).eq('id', id);
   } catch (e) { console.error('[updateCompanyExpiry]', e); }
+}
+
+export async function updateCompanyProfile(id: string, ownerName: string, address: string, phone: string): Promise<void> {
+  try {
+    await supabase.from('companies').update({ owner_name: ownerName, address, phone }).eq('id', id);
+  } catch (e) { console.error('[updateCompanyProfile]', e); }
+}
+
+export async function fetchCompanyProfile(id: string): Promise<{ ownerName: string; address: string; phone: string } | null> {
+  try {
+    const { data, error } = await supabase.from('companies').select('owner_name, address, phone').eq('id', id).single();
+    if (error || !data) return null;
+    return { ownerName: data.owner_name ?? '', address: data.address ?? '', phone: data.phone ?? '' };
+  } catch { return null; }
+}
+
+export async function verifyPassword(id: string, password: string): Promise<boolean> {
+  try {
+    const { data } = await supabase.from('users').select('id').eq('id', id).eq('password', password).single();
+    return !!data;
+  } catch { return false; }
 }
 
 // ─── Superadmin: Users ────────────────────────────────────────────────────────

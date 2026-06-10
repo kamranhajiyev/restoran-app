@@ -6,7 +6,7 @@ import {
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
   ShoppingCart, ChevronLeft, Minus, Plus,
 } from 'lucide-react';
-import { getSession, logout } from '@/lib/auth';
+import { getSession, logout, validateSession } from '@/lib/auth';
 import { fetchMenu, addOrder, fetchOrders, updateOrderStatus, fetchCategories, setCompanyContext, fetchTables } from '@/lib/store';
 import { Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable } from '@/types';
 
@@ -89,6 +89,9 @@ export default function SellerPage() {
   useEffect(() => {
     const session = getSession();
     if (!session || session.role !== 'seller') { router.replace('/login'); return; }
+    validateSession(session).then(valid => {
+      if (!valid) { logout(); router.replace('/login'); }
+    });
     setCompanyContext(session.companyId);
     setSellerName(session.name);
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables()]).then(([m, o, c, tb]) => {

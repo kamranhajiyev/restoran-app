@@ -2,12 +2,12 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  LogOut, Plus, Building2, Users, Trash2, EyeOff, Eye, X, Coffee, ShieldCheck,
+  LogOut, Plus, Building2, Users, Trash2, EyeOff, Eye, X, Coffee, ShieldCheck, UserCircle, MapPin, Phone, User,
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
 import {
   fetchCompanies, createCompany, deleteCompany, toggleCompanyActive, updateCompanyName, updateCompanyExpiry,
-  fetchAllUsers, createUser, deleteUser, toggleUserActive,
+  fetchAllUsers, createUser, deleteUser, toggleUserActive, updateCompanyProfile,
 } from '@/lib/store';
 
 type Tab = 'companies' | 'users';
@@ -20,6 +20,9 @@ interface Company {
   createdAt: string;
   expiresAt: string | null;
   userCount?: number;
+  ownerName: string | null;
+  address: string | null;
+  phone: string | null;
 }
 
 interface SAUser {
@@ -58,6 +61,32 @@ export default function SuperadminPage() {
   // inline expiry edit
   const [editingExpiryId, setEditingExpiryId] = useState<string | null>(null);
 
+  // company profile modal
+  const [profileCompany, setProfileCompany] = useState<Company | null>(null);
+  const [profOwner, setProfOwner] = useState('');
+  const [profAddress, setProfAddress] = useState('');
+  const [profPhone, setProfPhone] = useState('');
+  const [profSaving, setProfSaving] = useState(false);
+  const [profMsg, setProfMsg] = useState('');
+
+  function openProfileModal(c: Company) {
+    setProfileCompany(c);
+    setProfOwner(c.ownerName ?? '');
+    setProfAddress(c.address ?? '');
+    setProfPhone(c.phone ?? '');
+    setProfMsg('');
+  }
+
+  async function handleSaveProfile() {
+    if (!profileCompany) return;
+    setProfSaving(true);
+    await updateCompanyProfile(profileCompany.id, profOwner.trim(), profAddress.trim(), profPhone.trim());
+    setProfMsg('Yadda saxlandı');
+    setProfSaving(false);
+    loadData();
+    setTimeout(() => setProfMsg(''), 2000);
+  }
+
   // company form
   const [showCompanyForm, setShowCompanyForm] = useState(false);
   const [companyName, setCompanyName]         = useState('');
@@ -69,7 +98,7 @@ export default function SuperadminPage() {
   const [userName, setUserName]           = useState('');
   const [userUsername, setUserUsername]   = useState('');
   const [userPassword, setUserPassword]   = useState('');
-  const [userRole, setUserRole]           = useState<'owner' | 'seller'>('seller');
+  const [userRole] = useState<'owner'>('owner');
   const [userCompanyId, setUserCompanyId] = useState('');
 
   useEffect(() => {
@@ -83,7 +112,7 @@ export default function SuperadminPage() {
     const [comps, usrs] = await Promise.all([fetchCompanies(), fetchAllUsers()]);
     const withCounts = comps.map(c => ({
       ...c,
-      userCount: usrs.filter(u => u.companyId === c.id).length,
+      userCount: usrs.filter(u => u.companyId === c.id && u.role === 'owner').length,
     }));
     const withCompNames = usrs.map(u => ({
       ...u,
@@ -123,7 +152,7 @@ export default function SuperadminPage() {
     return <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700 shrink-0">{days} gün</span>;
   }
 
-  const visibleUsers = users.filter(u => u.role !== 'superadmin');
+  const visibleUsers = users.filter(u => u.role === 'owner');
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -258,6 +287,13 @@ export default function SuperadminPage() {
                     </span>
                     <div className="flex items-center gap-1 shrink-0">
                       <button
+                        onClick={() => openProfileModal(c)}
+                        title="Profil məlumatları"
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-purple-50 hover:text-purple-600 transition-colors"
+                      >
+                        <UserCircle className="w-4 h-4" />
+                      </button>
+                      <button
                         onClick={() => toggleCompanyActive(c.id, !c.active).then(loadData)}
                         title={c.active ? 'Deaktiv et' : 'Aktiv et'}
                         className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 transition-colors"
@@ -381,6 +417,62 @@ export default function SuperadminPage() {
         </div>
       )}
 
+      {/* Company Profile Modal */}
+      {profileCompany && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2">
+                <UserCircle className="w-5 h-5 text-purple-700" />
+                <h3 className="font-bold text-gray-800">{profileCompany.name}</h3>
+              </div>
+              <button onClick={() => setProfileCompany(null)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><User className="w-3.5 h-3.5" />Sahibin adı</label>
+                <input
+                  value={profOwner}
+                  onChange={e => setProfOwner(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="Ad Soyad"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><MapPin className="w-3.5 h-3.5" />Ünvan</label>
+                <input
+                  value={profAddress}
+                  onChange={e => setProfAddress(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="Şəhər, küçə, ev"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><Phone className="w-3.5 h-3.5" />Mobil nömrə</label>
+                <input
+                  value={profPhone}
+                  onChange={e => setProfPhone(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="+994 50 000 00 00"
+                />
+              </div>
+              <div className="flex items-center gap-3 pt-1">
+                <button
+                  onClick={handleSaveProfile}
+                  disabled={profSaving}
+                  className="flex-1 bg-purple-700 hover:bg-purple-800 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors"
+                >
+                  {profSaving ? 'Saxlanır...' : 'Yadda saxla'}
+                </button>
+                {profMsg && <span className="text-xs text-green-600 font-medium">{profMsg}</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Create User Modal */}
       {showUserForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -421,17 +513,6 @@ export default function SuperadminPage() {
                   className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
                   required
                 />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1">Rol</label>
-                <select
-                  value={userRole}
-                  onChange={e => setUserRole(e.target.value as 'owner' | 'seller')}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                >
-                  <option value="owner">Owner</option>
-                  <option value="seller">Seller</option>
-                </select>
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Şirkət</label>

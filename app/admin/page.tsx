@@ -6,15 +6,16 @@ import {
   PanelLeftClose, PanelLeftOpen, LogOut, Menu, X,
   TrendingUp, Receipt, Star, ChevronDown, Percent,
   Coffee, BarChart2, Package, Wallet, ChevronUp, ImageIcon, Trash2, RotateCcw,
-  Users, EyeOff, Eye, Plus, Pencil, QrCode,
+  Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User,
 } from 'lucide-react';
-import { getSession, logout } from '@/lib/auth';
+import { getSession, logout, validateSession } from '@/lib/auth';
 import {
   fetchMenu, saveMenu, fetchOrders, updateOrderStatus,
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash,
   setCompanyContext, fetchAllUsers, createUser, deleteUser, toggleUserActive, updateUser,
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, fetchCompanySlug,
+  fetchCompanyProfile, updateCompanyProfile, verifyPassword,
 } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, TrashItem } from '@/types';
@@ -227,12 +228,69 @@ function AdminPageContent() {
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [companySlug, setCompanySlug] = useState<string | null>(null);
 
+  // profile modal
+  const [showProfile, setShowProfile] = useState(false);
+  const [profOwner, setProfOwner] = useState('');
+  const [profAddress, setProfAddress] = useState('');
+  const [profPhone, setProfPhone] = useState('');
+  const [profSaving, setProfSaving] = useState(false);
+  const [profMsg, setProfMsg] = useState('');
+  const [pwCurrent, setPwCurrent] = useState('');
+  const [pwNew, setPwNew] = useState('');
+  const [pwConfirm, setPwConfirm] = useState('');
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwMsg, setPwMsg] = useState('');
+  const [pwShowCurrent, setPwShowCurrent] = useState(false);
+  const [pwShowNew, setPwShowNew] = useState(false);
+  const [userId, setUserId] = useState('');
+
+  async function openProfile() {
+    const session = getSession();
+    if (!session?.companyId) return;
+    const profile = await fetchCompanyProfile(session.companyId);
+    setProfOwner(profile?.ownerName ?? '');
+    setProfAddress(profile?.address ?? '');
+    setProfPhone(profile?.phone ?? '');
+    setProfMsg('');
+    setPwCurrent(''); setPwNew(''); setPwConfirm(''); setPwMsg('');
+    setShowProfile(true);
+  }
+
+  async function handleSaveProfile() {
+    const session = getSession();
+    if (!session?.companyId) return;
+    setProfSaving(true);
+    await updateCompanyProfile(session.companyId, profOwner.trim(), profAddress.trim(), profPhone.trim());
+    setProfMsg('Yadda saxlandı');
+    setProfSaving(false);
+    setTimeout(() => setProfMsg(''), 2000);
+  }
+
+  async function handleChangePassword() {
+    if (!pwNew || pwNew !== pwConfirm) { setPwMsg('Yeni şifrələr uyğun deyil'); return; }
+    if (pwNew.length < 4) { setPwMsg('Şifrə ən az 4 simvol olmalıdır'); return; }
+    const session = getSession();
+    if (!session) return;
+    setPwSaving(true);
+    const ok = await verifyPassword(session.id, pwCurrent);
+    if (!ok) { setPwMsg('Cari şifrə səhvdir'); setPwSaving(false); return; }
+    await updateUser(session.id, session.name, pwNew);
+    setPwMsg('Şifrə dəyişdirildi');
+    setPwCurrent(''); setPwNew(''); setPwConfirm('');
+    setPwSaving(false);
+    setTimeout(() => setPwMsg(''), 2000);
+  }
+
   useEffect(() => {
     const session = getSession();
     if (!session || session.role !== 'owner') { router.replace('/login'); return; }
+    validateSession(session).then(valid => {
+      if (!valid) { logout(); router.replace('/login'); }
+    });
     setCompanyContext(session.companyId);
     setAdminName(session.name);
     setCompanyId(session.companyId);
+    setUserId(session.id);
     setSessionReady(true);
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchAllUsers(), fetchTables(), fetchCompanySlug(session.companyId ?? '')]).then(([m, o, c, t, u, tb, slug]) => {
       setMenu(m);
@@ -840,13 +898,16 @@ function AdminPageContent() {
         {/* User + logout */}
         {!collapsed && (
           <div className="px-4 py-4 border-t border-gray-100/50">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
+            <button
+              onClick={openProfile}
+              className="flex items-center gap-2 mb-3 w-full hover:opacity-80 transition-opacity text-left"
+            >
+              <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold shrink-0">
                 {adminName[0]?.toUpperCase()}
               </div>
               <span className="text-xs text-gray-500 truncate">{adminName}</span>
               {!online && <span className="ml-auto text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">Oflayn</span>}
-            </div>
+            </button>
             <button
               onClick={() => { logout(); router.push('/login'); }}
               className="flex items-center gap-2 text-xs text-gray-400 hover:text-red-500 transition-colors"
@@ -858,9 +919,13 @@ function AdminPageContent() {
         )}
         {collapsed && (
           <div className="py-4 flex flex-col items-center gap-2 border-t border-gray-100/50">
-            <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
+            <button
+              onClick={openProfile}
+              title="Profil"
+              className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold hover:opacity-80 transition-opacity"
+            >
               {adminName[0]?.toUpperCase()}
-            </div>
+            </button>
             <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-gray-400 hover:text-red-500 transition-colors">
               <LogOut className="w-4 h-4" />
             </button>
@@ -894,7 +959,10 @@ function AdminPageContent() {
 
         <div className="flex-1" />
 
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-gray-100 rounded-xl">
+        <button
+          onClick={openProfile}
+          className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-gray-100 rounded-xl hover:border-amber-300 hover:bg-amber-50 transition-colors"
+        >
           <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
             {adminName[0]?.toUpperCase()}
           </div>
@@ -904,7 +972,7 @@ function AdminPageContent() {
               <span className="text-xs text-gray-400">{getSession()?.companyName}</span>
             )}
           </div>
-        </div>
+        </button>
 
         <button
           onClick={() => { logout(); router.push('/login'); }}
@@ -933,7 +1001,7 @@ function AdminPageContent() {
               </p>
             </div>
             <a
-              href="https://wa.me/994000000000"
+              href="https://wa.me/994998989876"
               target="_blank"
               rel="noopener noreferrer"
               className={`shrink-0 text-xs font-bold px-4 py-1.5 rounded-lg transition-colors ${expired ? 'bg-white text-red-600 hover:bg-red-50' : 'bg-white text-amber-600 hover:bg-amber-50'}`}
@@ -2034,6 +2102,128 @@ function AdminPageContent() {
             <div className="flex gap-2 justify-end">
               <button onClick={() => setEditCatTarget(null)} className="px-4 py-2 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">Ləğv et</button>
               <button onClick={() => renameCategory(editCatTarget, editCatValue)} className="px-4 py-2 text-sm rounded-lg bg-amber-800 hover:bg-amber-900 text-white font-medium transition-colors">Yadda saxla</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Profile Modal ── */}
+      {showProfile && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-y-auto max-h-[90vh]">
+            <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <UserCircle className="w-5 h-5 text-amber-800" />
+                <h3 className="font-bold text-gray-800">Profil</h3>
+              </div>
+              <button onClick={() => setShowProfile(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* ── Business Info ── */}
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Müəssisə məlumatları</p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><User className="w-3.5 h-3.5" />Sahibin adı</label>
+                    <input
+                      value={profOwner}
+                      onChange={e => setProfOwner(e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      placeholder="Ad Soyad"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><MapPin className="w-3.5 h-3.5" />Ünvan</label>
+                    <input
+                      value={profAddress}
+                      onChange={e => setProfAddress(e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      placeholder="Şəhər, küçə, ev"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><Phone className="w-3.5 h-3.5" />Mobil nömrə</label>
+                    <input
+                      value={profPhone}
+                      onChange={e => setProfPhone(e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      placeholder="+994 50 000 00 00"
+                    />
+                  </div>
+                  <div className="flex items-center gap-3 pt-1">
+                    <button
+                      onClick={handleSaveProfile}
+                      disabled={profSaving}
+                      className="flex-1 bg-amber-800 hover:bg-amber-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors"
+                    >
+                      {profSaving ? 'Saxlanır...' : 'Yadda saxla'}
+                    </button>
+                    {profMsg && <span className="text-xs text-green-600 font-medium">{profMsg}</span>}
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-gray-100" />
+
+              {/* ── Password Change ── */}
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Lock className="w-3.5 h-3.5" />Şifrəni dəyiş</p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 block mb-1">Cari şifrə</label>
+                    <div className="relative">
+                      <input
+                        type={pwShowCurrent ? 'text' : 'password'}
+                        value={pwCurrent}
+                        onChange={e => setPwCurrent(e.target.value)}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        placeholder="••••••••"
+                      />
+                      <button type="button" onClick={() => setPwShowCurrent(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400">
+                        {pwShowCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 block mb-1">Yeni şifrə</label>
+                    <div className="relative">
+                      <input
+                        type={pwShowNew ? 'text' : 'password'}
+                        value={pwNew}
+                        onChange={e => setPwNew(e.target.value)}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        placeholder="••••••••"
+                      />
+                      <button type="button" onClick={() => setPwShowNew(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400">
+                        {pwShowNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 block mb-1">Yeni şifrəni təsdiqlə</label>
+                    <input
+                      type="password"
+                      value={pwConfirm}
+                      onChange={e => setPwConfirm(e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      placeholder="••••••••"
+                    />
+                  </div>
+                  <div className="flex items-center gap-3 pt-1">
+                    <button
+                      onClick={handleChangePassword}
+                      disabled={pwSaving}
+                      className="flex-1 bg-gray-800 hover:bg-gray-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors"
+                    >
+                      {pwSaving ? 'Dəyişdirilir...' : 'Şifrəni dəyiş'}
+                    </button>
+                    {pwMsg && <span className={`text-xs font-medium ${pwMsg.includes('dəyişdirildi') ? 'text-green-600' : 'text-red-500'}`}>{pwMsg}</span>}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

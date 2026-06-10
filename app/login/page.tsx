@@ -15,12 +15,15 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
-    const session = await login(username, password);
+    const result = await login(username, password);
     setLoading(false);
-    if (!session) {
-      setError('İstifadəçi adı və ya şifrə yanlışdır');
+    if ('error' in result) {
+      setError(result.error === 'inactive'
+        ? 'Hesabınız deaktiv edilib. Zəhmət olmasa əlaqə saxlayın.'
+        : 'İstifadəçi adı və ya şifrə yanlışdır');
       return;
     }
+    const { session } = result;
     if (session.role === 'superadmin') router.push('/superadmin');
     else if (session.role === 'owner')  router.push('/admin');
     else                                router.push('/seller');
@@ -60,7 +63,23 @@ export default function LoginPage() {
             />
           </div>
 
-          {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+          {error && (
+            error.includes('deaktiv') ? (
+              <p className="text-red-500 text-sm text-center">
+                Hesabınız deaktiv edilib.{' '}
+                <a
+                  href="https://wa.me/994998989876"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline font-semibold hover:text-red-700"
+                >
+                  Əlaqə saxlayın
+                </a>
+              </p>
+            ) : (
+              <p className="text-red-500 text-sm text-center">{error}</p>
+            )
+          )}
 
           <button
             type="submit"
