@@ -36,7 +36,7 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
   'gözləyir':  'bg-amber-100 text-amber-700',
   'hazırlanır':'bg-blue-100 text-blue-700',
   'hazırdır':  'bg-green-100 text-green-700',
-  'ödənilib':  'bg-gray-100 text-gray-500',
+  'ödənilib':  'bg-stone-100 text-stone-500',
 };
 
 function elapsed(iso: string): string {
@@ -320,18 +320,18 @@ export default function SellerPage() {
   function SidebarContent() {
     return (
       <div className="flex flex-col h-full bg-white">
-        <div className={`flex items-center h-14 border-b border-gray-100/50 ${collapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
+        <div className={`flex items-center h-14 border-b border-stone-100/50 ${collapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
           {!collapsed && (
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
                 <Coffee className="w-4 h-4 text-white" />
               </div>
-              <span className="font-semibold text-gray-800 text-sm truncate max-w-[140px]">{getSession()?.companyName || 'Satıcı Paneli'}</span>
+              <span className="font-semibold text-stone-800 text-sm truncate max-w-[140px]">{getSession()?.companyName || 'Satıcı Paneli'}</span>
             </div>
           )}
           <button
             onClick={() => setCollapsed(c => !c)}
-            className="w-8 h-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors flex"
+            className="w-8 h-8 items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-stone-700 transition-colors flex"
           >
             {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </button>
@@ -356,7 +356,7 @@ export default function SellerPage() {
                     if (n.id === 'new-order') { setOrderType(null); setCart([]); }
                     setView(n.id);
                   }}
-                  className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${isActive ? 'bg-amber-800/10 text-amber-800' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700'}`}
+                  className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${isActive ? 'bg-amber-800/10 text-amber-800' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-700'}`}
                 >
                   <Icon className="w-4 h-4" />
                   {badge && <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-800 text-white text-[9px] rounded-full flex items-center justify-center font-bold">{badge}</span>}
@@ -371,7 +371,7 @@ export default function SellerPage() {
                   if (n.id === 'new-order') { setOrderType(null); setCart([]); }
                   setView(n.id);
                 }}
-                className={`flex items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium transition-colors w-full ${isActive ? 'bg-amber-800 text-white shadow-sm' : 'text-gray-500 hover:bg-amber-50 hover:text-amber-900'}`}
+                className={`flex items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium transition-colors w-full ${isActive ? 'bg-amber-800 text-white shadow-sm' : 'text-stone-500 hover:bg-amber-50 hover:text-amber-900'}`}
               >
                 <Icon className="w-4 h-4 shrink-0" />
                 <span className="flex-1 text-left truncate">{n.label}</span>
@@ -386,24 +386,24 @@ export default function SellerPage() {
         </nav>
 
         {!collapsed ? (
-          <div className="px-4 py-4 border-t border-gray-100/50">
+          <div className="px-4 py-4 border-t border-stone-100/50">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
                 {sellerName[0]?.toUpperCase()}
               </div>
-              <span className="text-xs text-gray-500 truncate">{sellerName}</span>
+              <span className="text-xs text-stone-500 truncate">{sellerName}</span>
               {!online && <span className="ml-auto text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">Oflayn</span>}
             </div>
-            <button onClick={() => { logout(); router.push('/login'); }} className="flex items-center gap-2 text-xs text-gray-400 hover:text-red-500 transition-colors">
+            <button onClick={() => { logout(); router.push('/login'); }} className="flex items-center gap-2 text-xs text-stone-400 hover:text-red-500 transition-colors">
               <LogOut className="w-3.5 h-3.5" /> Çıxış
             </button>
           </div>
         ) : (
-          <div className="py-4 flex flex-col items-center gap-2 border-t border-gray-100/50">
+          <div className="py-4 flex flex-col items-center gap-2 border-t border-stone-100/50">
             <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
               {sellerName[0]?.toUpperCase()}
             </div>
-            <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-gray-400 hover:text-red-500 transition-colors">
+            <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-stone-400 hover:text-red-500 transition-colors">
               <LogOut className="w-4 h-4" />
             </button>
           </div>
@@ -418,31 +418,31 @@ export default function SellerPage() {
   // a seller can see is the open-shift form.
   if (!shiftChecked) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <span className="w-8 h-8 border-2 border-gray-200 border-t-amber-800 rounded-full animate-spin" />
+      <div className="min-h-screen flex items-center justify-center bg-[#f7f3ed]">
+        <span className="w-8 h-8 border-2 border-stone-200 border-t-amber-800 rounded-full animate-spin" />
       </div>
     );
   }
 
   if (!shift) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="min-h-screen flex items-center justify-center bg-[#f7f3ed] px-4">
         <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm">
           <div className="text-center mb-6">
             <div className="w-12 h-12 rounded-2xl bg-amber-800 flex items-center justify-center mx-auto mb-3">
               <Wallet className="w-6 h-6 text-white" />
             </div>
-            <h1 className="text-xl font-bold text-gray-800">{justClosed ? 'Növbə bağlandı ✓' : 'Növbəni aç'}</h1>
-            <p className="text-gray-500 text-sm mt-1">
+            <h1 className="text-xl font-bold text-stone-800">{justClosed ? 'Növbə bağlandı ✓' : 'Növbəni aç'}</h1>
+            <p className="text-stone-500 text-sm mt-1">
               {justClosed ? 'Yeni növbə açmaq üçün başlanğıc məbləği daxil et' : 'İşə başlamaq üçün kassadakı məbləği daxil et'}
             </p>
           </div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">Kassada başlanğıc məbləğ (₼)</label>
+          <label className="block text-sm font-medium text-stone-700 mb-1.5">Kassada başlanğıc məbləğ (₼)</label>
           <input
             type="number" min="0" step="0.5" placeholder="0.00"
             value={openCashInput}
             onChange={e => setOpenCashInput(e.target.value)}
-            className="w-full border border-gray-200 rounded-xl px-4 py-3 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-amber-700 mb-4"
+            className="w-full border border-stone-200 rounded-xl px-4 py-3 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-amber-700 mb-4"
             autoFocus
           />
           <button
@@ -455,7 +455,7 @@ export default function SellerPage() {
           </button>
           <button
             onClick={() => { logout(); router.push('/login'); }}
-            className="w-full mt-3 text-sm text-gray-400 hover:text-red-500 transition-colors flex items-center justify-center gap-1.5"
+            className="w-full mt-3 text-sm text-stone-400 hover:text-red-500 transition-colors flex items-center justify-center gap-1.5"
           >
             <LogOut className="w-3.5 h-3.5" /> Çıxış
           </button>
@@ -465,26 +465,26 @@ export default function SellerPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#f7f3ed]">
 
       {/* Header */}
-      <header className="sticky top-0 z-50 h-14 border-b border-gray-100/60 bg-white/90 backdrop-blur-sm flex items-center gap-3 px-4">
+      <header className="sticky top-0 z-50 h-14 border-b border-stone-100/60 bg-white/90 backdrop-blur-sm flex items-center gap-3 px-4">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
             <Coffee className="w-4 h-4 text-white" />
           </div>
-          <span className="font-semibold text-gray-800 text-sm md:hidden truncate max-w-[160px]">{getSession()?.companyName || 'Kafe'}</span>
+          <span className="font-semibold text-stone-800 text-sm md:hidden truncate max-w-[160px]">{getSession()?.companyName || 'Kafe'}</span>
         </div>
         <div className="flex-1" />
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-gray-100 rounded-xl">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl">
           <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
             {sellerName[0]?.toUpperCase()}
           </div>
-          <span className="text-sm font-medium text-gray-700 hidden sm:inline">{sellerName}</span>
+          <span className="text-sm font-medium text-stone-700 hidden sm:inline">{sellerName}</span>
         </div>
         <button
           onClick={() => { logout(); router.push('/login'); }}
-          className="w-9 h-9 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+          className="w-9 h-9 flex items-center justify-center rounded-lg text-stone-400 hover:text-red-500 hover:bg-red-50 transition-colors"
           title="Çıxış"
         >
           <LogOut className="w-4 h-4" />
@@ -494,36 +494,36 @@ export default function SellerPage() {
       <div className="flex min-h-[calc(100vh-3.5rem)] bg-white">
 
         {/* Desktop sidebar */}
-        <aside className={`hidden md:block flex-shrink-0 sticky top-14 self-start h-[calc(100vh-3.5rem)] transition-all duration-200 border-r border-gray-100/60 ${collapsed ? 'w-14' : 'w-56'}`}>
+        <aside className={`hidden md:block flex-shrink-0 sticky top-14 self-start h-[calc(100vh-3.5rem)] transition-all duration-200 border-r border-stone-100/60 ${collapsed ? 'w-14' : 'w-56'}`}>
           <SidebarContent />
         </aside>
 
         {/* Main — pb-16 reserves space for mobile bottom nav */}
-        <main className="flex-1 min-w-0 bg-gray-50 md:rounded-tl-2xl md:border-l md:border-t border-gray-100/60 overflow-hidden flex flex-col pb-16 md:pb-0">
+        <main className="flex-1 min-w-0 bg-[#f7f3ed] md:rounded-tl-2xl md:border-l md:border-t border-stone-100/60 overflow-hidden flex flex-col pb-16 md:pb-0">
 
           {/* ── ORDERS ── */}
           {view === 'orders' && (
             <div className="flex-1 flex flex-col overflow-hidden">
               <div className="px-4 md:px-6 pt-5 pb-2">
-                <h1 className="text-lg font-semibold text-gray-900">Sifarişlər</h1>
-                <p className="text-sm text-gray-500 mt-0.5">Aktiv sifarişlər</p>
+                <h1 className="text-lg font-semibold text-stone-900">Sifarişlər</h1>
+                <p className="text-sm text-stone-500 mt-0.5">Aktiv sifarişlər</p>
               </div>
 
               <div className="px-4 md:px-6 py-2 flex items-center gap-3 flex-wrap">
                 <button
                   onClick={refreshOrders}
                   disabled={refreshing}
-                  className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
+                  className="flex items-center gap-1.5 text-sm text-stone-400 hover:text-stone-600 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
                 >
                   {refreshing
-                    ? <span className="w-3.5 h-3.5 border-2 border-gray-200 border-t-[#92400e] rounded-full animate-spin" />
+                    ? <span className="w-3.5 h-3.5 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
                     : <span>↻</span>}
                   Yenilə
                 </button>
                 <div className="flex gap-3 text-sm flex-wrap">
-                  <span className="text-gray-500">Cəmi <span className="font-semibold text-gray-800">{active.length}</span></span>
-                  <span className="text-gray-500">Gözləyir <span className="font-semibold text-amber-700">{orders.filter(o => o.status === 'gözləyir').length}</span></span>
-                  <span className="text-gray-500">Hazır <span className="font-semibold text-green-600">{orders.filter(o => o.status === 'hazırdır').length}</span></span>
+                  <span className="text-stone-500">Cəmi <span className="font-semibold text-stone-800">{active.length}</span></span>
+                  <span className="text-stone-500">Gözləyir <span className="font-semibold text-amber-700">{orders.filter(o => o.status === 'gözləyir').length}</span></span>
+                  <span className="text-stone-500">Hazır <span className="font-semibold text-green-600">{orders.filter(o => o.status === 'hazırdır').length}</span></span>
                   {myTodayTips > 0 && (
                     <span className="flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-2 py-0.5 font-semibold">
                       ⭐ Bəxşiş: {myTodayTips.toFixed(2)} ₼
@@ -533,26 +533,26 @@ export default function SellerPage() {
               </div>
 
               {/* Desktop table header */}
-              <div className="hidden md:grid grid-cols-[120px_1fr_140px_200px_110px] gap-4 px-6 py-2 text-xs font-medium text-gray-400 uppercase tracking-wide border-b border-t bg-white">
+              <div className="hidden md:grid grid-cols-[120px_1fr_140px_200px_110px] gap-4 px-6 py-2 text-xs font-medium text-stone-400 uppercase tracking-wide border-b border-t bg-white">
                 <span>Vaxt</span><span>Sifariş</span><span>Durum</span><span></span><span className="text-right">Ümumi</span>
               </div>
 
               <div className="flex-1 overflow-y-auto">
                 {active.length === 0 && (
-                  <div className="text-center py-20 text-gray-400">
+                  <div className="text-center py-20 text-stone-400">
                     <div className="text-5xl mb-3">📋</div>
                     <p>Aktiv sifariş yoxdur</p>
                   </div>
                 )}
                 {prevOrders.length > 0 && (
                   <div>
-                    <div className="px-4 md:px-6 py-2 bg-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
+                    <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-500 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
                     {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} onPay={() => openPayment(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
-                    <div className="px-4 md:px-6 py-2 bg-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
+                    <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-500 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
                     {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} onPay={() => openPayment(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
@@ -565,22 +565,22 @@ export default function SellerPage() {
             <div className="flex-1 p-4 md:p-8 overflow-y-auto">
               <div className="max-w-md space-y-4">
                 <div>
-                  <h1 className="text-lg font-semibold text-gray-900">Kassa</h1>
-                  <p className="text-sm text-gray-500 mt-0.5">
+                  <h1 className="text-lg font-semibold text-stone-900">Kassa</h1>
+                  <p className="text-sm text-stone-500 mt-0.5">
                     Açılıb: {new Date(shift.openedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })} · {shift.openedBy}
                   </p>
                 </div>
 
                 {/* Summary */}
-                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-2.5">
-                  <div className="flex justify-between text-sm text-gray-600">
+                <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5 space-y-2.5">
+                  <div className="flex justify-between text-sm text-stone-600">
                     <span>Başlanğıc məbləğ</span><span className="font-semibold">{shift.openingCash.toFixed(2)} ₼</span>
                   </div>
-                  <div className="flex justify-between text-sm text-gray-600">
+                  <div className="flex justify-between text-sm text-stone-600">
                     <span>Nağd satış (bəxşiş daxil)</span><span className="font-semibold">{shiftSales.cash.toFixed(2)} ₼</span>
                   </div>
                   {movementsTotal(shift) !== 0 && (
-                    <div className="flex justify-between text-sm text-gray-600">
+                    <div className="flex justify-between text-sm text-stone-600">
                       <span>Mədaxil / məxaric</span>
                       <span className={`font-semibold ${movementsTotal(shift) < 0 ? 'text-red-500' : 'text-green-600'}`}>
                         {movementsTotal(shift) > 0 ? '+' : ''}{movementsTotal(shift).toFixed(2)} ₼
@@ -590,15 +590,15 @@ export default function SellerPage() {
                   <div className="flex justify-between items-center border-t pt-3 font-bold text-lg">
                     <span>Kassada olmalıdır</span><span className="text-amber-700">{expectedCash.toFixed(2)} ₼</span>
                   </div>
-                  <div className="flex justify-between text-xs text-gray-400">
+                  <div className="flex justify-between text-xs text-stone-400">
                     <span>💳 Kart (terminal üçün)</span><span>{shiftSales.card.toFixed(2)} ₼</span>
                   </div>
                 </div>
 
                 {/* Movements */}
-                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5">
                   <div className="flex items-center justify-between mb-3">
-                    <h2 className="font-semibold text-gray-800 text-sm">Mədaxil / məxaric</h2>
+                    <h2 className="font-semibold text-stone-800 text-sm">Mədaxil / məxaric</h2>
                     <button
                       onClick={() => setShowMovForm(v => !v)}
                       className="text-xs font-semibold text-amber-800 hover:text-amber-950 px-2.5 py-1 rounded-lg hover:bg-amber-50 transition-colors"
@@ -607,26 +607,26 @@ export default function SellerPage() {
                     </button>
                   </div>
                   {showMovForm && (
-                    <div className="mb-3 p-3 bg-gray-50 rounded-xl space-y-2">
-                      <div className="flex rounded-lg overflow-hidden border border-gray-200">
+                    <div className="mb-3 p-3 bg-stone-50 rounded-xl space-y-2">
+                      <div className="flex rounded-lg overflow-hidden border border-stone-200">
                         <button
                           onClick={() => setMovOut(true)}
-                          className={`flex-1 py-2 text-xs font-semibold transition-colors ${movOut ? 'bg-red-500 text-white' : 'bg-white text-gray-500'}`}
+                          className={`flex-1 py-2 text-xs font-semibold transition-colors ${movOut ? 'bg-red-500 text-white' : 'bg-white text-stone-500'}`}
                         >− Məxaric</button>
                         <button
                           onClick={() => setMovOut(false)}
-                          className={`flex-1 py-2 text-xs font-semibold transition-colors ${!movOut ? 'bg-green-500 text-white' : 'bg-white text-gray-500'}`}
+                          className={`flex-1 py-2 text-xs font-semibold transition-colors ${!movOut ? 'bg-green-500 text-white' : 'bg-white text-stone-500'}`}
                         >+ Mədaxil</button>
                       </div>
                       <input
                         type="number" min="0" step="0.5" placeholder="Məbləğ (₼)"
                         value={movAmount} onChange={e => setMovAmount(e.target.value)}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700"
+                        className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700"
                       />
                       <input
                         type="text" placeholder="Səbəb (məs. su kuryeri)"
                         value={movReason} onChange={e => setMovReason(e.target.value)}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700"
+                        className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700"
                       />
                       <button
                         onClick={handleAddMovement}
@@ -636,14 +636,14 @@ export default function SellerPage() {
                     </div>
                   )}
                   {shift.movements.length === 0
-                    ? <p className="text-xs text-gray-400">Hərəkət yoxdur</p>
+                    ? <p className="text-xs text-stone-400">Hərəkət yoxdur</p>
                     : (
                       <ul className="space-y-1.5">
                         {shift.movements.map((m, i) => (
                           <li key={i} className="flex justify-between text-sm">
-                            <span className="text-gray-600 truncate mr-3">
+                            <span className="text-stone-600 truncate mr-3">
                               {m.reason}
-                              <span className="text-xs text-gray-400 ml-1.5">
+                              <span className="text-xs text-stone-400 ml-1.5">
                                 {new Date(m.at).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })} · {m.by}
                               </span>
                             </span>
@@ -657,13 +657,13 @@ export default function SellerPage() {
                 </div>
 
                 {/* Close shift */}
-                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-                  <h2 className="font-semibold text-gray-800 text-sm mb-3">Növbəni bağla</h2>
-                  <label className="block text-xs font-medium text-gray-500 mb-1.5">Sayılan məbləğ (₼)</label>
+                <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5">
+                  <h2 className="font-semibold text-stone-800 text-sm mb-3">Növbəni bağla</h2>
+                  <label className="block text-xs font-medium text-stone-500 mb-1.5">Sayılan məbləğ (₼)</label>
                   <input
                     type="number" min="0" step="0.5" placeholder="0.00"
                     value={countedInput} onChange={e => setCountedInput(e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-amber-700 mb-3"
+                    className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-amber-700 mb-3"
                   />
                   {countedInput !== '' && (
                     <div className={`flex justify-between items-center px-4 py-2.5 rounded-xl font-semibold text-sm mb-3 ${
@@ -682,7 +682,7 @@ export default function SellerPage() {
                   <button
                     onClick={handleCloseShift}
                     disabled={shiftBusy || countedInput === ''}
-                    className="w-full bg-gray-900 hover:bg-gray-800 disabled:opacity-40 text-white font-semibold py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"
+                    className="w-full bg-stone-900 hover:bg-stone-800 disabled:opacity-40 text-white font-semibold py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"
                   >
                     {shiftBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
                     Növbəni bağla
@@ -695,35 +695,35 @@ export default function SellerPage() {
           {/* ── NEW ORDER ── */}
           {view === 'new-order' && (
             <div className="flex-1 p-5 md:p-8 overflow-y-auto">
-              <h1 className="text-lg font-semibold text-gray-900 mb-1">Yeni sifariş</h1>
-              <p className="text-sm text-gray-500 mb-6">Sifariş növünü seçin</p>
+              <h1 className="text-lg font-semibold text-stone-900 mb-1">Yeni sifariş</h1>
+              <p className="text-sm text-stone-500 mb-6">Sifariş növünü seçin</p>
 
               <div className="grid grid-cols-2 gap-4 max-w-xs mb-8">
                 <button
                   onClick={() => setOrderType('masa')}
-                  className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 ${orderType === 'masa' ? 'border-amber-800 bg-amber-50' : 'border-gray-200 bg-white hover:border-amber-300'}`}
+                  className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 ${orderType === 'masa' ? 'border-amber-800 bg-amber-50' : 'border-stone-200 bg-white hover:border-amber-300'}`}
                 >
-                  <UtensilsCrossed className={`w-8 h-8 ${orderType === 'masa' ? 'text-amber-800' : 'text-gray-400'}`} />
-                  <span className={`font-semibold text-sm ${orderType === 'masa' ? 'text-amber-800' : 'text-gray-600'}`}>Masa</span>
+                  <UtensilsCrossed className={`w-8 h-8 ${orderType === 'masa' ? 'text-amber-800' : 'text-stone-400'}`} />
+                  <span className={`font-semibold text-sm ${orderType === 'masa' ? 'text-amber-800' : 'text-stone-600'}`}>Masa</span>
                 </button>
                 <button
                   onClick={() => startNewOrder('takeaway')}
-                  className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-gray-200 bg-white hover:border-amber-300 transition-all active:scale-95"
+                  className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-stone-200 bg-white hover:border-amber-300 transition-all active:scale-95"
                 >
-                  <ShoppingBag className="w-8 h-8 text-gray-400" />
-                  <span className="font-semibold text-sm text-gray-600">Takeaway</span>
+                  <ShoppingBag className="w-8 h-8 text-stone-400" />
+                  <span className="font-semibold text-sm text-stone-600">Takeaway</span>
                 </button>
               </div>
 
               {orderType === 'masa' && (
                 <div>
-                  <p className="text-sm font-medium text-gray-700 mb-3">Masanı seçin</p>
-                  <div className="flex items-center gap-3 text-xs text-gray-500 mb-4">
+                  <p className="text-sm font-medium text-stone-700 mb-3">Masanı seçin</p>
+                  <div className="flex items-center gap-3 text-xs text-stone-500 mb-4">
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-100 border border-green-300 inline-block" /> Boş</span>
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block" /> Dolu</span>
                   </div>
                   <div
-                    className="relative border border-gray-200 rounded-xl bg-white overflow-auto"
+                    className="relative border border-stone-200 rounded-xl bg-white overflow-auto"
                     style={{
                       height: 440,
                       maxWidth: 700,
@@ -786,13 +786,13 @@ export default function SellerPage() {
                   >
                     <ChevronLeft className="w-5 h-5" />
                   </button>
-                  <span className="font-semibold text-gray-800 text-sm flex-1">
+                  <span className="font-semibold text-stone-800 text-sm flex-1">
                     {orderType === 'takeaway' ? '🛍 Takeaway' : tableName(selectedTable)}
                   </span>
                   {/* Cart icon — mobile only */}
                   <button
                     onClick={() => setMobileCartOpen(true)}
-                    className="md:hidden relative w-9 h-9 flex items-center justify-center rounded-xl text-gray-600 hover:bg-gray-100 active:scale-95"
+                    className="md:hidden relative w-9 h-9 flex items-center justify-center rounded-xl text-stone-600 hover:bg-stone-100 active:scale-95"
                   >
                     <ShoppingCart className="w-5 h-5" />
                     {cartCount > 0 && (
@@ -809,10 +809,10 @@ export default function SellerPage() {
                       <button
                         key={cat}
                         onClick={() => setActiveCategory(cat)}
-                        className={`whitespace-nowrap text-sm px-3 py-1.5 rounded-full font-medium transition-colors shrink-0 flex items-center gap-1.5 ${activeCategory === cat ? 'bg-amber-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                        className={`whitespace-nowrap text-sm px-3 py-1.5 rounded-full font-medium transition-colors shrink-0 flex items-center gap-1.5 ${activeCategory === cat ? 'bg-amber-800 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
                       >
                         {cat}
-                        <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${activeCategory === cat ? 'bg-amber-700 text-amber-100' : 'bg-gray-200 text-gray-500'}`}>{count}</span>
+                        <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${activeCategory === cat ? 'bg-amber-700 text-amber-100' : 'bg-stone-200 text-stone-500'}`}>{count}</span>
                       </button>
                     );
                   })}
@@ -820,7 +820,7 @@ export default function SellerPage() {
 
                 {/* Menu grid */}
                 <div
-                  className="flex-1 overflow-y-auto p-3 grid grid-cols-2 sm:grid-cols-3 gap-3 content-start bg-gray-50"
+                  className="flex-1 overflow-y-auto p-3 grid grid-cols-2 sm:grid-cols-3 gap-3 content-start bg-stone-50"
                   style={{ paddingBottom: cartCount > 0 ? '5.5rem' : '0.75rem' }}
                 >
                   {filtered.map(item => {
@@ -839,7 +839,7 @@ export default function SellerPage() {
                           : <div className="w-full h-24 bg-amber-50 flex items-center justify-center text-3xl">☕</div>
                         }
                         <div className="p-2.5">
-                          <p className="text-sm font-medium text-gray-800 leading-tight">{item.name}</p>
+                          <p className="text-sm font-medium text-stone-800 leading-tight">{item.name}</p>
                           <p className="text-amber-700 font-bold text-sm mt-0.5">{item.price.toFixed(2)} ₼</p>
                         </div>
                       </button>
@@ -851,12 +851,12 @@ export default function SellerPage() {
               {/* Desktop cart sidebar */}
               <div className="hidden md:flex w-72 bg-white border-l flex-col">
                 <div className="px-4 py-3 border-b">
-                  <h2 className="font-bold text-gray-800">Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}</h2>
-                  <p className="text-xs text-gray-400">{orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                  <h2 className="font-bold text-stone-800">Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}</h2>
+                  <p className="text-xs text-stone-400">{orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
                 </div>
                 <div className="flex-1 overflow-y-auto px-4 py-3">
                   {cart.length === 0
-                    ? <p className="text-center text-gray-400 text-sm py-8">Boşdur</p>
+                    ? <p className="text-center text-stone-400 text-sm py-8">Boşdur</p>
                     : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
                   }
                 </div>
@@ -866,16 +866,16 @@ export default function SellerPage() {
                     value={note}
                     onChange={e => setNote(e.target.value)}
                     rows={2}
-                    className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400"
                   />
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-gray-600">Cəmi:</span>
+                    <span className="text-sm text-stone-600">Cəmi:</span>
                     <span className="font-bold text-lg text-amber-700">{cartTotal.toFixed(2)} ₼</span>
                   </div>
                   <button
                     onClick={submitOrder}
                     disabled={cart.length === 0}
-                    className="w-full bg-amber-800 hover:bg-amber-900 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors"
+                    className="w-full bg-amber-800 hover:bg-amber-900 disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors"
                   >
                     Sifariş ver
                   </button>
@@ -901,7 +901,7 @@ export default function SellerPage() {
       </div>
 
       {/* Mobile bottom navigation */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-gray-200 flex safe-area-inset-bottom">
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-stone-200 flex safe-area-inset-bottom">
         {[
           { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
           { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
@@ -917,7 +917,7 @@ export default function SellerPage() {
                 if (n.id === 'new-order') { setOrderType(null); setCart([]); }
                 setView(n.id);
               }}
-              className={`flex-1 flex flex-col items-center gap-1 py-2.5 relative transition-colors active:opacity-70 ${isActive ? 'text-amber-800' : 'text-gray-400'}`}
+              className={`flex-1 flex flex-col items-center gap-1 py-2.5 relative transition-colors active:opacity-70 ${isActive ? 'text-amber-800' : 'text-stone-400'}`}
             >
               <div className="relative">
                 <Icon className="w-5 h-5" />
@@ -939,18 +939,18 @@ export default function SellerPage() {
           <div className="fixed bottom-0 inset-x-0 z-[60] bg-white rounded-t-2xl shadow-2xl md:hidden flex flex-col max-h-[85vh]">
             <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b shrink-0">
               <div>
-                <h2 className="font-bold text-gray-800">
+                <h2 className="font-bold text-stone-800">
                   Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}
                 </h2>
-                <p className="text-xs text-gray-400">{orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                <p className="text-xs text-stone-400">{orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
               </div>
-              <button onClick={() => setMobileCartOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-xl bg-gray-100 text-gray-500">
+              <button onClick={() => setMobileCartOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-xl bg-stone-100 text-stone-500">
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-3">
               {cart.length === 0
-                ? <p className="text-center text-gray-400 text-sm py-8">Boşdur</p>
+                ? <p className="text-center text-stone-400 text-sm py-8">Boşdur</p>
                 : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
               }
             </div>
@@ -960,16 +960,16 @@ export default function SellerPage() {
                 value={note}
                 onChange={e => setNote(e.target.value)}
                 rows={2}
-                className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400"
+                className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400"
               />
               <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Cəmi:</span>
+                <span className="text-sm text-stone-600">Cəmi:</span>
                 <span className="font-bold text-xl text-amber-700">{cartTotal.toFixed(2)} ₼</span>
               </div>
               <button
                 onClick={submitOrder}
                 disabled={cart.length === 0}
-                className="w-full bg-amber-800 hover:bg-amber-900 disabled:bg-gray-300 text-white font-semibold py-4 rounded-2xl transition-colors text-base active:scale-95"
+                className="w-full bg-amber-800 hover:bg-amber-900 disabled:bg-stone-300 text-white font-semibold py-4 rounded-2xl transition-colors text-base active:scale-95"
               >
                 Sifariş ver
               </button>
@@ -990,13 +990,13 @@ export default function SellerPage() {
         return (
           <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
             <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
-              <h3 className="font-bold text-lg text-gray-800 mb-1">Ödəniş</h3>
-              <p className="text-sm text-gray-500 mb-4">
+              <h3 className="font-bold text-lg text-stone-800 mb-1">Ödəniş</h3>
+              <p className="text-sm text-stone-500 mb-4">
                 №{payingOrder.orderNumber} · {tableName(payingOrder.tableNumber)}
               </p>
               <ul className="text-sm space-y-2 mb-4 border-t pt-3 max-h-40 overflow-y-auto">
                 {payingOrder.items.map((oi, i) => (
-                  <li key={i} className="flex justify-between text-gray-700">
+                  <li key={i} className="flex justify-between text-stone-700">
                     <div>
                       <span>{oi.menuItem.name} × {oi.quantity}</span>
                       {oi.modifiers && <p className="text-xs text-amber-600">{oi.modifiers}</p>}
@@ -1011,7 +1011,7 @@ export default function SellerPage() {
               </div>
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div>
-                  <label className="text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1 block">💵 Nağd (₼)</label>
+                  <label className="text-xs font-medium text-stone-500 mb-1.5 flex items-center gap-1 block">💵 Nağd (₼)</label>
                   <input
                     type="number" min="0" step="0.5" placeholder="0.00"
                     value={cashInput}
@@ -1024,12 +1024,12 @@ export default function SellerPage() {
                       }
                       requestAnimationFrame(() => el.select());
                     }}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700 text-center"
+                    className="w-full border border-stone-200 rounded-xl px-3 py-3 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700 text-center"
                     autoFocus
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1 block">💳 Kart (₼)</label>
+                  <label className="text-xs font-medium text-stone-500 mb-1.5 flex items-center gap-1 block">💳 Kart (₼)</label>
                   <input
                     type="number" min="0" step="0.5" placeholder="0.00"
                     value={cardInput}
@@ -1042,7 +1042,7 @@ export default function SellerPage() {
                       }
                       requestAnimationFrame(() => el.select());
                     }}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-3 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700 text-center"
+                    className="w-full border border-stone-200 rounded-xl px-3 py-3 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700 text-center"
                   />
                 </div>
               </div>
@@ -1055,16 +1055,16 @@ export default function SellerPage() {
               {paid > 0 && overpay > 0 && (
                 <div className="mb-4 space-y-2">
                   {maxChange > 0 && (
-                    <div className="rounded-xl overflow-hidden border border-gray-200 flex">
+                    <div className="rounded-xl overflow-hidden border border-stone-200 flex">
                       <button
                         onClick={() => setIsTip(false)}
-                        className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${!isTip ? 'bg-green-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                        className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${!isTip ? 'bg-green-500 text-white' : 'bg-white text-stone-500 hover:bg-stone-50'}`}
                       >
                         💸 Qaytar {maxChange.toFixed(2)} ₼
                       </button>
                       <button
                         onClick={() => { setIsTip(true); setTipInput(overpay.toFixed(2)); }}
-                        className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${isTip ? 'bg-amber-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                        className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${isTip ? 'bg-amber-500 text-white' : 'bg-white text-stone-500 hover:bg-stone-50'}`}
                       >
                         ⭐ Bəxşiş
                       </button>
@@ -1109,7 +1109,7 @@ export default function SellerPage() {
                 </div>
               )}
               <div className="flex gap-2">
-                <button onClick={() => setPayingOrder(null)} className="py-3 px-5 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">Ləğv et</button>
+                <button onClick={() => setPayingOrder(null)} className="py-3 px-5 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">Ləğv et</button>
                 <button
                   onClick={confirmPayment}
                   disabled={!canPay}
@@ -1127,18 +1127,18 @@ export default function SellerPage() {
       {modifierItem && (
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
-            <h3 className="font-bold text-lg text-gray-800 mb-1">{modifierItem.name}</h3>
-            <p className="text-sm text-gray-400 mb-4">Seçimləri edin</p>
+            <h3 className="font-bold text-lg text-stone-800 mb-1">{modifierItem.name}</h3>
+            <p className="text-sm text-stone-400 mb-4">Seçimləri edin</p>
             <div className="space-y-4">
               {(modifierItem.variants?.length ?? 0) > 0 && (
                 <div>
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Variant</p>
+                  <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2">Variant</p>
                   <div className="flex flex-wrap gap-2">
                     {modifierItem.variants!.map(v => (
                       <button
                         key={v.id}
                         onClick={() => setSelectedVariant({ id: v.id, name: v.name, price: v.price })}
-                        className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${selectedVariant?.id === v.id ? 'border-amber-800 bg-amber-50 text-amber-800' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${selectedVariant?.id === v.id ? 'border-amber-800 bg-amber-50 text-amber-800' : 'border-stone-200 text-stone-600 hover:border-stone-300'}`}
                       >
                         {v.name} — {v.price.toFixed(2)} ₼
                       </button>
@@ -1148,13 +1148,13 @@ export default function SellerPage() {
               )}
               {(MOD_GROUPS[modifierItem.category] ?? []).map(group => (
                 <div key={group.label}>
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{group.label}</p>
+                  <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2">{group.label}</p>
                   <div className="flex flex-wrap gap-2">
                     {group.options.map(opt => (
                       <button
                         key={opt}
                         onClick={() => setSelectedMods(prev => ({ ...prev, [group.label]: opt }))}
-                        className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${selectedMods[group.label] === opt ? 'border-amber-800 bg-amber-50 text-amber-800' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${selectedMods[group.label] === opt ? 'border-amber-800 bg-amber-50 text-amber-800' : 'border-stone-200 text-stone-600 hover:border-stone-300'}`}
                       >
                         {opt}
                       </button>
@@ -1164,7 +1164,7 @@ export default function SellerPage() {
               ))}
             </div>
             <div className="flex gap-2 mt-6">
-              <button onClick={() => setModifierItem(null)} className="flex-1 py-3 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50">Ləğv et</button>
+              <button onClick={() => setModifierItem(null)} className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">Ləğv et</button>
               <button onClick={confirmModifiers} className="flex-1 py-3 rounded-xl bg-amber-800 hover:bg-amber-900 text-white font-semibold text-sm active:scale-95">Əlavə et</button>
             </div>
           </div>
@@ -1186,14 +1186,14 @@ function CartItems({ cart, addToCart, removeFromCart }: {
       {cart.map(ci => (
         <li key={ci.menuItem.id + (ci.modifiers ?? '')} className="flex items-center gap-3">
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-800 truncate">{ci.menuItem.name}</p>
+            <p className="text-sm font-medium text-stone-800 truncate">{ci.menuItem.name}</p>
             {ci.modifiers && <p className="text-xs text-amber-600 truncate">{ci.modifiers}</p>}
-            <p className="text-xs text-gray-400">{ci.menuItem.price.toFixed(2)} ₼</p>
+            <p className="text-xs text-stone-400">{ci.menuItem.price.toFixed(2)} ₼</p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               onClick={() => removeFromCart(ci.menuItem.id, ci.modifiers)}
-              className="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center active:scale-90"
+              className="w-7 h-7 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-600 flex items-center justify-center active:scale-90"
             >
               <Minus className="w-3 h-3" />
             </button>
@@ -1227,23 +1227,23 @@ function OrderRow({ order, tableLabel, onPay, onStatusChange }: {
   return (
     <>
       {/* Mobile card */}
-      <div className="md:hidden mx-3 my-2 bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+      <div className="md:hidden mx-3 my-2 bg-white rounded-2xl border border-stone-100 shadow-sm p-4">
         <div className="flex items-start justify-between mb-2">
           <div>
             <div className="flex items-center gap-2 mb-0.5">
               <span className="text-amber-700 font-bold text-sm">№{order.orderNumber}</span>
-              <span className="text-gray-800 font-semibold text-sm">{tableLabel}</span>
+              <span className="text-stone-800 font-semibold text-sm">{tableLabel}</span>
             </div>
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-stone-400">
               {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })} · {elapsed(order.createdAt)}
             </p>
           </div>
           <div className="text-right">
-            <p className="font-bold text-gray-800">{total.toFixed(2)} ₼</p>
+            <p className="font-bold text-stone-800">{total.toFixed(2)} ₼</p>
             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[order.status]}`}>{order.status}</span>
           </div>
         </div>
-        <p className="text-xs text-gray-500 truncate mb-3">{itemsPreview}</p>
+        <p className="text-xs text-stone-500 truncate mb-3">{itemsPreview}</p>
         {order.status !== 'ödənilib' && (
           <button
             onClick={onPay}
@@ -1255,18 +1255,18 @@ function OrderRow({ order, tableLabel, onPay, onStatusChange }: {
       </div>
 
       {/* Desktop table row */}
-      <div className="hidden md:grid grid-cols-[120px_1fr_140px_200px_110px] gap-4 px-6 py-4 border-b bg-white hover:bg-gray-50 items-center">
+      <div className="hidden md:grid grid-cols-[120px_1fr_140px_200px_110px] gap-4 px-6 py-4 border-b bg-white hover:bg-stone-50 items-center">
         <div>
-          <p className="font-semibold text-gray-800 text-sm">
+          <p className="font-semibold text-stone-800 text-sm">
             {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })}
           </p>
-          <p className="text-xs text-gray-400">{elapsed(order.createdAt)}</p>
+          <p className="text-xs text-stone-400">{elapsed(order.createdAt)}</p>
         </div>
         <div>
-          <p className="text-sm font-medium text-gray-800">
+          <p className="text-sm font-medium text-stone-800">
             <span className="text-amber-700">№{order.orderNumber}</span>{' › '}<span>{tableLabel}</span>
           </p>
-          <p className="text-xs text-gray-400 truncate max-w-xs">{itemsPreview}</p>
+          <p className="text-xs text-stone-400 truncate max-w-xs">{itemsPreview}</p>
         </div>
         <div>
           <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[order.status]}`}>
@@ -1281,7 +1281,7 @@ function OrderRow({ order, tableLabel, onPay, onStatusChange }: {
           )}
         </div>
         <div className="text-right">
-          <span className="font-bold text-gray-800">{total.toFixed(2)} ₼</span>
+          <span className="font-bold text-stone-800">{total.toFixed(2)} ₼</span>
         </div>
       </div>
     </>

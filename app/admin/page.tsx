@@ -28,7 +28,7 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
   'gözləyir':  'bg-amber-100 text-amber-700',
   'hazırlanır':'bg-blue-100 text-blue-700',
   'hazırdır':  'bg-green-100 text-green-700',
-  'ödənilib':  'bg-gray-100 text-gray-500',
+  'ödənilib':  'bg-stone-100 text-stone-500',
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
 
@@ -630,35 +630,35 @@ function AdminPageContent() {
   function renderItemForm(className: string) {
     return (
       <form ref={formRef} onSubmit={handleSubmit} className={className}>
-        <h3 className="font-semibold text-gray-800">{editingId ? 'Məhsulu düzəlt' : 'Yeni Məhsul'}</h3>
+        <h3 className="font-semibold text-stone-800">{editingId ? 'Məhsulu düzəlt' : 'Yeni Məhsul'}</h3>
 
         <div>
-          <label className="text-xs font-medium text-gray-500 mb-1.5 block">Ad</label>
+          <label className="text-xs font-medium text-stone-500 mb-1.5 block">Ad</label>
           <input type="text" placeholder="Məhsulun adı" value={form.name}
             onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+            className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
             required />
         </div>
 
         <div>
-          <label className="text-xs font-medium text-gray-500 mb-1.5 block">Kateqoriya</label>
+          <label className="text-xs font-medium text-stone-500 mb-1.5 block">Kateqoriya</label>
           <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white">
+            className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white">
             {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
           </select>
         </div>
 
         <div>
-          <label className="text-xs font-medium text-gray-500 mb-1.5 block">Şəkil</label>
+          <label className="text-xs font-medium text-stone-500 mb-1.5 block">Şəkil</label>
           <div className="flex gap-3 items-center">
             <button type="button" onClick={() => imgRef.current?.click()}
-              className="w-16 h-16 rounded-lg border-2 border-dashed border-gray-200 hover:border-amber-400 flex items-center justify-center text-gray-300 hover:text-amber-500 transition-colors shrink-0">
+              className="w-16 h-16 rounded-lg border-2 border-dashed border-stone-200 hover:border-amber-400 flex items-center justify-center text-stone-300 hover:text-amber-500 transition-colors shrink-0">
               <ImageIcon className="w-6 h-6" />
             </button>
             <input ref={imgRef} type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
             {form.image && (
               <div className="relative">
-                <img src={form.image} alt="" className="w-16 h-16 rounded-lg object-cover border border-gray-200" />
+                <img src={form.image} alt="" className="w-16 h-16 rounded-lg object-cover border border-stone-200" />
                 <button type="button" onClick={() => setForm(f => ({ ...f, image: '' }))} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-4 h-4 text-xs flex items-center justify-center">×</button>
               </div>
             )}
@@ -669,22 +669,22 @@ function AdminPageContent() {
           <input type="checkbox" checked={form.hasVariants}
             onChange={e => setForm(f => ({ ...f, hasVariants: e.target.checked, variants: e.target.checked && f.variants.length === 0 ? [{ id: Date.now().toString(), name: '', price: '', costPrice: '' }] : f.variants }))}
             className="rounded accent-amber-800" />
-          <span className="text-sm text-gray-700">Variantlar var (ölçü, növ…)</span>
+          <span className="text-sm text-stone-700">Variantlar var (ölçü, növ…)</span>
         </label>
 
         {!form.hasVariants ? (
           <div className="grid grid-cols-3 gap-3 items-end">
             <div>
-              <label className="text-xs font-medium text-gray-500 mb-1.5 block">Qiymət (₼)</label>
+              <label className="text-xs font-medium text-stone-500 mb-1.5 block">Qiymət (₼)</label>
               <input type="number" placeholder="0.00" step="0.5" min="0" value={form.price}
                 onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" required />
+                className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" required />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-500 mb-1.5 block">Maya dəyəri (₼)</label>
+              <label className="text-xs font-medium text-stone-500 mb-1.5 block">Maya dəyəri (₼)</label>
               <input type="number" placeholder="0.00" step="0.01" min="0" value={form.costPrice}
                 onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
+                className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
             </div>
             <div className="pb-2 text-sm font-semibold text-green-600">
               {calcMargin(form.price, form.costPrice) && `Marja: ${calcMargin(form.price, form.costPrice)}`}
@@ -692,7 +692,7 @@ function AdminPageContent() {
           </div>
         ) : (
           <div className="space-y-2">
-            <div className="grid grid-cols-9 gap-2 text-xs text-gray-400 px-1">
+            <div className="grid grid-cols-9 gap-2 text-xs text-stone-400 px-1">
               <span className="col-span-3">Variant adı</span>
               <span className="col-span-2">Qiymət (₼)</span>
               <span className="col-span-2">Maya (₼)</span>
@@ -700,13 +700,13 @@ function AdminPageContent() {
             </div>
             {form.variants.map((v, i) => (
               <div key={v.id} className="grid grid-cols-9 gap-2 items-center">
-                <input className="col-span-3 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                <input className="col-span-3 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
                   placeholder={`Variant ${i + 1}`} value={v.name} onChange={e => updateVariant(i, 'name', e.target.value)} required />
                 <input type="number" placeholder="0.00" step="0.5" min="0"
-                  className="col-span-2 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                  className="col-span-2 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
                   value={v.price} onChange={e => updateVariant(i, 'price', e.target.value)} required />
                 <input type="number" placeholder="0.00" step="0.01" min="0"
-                  className="col-span-2 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                  className="col-span-2 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
                   value={v.costPrice} onChange={e => updateVariant(i, 'costPrice', e.target.value)} />
                 <div className="col-span-2 flex items-center gap-1">
                   <span className="text-xs text-green-600 font-medium flex-1">{calcMargin(v.price, v.costPrice)}</span>
@@ -723,7 +723,7 @@ function AdminPageContent() {
             {saving && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
             {saving ? 'Saxlanır…' : editingId ? 'Yadda saxla' : 'Əlavə et'}
           </button>
-          <button type="button" onClick={cancelForm} disabled={saving} className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-40">Ləğv et</button>
+          <button type="button" onClick={cancelForm} disabled={saving} className="text-sm text-stone-400 hover:text-stone-600 px-4 py-2 rounded-lg hover:bg-stone-100 transition-colors disabled:opacity-40">Ləğv et</button>
         </div>
       </form>
     );
@@ -904,18 +904,18 @@ function AdminPageContent() {
     return (
       <div className="flex flex-col h-full bg-white min-h-[calc(100vh-4rem)]">
         {/* Logo row */}
-        <div className={`flex items-center h-16 border-b border-gray-100/50 ${collapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
+        <div className={`flex items-center h-16 border-b border-stone-100/50 ${collapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
           {!collapsed && (
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
                 <Coffee className="w-4 h-4 text-white" />
               </div>
-              <span className="font-semibold text-gray-800 text-sm truncate max-w-[140px]">{getSession()?.companyName || 'Admin Paneli'}</span>
+              <span className="font-semibold text-stone-800 text-sm truncate max-w-[140px]">{getSession()?.companyName || 'Admin Paneli'}</span>
             </div>
           )}
           <button
             onClick={() => setCollapsed(c => !c)}
-            className="hidden md:flex w-8 h-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+            className="hidden md:flex w-8 h-8 items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-stone-700 transition-colors"
           >
             {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </button>
@@ -937,7 +937,7 @@ function AdminPageContent() {
                   className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
                     isActive
                       ? 'bg-amber-800/10 text-amber-800 before:absolute before:left-[-9px] before:top-1/2 before:-translate-y-1/2 before:w-[3px] before:h-4 before:rounded-r-full before:bg-amber-800'
-                      : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700'
+                      : 'text-stone-400 hover:bg-stone-100 hover:text-stone-700'
                   }`}
                 >
                   <Icon className="w-4 h-4" />
@@ -953,7 +953,7 @@ function AdminPageContent() {
                 className={`flex items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium transition-colors w-full ${
                   isActive
                     ? 'bg-amber-800 text-white shadow-sm'
-                    : 'text-gray-500 hover:bg-amber-50 hover:text-amber-900'
+                    : 'text-stone-500 hover:bg-amber-50 hover:text-amber-900'
                 }`}
               >
                 <Icon className="w-4 h-4 shrink-0" />
@@ -970,7 +970,7 @@ function AdminPageContent() {
 
         {/* User + logout */}
         {!collapsed && (
-          <div className="px-4 py-4 border-t border-gray-100/50">
+          <div className="px-4 py-4 border-t border-stone-100/50">
             <button
               onClick={openProfile}
               className="flex items-center gap-2 mb-3 w-full hover:opacity-80 transition-opacity text-left"
@@ -978,12 +978,12 @@ function AdminPageContent() {
               <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold shrink-0">
                 {adminName[0]?.toUpperCase()}
               </div>
-              <span className="text-xs text-gray-500 truncate">{adminName}</span>
+              <span className="text-xs text-stone-500 truncate">{adminName}</span>
               {!online && <span className="ml-auto text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">Oflayn</span>}
             </button>
             <button
               onClick={() => { logout(); router.push('/login'); }}
-              className="flex items-center gap-2 text-xs text-gray-400 hover:text-red-500 transition-colors"
+              className="flex items-center gap-2 text-xs text-stone-400 hover:text-red-500 transition-colors"
             >
               <LogOut className="w-3.5 h-3.5" />
               Çıxış
@@ -991,7 +991,7 @@ function AdminPageContent() {
           </div>
         )}
         {collapsed && (
-          <div className="py-4 flex flex-col items-center gap-2 border-t border-gray-100/50">
+          <div className="py-4 flex flex-col items-center gap-2 border-t border-stone-100/50">
             <button
               onClick={openProfile}
               title="Profil"
@@ -999,7 +999,7 @@ function AdminPageContent() {
             >
               {adminName[0]?.toUpperCase()}
             </button>
-            <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-gray-400 hover:text-red-500 transition-colors">
+            <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-stone-400 hover:text-red-500 transition-colors">
               <LogOut className="w-4 h-4" />
             </button>
           </div>
@@ -1011,13 +1011,13 @@ function AdminPageContent() {
   const meta = PAGE_META[tab];
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#f7f3ed]">
 
       {/* ── Top header ── */}
-      <header className="sticky top-0 z-50 h-16 border-b border-gray-100/60 bg-white/80 backdrop-blur-sm flex items-center gap-3 px-4">
+      <header className="sticky top-0 z-50 h-16 border-b border-stone-100/60 bg-white/80 backdrop-blur-sm flex items-center gap-3 px-4">
         {/* Mobile menu */}
         <button
-          className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100"
+          className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100"
           onClick={() => setMobileOpen(true)}
         >
           <Menu className="w-5 h-5" />
@@ -1027,29 +1027,29 @@ function AdminPageContent() {
           <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
             <Coffee className="w-4 h-4 text-white" />
           </div>
-          <span className="font-semibold text-gray-800 text-sm truncate max-w-[160px]">{getSession()?.companyName || 'Kafe'}</span>
+          <span className="font-semibold text-stone-800 text-sm truncate max-w-[160px]">{getSession()?.companyName || 'Kafe'}</span>
         </div>
 
         <div className="flex-1" />
 
         <button
           onClick={openProfile}
-          className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-gray-100 rounded-xl hover:border-amber-300 hover:bg-amber-50 transition-colors"
+          className="flex items-center gap-2 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl hover:border-amber-300 hover:bg-amber-50 transition-colors"
         >
           <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
             {adminName[0]?.toUpperCase()}
           </div>
           <div className="hidden sm:flex flex-col leading-tight">
-            <span className="text-sm font-medium text-gray-700">{adminName}</span>
+            <span className="text-sm font-medium text-stone-700">{adminName}</span>
             {getSession()?.companyName && (
-              <span className="text-xs text-gray-400">{getSession()?.companyName}</span>
+              <span className="text-xs text-stone-400">{getSession()?.companyName}</span>
             )}
           </div>
         </button>
 
         <button
           onClick={() => { logout(); router.push('/login'); }}
-          className="w-9 h-9 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+          className="w-9 h-9 flex items-center justify-center rounded-lg text-stone-400 hover:text-red-500 hover:bg-red-50 transition-colors"
           title="Çıxış"
         >
           <LogOut className="w-4 h-4" />
@@ -1091,7 +1091,7 @@ function AdminPageContent() {
           <div className="fixed inset-0 bg-black/30 z-[60] md:hidden" onClick={() => setMobileOpen(false)} />
           <div className="fixed inset-y-0 left-0 z-[70] w-64 md:hidden shadow-xl">
             <div className="absolute top-3 right-3 z-10">
-              <button onClick={() => setMobileOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 text-gray-500">
+              <button onClick={() => setMobileOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100 text-stone-500">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1103,68 +1103,68 @@ function AdminPageContent() {
       <div className="flex min-h-[calc(100vh-4rem)] bg-white">
 
         {/* ── Desktop sidebar ── */}
-        <aside className={`hidden md:block flex-shrink-0 sticky top-16 self-start h-[calc(100vh-4rem)] transition-all duration-200 border-r border-gray-100/60 ${collapsed ? 'w-14' : 'w-56'}`}>
+        <aside className={`hidden md:block flex-shrink-0 sticky top-16 self-start h-[calc(100vh-4rem)] transition-all duration-200 border-r border-stone-100/60 ${collapsed ? 'w-14' : 'w-56'}`}>
           <SidebarContent />
         </aside>
 
         {/* ── Main ── */}
-        <main className="flex-1 min-w-0 bg-gray-50 rounded-tl-2xl border-l border-t border-gray-100/60 p-6 md:p-8 overflow-y-auto">
+        <main className="flex-1 min-w-0 bg-[#f7f3ed] rounded-tl-2xl border-l border-t border-stone-100/60 p-6 md:p-8 overflow-y-auto">
           <div className="mb-6">
-            <h1 className="text-lg font-semibold text-gray-900">{meta.title}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{meta.subtitle}</p>
+            <h1 className="text-lg font-semibold text-stone-900">{meta.title}</h1>
+            <p className="text-sm text-stone-500 mt-0.5">{meta.subtitle}</p>
           </div>
 
           {/* ── STATS ─────────────────────────────────────────────────── */}
           {tab === 'stats' && !statsLoaded && (
             <div className="flex flex-col items-center justify-center gap-3 py-24 max-w-5xl">
-              <span className="w-8 h-8 border-2 border-gray-200 border-t-[#92400e] rounded-full animate-spin" />
-              <p className="text-sm text-gray-400">Yüklənir...</p>
+              <span className="w-8 h-8 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
+              <p className="text-sm text-stone-400">Yüklənir...</p>
             </div>
           )}
           {tab === 'stats' && statsLoaded && (
             <div className={`relative space-y-5 max-w-5xl transition-opacity duration-300 ${dataLoading ? 'opacity-60' : ''}`}>
               {dataLoading && (
                 <div className="absolute inset-x-0 top-32 z-10 flex justify-center pointer-events-none">
-                  <div className="flex flex-col items-center gap-2 bg-white/95 rounded-xl px-8 py-5 shadow-lg border border-gray-100">
-                    <span className="w-7 h-7 border-2 border-gray-200 border-t-[#92400e] rounded-full animate-spin" />
-                    <p className="text-sm text-gray-500">Yüklənir...</p>
+                  <div className="flex flex-col items-center gap-2 bg-white/95 rounded-xl px-8 py-5 shadow-lg border border-stone-100">
+                    <span className="w-7 h-7 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
+                    <p className="text-sm text-stone-500">Yüklənir...</p>
                   </div>
                 </div>
               )}
 
               {/* Main chart card */}
-              <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
+              <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-5 pb-3">
-                  <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                  <h3 className="font-semibold text-stone-800 flex items-center gap-2">
                     Gəlir
-                    {dataLoading && <span className="w-3.5 h-3.5 border-2 border-gray-200 border-t-[#92400e] rounded-full animate-spin" />}
+                    {dataLoading && <span className="w-3.5 h-3.5 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />}
                   </h3>
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5">
+                    <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5">
                       {([['bugün', 'Bu gün'], ['7g', '7 gün'], ['30g', '30 gün'], ['ay', 'Bu ay'], ['6ay', '6 ay'], ['1il', '1 il']] as [ChartPreset, string][]).map(([p, l]) => {
                         const [f, t] = presetRange(p);
                         const active = customFrom === f && customTo === t;
                         return (
                           <button key={p} onClick={() => { setCustomFrom(f); setCustomTo(t); }}
-                            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${active ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
+                            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${active ? 'bg-white shadow-sm text-stone-800' : 'text-stone-400 hover:text-stone-600'}`}>
                             {l}
                           </button>
                         );
                       })}
                     </div>
-                    <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1">
+                    <div className="flex items-center gap-1.5 bg-stone-50 border border-stone-200 rounded-lg px-2 py-1">
                       <input
                         type="date"
                         value={customFrom}
                         onChange={e => setCustomFrom(e.target.value)}
-                        className="text-xs text-gray-600 bg-transparent border-none outline-none w-[118px]"
+                        className="text-xs text-stone-600 bg-transparent border-none outline-none w-[118px]"
                       />
-                      <span className="text-gray-300 text-xs">—</span>
+                      <span className="text-stone-300 text-xs">—</span>
                       <input
                         type="date"
                         value={customTo}
                         onChange={e => setCustomTo(e.target.value)}
-                        className="text-xs text-gray-600 bg-transparent border-none outline-none w-[118px]"
+                        className="text-xs text-stone-600 bg-transparent border-none outline-none w-[118px]"
                       />
                     </div>
                   </div>
@@ -1173,21 +1173,21 @@ function AdminPageContent() {
                   <LineChartSvg data={chartData} />
                 </div>
                 {/* KPI strip */}
-                <div className="flex flex-wrap border-t border-gray-100">
+                <div className="flex flex-wrap border-t border-stone-100">
                   {[
-                    { label: 'Gəlir',       value: `${chartRevenue.toFixed(2)} ₼`,  icon: Wallet,    color: 'text-gray-800' },
-                    { label: 'Maya dəyəri', value: `${chartCost.toFixed(2)} ₼`,     icon: Package,   color: 'text-gray-800' },
+                    { label: 'Gəlir',       value: `${chartRevenue.toFixed(2)} ₼`,  icon: Wallet,    color: 'text-stone-800' },
+                    { label: 'Maya dəyəri', value: `${chartCost.toFixed(2)} ₼`,     icon: Package,   color: 'text-stone-800' },
                     { label: 'Mənfəət',     value: `${chartProfit.toFixed(2)} ₼`,   icon: TrendingUp,color: chartProfit >= 0 ? 'text-green-600' : 'text-red-500' },
                     { label: 'Mənfəət %',   value: `${chartMarginPct.toFixed(1)}%`, icon: Percent,   color: chartMarginPct >= 0 ? 'text-green-600' : 'text-red-500' },
-                    { label: 'Orta çek',    value: `${chartAvg.toFixed(2)} ₼`,      icon: Receipt,   color: 'text-gray-800' },
-                    { label: 'Sifarişlər',  value: String(chartPaid.length),         icon: Coffee,    color: 'text-gray-800' },
+                    { label: 'Orta çek',    value: `${chartAvg.toFixed(2)} ₼`,      icon: Receipt,   color: 'text-stone-800' },
+                    { label: 'Sifarişlər',  value: String(chartPaid.length),         icon: Coffee,    color: 'text-stone-800' },
                   ].map((kpi, i, arr) => {
                     const Icon = kpi.icon;
                     return (
-                      <div key={kpi.label} className={`flex-1 min-w-[100px] px-4 py-3 ${i < arr.length - 1 ? 'border-r border-gray-100' : ''}`}>
+                      <div key={kpi.label} className={`flex-1 min-w-[100px] px-4 py-3 ${i < arr.length - 1 ? 'border-r border-stone-100' : ''}`}>
                         <div className="flex items-center gap-1.5 mb-1">
-                          <Icon className="w-3 h-3 text-gray-300" />
-                          <p className="text-xs text-gray-400 whitespace-nowrap">{kpi.label}</p>
+                          <Icon className="w-3 h-3 text-stone-300" />
+                          <p className="text-xs text-stone-400 whitespace-nowrap">{kpi.label}</p>
                         </div>
                         <p className={`font-bold text-sm whitespace-nowrap ${kpi.color}`}>{kpi.value}</p>
                       </div>
@@ -1198,10 +1198,10 @@ function AdminPageContent() {
 
               {/* Payment + Category */}
               <div className="grid md:grid-cols-2 gap-5">
-                <div className="bg-white rounded-xl border border-gray-100 card p-5">
-                  <h3 className="font-semibold text-gray-800 text-sm mb-4">Ödəniş üsulları</h3>
+                <div className="bg-white rounded-xl border border-stone-100 card p-5">
+                  <h3 className="font-semibold text-stone-800 text-sm mb-4">Ödəniş üsulları</h3>
                   {totalPayRev === 0 ? (
-                    <p className="text-sm text-gray-300 text-center py-4">Məlumat yoxdur</p>
+                    <p className="text-sm text-stone-300 text-center py-4">Məlumat yoxdur</p>
                   ) : (
                     <div className="space-y-3">
                       {[{ label: 'Nağd', rev: cashRev }, { label: 'Kart', rev: cardRev }].map(pm => {
@@ -1209,13 +1209,13 @@ function AdminPageContent() {
                         return (
                           <div key={pm.label}>
                             <div className="flex justify-between items-center mb-1.5">
-                              <span className="text-sm text-gray-600">{pm.label}</span>
+                              <span className="text-sm text-stone-600">{pm.label}</span>
                               <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-400">{pct.toFixed(0)}%</span>
-                                <span className="font-semibold text-gray-800 text-sm">{pm.rev.toFixed(2)} ₼</span>
+                                <span className="text-xs text-stone-400">{pct.toFixed(0)}%</span>
+                                <span className="font-semibold text-stone-800 text-sm">{pm.rev.toFixed(2)} ₼</span>
                               </div>
                             </div>
-                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-1.5 bg-stone-100 rounded-full overflow-hidden">
                               <div className="h-full bg-amber-700 rounded-full transition-all" style={{ width: `${pct}%` }} />
                             </div>
                           </div>
@@ -1225,10 +1225,10 @@ function AdminPageContent() {
                   )}
                 </div>
 
-                <div className="bg-white rounded-xl border border-gray-100 card p-5">
-                  <h3 className="font-semibold text-gray-800 text-sm mb-4">Kateqoriya mənfəəti</h3>
+                <div className="bg-white rounded-xl border border-stone-100 card p-5">
+                  <h3 className="font-semibold text-stone-800 text-sm mb-4">Kateqoriya mənfəəti</h3>
                   {repCategories.length === 0 ? (
-                    <p className="text-sm text-gray-300 text-center py-4">Məlumat yoxdur</p>
+                    <p className="text-sm text-stone-300 text-center py-4">Məlumat yoxdur</p>
                   ) : (
                     <div className="space-y-3">
                       {repCategories.slice(0, 5).map(({ cat, rev, profit }) => {
@@ -1236,13 +1236,13 @@ function AdminPageContent() {
                         return (
                           <div key={cat}>
                             <div className="flex justify-between items-center mb-1.5">
-                              <span className="text-sm text-gray-600 truncate flex-1 mr-3">{cat}</span>
+                              <span className="text-sm text-stone-600 truncate flex-1 mr-3">{cat}</span>
                               <div className="flex items-center gap-2 shrink-0">
-                                <span className="text-xs text-gray-400">{margin}%</span>
-                                <span className={`font-semibold text-sm ${profit >= 0 ? 'text-gray-800' : 'text-red-500'}`}>{profit.toFixed(2)} ₼</span>
+                                <span className="text-xs text-stone-400">{margin}%</span>
+                                <span className={`font-semibold text-sm ${profit >= 0 ? 'text-stone-800' : 'text-red-500'}`}>{profit.toFixed(2)} ₼</span>
                               </div>
                             </div>
-                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-1.5 bg-stone-100 rounded-full overflow-hidden">
                               <div className={`h-full rounded-full transition-all ${profit >= 0 ? 'bg-green-400' : 'bg-red-400'}`}
                                 style={{ width: `${(Math.abs(profit) / maxRepCatProfit) * 100}%` }} />
                             </div>
@@ -1256,8 +1256,8 @@ function AdminPageContent() {
 
               {/* Hourly + Weekly */}
               <div className="grid md:grid-cols-2 gap-5">
-                <div className="bg-white rounded-xl border border-gray-100 card p-5">
-                  <h3 className="font-semibold text-gray-800 text-sm mb-4">Gün saatlarına görə</h3>
+                <div className="bg-white rounded-xl border border-stone-100 card p-5">
+                  <h3 className="font-semibold text-stone-800 text-sm mb-4">Gün saatlarına görə</h3>
                   <div className="flex items-end gap-0.5 h-36 pt-6">
                     {hourlyData.map((d, i) => {
                       const isPeak = d.rev > 0 && d.rev === maxHourly;
@@ -1279,14 +1279,14 @@ function AdminPageContent() {
                   <div className="flex gap-0.5 mt-1.5">
                     {hourlyData.map((d, i) => (
                       <div key={i} className="flex-1 text-center">
-                        {i % 2 === 0 && <span className="text-[9px] text-gray-300">{i}</span>}
+                        {i % 2 === 0 && <span className="text-[9px] text-stone-300">{i}</span>}
                       </div>
                     ))}
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl border border-gray-100 card p-5">
-                  <h3 className="font-semibold text-gray-800 text-sm mb-4">Həftənin günlərinə görə</h3>
+                <div className="bg-white rounded-xl border border-stone-100 card p-5">
+                  <h3 className="font-semibold text-stone-800 text-sm mb-4">Həftənin günlərinə görə</h3>
                   <div className="flex items-end gap-2 h-36 pt-6">
                     {weeklyData.map(d => {
                       const isPeak = d.rev > 0 && d.rev === maxWeekly;
@@ -1297,7 +1297,7 @@ function AdminPageContent() {
                           title={`${d.label} — ${d.rev.toFixed(2)} ₼`}
                         >
                           {d.rev > 0 && (
-                            <span className={`absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] font-bold whitespace-nowrap ${isPeak ? 'text-amber-800' : 'text-gray-500'}`}>
+                            <span className={`absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] font-bold whitespace-nowrap ${isPeak ? 'text-amber-800' : 'text-stone-500'}`}>
                               {d.rev >= 1000 ? `${(d.rev / 1000).toFixed(1)}k` : `${d.rev.toFixed(0)}₼`}
                             </span>
                           )}
@@ -1307,7 +1307,7 @@ function AdminPageContent() {
                   </div>
                   <div className="flex mt-1.5">
                     {weeklyData.map(d => (
-                      <span key={d.label} className="flex-1 text-center text-xs text-gray-400">{d.label}</span>
+                      <span key={d.label} className="flex-1 text-center text-xs text-stone-400">{d.label}</span>
                     ))}
                   </div>
                 </div>
@@ -1315,16 +1315,16 @@ function AdminPageContent() {
 
               {/* Top items */}
               {topItems.length > 0 && (
-                <div className="bg-white rounded-xl border border-gray-100 card p-5">
+                <div className="bg-white rounded-xl border border-stone-100 card p-5">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
                       <Star className="w-4 h-4 text-amber-700" />
-                      <h3 className="font-semibold text-gray-800 text-sm">Top məhsullar</h3>
+                      <h3 className="font-semibold text-stone-800 text-sm">Top məhsullar</h3>
                     </div>
-                    <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5">
+                    <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5">
                       {([['rev','Gəlir'],['profit','Mənfəət'],['qty','Ədəd'],['margin','Marja']] as const).map(([v, l]) => (
                         <button key={v} onClick={() => setTopSort(v)}
-                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${topSort === v ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>
+                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${topSort === v ? 'bg-white shadow-sm text-stone-800' : 'text-stone-400 hover:text-stone-600'}`}>
                           {l}
                         </button>
                       ))}
@@ -1339,8 +1339,8 @@ function AdminPageContent() {
                         <div key={item.name}>
                           <div className="flex justify-between items-center mb-1">
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[10px] font-bold text-gray-200 w-4 shrink-0">#{idx + 1}</span>
-                              <span className="text-sm text-gray-700 truncate">{item.name}</span>
+                              <span className="text-[10px] font-bold text-stone-200 w-4 shrink-0">#{idx + 1}</span>
+                              <span className="text-sm text-stone-700 truncate">{item.name}</span>
                             </div>
                             <div className="flex items-center gap-2 shrink-0 ml-3">
                               {topSort === 'margin' && margin !== null && (
@@ -1353,15 +1353,15 @@ function AdminPageContent() {
                                 <span className="text-sm font-bold text-amber-700">{item.qty} ədəd</span>
                               )}
                               {topSort === 'rev' && (
-                                <span className="font-semibold text-gray-800 text-sm">{item.rev.toFixed(2)} ₼</span>
+                                <span className="font-semibold text-stone-800 text-sm">{item.rev.toFixed(2)} ₼</span>
                               )}
-                              <span className="text-xs text-gray-300">
+                              <span className="text-xs text-stone-300">
                                 {topSort !== 'qty' && `${item.qty} ədəd`}
                                 {topSort !== 'rev' && topSort !== 'qty' && ` · ${item.rev.toFixed(2)} ₼`}
                               </span>
                             </div>
                           </div>
-                          <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-1 bg-stone-100 rounded-full overflow-hidden">
                             <div className="h-full bg-amber-700 rounded-full transition-all" style={{ width: `${(metricVal / maxItemMetric) * 100}%` }} />
                           </div>
                         </div>
@@ -1373,10 +1373,10 @@ function AdminPageContent() {
 
               {/* Seller stats + Tips */}
               <div className="grid md:grid-cols-2 gap-5">
-                <div className="bg-white rounded-xl border border-gray-100 card p-5">
-                  <h3 className="font-semibold text-gray-800 text-sm mb-4">Satıcı statistikası</h3>
+                <div className="bg-white rounded-xl border border-stone-100 card p-5">
+                  <h3 className="font-semibold text-stone-800 text-sm mb-4">Satıcı statistikası</h3>
                   {sellerStats.length === 0 ? (
-                    <p className="text-sm text-gray-300 text-center py-4">Məlumat yoxdur</p>
+                    <p className="text-sm text-stone-300 text-center py-4">Məlumat yoxdur</p>
                   ) : (
                     <div className="space-y-3">
                       {sellerStats.map(s => (
@@ -1385,11 +1385,11 @@ function AdminPageContent() {
                             <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold shrink-0">
                               {s.name[0]?.toUpperCase()}
                             </div>
-                            <span className="text-sm text-gray-700 truncate">{s.name}</span>
+                            <span className="text-sm text-stone-700 truncate">{s.name}</span>
                           </div>
                           <div className="flex items-center gap-3 shrink-0 text-sm">
-                            <span className="text-gray-400">{s.orders} sif.</span>
-                            <span className="font-semibold text-gray-800">{s.rev.toFixed(2)} ₼</span>
+                            <span className="text-stone-400">{s.orders} sif.</span>
+                            <span className="font-semibold text-stone-800">{s.rev.toFixed(2)} ₼</span>
                             {s.tips > 0 && (
                               <span className="bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-2 py-0.5 text-xs font-semibold">
                                 ⭐ bəxşiş {s.tips.toFixed(2)} ₼
@@ -1402,13 +1402,13 @@ function AdminPageContent() {
                   )}
                 </div>
 
-                <div className="bg-white rounded-xl border border-gray-100 card p-5">
+                <div className="bg-white rounded-xl border border-stone-100 card p-5">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold text-gray-800 text-sm">Bəxşiş gəliri</h3>
+                    <h3 className="font-semibold text-stone-800 text-sm">Bəxşiş gəliri</h3>
                     {totalTips > 0 && <span className="text-lg font-bold text-amber-600">⭐ {totalTips.toFixed(2)} ₼</span>}
                   </div>
                   {totalTips === 0 ? (
-                    <p className="text-sm text-gray-300 text-center py-4">Bəxşiş yoxdur</p>
+                    <p className="text-sm text-stone-300 text-center py-4">Bəxşiş yoxdur</p>
                   ) : (
                     <div className="space-y-3">
                       {sellerStats.filter(s => s.tips > 0).map(s => {
@@ -1416,13 +1416,13 @@ function AdminPageContent() {
                         return (
                           <div key={s.name}>
                             <div className="flex justify-between items-center mb-1.5">
-                              <span className="text-sm text-gray-600">{s.name}</span>
+                              <span className="text-sm text-stone-600">{s.name}</span>
                               <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-400">{pct.toFixed(0)}%</span>
+                                <span className="text-xs text-stone-400">{pct.toFixed(0)}%</span>
                                 <span className="font-semibold text-amber-700 text-sm">{s.tips.toFixed(2)} ₼</span>
                               </div>
                             </div>
-                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-1.5 bg-stone-100 rounded-full overflow-hidden">
                               <div className="h-full bg-amber-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
                             </div>
                           </div>
@@ -1434,7 +1434,7 @@ function AdminPageContent() {
               </div>
 
               {paidOrders.length === 0 && (
-                <div className="text-center py-16 text-gray-400">
+                <div className="text-center py-16 text-stone-400">
                   <TrendingUp className="w-12 h-12 mx-auto mb-3 opacity-30" />
                   <p className="text-sm">Hələlik heç bir ödəniş yoxdur</p>
                 </div>
@@ -1446,7 +1446,7 @@ function AdminPageContent() {
           {tab === 'orders' && (
             <div className="max-w-3xl space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-400">
+                <p className="text-sm text-stone-400">
                   {totalOrders > orders.length ? `${totalOrders} sifariş · son ${orders.length}` : `${orders.length} sifariş`} · {activeOrders.length} aktiv
                 </p>
                 <button
@@ -1460,82 +1460,82 @@ function AdminPageContent() {
               </div>
 
               <div className="relative">
-                <Search className="w-4 h-4 text-gray-300 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Search className="w-4 h-4 text-stone-300 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   value={orderSearch}
                   onChange={e => setOrderSearch(e.target.value)}
                   placeholder="Sifariş № və ya satıcı adı ilə axtar"
-                  className="w-full bg-white border border-gray-200 rounded-xl pl-9 pr-3 py-2 text-sm text-gray-700 placeholder:text-gray-300 focus:outline-none focus:border-amber-300"
+                  className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-3 py-2 text-sm text-stone-700 placeholder:text-stone-300 focus:outline-none focus:border-amber-300"
                 />
               </div>
 
               {orders.length === 0 && (
-                <div className="bg-white rounded-xl border border-gray-100 card p-16 text-center">
-                  <Coffee className="w-10 h-10 mx-auto mb-3 text-gray-200" />
-                  <p className="text-sm text-gray-400">Sifariş yoxdur</p>
+                <div className="bg-white rounded-xl border border-stone-100 card p-16 text-center">
+                  <Coffee className="w-10 h-10 mx-auto mb-3 text-stone-200" />
+                  <p className="text-sm text-stone-400">Sifariş yoxdur</p>
                 </div>
               )}
 
               {orders.length > 0 && visibleOrders.length === 0 && (
-                <div className="bg-white rounded-xl border border-gray-100 card p-10 text-center">
-                  <p className="text-sm text-gray-400">Axtarışa uyğun sifariş tapılmadı (yüklənmiş {orders.length} sifariş arasında)</p>
+                <div className="bg-white rounded-xl border border-stone-100 card p-10 text-center">
+                  <p className="text-sm text-stone-400">Axtarışa uyğun sifariş tapılmadı (yüklənmiş {orders.length} sifariş arasında)</p>
                 </div>
               )}
 
-              <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
+              <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
                 {visibleOrders.map((order, i) => {
                   const isPaid = order.status === 'ödənilib';
                   const isExpanded = expandedOrderId === order.id;
                   return (
-                    <div key={order.id} className={i < visibleOrders.length - 1 ? 'border-b border-gray-50' : ''}>
+                    <div key={order.id} className={i < visibleOrders.length - 1 ? 'border-b border-stone-50' : ''}>
                       {/* Row */}
                       <button
                         onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors text-left"
                       >
-                        <ChevronDown className={`w-4 h-4 text-gray-300 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                        <ChevronDown className={`w-4 h-4 text-stone-300 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                         <span className="w-14 text-xs font-bold text-amber-900 flex-shrink-0">#{order.orderNumber}</span>
-                        <span className="flex-1 text-sm text-gray-700 truncate">{order.sellerName}</span>
-                        <span className="text-xs text-gray-400 flex-shrink-0 hidden sm:block">
+                        <span className="flex-1 text-sm text-stone-700 truncate">{order.sellerName}</span>
+                        <span className="text-xs text-stone-400 flex-shrink-0 hidden sm:block">
                           {new Date(order.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })},{' '}
                           {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })}
                         </span>
-                        <span className="text-sm font-semibold text-gray-800 flex-shrink-0 w-20 text-right">{orderTotal(order).toFixed(2)} ₼</span>
+                        <span className="text-sm font-semibold text-stone-800 flex-shrink-0 w-20 text-right">{orderTotal(order).toFixed(2)} ₼</span>
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 w-24 text-center ${STATUS_COLORS[order.status]}`}>{order.status}</span>
                       </button>
 
                       {/* Expanded items */}
                       {isExpanded && (
-                        <div className="px-4 pb-4 bg-gray-50 border-t border-gray-100">
+                        <div className="px-4 pb-4 bg-stone-50 border-t border-stone-100">
                           <div className="pt-3 space-y-1 mb-3">
-                            <div className="hidden sm:grid grid-cols-[1fr_80px_80px] gap-2 text-xs font-medium text-gray-400 uppercase tracking-wide pb-1 border-b border-gray-200 mb-2">
+                            <div className="hidden sm:grid grid-cols-[1fr_80px_80px] gap-2 text-xs font-medium text-stone-400 uppercase tracking-wide pb-1 border-b border-stone-200 mb-2">
                               <span>Məhsul</span><span className="text-right">Say</span><span className="text-right">Cəmi</span>
                             </div>
                             {order.items.map((oi, j) => (
-                              <div key={j} className="flex justify-between text-sm text-gray-700 py-0.5">
+                              <div key={j} className="flex justify-between text-sm text-stone-700 py-0.5">
                                 <span className="flex-1">
                                   {oi.menuItem.name}
                                   {oi.modifiers && <span className="text-xs text-amber-600 ml-1">({oi.modifiers})</span>}
                                 </span>
-                                <span className="text-gray-400 mx-4">{oi.quantity} əd</span>
+                                <span className="text-stone-400 mx-4">{oi.quantity} əd</span>
                                 <span className="font-medium">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
                               </div>
                             ))}
                           </div>
-                          {order.note && <p className="text-xs text-gray-400 italic mb-3">Qeyd: {order.note}</p>}
-                          <div className="flex items-center justify-between pt-2 border-t border-gray-200">
+                          {order.note && <p className="text-xs text-stone-400 italic mb-3">Qeyd: {order.note}</p>}
+                          <div className="flex items-center justify-between pt-2 border-t border-stone-200">
                             <div className="flex items-center gap-2">
                               {!isPaid && (
                                 <select
                                   value={order.status}
                                   onChange={e => handleStatusChange(order.id, e.target.value as OrderStatus)}
-                                  className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                                  className="text-xs border border-stone-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
                                 >
                                   {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                                 </select>
                               )}
                               {(order.cashAmount || order.cardAmount) && (
-                                <span className="text-xs text-gray-400">
+                                <span className="text-xs text-stone-400">
                                   {[order.cashAmount ? `💵 ${order.cashAmount.toFixed(2)}` : '', order.cardAmount ? `💳 ${order.cardAmount.toFixed(2)}` : ''].filter(Boolean).join(' · ')}
                                 </span>
                               )}
@@ -1545,7 +1545,7 @@ function AdminPageContent() {
                                 </span>
                               )}
                               {(order.changeAmount ?? 0) > 0 && (
-                                <span className="text-xs text-gray-400">
+                                <span className="text-xs text-stone-400">
                                   💸 {((order.cashAmount ?? 0) + order.changeAmount!).toFixed(2)} alındı · {order.changeAmount!.toFixed(2)} qaytarıldı
                                 </span>
                               )}
@@ -1563,7 +1563,7 @@ function AdminPageContent() {
                 <button
                   onClick={loadMoreOrders}
                   disabled={loadingMore}
-                  className="w-full flex items-center justify-center gap-2 bg-white border border-gray-200 rounded-xl py-2.5 text-sm font-medium text-amber-800 hover:bg-amber-50 transition-colors disabled:opacity-60"
+                  className="w-full flex items-center justify-center gap-2 bg-white border border-stone-200 rounded-xl py-2.5 text-sm font-medium text-amber-800 hover:bg-amber-50 transition-colors disabled:opacity-60"
                 >
                   {loadingMore && <span className="w-3.5 h-3.5 border-2 border-amber-200 border-t-amber-800 rounded-full animate-spin" />}
                   Daha çox göstər ({totalOrders - orders.length} qalıb)
@@ -1577,7 +1577,7 @@ function AdminPageContent() {
             <div className="max-w-3xl space-y-4">
               {shiftsLoading ? (
                 <div className="flex justify-center py-16">
-                  <span className="w-7 h-7 border-2 border-gray-200 border-t-[#92400e] rounded-full animate-spin" />
+                  <span className="w-7 h-7 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
                 </div>
               ) : (() => {
                 const open = shifts.find(s => !s.closedAt);
@@ -1590,21 +1590,21 @@ function AdminPageContent() {
                     {open ? (
                       <div className="bg-white rounded-xl border border-green-200 card p-5 space-y-2.5">
                         <div className="flex items-center justify-between">
-                          <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                          <h3 className="font-bold text-stone-800 flex items-center gap-2">
                             <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Açıq növbə
                           </h3>
-                          <span className="text-xs text-gray-400">
+                          <span className="text-xs text-stone-400">
                             {new Date(open.openedAt).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {open.openedBy}
                           </span>
                         </div>
-                        <div className="flex justify-between text-sm text-gray-600">
+                        <div className="flex justify-between text-sm text-stone-600">
                           <span>Başlanğıc məbləğ</span><span className="font-semibold">{open.openingCash.toFixed(2)} ₼</span>
                         </div>
-                        <div className="flex justify-between text-sm text-gray-600">
+                        <div className="flex justify-between text-sm text-stone-600">
                           <span>Nağd satış (bəxşiş daxil)</span><span className="font-semibold">{openShiftSales.cash.toFixed(2)} ₼</span>
                         </div>
                         {movTotal(open) !== 0 && (
-                          <div className="flex justify-between text-sm text-gray-600">
+                          <div className="flex justify-between text-sm text-stone-600">
                             <span>Mədaxil / məxaric</span>
                             <span className={`font-semibold ${movTotal(open) < 0 ? 'text-red-500' : 'text-green-600'}`}>
                               {movTotal(open) > 0 ? '+' : ''}{movTotal(open).toFixed(2)} ₼
@@ -1614,13 +1614,13 @@ function AdminPageContent() {
                         <div className="flex justify-between items-center border-t pt-2.5 font-bold">
                           <span>Kassada olmalıdır</span><span className="text-amber-800 text-lg">{expected.toFixed(2)} ₼</span>
                         </div>
-                        <div className="flex justify-between text-xs text-gray-400">
+                        <div className="flex justify-between text-xs text-stone-400">
                           <span>💳 Kart (terminal üçün)</span><span>{openShiftSales.card.toFixed(2)} ₼</span>
                         </div>
                         {open.movements.length > 0 && (
                           <ul className="border-t pt-2.5 space-y-1">
                             {open.movements.map((m, i) => (
-                              <li key={i} className="flex justify-between text-xs text-gray-500">
+                              <li key={i} className="flex justify-between text-xs text-stone-500">
                                 <span className="truncate mr-3">{m.reason} · {m.by}</span>
                                 <span className={`font-semibold shrink-0 ${m.amount < 0 ? 'text-red-500' : 'text-green-600'}`}>
                                   {m.amount > 0 ? '+' : ''}{m.amount.toFixed(2)} ₼
@@ -1634,12 +1634,12 @@ function AdminPageContent() {
                             type="number" min="0" step="0.5" placeholder="Sayılan məbləğ (₼)"
                             value={adminCountedInput}
                             onChange={e => setAdminCountedInput(e.target.value)}
-                            className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700"
+                            className="flex-1 border border-stone-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700"
                           />
                           <button
                             onClick={() => handleAdminCloseShift(open)}
                             disabled={closingShift || adminCountedInput === ''}
-                            className="bg-gray-900 hover:bg-gray-800 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors flex items-center gap-2"
+                            className="bg-stone-900 hover:bg-stone-800 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors flex items-center gap-2"
                           >
                             {closingShift && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
                             Bağla
@@ -1655,34 +1655,34 @@ function AdminPageContent() {
                         )}
                       </div>
                     ) : (
-                      <div className="bg-white rounded-xl border border-gray-100 card p-8 text-center">
-                        <Wallet className="w-8 h-8 mx-auto mb-2 text-gray-200" />
-                        <p className="text-sm text-gray-400">Hazırda açıq növbə yoxdur — satıcı işə başlayanda açır</p>
+                      <div className="bg-white rounded-xl border border-stone-100 card p-8 text-center">
+                        <Wallet className="w-8 h-8 mx-auto mb-2 text-stone-200" />
+                        <p className="text-sm text-stone-400">Hazırda açıq növbə yoxdur — satıcı işə başlayanda açır</p>
                       </div>
                     )}
 
                     {/* History */}
                     {closed.length > 0 && (
-                      <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
-                        <div className="px-4 py-3 border-b border-gray-50 text-xs font-semibold text-gray-400 uppercase tracking-wide">Bağlanmış növbələr</div>
+                      <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
+                        <div className="px-4 py-3 border-b border-stone-50 text-xs font-semibold text-stone-400 uppercase tracking-wide">Bağlanmış növbələr</div>
                         {closed.map((s, i) => {
                           const diff = (s.countedCash ?? 0) - (s.expectedCash ?? 0);
                           const isExp = expandedShiftId === s.id;
                           return (
-                            <div key={s.id} className={i < closed.length - 1 ? 'border-b border-gray-50' : ''}>
+                            <div key={s.id} className={i < closed.length - 1 ? 'border-b border-stone-50' : ''}>
                               <button
                                 onClick={() => setExpandedShiftId(isExp ? null : s.id)}
-                                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+                                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors text-left"
                               >
-                                <ChevronDown className={`w-4 h-4 text-gray-300 shrink-0 transition-transform ${isExp ? 'rotate-180' : ''}`} />
-                                <span className="text-sm text-gray-700 flex-1 truncate">
+                                <ChevronDown className={`w-4 h-4 text-stone-300 shrink-0 transition-transform ${isExp ? 'rotate-180' : ''}`} />
+                                <span className="text-sm text-stone-700 flex-1 truncate">
                                   {new Date(s.openedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-                                  <span className="text-xs text-gray-400 ml-2">
+                                  <span className="text-xs text-stone-400 ml-2">
                                     {new Date(s.openedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })}
                                     –{s.closedAt ? new Date(s.closedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' }) : ''}
                                   </span>
                                 </span>
-                                <span className="text-sm font-semibold text-gray-700 shrink-0">{(s.countedCash ?? 0).toFixed(2)} ₼</span>
+                                <span className="text-sm font-semibold text-stone-700 shrink-0">{(s.countedCash ?? 0).toFixed(2)} ₼</span>
                                 <span className={`text-xs px-2 py-0.5 rounded-full font-semibold shrink-0 w-20 text-center ${
                                   Math.abs(diff) < 0.005 ? 'bg-green-50 text-green-600'
                                   : diff < 0 ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
@@ -1691,15 +1691,15 @@ function AdminPageContent() {
                                 </span>
                               </button>
                               {isExp && (
-                                <div className="px-11 pb-4 text-sm text-gray-600 space-y-1.5 bg-gray-50 pt-3 border-t border-gray-100">
+                                <div className="px-11 pb-4 text-sm text-stone-600 space-y-1.5 bg-stone-50 pt-3 border-t border-stone-100">
                                   <div className="flex justify-between"><span>Açdı / bağladı</span><span>{s.openedBy} / {s.closedBy}</span></div>
                                   <div className="flex justify-between"><span>Başlanğıc</span><span>{s.openingCash.toFixed(2)} ₼</span></div>
                                   <div className="flex justify-between"><span>Olmalı idi</span><span>{(s.expectedCash ?? 0).toFixed(2)} ₼</span></div>
                                   <div className="flex justify-between"><span>Sayıldı</span><span>{(s.countedCash ?? 0).toFixed(2)} ₼</span></div>
                                   {s.movements.length > 0 && (
-                                    <ul className="pt-1.5 border-t border-gray-200 space-y-1">
+                                    <ul className="pt-1.5 border-t border-stone-200 space-y-1">
                                       {s.movements.map((m, j) => (
-                                        <li key={j} className="flex justify-between text-xs text-gray-500">
+                                        <li key={j} className="flex justify-between text-xs text-stone-500">
                                           <span className="truncate mr-3">{m.reason} · {m.by}</span>
                                           <span className={m.amount < 0 ? 'text-red-500' : 'text-green-600'}>
                                             {m.amount > 0 ? '+' : ''}{m.amount.toFixed(2)} ₼
@@ -1725,9 +1725,9 @@ function AdminPageContent() {
           {tab === 'menu' && (
             <div className="max-w-3xl">
               <div className="flex items-center justify-between mb-5">
-                <p className="text-sm text-gray-400">{menu.filter(m => categories.some(c => c.name === m.category)).length} məhsul</p>
+                <p className="text-sm text-stone-400">{menu.filter(m => categories.some(c => c.name === m.category)).length} məhsul</p>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => setShowTrash(true)} className="relative flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors">
+                  <button onClick={() => setShowTrash(true)} className="relative flex items-center gap-1.5 text-sm text-stone-400 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
                     <Trash2 className="w-4 h-4" />
                     {trash.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-400 text-white text-[10px] rounded-full flex items-center justify-center font-bold">{trash.length}</span>}
                   </button>
@@ -1738,7 +1738,7 @@ function AdminPageContent() {
                 </div>
               </div>
 
-              {showForm && !editingId && renderItemForm('bg-white rounded-xl border border-gray-100 card p-6 mb-5 space-y-4')}
+              {showForm && !editingId && renderItemForm('bg-white rounded-xl border border-stone-100 card p-6 mb-5 space-y-4')}
 
               {categories.map(({ name: cat, available: catAvailable }) => {
                 const items = menu.filter(m => m.category === cat);
@@ -1746,34 +1746,34 @@ function AdminPageContent() {
                 return (
                   <div key={cat} className="mb-5">
                     <div className="flex items-center gap-2 mb-2 px-1">
-                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{cat}</p>
-                      {!catAvailable && <span className="text-xs bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded font-medium">Gizli</span>}
+                      <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider">{cat}</p>
+                      {!catAvailable && <span className="text-xs bg-stone-100 text-stone-400 px-1.5 py-0.5 rounded font-medium">Gizli</span>}
                     </div>
-                    <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
+                    <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
                       {items.map((item, i) => (
                         <React.Fragment key={item.id}>
-                        <div className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${(i < items.length - 1 && editingId !== item.id) ? 'border-b border-gray-50' : ''}`}>
+                        <div className={`flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors ${(i < items.length - 1 && editingId !== item.id) ? 'border-b border-stone-50' : ''}`}>
                           <div className="flex flex-col gap-0.5 shrink-0">
-                            <button onClick={() => moveItemOrder(cat, i, -1)} disabled={i === 0} className="text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
+                            <button onClick={() => moveItemOrder(cat, i, -1)} disabled={i === 0} className="text-stone-300 hover:text-stone-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
                               <ChevronUp className="w-3.5 h-3.5" />
                             </button>
-                            <button onClick={() => moveItemOrder(cat, i, 1)} disabled={i === items.length - 1} className="text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
+                            <button onClick={() => moveItemOrder(cat, i, 1)} disabled={i === items.length - 1} className="text-stone-300 hover:text-stone-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
                               <ChevronDown className="w-3.5 h-3.5" />
                             </button>
                           </div>
                           {item.image
-                            ? <img src={item.image} alt={item.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-gray-100" />
-                            : <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0"><Coffee className="w-4 h-4 text-gray-300" /></div>
+                            ? <img src={item.image} alt={item.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-stone-100" />
+                            : <div className="w-10 h-10 rounded-lg bg-stone-100 flex items-center justify-center flex-shrink-0"><Coffee className="w-4 h-4 text-stone-300" /></div>
                           }
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${item.available ? 'bg-green-400' : 'bg-gray-300'}`} />
-                              <span className={`text-sm font-medium ${item.available ? 'text-gray-800' : 'text-gray-400 line-through'}`}>{item.name}</span>
+                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${item.available ? 'bg-green-400' : 'bg-stone-300'}`} />
+                              <span className={`text-sm font-medium ${item.available ? 'text-stone-800' : 'text-stone-400 line-through'}`}>{item.name}</span>
                             </div>
                             {item.variants?.length ? (
-                              <p className="text-xs text-gray-400 mt-0.5">{item.variants.map(v => `${v.name}: ${v.price.toFixed(2)}₼`).join(' · ')}</p>
+                              <p className="text-xs text-stone-400 mt-0.5">{item.variants.map(v => `${v.name}: ${v.price.toFixed(2)}₼`).join(' · ')}</p>
                             ) : (
-                              <p className="text-xs text-gray-400 mt-0.5">
+                              <p className="text-xs text-stone-400 mt-0.5">
                                 {item.price.toFixed(2)} ₼
                                 {item.costPrice ? ` · Maya: ${item.costPrice.toFixed(2)}₼ · Marja: ${Math.round((1 - item.costPrice / item.price) * 100)}%` : ''}
                               </p>
@@ -1782,13 +1782,13 @@ function AdminPageContent() {
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <button onClick={() => openEdit(item)} className="text-xs text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors font-medium">Düzəlt</button>
                             <button onClick={() => duplicateItem(item.id)} className="text-xs text-purple-500 hover:text-purple-700 px-2 py-1 rounded-lg hover:bg-purple-50 transition-colors font-medium">Kopyala</button>
-                            <button onClick={() => toggleAvailable(item.id)} className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${item.available ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
+                            <button onClick={() => toggleAvailable(item.id)} className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${item.available ? 'bg-stone-100 text-stone-600 hover:bg-stone-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
                               {item.available ? 'Bağla' : 'Aç'}
                             </button>
                             <button onClick={() => setDeleteItemTarget(item.id)} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
                           </div>
                         </div>
-                        {editingId === item.id && renderItemForm(`border-t border-amber-100 bg-amber-50/20 px-5 py-4 space-y-4${i < items.length - 1 ? ' border-b border-gray-50' : ''}`)}
+                        {editingId === item.id && renderItemForm(`border-t border-amber-100 bg-amber-50/20 px-5 py-4 space-y-4${i < items.length - 1 ? ' border-b border-stone-50' : ''}`)}
                         </React.Fragment>
                       ))}
                     </div>
@@ -1797,9 +1797,9 @@ function AdminPageContent() {
               })}
 
               {menu.length === 0 && !showForm && (
-                <div className="bg-white rounded-xl border border-gray-100 card p-16 text-center">
-                  <Coffee className="w-10 h-10 mx-auto mb-3 text-gray-200" />
-                  <p className="text-sm text-gray-400">Məhsul yoxdur</p>
+                <div className="bg-white rounded-xl border border-stone-100 card p-16 text-center">
+                  <Coffee className="w-10 h-10 mx-auto mb-3 text-stone-200" />
+                  <p className="text-sm text-stone-400">Məhsul yoxdur</p>
                 </div>
               )}
             </div>
@@ -1809,7 +1809,7 @@ function AdminPageContent() {
           {tab === 'users' && (
             <div className="max-w-lg space-y-4">
               <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-400">{staffUsers.length} əməkdaş</p>
+                <p className="text-sm text-stone-400">{staffUsers.length} əməkdaş</p>
                 <button
                   onClick={() => { setEditingUser(null); setUName(''); setUUsername(''); setUPassword(''); setUError(''); setShowUserForm(true); }}
                   className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors"
@@ -1819,42 +1819,42 @@ function AdminPageContent() {
               </div>
 
               {staffUsers.length === 0 && !showUserForm && (
-                <div className="bg-white rounded-xl border border-gray-100 p-16 text-center">
-                  <Users className="w-10 h-10 mx-auto mb-3 text-gray-200" />
-                  <p className="text-sm text-gray-400">Əməkdaş yoxdur</p>
+                <div className="bg-white rounded-xl border border-stone-100 p-16 text-center">
+                  <Users className="w-10 h-10 mx-auto mb-3 text-stone-200" />
+                  <p className="text-sm text-stone-400">Əməkdaş yoxdur</p>
                 </div>
               )}
 
               {staffUsers.map(u => (
-                <div key={u.id} className="bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center gap-3">
+                <div key={u.id} className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-sm font-bold shrink-0">
                     {u.name[0]?.toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-800">{u.name}</p>
-                    <p className="text-xs text-gray-400">@{u.username}</p>
+                    <p className="text-sm font-semibold text-stone-800">{u.name}</p>
+                    <p className="text-xs text-stone-400">@{u.username}</p>
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${u.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${u.active ? 'bg-green-100 text-green-700' : 'bg-stone-100 text-stone-500'}`}>
                     {u.active ? 'Aktiv' : 'Deaktiv'}
                   </span>
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={() => { setEditingUser(u); setUName(u.name); setUUsername(u.username); setUPassword(''); setUError(''); setShowUserForm(true); }}
                       title="Düzəlt"
-                      className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-amber-700 transition-colors"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-amber-700 transition-colors"
                     >
                       <Pencil className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => toggleUserActive(u.id, !u.active).then(() => setStaffUsers(prev => prev.map(x => x.id === u.id ? { ...x, active: !x.active } : x)))}
                       title={u.active ? 'Deaktiv et' : 'Aktiv et'}
-                      className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 transition-colors"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 transition-colors"
                     >
                       {u.active ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                     <button
                       onClick={() => { if (confirm(`"${u.name}" silinsin?`)) deleteUser(u.id).then(err => { if (err) alert('Silinmədi: ' + err); else setStaffUsers(prev => prev.filter(x => x.id !== u.id)); }); }}
-                      className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-400 hover:bg-red-50 hover:text-red-500 transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -1870,33 +1870,33 @@ function AdminPageContent() {
               <form onSubmit={addCategory} className="flex gap-2">
                 <input type="text" placeholder="Yeni kateqoriya adı" value={newCat}
                   onChange={e => setNewCat(e.target.value)}
-                  className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
+                  className="flex-1 border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
                 <button type="submit" className="bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors">Əlavə et</button>
-                <button type="button" onClick={() => setShowTrash(true)} className="relative flex items-center justify-center text-gray-400 hover:text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors border border-gray-200">
+                <button type="button" onClick={() => setShowTrash(true)} className="relative flex items-center justify-center text-stone-400 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors border border-stone-200">
                   <Trash2 className="w-4 h-4" />
                   {trash.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-400 text-white text-[10px] rounded-full flex items-center justify-center font-bold">{trash.length}</span>}
                 </button>
               </form>
 
-              <div className="bg-white rounded-xl border border-gray-100 card overflow-hidden">
+              <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
                 {categories.map(({ name: cat, available: catAvailable }, i) => (
-                  <div key={cat} className={`flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors ${i < categories.length - 1 ? 'border-b border-gray-50' : ''}`}>
+                  <div key={cat} className={`flex items-center justify-between px-5 py-3 hover:bg-stone-50 transition-colors ${i < categories.length - 1 ? 'border-b border-stone-50' : ''}`}>
                     <div className="flex items-center gap-3">
                       <div className="flex flex-col gap-0.5">
-                        <button onClick={() => moveCategoryOrder(i, -1)} disabled={i === 0} className="text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
+                        <button onClick={() => moveCategoryOrder(i, -1)} disabled={i === 0} className="text-stone-300 hover:text-stone-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
                           <ChevronUp className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => moveCategoryOrder(i, 1)} disabled={i === categories.length - 1} className="text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
+                        <button onClick={() => moveCategoryOrder(i, 1)} disabled={i === categories.length - 1} className="text-stone-300 hover:text-stone-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
                           <ChevronDown className="w-3.5 h-3.5" />
                         </button>
                       </div>
                       <span className="w-6 h-6 bg-amber-50 text-amber-800 rounded-lg flex items-center justify-center text-xs font-bold">{i + 1}</span>
-                      <span className={`text-sm font-medium ${catAvailable ? 'text-gray-800' : 'text-gray-400'}`}>{cat}</span>
-                      {!catAvailable && <span className="text-xs bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded font-medium">Gizli</span>}
+                      <span className={`text-sm font-medium ${catAvailable ? 'text-stone-800' : 'text-stone-400'}`}>{cat}</span>
+                      {!catAvailable && <span className="text-xs bg-stone-100 text-stone-400 px-1.5 py-0.5 rounded font-medium">Gizli</span>}
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="text-xs text-gray-400">{menu.filter(m => m.category === cat).length} məhsul</span>
-                      <button onClick={() => toggleCategoryAvailable(cat)} className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${catAvailable ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
+                      <span className="text-xs text-stone-400">{menu.filter(m => m.category === cat).length} məhsul</span>
+                      <button onClick={() => toggleCategoryAvailable(cat)} className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${catAvailable ? 'bg-stone-100 text-stone-600 hover:bg-stone-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
                         {catAvailable ? 'Bağla' : 'Aç'}
                       </button>
                       <button onClick={() => { setEditCatTarget(cat); setEditCatValue(cat); }} className="text-xs text-amber-600 hover:text-amber-800 px-2 py-1 rounded-lg hover:bg-amber-50 transition-colors font-medium">Dəyiş</button>
@@ -1906,8 +1906,8 @@ function AdminPageContent() {
                 ))}
                 {categories.length === 0 && (
                   <div className="p-10 text-center">
-                    <Tag className="w-8 h-8 mx-auto mb-2 text-gray-200" />
-                    <p className="text-sm text-gray-400">Kateqoriya yoxdur</p>
+                    <Tag className="w-8 h-8 mx-auto mb-2 text-stone-200" />
+                    <p className="text-sm text-stone-400">Kateqoriya yoxdur</p>
                   </div>
                 )}
               </div>
@@ -1919,10 +1919,10 @@ function AdminPageContent() {
             <div className="max-w-3xl space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <p className="text-sm text-gray-400">{tables.length} masa</p>
-                  <div className="flex bg-gray-100 rounded-lg p-0.5 gap-0.5">
-                    <button onClick={() => setTableView('floor')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${tableView === 'floor' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>Plan</button>
-                    <button onClick={() => setTableView('list')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${tableView === 'list' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}>Siyahı</button>
+                  <p className="text-sm text-stone-400">{tables.length} masa</p>
+                  <div className="flex bg-stone-100 rounded-lg p-0.5 gap-0.5">
+                    <button onClick={() => setTableView('floor')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${tableView === 'floor' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-400 hover:text-stone-600'}`}>Plan</button>
+                    <button onClick={() => setTableView('list')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${tableView === 'list' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-400 hover:text-stone-600'}`}>Siyahı</button>
                   </div>
                 </div>
                 <button
@@ -1934,19 +1934,19 @@ function AdminPageContent() {
               </div>
 
               {tables.length === 0 && (
-                <div className="bg-white rounded-xl border border-gray-100 p-16 text-center">
-                  <LayoutDashboard className="w-10 h-10 mx-auto mb-3 text-gray-200" />
-                  <p className="text-sm text-gray-400">Masa yoxdur</p>
+                <div className="bg-white rounded-xl border border-stone-100 p-16 text-center">
+                  <LayoutDashboard className="w-10 h-10 mx-auto mb-3 text-stone-200" />
+                  <p className="text-sm text-stone-400">Masa yoxdur</p>
                 </div>
               )}
 
               {/* Floor plan / canvas view */}
               {tableView === 'floor' && tables.length > 0 && (
-                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                  <div className="flex items-center gap-4 px-4 py-3 border-b border-gray-50 text-xs text-gray-400">
+                <div className="bg-white rounded-xl border border-stone-100 overflow-hidden">
+                  <div className="flex items-center gap-4 px-4 py-3 border-b border-stone-50 text-xs text-stone-400">
                     <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-green-400 inline-block" />Boş</span>
                     <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-red-400 inline-block" />Dolu</span>
-                    <span className="ml-auto text-gray-300">Masaları sürükləyərək yerini dəyiş</span>
+                    <span className="ml-auto text-stone-300">Masaları sürükləyərək yerini dəyiş</span>
                     {tableSavedToast && (
                       <span className="ml-2 text-xs text-green-600 font-medium transition-opacity">✓ Saxlanıldı</span>
                     )}
@@ -1987,18 +1987,18 @@ function AdminPageContent() {
                           }}
                           className={`absolute flex flex-col items-center justify-center border-2 transition-shadow ${
                             isSelected ? 'shadow-xl' : 'shadow-sm hover:shadow-md'
-                          } ${busy ? 'bg-red-50 border-red-300' : 'bg-white border-gray-200'}`}
+                          } ${busy ? 'bg-red-50 border-red-300' : 'bg-white border-stone-200'}`}
                           onMouseDown={e => handleTableDragStart(e, { ...t, x, y, w, h })}
                           onClick={e => { e.stopPropagation(); setSelectedTableId(t.id); }}
                         >
                           {isSelected && (
-                            <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex gap-1 bg-white rounded-lg shadow border border-gray-100 px-1.5 py-1">
-                              <button onClick={e => { e.stopPropagation(); setQrTable(t); }} className="w-5 h-5 flex items-center justify-center text-gray-400 hover:text-amber-700"><QrCode className="w-3 h-3" /></button>
-                              <button onClick={e => { e.stopPropagation(); setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} className="w-5 h-5 flex items-center justify-center text-gray-400 hover:text-amber-700"><Pencil className="w-3 h-3" /></button>
-                              <button onClick={e => { e.stopPropagation(); if (busy) { alert('Aktiv sifarişi olan masanı silmək olmaz.'); return; } if (confirm(`"${t.name}" silinsin?`)) deleteTable(t.id).then(err => { if (err) alert('Silinmədi: ' + err); else setTables(prev => prev.filter(x => x.id !== t.id)); }); }} className="w-5 h-5 flex items-center justify-center text-gray-400 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
+                            <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex gap-1 bg-white rounded-lg shadow border border-stone-100 px-1.5 py-1">
+                              <button onClick={e => { e.stopPropagation(); setQrTable(t); }} className="w-5 h-5 flex items-center justify-center text-stone-400 hover:text-amber-700"><QrCode className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} className="w-5 h-5 flex items-center justify-center text-stone-400 hover:text-amber-700"><Pencil className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); if (busy) { alert('Aktiv sifarişi olan masanı silmək olmaz.'); return; } if (confirm(`"${t.name}" silinsin?`)) deleteTable(t.id).then(err => { if (err) alert('Silinmədi: ' + err); else setTables(prev => prev.filter(x => x.id !== t.id)); }); }} className="w-5 h-5 flex items-center justify-center text-stone-400 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
                             </div>
                           )}
-                          <span className={`text-xs font-bold ${busy ? 'text-red-600' : 'text-gray-600'}`}>{t.name}</span>
+                          <span className={`text-xs font-bold ${busy ? 'text-red-600' : 'text-stone-600'}`}>{t.name}</span>
                           {busy && activeOrder && (
                             <>
                               <span className={`text-[9px] font-semibold text-white px-1.5 py-0.5 rounded-full mt-0.5 ${statusColor}`}>{activeOrder.status}</span>
@@ -2018,22 +2018,22 @@ function AdminPageContent() {
                   {tables.map(t => {
                     const busy = orders.some(o => o.tableNumber === t.id && o.status !== 'ödənilib');
                     return (
-                      <div key={t.id} className="bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center gap-3">
+                      <div key={t.id} className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-800 font-bold text-sm shrink-0">
                           {t.id}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-800 truncate">{t.name}</p>
-                          <p className="text-xs text-gray-400">{t.capacity} nəfər</p>
+                          <p className="text-sm font-semibold text-stone-800 truncate">{t.name}</p>
+                          <p className="text-xs text-stone-400">{t.capacity} nəfər</p>
                         </div>
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${busy ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
                           {busy ? 'Dolu' : 'Boş'}
                         </span>
                         <div className="flex items-center gap-1 shrink-0">
-                          <button onClick={() => setQrTable(t)} title="QR kod" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-amber-700 transition-colors">
+                          <button onClick={() => setQrTable(t)} title="QR kod" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-amber-700 transition-colors">
                             <QrCode className="w-4 h-4" />
                           </button>
-                          <button onClick={() => { setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} title="Düzəlt" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-amber-700 transition-colors">
+                          <button onClick={() => { setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} title="Düzəlt" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-amber-700 transition-colors">
                             <Pencil className="w-4 h-4" />
                           </button>
                           <button
@@ -2046,7 +2046,7 @@ function AdminPageContent() {
                                 });
                               }
                             }}
-                            className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                            className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-400 hover:bg-red-50 hover:text-red-500 transition-colors"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -2067,8 +2067,8 @@ function AdminPageContent() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-gray-800">{editingTable ? 'Masanı düzəlt' : 'Yeni masa'}</h3>
-              <button onClick={() => setShowTableForm(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100">
+              <h3 className="font-bold text-stone-800">{editingTable ? 'Masanı düzəlt' : 'Yeni masa'}</h3>
+              <button onClick={() => setShowTableForm(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -2095,29 +2095,29 @@ function AdminPageContent() {
               className="space-y-3"
             >
               <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1">Ad</label>
+                <label className="text-xs font-medium text-stone-500 block mb-1">Ad</label>
                 <input
                   value={tName}
                   onChange={e => setTName(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
                   placeholder="Masa 1"
                   required
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1">Tutum (nəfər)</label>
+                <label className="text-xs font-medium text-stone-500 block mb-1">Tutum (nəfər)</label>
                 <input
                   type="number"
                   min={1}
                   max={50}
                   value={tCapacity}
                   onChange={e => setTCapacity(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
                   required
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-500 block mb-2">Forma</label>
+                <label className="text-xs font-medium text-stone-500 block mb-2">Forma</label>
                 <div className="flex gap-2">
                   {([
                     { value: 'rect' as const,   label: 'Üfüqi',   w: 'w-6', h: 'h-4', round: false },
@@ -2125,8 +2125,8 @@ function AdminPageContent() {
                     { value: 'round' as const,  label: 'Dairəvi', w: 'w-5', h: 'h-5', round: true },
                   ]).map(s => (
                     <button key={s.value} type="button" onClick={() => setTShape(s.value)}
-                      className={`flex-1 py-2 rounded-xl border-2 text-xs font-medium transition-colors flex flex-col items-center justify-center gap-1.5 ${tShape === s.value ? 'border-amber-600 bg-amber-50 text-amber-800' : 'border-gray-200 text-gray-400 hover:border-gray-300'}`}>
-                      <span className={`inline-block border-2 ${s.w} ${s.h} ${s.round ? 'rounded-full' : 'rounded-sm'} ${tShape === s.value ? 'border-amber-600' : 'border-gray-300'}`} />
+                      className={`flex-1 py-2 rounded-xl border-2 text-xs font-medium transition-colors flex flex-col items-center justify-center gap-1.5 ${tShape === s.value ? 'border-amber-600 bg-amber-50 text-amber-800' : 'border-stone-200 text-stone-400 hover:border-stone-300'}`}>
+                      <span className={`inline-block border-2 ${s.w} ${s.h} ${s.round ? 'rounded-full' : 'rounded-sm'} ${tShape === s.value ? 'border-amber-600' : 'border-stone-300'}`} />
                       {s.label}
                     </button>
                   ))}
@@ -2149,15 +2149,15 @@ function AdminPageContent() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-xl text-center">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-gray-800">{qrTable.name} — QR Kod</h3>
-              <button onClick={() => setQrTable(null)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100">
+              <h3 className="font-bold text-stone-800">{qrTable.name} — QR Kod</h3>
+              <button onClick={() => setQrTable(null)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100">
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="flex justify-center p-4 bg-white rounded-xl border border-gray-100">
+            <div className="flex justify-center p-4 bg-white rounded-xl border border-stone-100">
               <QRCode value={`${typeof window !== 'undefined' ? window.location.origin : ''}/${companySlug}/menu?table=${qrTable.id}`} size={180} />
             </div>
-            <p className="text-xs text-gray-400 mt-3">/{companySlug}/menu?table={qrTable.id}</p>
+            <p className="text-xs text-stone-400 mt-3">/{companySlug}/menu?table={qrTable.id}</p>
           </div>
         </div>
       )}
@@ -2167,8 +2167,8 @@ function AdminPageContent() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-gray-800">{editingUser ? 'Əməkdaşı düzəlt' : 'Yeni əməkdaş'}</h3>
-              <button onClick={() => setShowUserForm(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100">
+              <h3 className="font-bold text-stone-800">{editingUser ? 'Əməkdaşı düzəlt' : 'Yeni əməkdaş'}</h3>
+              <button onClick={() => setShowUserForm(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -2197,36 +2197,36 @@ function AdminPageContent() {
               className="space-y-3"
             >
               <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1">Ad</label>
+                <label className="text-xs font-medium text-stone-500 block mb-1">Ad</label>
                 <input
                   value={uName}
                   onChange={e => setUName(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
                   placeholder="Tam ad"
                   required
                 />
               </div>
               {!editingUser && (
                 <div>
-                  <label className="text-xs font-medium text-gray-500 block mb-1">İstifadəçi adı</label>
+                  <label className="text-xs font-medium text-stone-500 block mb-1">İstifadəçi adı</label>
                   <input
                     value={uUsername}
                     onChange={e => setUUsername(e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
                     placeholder="login"
                     required
                   />
                 </div>
               )}
               <div>
-                <label className="text-xs font-medium text-gray-500 block mb-1">
+                <label className="text-xs font-medium text-stone-500 block mb-1">
                   {editingUser ? 'Yeni şifrə' : 'Şifrə'}
                 </label>
                 <input
                   type="password"
                   value={uPassword}
                   onChange={e => setUPassword(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
                   placeholder={editingUser ? 'Dəyişmək üçün daxil edin' : ''}
                   required={!editingUser}
                 />
@@ -2248,12 +2248,12 @@ function AdminPageContent() {
       {deleteCatTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
-            <h3 className="text-base font-semibold text-gray-800">Kateqoriyanı sil?</h3>
-            <p className="text-sm text-gray-500">
-              <span className="font-medium text-gray-700">&ldquo;{deleteCatTarget}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.
+            <h3 className="text-base font-semibold text-stone-800">Kateqoriyanı sil?</h3>
+            <p className="text-sm text-stone-500">
+              <span className="font-medium text-stone-700">&ldquo;{deleteCatTarget}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.
             </p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleteCatTarget(null)} className="px-4 py-2 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">Ləğv et</button>
+              <button onClick={() => setDeleteCatTarget(null)} className="px-4 py-2 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors">Ləğv et</button>
               <button onClick={() => deleteCategory(deleteCatTarget)} className="px-4 py-2 text-sm rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition-colors">Sil</button>
             </div>
           </div>
@@ -2264,12 +2264,12 @@ function AdminPageContent() {
       {deleteItemTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
-            <h3 className="text-base font-semibold text-gray-800">Məhsulu sil?</h3>
-            <p className="text-sm text-gray-500">
-              <span className="font-medium text-gray-700">&ldquo;{menu.find(m => m.id === deleteItemTarget)?.name}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.
+            <h3 className="text-base font-semibold text-stone-800">Məhsulu sil?</h3>
+            <p className="text-sm text-stone-500">
+              <span className="font-medium text-stone-700">&ldquo;{menu.find(m => m.id === deleteItemTarget)?.name}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.
             </p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleteItemTarget(null)} className="px-4 py-2 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">Ləğv et</button>
+              <button onClick={() => setDeleteItemTarget(null)} className="px-4 py-2 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors">Ləğv et</button>
               <button onClick={() => deleteItem(deleteItemTarget)} className="px-4 py-2 text-sm rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition-colors">Sil</button>
             </div>
           </div>
@@ -2280,17 +2280,17 @@ function AdminPageContent() {
       {showTrash && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+            <div className="flex items-center justify-between p-5 border-b border-stone-100">
               <div className="flex items-center gap-2">
-                <Trash2 className="w-4 h-4 text-gray-400" />
-                <h3 className="text-base font-semibold text-gray-800">Zibil qutusu</h3>
-                <span className="text-xs text-gray-400">(30 gün saxlanılır)</span>
+                <Trash2 className="w-4 h-4 text-stone-400" />
+                <h3 className="text-base font-semibold text-stone-800">Zibil qutusu</h3>
+                <span className="text-xs text-stone-400">(30 gün saxlanılır)</span>
               </div>
-              <button onClick={() => setShowTrash(false)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+              <button onClick={() => setShowTrash(false)} className="text-stone-400 hover:text-stone-600"><X className="w-4 h-4" /></button>
             </div>
             <div className="overflow-y-auto flex-1 p-4 space-y-2">
               {trash.length === 0 && (
-                <p className="text-sm text-gray-400 text-center py-8">Zibil qutusu boşdur</p>
+                <p className="text-sm text-stone-400 text-center py-8">Zibil qutusu boşdur</p>
               )}
               {trash.map(item => {
                 const d = item.data as Record<string, unknown>;
@@ -2298,10 +2298,10 @@ function AdminPageContent() {
                 const sub = item.type === 'menu' ? String(d.category ?? '') : 'Kateqoriya';
                 const daysLeft = Math.max(0, 30 - Math.floor((Date.now() - new Date(item.deletedAt).getTime()) / 86400000));
                 return (
-                  <div key={item.id} className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-gray-100 hover:bg-gray-50">
+                  <div key={item.id} className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-stone-100 hover:bg-stone-50">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-800 truncate">{label}</p>
-                      <p className="text-xs text-gray-400">{sub} · {daysLeft} gün qalıb</p>
+                      <p className="text-sm font-medium text-stone-800 truncate">{label}</p>
+                      <p className="text-xs text-stone-400">{sub} · {daysLeft} gün qalıb</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <button
@@ -2353,17 +2353,17 @@ function AdminPageContent() {
       {editCatTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
-            <h3 className="text-base font-semibold text-gray-800">Kateqoriyanı dəyiş</h3>
+            <h3 className="text-base font-semibold text-stone-800">Kateqoriyanı dəyiş</h3>
             <input
               autoFocus
               type="text"
               value={editCatValue}
               onChange={e => setEditCatValue(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') renameCategory(editCatTarget, editCatValue); }}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+              className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
             />
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setEditCatTarget(null)} className="px-4 py-2 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors">Ləğv et</button>
+              <button onClick={() => setEditCatTarget(null)} className="px-4 py-2 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors">Ləğv et</button>
               <button onClick={() => renameCategory(editCatTarget, editCatValue)} className="px-4 py-2 text-sm rounded-lg bg-amber-800 hover:bg-amber-900 text-white font-medium transition-colors">Yadda saxla</button>
             </div>
           </div>
@@ -2374,12 +2374,12 @@ function AdminPageContent() {
       {showProfile && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-y-auto max-h-[90vh]">
-            <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-gray-100">
+            <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-stone-100">
               <div className="flex items-center gap-2">
                 <UserCircle className="w-5 h-5 text-amber-800" />
-                <h3 className="font-bold text-gray-800">Profil</h3>
+                <h3 className="font-bold text-stone-800">Profil</h3>
               </div>
-              <button onClick={() => setShowProfile(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors">
+              <button onClick={() => setShowProfile(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100 hover:bg-stone-200 transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -2387,32 +2387,32 @@ function AdminPageContent() {
             <div className="p-6 space-y-6">
               {/* ── Business Info ── */}
               <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Müəssisə məlumatları</p>
+                <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide mb-3">Müəssisə məlumatları</p>
                 <div className="space-y-3">
                   <div>
-                    <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><User className="w-3.5 h-3.5" />Sahibin adı</label>
+                    <label className="text-xs font-medium text-stone-500 flex items-center gap-1 mb-1"><User className="w-3.5 h-3.5" />Sahibin adı</label>
                     <input
                       value={profOwner}
                       onChange={e => setProfOwner(e.target.value)}
-                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
                       placeholder="Ad Soyad"
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><MapPin className="w-3.5 h-3.5" />Ünvan</label>
+                    <label className="text-xs font-medium text-stone-500 flex items-center gap-1 mb-1"><MapPin className="w-3.5 h-3.5" />Ünvan</label>
                     <input
                       value={profAddress}
                       onChange={e => setProfAddress(e.target.value)}
-                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
                       placeholder="Şəhər, küçə, ev"
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><Phone className="w-3.5 h-3.5" />Mobil nömrə</label>
+                    <label className="text-xs font-medium text-stone-500 flex items-center gap-1 mb-1"><Phone className="w-3.5 h-3.5" />Mobil nömrə</label>
                     <input
                       value={profPhone}
                       onChange={e => setProfPhone(e.target.value)}
-                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
                       placeholder="+994 50 000 00 00"
                     />
                   </div>
@@ -2429,49 +2429,49 @@ function AdminPageContent() {
                 </div>
               </div>
 
-              <div className="border-t border-gray-100" />
+              <div className="border-t border-stone-100" />
 
               {/* ── Password Change ── */}
               <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Lock className="w-3.5 h-3.5" />Şifrəni dəyiş</p>
+                <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Lock className="w-3.5 h-3.5" />Şifrəni dəyiş</p>
                 <div className="space-y-3">
                   <div>
-                    <label className="text-xs font-medium text-gray-500 block mb-1">Cari şifrə</label>
+                    <label className="text-xs font-medium text-stone-500 block mb-1">Cari şifrə</label>
                     <div className="relative">
                       <input
                         type={pwShowCurrent ? 'text' : 'password'}
                         value={pwCurrent}
                         onChange={e => setPwCurrent(e.target.value)}
-                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        className="w-full border border-stone-200 rounded-xl px-3 py-2.5 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
                         placeholder="••••••••"
                       />
-                      <button type="button" onClick={() => setPwShowCurrent(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400">
+                      <button type="button" onClick={() => setPwShowCurrent(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400">
                         {pwShowCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-gray-500 block mb-1">Yeni şifrə</label>
+                    <label className="text-xs font-medium text-stone-500 block mb-1">Yeni şifrə</label>
                     <div className="relative">
                       <input
                         type={pwShowNew ? 'text' : 'password'}
                         value={pwNew}
                         onChange={e => setPwNew(e.target.value)}
-                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        className="w-full border border-stone-200 rounded-xl px-3 py-2.5 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
                         placeholder="••••••••"
                       />
-                      <button type="button" onClick={() => setPwShowNew(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400">
+                      <button type="button" onClick={() => setPwShowNew(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400">
                         {pwShowNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-gray-500 block mb-1">Yeni şifrəni təsdiqlə</label>
+                    <label className="text-xs font-medium text-stone-500 block mb-1">Yeni şifrəni təsdiqlə</label>
                     <input
                       type="password"
                       value={pwConfirm}
                       onChange={e => setPwConfirm(e.target.value)}
-                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
                       placeholder="••••••••"
                     />
                   </div>
@@ -2479,7 +2479,7 @@ function AdminPageContent() {
                     <button
                       onClick={handleChangePassword}
                       disabled={pwSaving}
-                      className="flex-1 bg-gray-800 hover:bg-gray-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors"
+                      className="flex-1 bg-stone-800 hover:bg-stone-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors"
                     >
                       {pwSaving ? 'Dəyişdirilir...' : 'Şifrəni dəyiş'}
                     </button>
