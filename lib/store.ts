@@ -1,7 +1,15 @@
 import { Category, MenuItem, Order, RestaurantTable, TrashItem } from '@/types';
 import { supabase } from './supabase';
 
-const DEFAULT_CATEGORIES = ['Qəhvə', 'Çay', 'Soyuq içkilər', 'Şirniyyat', 'Snack', 'Xüsusi'];
+const DEFAULT_CATEGORIES = ['Çay', 'Soyuq içkilər', 'Şirniyyat', 'Snack', 'Xüsusi'];
+
+async function authHeaders(): Promise<HeadersInit> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return {
+    'Content-Type': 'application/json',
+    ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+  };
+}
 
 let _companyId: string | null = null;
 
@@ -17,9 +25,7 @@ function isValidUUID(id: string): boolean {
 
 export async function fetchMenu(): Promise<MenuItem[]> {
   try {
-    let q = supabase.from('menu_items').select('*').order('position');
-    if (_companyId) q = q.eq('company_id', _companyId);
-    const { data, error } = await q;
+    const { data, error } = await supabase.from('menu_items').select('*').order('position');
     if (error || !data) return [];
     return data.map(r => ({
       id: r.id,
@@ -39,9 +45,7 @@ export async function fetchMenu(): Promise<MenuItem[]> {
 
 export async function saveMenu(menu: MenuItem[]): Promise<void> {
   try {
-    let delQ = supabase.from('menu_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    if (_companyId) delQ = delQ.eq('company_id', _companyId);
-    await delQ;
+    await supabase.from('menu_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     const rows = menu.map((m, i) => ({
       id: isValidUUID(m.id) ? m.id : crypto.randomUUID(),
       name: m.name,
@@ -65,9 +69,7 @@ export async function saveMenu(menu: MenuItem[]): Promise<void> {
 
 export async function fetchCategories(): Promise<Category[]> {
   try {
-    let q = supabase.from('categories').select('name, available').order('position');
-    if (_companyId) q = q.eq('company_id', _companyId);
-    const { data, error } = await q;
+    const { data, error } = await supabase.from('categories').select('name, available').order('position');
     if (error || !data || data.length === 0) return DEFAULT_CATEGORIES.map(name => ({ name, available: true }));
     return data.map((r: { name: string; available: boolean }) => ({ name: r.name, available: r.available }));
   } catch {
@@ -77,9 +79,7 @@ export async function fetchCategories(): Promise<Category[]> {
 
 export async function saveCategories(categories: Category[]): Promise<void> {
   try {
-    let delQ = supabase.from('categories').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    if (_companyId) delQ = delQ.eq('company_id', _companyId);
-    await delQ;
+    await supabase.from('categories').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     await supabase.from('categories').insert(
       categories.map((c, position) => ({ name: c.name, available: c.available, position, company_id: _companyId }))
     );
@@ -93,9 +93,7 @@ export async function saveCategories(categories: Category[]): Promise<void> {
 export async function fetchTrash(): Promise<TrashItem[]> {
   try {
     await supabase.from('trash_items').delete().lt('deleted_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
-    let q = supabase.from('trash_items').select('*').order('deleted_at', { ascending: false });
-    if (_companyId) q = q.eq('company_id', _companyId);
-    const { data, error } = await q;
+    const { data, error } = await supabase.from('trash_items').select('*').order('deleted_at', { ascending: false });
     if (error || !data) return [];
     return data.map(r => ({ id: r.id, type: r.type, data: r.data, deletedAt: r.deleted_at }));
   } catch { return []; }
@@ -123,17 +121,12 @@ export async function permanentlyDeleteFromTrash(id: string): Promise<void> {
 
 export async function fetchOrders(opts?: { from?: string; to?: string; limit?: number }): Promise<Order[]> {
   try {
-    // Total company-wide count so orderNumber stays stable regardless of range/limit
-    let countQ = supabase.from('orders').select('*', { count: 'exact', head: true });
-    if (_companyId) countQ = countQ.eq('company_id', _companyId);
-    const { count: totalCount } = await countQ;
+    const { count: totalCount } = await supabase.from('orders').select('*', { count: 'exact', head: true });
 
-    // Supabase caps each response at 1000 rows — page until a short page comes back
     const PAGE = 1000;
     const all: Awaited<ReturnType<typeof runPage>> = [];
     async function runPage(start: number, end: number) {
       let q = supabase.from('orders').select('*, order_items(*)').order('created_at', { ascending: false }).range(start, end);
-      if (_companyId) q = q.eq('company_id', _companyId);
       if (opts?.from) q = q.gte('created_at', opts.from);
       if (opts?.to) q = q.lte('created_at', opts.to);
       const { data, error } = await q;
@@ -237,9 +230,7 @@ export async function fetchCompanySlug(id: string): Promise<string | null> {
 
 export async function fetchTables(): Promise<RestaurantTable[]> {
   try {
-    let q = supabase.from('restaurant_tables').select('id, name, capacity, x, y, w, h, shape').order('id');
-    if (_companyId) q = q.eq('company_id', _companyId);
-    const { data, error } = await q;
+    const { data, error } = await supabase.from('restaurant_tables').select('id, name, capacity, x, y, w, h, shape').order('id');
     if (error || !data) return [];
     return data.map(r => ({
       id: r.id,
@@ -330,7 +321,7 @@ export async function restoreCompany(item: TrashItem): Promise<void> {
 
 export async function permanentlyDeleteCompany(trashId: string, companyId: string): Promise<void> {
   try {
-    await supabase.from('users').delete().eq('company_id', companyId);
+    await supabase.from('profiles').delete().eq('company_id', companyId);
     await supabase.from('trash_items').delete().eq('id', trashId);
   } catch (e) { console.error('[permanentlyDeleteCompany]', e); }
 }
@@ -369,8 +360,13 @@ export async function fetchCompanyProfile(id: string): Promise<{ ownerName: stri
 
 export async function verifyPassword(id: string, password: string): Promise<boolean> {
   try {
-    const { data } = await supabase.from('users').select('id').eq('id', id).eq('password', password).single();
-    return !!data;
+    const res = await fetch('/api/users/verify-password', {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify({ id, password }),
+    });
+    const { valid } = await res.json();
+    return !!valid;
   } catch { return false; }
 }
 
@@ -378,42 +374,60 @@ export async function verifyPassword(id: string, password: string): Promise<bool
 
 export async function fetchAllUsers(): Promise<{ id: string; username: string; name: string; role: string; companyId: string | null; active: boolean; createdAt: string }[]> {
   try {
-    const { data, error } = await supabase.from('users').select('*').order('created_at');
-    if (error || !data) return [];
-    return data.map(u => ({ id: u.id, username: u.username, name: u.name, role: u.role, companyId: u.company_id ?? null, active: u.active, createdAt: u.created_at }));
+    const res = await fetch('/api/users', { headers: await authHeaders() });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.map((u: Record<string, unknown>) => ({ id: u.id, username: u.username, name: u.name, role: u.role, companyId: u.company_id ?? null, active: u.active, createdAt: u.created_at }));
   } catch { return []; }
 }
 
 export async function createUser(username: string, password: string, name: string, role: string, companyId: string | null): Promise<string | null> {
-  const { error } = await supabase.from('users').insert({ username, password, name, role, company_id: companyId });
-  if (error) { console.error('[createUser]', error); return error.message; }
+  const res = await fetch('/api/users', {
+    method: 'POST',
+    headers: await authHeaders(),
+    body: JSON.stringify({ username, password, name, role, companyId }),
+  });
+  if (!res.ok) {
+    const { error } = await res.json();
+    return error ?? 'Xəta baş verdi';
+  }
   return null;
 }
 
 export async function deleteUser(id: string): Promise<string | null> {
-  const { error } = await supabase.from('users').delete().eq('id', id);
-  if (error) { console.error('[deleteUser]', error); return error.message; }
+  const res = await fetch(`/api/users/${id}`, { method: 'DELETE', headers: await authHeaders() });
+  if (!res.ok) {
+    const { error } = await res.json();
+    return error ?? 'Xəta baş verdi';
+  }
   return null;
 }
 
 export async function toggleUserActive(id: string, active: boolean): Promise<void> {
-  try {
-    await supabase.from('users').update({ active }).eq('id', id);
-  } catch (e) { console.error('[toggleUserActive]', e); }
+  await fetch(`/api/users/${id}`, {
+    method: 'PATCH',
+    headers: await authHeaders(),
+    body: JSON.stringify({ active }),
+  });
 }
 
 export async function updateUser(id: string, name: string, password: string): Promise<void> {
-  try {
-    await supabase.from('users').update({ name, password }).eq('id', id);
-  } catch (e) { console.error('[updateUser]', e); }
+  await fetch(`/api/users/${id}`, {
+    method: 'PATCH',
+    headers: await authHeaders(),
+    body: JSON.stringify({ name, password }),
+  });
 }
 
 export async function updateOwnerAccount(id: string, name: string, username: string, password?: string): Promise<string | null> {
-  try {
-    const updates: Record<string, unknown> = { name, username };
-    if (password) updates.password = password;
-    const { error } = await supabase.from('users').update(updates).eq('id', id);
-    if (error) return error.message;
-    return null;
-  } catch (e) { console.error('[updateOwnerAccount]', e); return 'Xəta baş verdi'; }
+  const res = await fetch(`/api/users/${id}`, {
+    method: 'PATCH',
+    headers: await authHeaders(),
+    body: JSON.stringify({ name, username, ...(password ? { password } : {}) }),
+  });
+  if (!res.ok) {
+    const { error } = await res.json();
+    return error ?? 'Xəta baş verdi';
+  }
+  return null;
 }

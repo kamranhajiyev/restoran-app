@@ -8,7 +8,7 @@ import { getSession, logout } from '@/lib/auth';
 import {
   fetchCompanies, createCompany, trashCompany, toggleCompanyActive, updateCompanyName, updateCompanyExpiry,
   fetchAllUsers, createUser, deleteUser, toggleUserActive, updateCompanyProfile, updateOwnerAccount,
-  fetchCompanyTrash, restoreCompany, permanentlyDeleteCompany,
+  fetchCompanyTrash, restoreCompany, permanentlyDeleteCompany, verifyPassword, updateUser,
 } from '@/lib/store';
 import { TrashItem } from '@/types';
 
@@ -73,6 +73,16 @@ export default function SuperadminPage() {
   // trash
   const [companyTrash, setCompanyTrash] = useState<TrashItem[]>([]);
   const [showTrash, setShowTrash] = useState(false);
+
+  // account / password modal
+  const [showAccount, setShowAccount] = useState(false);
+  const [pwCurrent, setPwCurrent] = useState('');
+  const [pwNew, setPwNew] = useState('');
+  const [pwConfirm, setPwConfirm] = useState('');
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwMsg, setPwMsg] = useState('');
+  const [pwShowCurrent, setPwShowCurrent] = useState(false);
+  const [pwShowNew, setPwShowNew] = useState(false);
 
   useEffect(() => {
     const session = getSession();
@@ -192,6 +202,21 @@ export default function SuperadminPage() {
     loadData();
   }
 
+  async function handleChangePassword() {
+    if (!pwNew || pwNew !== pwConfirm) { setPwMsg('Yeni şifrələr uyğun deyil'); return; }
+    if (pwNew.length < 4) { setPwMsg('Şifrə ən az 4 simvol olmalıdır'); return; }
+    const session = getSession();
+    if (!session) return;
+    setPwSaving(true);
+    const ok = await verifyPassword(session.id, pwCurrent);
+    if (!ok) { setPwMsg('Cari şifrə səhvdir'); setPwSaving(false); return; }
+    await updateUser(session.id, session.name, pwNew);
+    setPwMsg('Şifrə dəyişdirildi');
+    setPwCurrent(''); setPwNew(''); setPwConfirm('');
+    setPwSaving(false);
+    setTimeout(() => { setPwMsg(''); setShowAccount(false); }, 1500);
+  }
+
   async function handleCreateCompany(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -304,6 +329,13 @@ export default function SuperadminPage() {
           {companyTrash.length > 0 && (
             <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-400 text-white text-[10px] rounded-full flex items-center justify-center font-bold">{companyTrash.length}</span>
           )}
+        </button>
+        <button
+          onClick={() => { setPwCurrent(''); setPwNew(''); setPwConfirm(''); setPwMsg(''); setShowAccount(true); }}
+          className="w-9 h-9 flex items-center justify-center rounded-lg text-gray-400 hover:text-[#2779a7] hover:bg-[#2779a7]/10 transition-colors"
+          title="Hesabım"
+        >
+          <KeyRound className="w-4 h-4" />
         </button>
         <button
           onClick={() => { logout(); router.push('/login'); }}
@@ -544,6 +576,75 @@ export default function SuperadminPage() {
                 {saving ? 'Yaradılır...' : 'Yarat'}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Superadmin Account / Password Modal */}
+      {showAccount && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2">
+                <KeyRound className="w-5 h-5 text-[#2779a7]" />
+                <h3 className="font-bold text-gray-800">Şifrəni dəyiş</h3>
+              </div>
+              <button onClick={() => setShowAccount(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Cari şifrə</label>
+                <div className="relative">
+                  <input
+                    type={pwShowCurrent ? 'text' : 'password'}
+                    value={pwCurrent}
+                    onChange={e => setPwCurrent(e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm pr-10 focus:outline-none focus:ring-2 focus:ring-[#2779a7]"
+                    placeholder="••••••"
+                  />
+                  <button type="button" onClick={() => setPwShowCurrent(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    {pwShowCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Yeni şifrə</label>
+                <div className="relative">
+                  <input
+                    type={pwShowNew ? 'text' : 'password'}
+                    value={pwNew}
+                    onChange={e => setPwNew(e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm pr-10 focus:outline-none focus:ring-2 focus:ring-[#2779a7]"
+                    placeholder="••••••"
+                  />
+                  <button type="button" onClick={() => setPwShowNew(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    {pwShowNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Yeni şifrəni təsdiqlə</label>
+                <input
+                  type="password"
+                  value={pwConfirm}
+                  onChange={e => setPwConfirm(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2779a7]"
+                  placeholder="••••••"
+                />
+              </div>
+              <button
+                onClick={handleChangePassword}
+                disabled={pwSaving}
+                className="w-full bg-[#2779a7] hover:bg-[#21678e] disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors mt-1"
+              >
+                {pwSaving ? 'Yoxlanılır...' : 'Şifrəni dəyiş'}
+              </button>
+              {pwMsg && (
+                <p className={`text-xs font-medium text-center ${pwMsg.includes('dəyişdirildi') ? 'text-green-600' : 'text-red-500'}`}>{pwMsg}</p>
+              )}
+            </div>
           </div>
         </div>
       )}
