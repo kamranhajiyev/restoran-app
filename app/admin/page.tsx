@@ -196,6 +196,7 @@ function AdminPageContent() {
   const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
   const [dragging, setDragging] = useState<{ id: number; ox: number; oy: number; mx: number; my: number } | null>(null);
   const [tableSavedToast, setTableSavedToast] = useState(false);
+  const [alignGuides, setAlignGuides] = useState<{ type: 'h' | 'v'; pos: number }[]>([]);
   const canvasRef = useRef<HTMLDivElement>(null);
 
   // users tab
@@ -410,13 +411,51 @@ function AdminPageContent() {
       if (!canvasRef.current) return;
       const rect = canvasRef.current.getBoundingClientRect();
       const w = t.w ?? 100; const h = t.h ?? 70;
-      const newX = Math.max(0, Math.min(rect.width - w, dragState.ox + ev.clientX - dragState.mx));
-      const newY = Math.max(0, Math.min(rect.height - h, dragState.oy + ev.clientY - dragState.my));
-      setTables(prev => prev.map(x => x.id === dragState.id ? { ...x, x: newX, y: newY } : x));
+      let newX = Math.max(0, Math.min(rect.width - w, dragState.ox + ev.clientX - dragState.mx));
+      let newY = Math.max(0, Math.min(rect.height - h, dragState.oy + ev.clientY - dragState.my));
+
+      const SNAP = 8;
+      const guides: { type: 'h' | 'v'; pos: number }[] = [];
+
+      setTables(prev => {
+        const others = prev.filter(x => x.id !== dragState.id);
+        const dxPoints = [newX, newX + w / 2, newX + w];
+        const dyPoints = [newY, newY + h / 2, newY + h];
+        const dxOffsets = [0, w / 2, w];
+        const dyOffsets = [0, h / 2, h];
+
+        others.forEach(other => {
+          const ow = other.w ?? 100; const oh = other.h ?? 70;
+          const ox2 = other.x ?? 20; const oy2 = other.y ?? 20;
+          const oxPoints = [ox2, ox2 + ow / 2, ox2 + ow];
+          const oyPoints = [oy2, oy2 + oh / 2, oy2 + oh];
+
+          oxPoints.forEach(op => {
+            dxPoints.forEach((dp, di) => {
+              if (Math.abs(dp - op) < SNAP) {
+                guides.push({ type: 'v', pos: op });
+                newX = op - dxOffsets[di];
+              }
+            });
+          });
+          oyPoints.forEach(op => {
+            dyPoints.forEach((dp, di) => {
+              if (Math.abs(dp - op) < SNAP) {
+                guides.push({ type: 'h', pos: op });
+                newY = op - dyOffsets[di];
+              }
+            });
+          });
+        });
+
+        setAlignGuides(guides);
+        return prev.map(x => x.id === dragState.id ? { ...x, x: newX, y: newY } : x);
+      });
     }
     function onUp() {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      setAlignGuides([]);
       setDragging(null);
       setTables(prev => {
         const updated = prev.find(x => x.id === dragState.id);
@@ -1531,6 +1570,14 @@ function AdminPageContent() {
                     style={{ height: 480, backgroundImage: 'radial-gradient(circle, #e5e7eb 1px, transparent 1px)', backgroundSize: '24px 24px' }}
                     onClick={() => setSelectedTableId(null)}
                   >
+                    {alignGuides.map((g, i) => (
+                      <div key={i} className="absolute pointer-events-none z-10"
+                        style={g.type === 'h'
+                          ? { left: 0, right: 0, top: g.pos, height: 1, background: '#6366f1', opacity: 0.7 }
+                          : { top: 0, bottom: 0, left: g.pos, width: 1, background: '#6366f1', opacity: 0.7 }
+                        }
+                      />
+                    ))}
                     {tables.map((t, idx) => {
                       const busy = orders.some(o => o.tableNumber === t.id && o.status !== 'ödənilib');
                       const activeOrder = orders.find(o => o.tableNumber === t.id && o.status !== 'ödənilib');
