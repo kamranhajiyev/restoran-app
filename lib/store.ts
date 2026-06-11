@@ -1,4 +1,5 @@
 import { CashShift, Category, MenuItem, Order, RestaurantTable, ShiftMovement, TrashItem } from '@/types';
+import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { supabase } from './supabase';
 
 const DEFAULT_CATEGORIES = ['Çay', 'Soyuq içkilər', 'Şirniyyat', 'Snack', 'Xüsusi'];
@@ -175,6 +176,9 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
       cardAmount: o.card_amount ? Number(o.card_amount) : undefined,
       tipAmount: o.tip_amount ? Number(o.tip_amount) : undefined,
       changeAmount: o.change_amount ? Number(o.change_amount) : undefined,
+      cancelledAt: o.cancelled_at ?? undefined,
+      cancelledBy: o.cancelled_by ?? undefined,
+      cancelReason: o.cancel_reason ?? undefined,
       items: (o.order_items ?? []).map((oi: { menu_item_id: string; menu_item_name: string; menu_item_price: number; quantity: number; modifiers?: string }) => ({
         menuItem: {
           id: oi.menu_item_id,
@@ -239,10 +243,30 @@ export async function updateOrderStatus(
   }
   if (status === 'ödənilib') updates.paid_at = new Date().toISOString();
   let q = supabase.from('orders').update(updates).eq('id', orderId);
-  // An order can only be paid once — second concurrent payment is a no-op
+  // An order can only be paid once, and a cancelled order can't be paid or
+  // revived — concurrent conflicting updates become no-ops
   if (status === 'ödənilib') q = q.neq('status', 'ödənilib');
+  q = q.neq('status', 'ləğv edildi');
   const { data, error } = await q.select('id');
   if (error) { console.error('[updateOrderStatus]', error.message); return false; }
+  return (data?.length ?? 0) > 0;
+}
+
+// Only unpaid orders can be cancelled — a paid order is final, mistakes after
+// payment are for the owner to sort out manually.
+export async function cancelOrder(orderId: string, reason: string, by: string): Promise<boolean> {
+  const { data, error } = await supabase.from('orders')
+    .update({
+      status: 'ləğv edildi',
+      cancelled_at: new Date().toISOString(),
+      cancelled_by: by,
+      cancel_reason: reason,
+    })
+    .eq('id', orderId)
+    .neq('status', 'ödənilib')
+    .neq('status', 'ləğv edildi')
+    .select('id');
+  if (error) { console.error('[cancelOrder]', error.message); return false; }
   return (data?.length ?? 0) > 0;
 }
 
@@ -264,6 +288,24 @@ export async function fetchCompanySlug(id: string): Promise<string | null> {
 }
 
 // ─── Tables ───────────────────────────────────────────────────────────────────
+
+// Takeaway-only companies turn tables off: sellers then skip table selection
+// entirely and orders are created without a table.
+export async function fetchTablesEnabled(): Promise<boolean> {
+  try {
+    if (!_companyId) return true;
+    const { data, error } = await supabase.from('companies').select('tables_enabled').eq('id', _companyId).single();
+    if (error || !data) return true;
+    return data.tables_enabled !== false;
+  } catch { return true; }
+}
+
+export async function setTablesEnabled(enabled: boolean): Promise<void> {
+  // RLS allows only superadmins to update companies — owners flip this flag
+  // through a security definer RPC scoped to their own company.
+  const { error } = await supabase.rpc('set_tables_enabled', { enabled });
+  if (error) console.error('[setTablesEnabled]', error);
+}
 
 export async function fetchTables(): Promise<RestaurantTable[]> {
   try {
@@ -312,11 +354,11 @@ export async function deleteTable(id: number): Promise<string | null> {
 
 // ─── Superadmin: Companies ────────────────────────────────────────────────────
 
-export async function fetchCompanies(): Promise<{ id: string; name: string; slug: string; active: boolean; createdAt: string; expiresAt: string | null; ownerName: string | null; address: string | null; phone: string | null }[]> {
+export async function fetchCompanies(): Promise<{ id: string; name: string; slug: string; active: boolean; createdAt: string; expiresAt: string | null; ownerName: string | null; address: string | null; phone: string | null; timezone: string }[]> {
   try {
     const { data, error } = await supabase.from('companies').select('*').order('created_at');
     if (error || !data) return [];
-    return data.map(c => ({ id: c.id, name: c.name, slug: c.slug, active: c.active, createdAt: c.created_at, expiresAt: c.expires_at ?? null, ownerName: c.owner_name ?? null, address: c.address ?? null, phone: c.phone ?? null }));
+    return data.map(c => ({ id: c.id, name: c.name, slug: c.slug, active: c.active, createdAt: c.created_at, expiresAt: c.expires_at ?? null, ownerName: c.owner_name ?? null, address: c.address ?? null, phone: c.phone ?? null, timezone: c.timezone || DEFAULT_TZ }));
   } catch { return []; }
 }
 
@@ -341,7 +383,7 @@ export async function fetchCompanyTrash(): Promise<TrashItem[]> {
   } catch { return []; }
 }
 
-export async function trashCompany(company: { id: string; name: string; slug: string; active: boolean; expiresAt: string | null; ownerName: string | null; address: string | null; phone: string | null }): Promise<void> {
+export async function trashCompany(company: { id: string; name: string; slug: string; active: boolean; expiresAt: string | null; ownerName: string | null; address: string | null; phone: string | null; timezone?: string }): Promise<void> {
   try {
     await supabase.from('trash_items').insert({ type: 'company', data: company, company_id: null });
     await supabase.from('companies').delete().eq('id', company.id);
@@ -351,7 +393,7 @@ export async function trashCompany(company: { id: string; name: string; slug: st
 export async function restoreCompany(item: TrashItem): Promise<void> {
   try {
     const c = item.data as Record<string, unknown>;
-    await supabase.from('companies').insert({ id: c.id, name: c.name, slug: c.slug, active: c.active, expires_at: c.expiresAt ?? null, owner_name: c.ownerName ?? null, address: c.address ?? null, phone: c.phone ?? null });
+    await supabase.from('companies').insert({ id: c.id, name: c.name, slug: c.slug, active: c.active, expires_at: c.expiresAt ?? null, owner_name: c.ownerName ?? null, address: c.address ?? null, phone: c.phone ?? null, timezone: (c.timezone as string) || DEFAULT_TZ });
     await supabase.from('trash_items').delete().eq('id', item.id);
   } catch (e) { console.error('[restoreCompany]', e); }
 }
@@ -385,6 +427,39 @@ export async function updateCompanyProfile(id: string, ownerName: string, addres
   try {
     await supabase.from('companies').update({ owner_name: ownerName, address, phone }).eq('id', id);
   } catch (e) { console.error('[updateCompanyProfile]', e); }
+}
+
+// Owner's own profile save — direct updates to companies are superadmin-only
+// under RLS, so owners go through a security definer RPC like set_work_hours.
+export async function updateMyCompanyProfile(ownerName: string, address: string, phone: string): Promise<void> {
+  const { error } = await supabase.rpc('set_company_profile', { owner_name_t: ownerName, address_t: address, phone_t: phone });
+  if (error) console.error('[updateMyCompanyProfile]', error);
+}
+
+// Timezone + working hours drive how the statistics "business day" is computed
+export async function fetchCompanySettings(id: string): Promise<CompanySettings> {
+  try {
+    const { data, error } = await supabase.from('companies').select('timezone, work_open, work_close').eq('id', id).single();
+    if (error || !data) return DEFAULT_SETTINGS;
+    return {
+      timezone: data.timezone || DEFAULT_TZ,
+      workOpen: data.work_open || '00:00',
+      workClose: data.work_close || '00:00',
+    };
+  } catch { return DEFAULT_SETTINGS; }
+}
+
+export async function updateCompanyHours(workOpen: string, workClose: string): Promise<void> {
+  // RLS allows only superadmins to update companies — owners set their working
+  // hours through a security definer RPC scoped to their own company.
+  const { error } = await supabase.rpc('set_work_hours', { open_t: workOpen, close_t: workClose });
+  if (error) console.error('[updateCompanyHours]', error);
+}
+
+export async function updateCompanyTimezone(id: string, timezone: string): Promise<void> {
+  try {
+    await supabase.from('companies').update({ timezone }).eq('id', id);
+  } catch (e) { console.error('[updateCompanyTimezone]', e); }
 }
 
 export async function fetchCompanyProfile(id: string): Promise<{ ownerName: string; address: string; phone: string } | null> {
@@ -474,7 +549,8 @@ export async function updateOwnerAccount(id: string, name: string, username: str
 function mapShift(r: {
   id: string; opened_at: string; opened_by: string; opening_cash: number;
   closed_at: string | null; closed_by: string | null;
-  expected_cash: number | null; counted_cash: number | null; movements: unknown;
+  expected_cash: number | null; counted_cash: number | null;
+  card_sales: number | null; counted_card: number | null; movements: unknown;
 }): CashShift {
   return {
     id: r.id,
@@ -485,6 +561,8 @@ function mapShift(r: {
     closedBy: r.closed_by ?? undefined,
     expectedCash: r.expected_cash !== null ? Number(r.expected_cash) : undefined,
     countedCash: r.counted_cash !== null ? Number(r.counted_cash) : undefined,
+    cardSales: r.card_sales !== null ? Number(r.card_sales) : undefined,
+    countedCard: r.counted_card !== null ? Number(r.counted_card) : undefined,
     movements: Array.isArray(r.movements) ? (r.movements as ShiftMovement[]) : [],
   };
 }
@@ -534,10 +612,17 @@ export async function addShiftMovement(shiftId: string, movement: ShiftMovement)
   if (error) console.error('[addShiftMovement]', error);
 }
 
-export async function closeShift(shiftId: string, expectedCash: number, countedCash: number, closedBy: string): Promise<void> {
+export async function closeShift(
+  shiftId: string, expectedCash: number, countedCash: number, closedBy: string,
+  cardSales?: number, countedCard?: number,
+): Promise<void> {
   const { error } = await supabase
     .from('cash_shifts')
-    .update({ closed_at: new Date().toISOString(), closed_by: closedBy, expected_cash: expectedCash, counted_cash: countedCash })
+    .update({
+      closed_at: new Date().toISOString(), closed_by: closedBy,
+      expected_cash: expectedCash, counted_cash: countedCash,
+      card_sales: cardSales ?? null, counted_card: countedCard ?? null,
+    })
     .eq('id', shiftId);
   if (error) console.error('[closeShift]', error);
 }

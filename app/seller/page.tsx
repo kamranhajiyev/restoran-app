@@ -8,10 +8,14 @@ import {
 } from 'lucide-react';
 import { getSession, logout, validateSession } from '@/lib/auth';
 import {
-  fetchMenu, addOrder, fetchOrders, updateOrderStatus, fetchCategories, setCompanyContext, fetchTables,
-  fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
+  fetchMenu, addOrder, fetchOrders, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
+  fetchTablesEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
+  fetchCompanySettings,
 } from '@/lib/store';
-import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement } from '@/types';
+import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday } from '@/lib/business-day';
+import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, isOrderOpen } from '@/types';
+
+const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
 type View = 'orders' | 'new-order' | 'menu' | 'kassa';
 type PayMethod = 'nağd' | 'kart';
@@ -37,16 +41,13 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
   'hazırlanır':'bg-blue-100 text-blue-700',
   'hazırdır':  'bg-green-100 text-green-700',
   'ödənilib':  'bg-stone-100 text-stone-500',
+  'ləğv edildi': 'bg-red-100 text-red-600',
 };
 
 function elapsed(iso: string): string {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
   if (mins < 60) return `${mins} dəq`;
   return `${Math.floor(mins / 60)} saat`;
-}
-
-function isToday(iso: string): boolean {
-  return new Date(iso).toDateString() === new Date().toDateString();
 }
 
 function orderTotal(order: Order): number {
@@ -68,7 +69,7 @@ function paymentBreakdown(total: number, cash: number, card: number, isTip: bool
 }
 
 function tableHasActive(n: number, orders: Order[]): boolean {
-  return orders.some(o => o.tableNumber === n && o.status !== 'ödənilib');
+  return orders.some(o => o.tableNumber === n && isOrderOpen(o));
 }
 
 export default function SellerPage() {
@@ -83,6 +84,9 @@ export default function SellerPage() {
 
   // new order
   const [tables, setTables]                 = useState<RestaurantTable[]>([]);
+  // Tables off (takeaway-only company): the Masa/Takeaway screen is skipped and
+  // "Yeni sifariş" opens the product menu directly
+  const [tablesOn, setTablesOn]             = useState(true);
   const [orderType, setOrderType]           = useState<OrderType | null>(null);
   const [selectedTable, setSelectedTable]   = useState<number | null>(null);
   const [cart, setCart]                     = useState<OrderItem[]>([]);
@@ -90,6 +94,12 @@ export default function SellerPage() {
   const [note, setNote]                     = useState('');
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [submitting, setSubmitting]         = useState(false);
+
+  // cancel modal — preset reason required, free text only for "Digər"
+  const [cancellingOrder, setCancellingOrder] = useState<Order | null>(null);
+  const [cancelReason, setCancelReason]       = useState<string | null>(null);
+  const [cancelOtherText, setCancelOtherText] = useState('');
+  const [cancelBusy, setCancelBusy]           = useState(false);
 
   // payment modal
   const [payingOrder, setPayingOrder] = useState<Order | null>(null);
@@ -105,6 +115,7 @@ export default function SellerPage() {
   const [shiftBusy, setShiftBusy]       = useState(false);
   const [shiftSales, setShiftSales]     = useState({ cash: 0, card: 0 });
   const [countedInput, setCountedInput] = useState('');
+  const [terminalInput, setTerminalInput] = useState('');
   const [movAmount, setMovAmount]       = useState('');
   const [movReason, setMovReason]       = useState('');
   const [movOut, setMovOut]             = useState(true);
@@ -115,6 +126,10 @@ export default function SellerPage() {
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
   const [selectedMods, setSelectedMods] = useState<Record<string, string>>({});
   const [selectedVariant, setSelectedVariant] = useState<{ id: string; name: string; price: number } | null>(null);
+
+  // Company timezone + working hours: "Bu gün" follows the business day, so a
+  // night shift's post-midnight orders stay under today until closing time
+  const [bizSettings, setBizSettings] = useState<CompanySettings>(DEFAULT_SETTINGS);
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshOrders = useCallback(async () => {
@@ -130,9 +145,10 @@ export default function SellerPage() {
     });
     setCompanyContext(session.companyId);
     setSellerName(session.name);
+    fetchCompanySettings(session.companyId ?? '').then(setBizSettings);
     fetchOpenShift().then(s => { setShift(s); setShiftChecked(true); });
-    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables()]).then(([m, o, c, tb]) => {
-      setOnline(true); setMenu(m); setOrders(o); setTables(tb);
+    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled()]).then(([m, o, c, tb, te]) => {
+      setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te);
       const available = c.filter(cat => cat.available);
       setAvailableCategories(available);
       const cats = [...new Set(m.map(i => i.category))].filter(cat => available.some(a => a.name === cat));
@@ -201,8 +217,16 @@ export default function SellerPage() {
   }
 
   function tableName(id: number | null): string {
-    if (!id) return 'Takeaway';
+    if (!id) return tablesOn ? 'Takeaway' : '';
     return tables.find(t => t.id === id)?.name ?? `Masa ${id}`;
+  }
+
+  function handleNav(id: View) {
+    if (id === 'new-order') {
+      if (!tablesOn) { startNewOrder('takeaway'); return; }
+      setOrderType(null); setCart([]);
+    }
+    setView(id);
   }
 
   function startNewOrder(type: OrderType, tableNum?: number) {
@@ -268,6 +292,30 @@ export default function SellerPage() {
     }
   }
 
+  function openCancel(order: Order) {
+    setCancellingOrder(order);
+    setCancelReason(null);
+    setCancelOtherText('');
+  }
+
+  async function confirmCancel() {
+    if (!cancellingOrder || !cancelReason || cancelBusy) return;
+    const reason = cancelReason === 'Digər' ? cancelOtherText.trim() : cancelReason;
+    if (!reason) return;
+    setCancelBusy(true);
+    // Conditional in the DB — a no-op if the order got paid in the meantime
+    const ok = await cancelOrder(cancellingOrder.id, reason, sellerName);
+    setCancelBusy(false);
+    setCancellingOrder(null);
+    if (ok) {
+      setOrders(prev => prev.map(o => o.id === cancellingOrder.id
+        ? { ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: sellerName, cancelledAt: new Date().toISOString() }
+        : o));
+    } else {
+      refreshOrders();
+    }
+  }
+
   // ── kassa (cash shift) ────────────────────────────────────────────────────
 
   const movementsTotal = (s: CashShift) => s.movements.reduce((t, m) => t + m.amount, 0);
@@ -298,15 +346,16 @@ export default function SellerPage() {
   async function handleCloseShift() {
     if (!shift || countedInput === '') return;
     const counted = parseFloat(countedInput) || 0;
+    const countedCard = terminalInput === '' ? undefined : parseFloat(terminalInput) || 0;
     setShiftBusy(true);
     // re-fetch shift + sales right before closing so movements added elsewhere
     // and last-second payments are all in the snapshot
     const fresh = (await fetchOpenShift()) ?? shift;
     const sales = await fetchShiftSales(fresh.openedAt);
     const expected = fresh.openingCash + sales.cash + movementsTotal(fresh);
-    await closeShift(fresh.id, expected, counted, sellerName);
+    await closeShift(fresh.id, expected, counted, sellerName, sales.card, countedCard);
     setShiftBusy(false);
-    setShift(null); setCountedInput(''); setView('orders');
+    setShift(null); setCountedInput(''); setTerminalInput(''); setView('orders');
     setJustClosed(true);
   }
 
@@ -323,7 +372,9 @@ export default function SellerPage() {
   const cartCount   = cart.reduce((s, ci) => s + ci.quantity, 0);
   const categories  = [...new Set(menu.map(i => i.category))].filter(cat => availableCategories.some(a => a.name === cat));
   const filtered    = menu.filter(m => m.category === activeCategory && m.available);
-  const active      = orders.filter(o => o.status !== 'ödənilib');
+  const active      = orders.filter(isOrderOpen);
+  const bizToday    = businessToday(bizSettings);
+  const isToday     = (iso: string) => businessDay(iso, bizSettings) === bizToday;
   const todayOrders = active.filter(o => isToday(o.createdAt));
   const prevOrders  = active.filter(o => !isToday(o.createdAt));
   const myTodayTips = orders.filter(o => o.sellerName === sellerName && isToday(o.createdAt) && (o.tipAmount ?? 0) > 0).reduce((s, o) => s + (o.tipAmount ?? 0), 0);
@@ -365,10 +416,7 @@ export default function SellerPage() {
                 <button
                   key={n.id}
                   title={n.label}
-                  onClick={() => {
-                    if (n.id === 'new-order') { setOrderType(null); setCart([]); }
-                    setView(n.id);
-                  }}
+                  onClick={() => handleNav(n.id)}
                   className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${isActive ? 'bg-amber-800/10 text-amber-800' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-700'}`}
                 >
                   <Icon className="w-4 h-4" />
@@ -380,10 +428,7 @@ export default function SellerPage() {
             return (
               <button
                 key={n.id}
-                onClick={() => {
-                  if (n.id === 'new-order') { setOrderType(null); setCart([]); }
-                  setView(n.id);
-                }}
+                onClick={() => handleNav(n.id)}
                 className={`flex items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium transition-colors w-full ${isActive ? 'bg-amber-800 text-white shadow-sm' : 'text-stone-500 hover:bg-amber-50 hover:text-amber-900'}`}
               >
                 <Icon className="w-4 h-4 shrink-0" />
@@ -560,13 +605,13 @@ export default function SellerPage() {
                 {prevOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-500 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
-                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} onPay={() => openPayment(o)} onStatusChange={handleStatusChange} />)}
+                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-500 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
-                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} onPay={() => openPayment(o)} onStatusChange={handleStatusChange} />)}
+                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
               </div>
@@ -580,7 +625,7 @@ export default function SellerPage() {
                 <div>
                   <h1 className="text-lg font-semibold text-stone-900">Kassa</h1>
                   <p className="text-sm text-stone-500 mt-0.5">
-                    Açılıb: {new Date(shift.openedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })} · {shift.openedBy}
+                    Açılıb: {new Date(shift.openedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })} · {shift.openedBy}
                   </p>
                 </div>
 
@@ -603,9 +648,15 @@ export default function SellerPage() {
                   <div className="flex justify-between items-center border-t pt-3 font-bold text-lg">
                     <span>Kassada olmalıdır</span><span className="text-amber-700">{expectedCash.toFixed(2)} ₼</span>
                   </div>
-                  <div className="flex justify-between text-xs text-stone-400">
-                    <span>💳 Kart (terminal üçün)</span><span>{shiftSales.card.toFixed(2)} ₼</span>
+                </div>
+
+                {/* Terminal (card) — separate from drawer math */}
+                <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5">
+                  <div className="flex justify-between items-center font-bold">
+                    <span className="text-stone-800">💳 Terminal (kart satışı)</span>
+                    <span className="text-amber-700 text-lg">{shiftSales.card.toFixed(2)} ₼</span>
                   </div>
+                  <p className="text-xs text-stone-400 mt-1">Kassaya daxil deyil — bank terminalından keçir</p>
                 </div>
 
                 {/* Movements */}
@@ -657,7 +708,7 @@ export default function SellerPage() {
                             <span className="text-stone-600 truncate mr-3">
                               {m.reason}
                               <span className="text-xs text-stone-400 ml-1.5">
-                                {new Date(m.at).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })} · {m.by}
+                                {new Date(m.at).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })} · {m.by}
                               </span>
                             </span>
                             <span className={`font-semibold shrink-0 ${m.amount < 0 ? 'text-red-500' : 'text-green-600'}`}>
@@ -672,7 +723,7 @@ export default function SellerPage() {
                 {/* Close shift */}
                 <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5">
                   <h2 className="font-semibold text-stone-800 text-sm mb-3">Növbəni bağla</h2>
-                  <label className="block text-xs font-medium text-stone-500 mb-1.5">Sayılan məbləğ (₼)</label>
+                  <label className="block text-xs font-medium text-stone-500 mb-1.5">Sayılan nağd (₼)</label>
                   <input
                     type="number" min="0" step="0.5" placeholder="0.00"
                     value={countedInput} onChange={e => setCountedInput(e.target.value)}
@@ -690,6 +741,26 @@ export default function SellerPage() {
                           : (parseFloat(countedInput) || 0) < expectedCash ? 'Kəsir' : 'Artıq'}
                       </span>
                       <span>{((parseFloat(countedInput) || 0) - expectedCash).toFixed(2)} ₼</span>
+                    </div>
+                  )}
+                  <label className="block text-xs font-medium text-stone-500 mb-1.5">💳 Terminal məbləği (Z-hesabat, ₼)</label>
+                  <input
+                    type="number" min="0" step="0.5" placeholder="0.00"
+                    value={terminalInput} onChange={e => setTerminalInput(e.target.value)}
+                    className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-amber-700 mb-3"
+                  />
+                  {terminalInput !== '' && (
+                    <div className={`flex justify-between items-center px-4 py-2.5 rounded-xl font-semibold text-sm mb-3 ${
+                      Math.abs((parseFloat(terminalInput) || 0) - shiftSales.card) < 0.005
+                        ? 'bg-green-50 text-green-700'
+                        : (parseFloat(terminalInput) || 0) < shiftSales.card ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
+                    }`}>
+                      <span>
+                        {Math.abs((parseFloat(terminalInput) || 0) - shiftSales.card) < 0.005
+                          ? 'Terminal düz gəlir ✓'
+                          : (parseFloat(terminalInput) || 0) < shiftSales.card ? 'Terminal kəsir' : 'Terminal artıq'}
+                      </span>
+                      <span>{((parseFloat(terminalInput) || 0) - shiftSales.card).toFixed(2)} ₼</span>
                     </div>
                   )}
                   <button
@@ -752,7 +823,7 @@ export default function SellerPage() {
                       const h = t.h ?? 70;
                       const isRound = t.shape === 'round';
                       const busyTotal = orders
-                        .filter(o => o.tableNumber === t.id && o.status !== 'ödənilib')
+                        .filter(o => o.tableNumber === t.id && isOrderOpen(o))
                         .reduce((s, o) => s + orderTotal(o), 0);
                       return (
                         <button
@@ -794,13 +865,13 @@ export default function SellerPage() {
                 {/* Menu toolbar */}
                 <div className="px-3 py-2.5 border-b bg-white flex items-center gap-2 shrink-0">
                   <button
-                    onClick={() => { setView('new-order'); setOrderType('masa'); setCart([]); }}
+                    onClick={() => { setView(tablesOn ? 'new-order' : 'orders'); setOrderType(tablesOn ? 'masa' : null); setCart([]); }}
                     className="w-9 h-9 flex items-center justify-center rounded-xl text-amber-700 hover:bg-amber-50 active:scale-95 transition-all"
                   >
                     <ChevronLeft className="w-5 h-5" />
                   </button>
                   <span className="font-semibold text-stone-800 text-sm flex-1">
-                    {orderType === 'takeaway' ? '🛍 Takeaway' : tableName(selectedTable)}
+                    {!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? '🛍 Takeaway' : tableName(selectedTable)}
                   </span>
                   {/* Cart icon — mobile only */}
                   <button
@@ -865,7 +936,7 @@ export default function SellerPage() {
               <div className="hidden md:flex w-72 bg-white border-l flex-col">
                 <div className="px-4 py-3 border-b">
                   <h2 className="font-bold text-stone-800">Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}</h2>
-                  <p className="text-xs text-stone-400">{orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                  <p className="text-xs text-stone-400">{!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
                 </div>
                 <div className="flex-1 overflow-y-auto px-4 py-3">
                   {cart.length === 0
@@ -926,10 +997,7 @@ export default function SellerPage() {
           return (
             <button
               key={n.id}
-              onClick={() => {
-                if (n.id === 'new-order') { setOrderType(null); setCart([]); }
-                setView(n.id);
-              }}
+              onClick={() => handleNav(n.id)}
               className={`flex-1 flex flex-col items-center gap-1 py-2.5 relative transition-colors active:opacity-70 ${isActive ? 'text-amber-800' : 'text-stone-400'}`}
             >
               <div className="relative">
@@ -955,7 +1023,7 @@ export default function SellerPage() {
                 <h2 className="font-bold text-stone-800">
                   Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}
                 </h2>
-                <p className="text-xs text-stone-400">{orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                <p className="text-xs text-stone-400">{!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
               </div>
               <button onClick={() => setMobileCartOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-xl bg-stone-100 text-stone-500">
                 <X className="w-4 h-4" />
@@ -991,6 +1059,50 @@ export default function SellerPage() {
         </>
       )}
 
+      {/* Cancel order modal — bottom sheet on mobile */}
+      {cancellingOrder && (
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
+            <h3 className="font-bold text-lg text-stone-800 mb-1">Sifarişi ləğv et</h3>
+            <p className="text-sm text-stone-500 mb-4">
+              №{cancellingOrder.orderNumber}{tableName(cancellingOrder.tableNumber) && ` · ${tableName(cancellingOrder.tableNumber)}`} · {orderTotal(cancellingOrder).toFixed(2)} ₼
+            </p>
+            <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2">Səbəb</p>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {CANCEL_REASONS.map(r => (
+                <button
+                  key={r}
+                  onClick={() => setCancelReason(r)}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${cancelReason === r ? 'border-red-400 bg-red-50 text-red-600' : 'border-stone-200 text-stone-600 hover:border-stone-300'}`}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+            {cancelReason === 'Digər' && (
+              <input
+                type="text" placeholder="Səbəbi yazın..."
+                value={cancelOtherText}
+                onChange={e => setCancelOtherText(e.target.value)}
+                className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 mb-4"
+                autoFocus
+              />
+            )}
+            <div className="flex gap-2">
+              <button onClick={() => setCancellingOrder(null)} className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">İmtina</button>
+              <button
+                onClick={confirmCancel}
+                disabled={cancelBusy || !cancelReason || (cancelReason === 'Digər' && !cancelOtherText.trim())}
+                className="flex-1 py-3 rounded-xl bg-red-500 hover:bg-red-600 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2"
+              >
+                {cancelBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                Ləğv et
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Payment modal — bottom sheet on mobile */}
       {payingOrder && (() => {
         const total = orderTotal(payingOrder);
@@ -1005,7 +1117,7 @@ export default function SellerPage() {
             <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
               <h3 className="font-bold text-lg text-stone-800 mb-1">Ödəniş</h3>
               <p className="text-sm text-stone-500 mb-4">
-                №{payingOrder.orderNumber} · {tableName(payingOrder.tableNumber)}
+                №{payingOrder.orderNumber}{tableName(payingOrder.tableNumber) && ` · ${tableName(payingOrder.tableNumber)}`}
               </p>
               <ul className="text-sm space-y-2 mb-4 border-t pt-3 max-h-40 overflow-y-auto">
                 {payingOrder.items.map((oi, i) => (
@@ -1226,10 +1338,12 @@ function CartItems({ cart, addToCart, removeFromCart }: {
 
 // ── OrderRow — mobile card + desktop table row ────────────────────────────
 
-function OrderRow({ order, tableLabel, onPay, onStatusChange }: {
+function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
   order: Order;
   tableLabel: string;
+  tz: string;
   onPay: () => void;
+  onCancel: () => void;
   onStatusChange: (id: string, s: OrderStatus) => void;
 }) {
   const total = orderTotal(order);
@@ -1245,10 +1359,10 @@ function OrderRow({ order, tableLabel, onPay, onStatusChange }: {
           <div>
             <div className="flex items-center gap-2 mb-0.5">
               <span className="text-amber-700 font-bold text-sm">№{order.orderNumber}</span>
-              <span className="text-stone-800 font-semibold text-sm">{tableLabel}</span>
+              {tableLabel && <span className="text-stone-800 font-semibold text-sm">{tableLabel}</span>}
             </div>
             <p className="text-xs text-stone-400">
-              {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })} · {elapsed(order.createdAt)}
+              {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: tz })} · {elapsed(order.createdAt)}
             </p>
           </div>
           <div className="text-right">
@@ -1257,13 +1371,21 @@ function OrderRow({ order, tableLabel, onPay, onStatusChange }: {
           </div>
         </div>
         <p className="text-xs text-stone-500 truncate mb-3">{itemsPreview}</p>
-        {order.status !== 'ödənilib' && (
-          <button
-            onClick={onPay}
-            className="w-full bg-amber-800 hover:bg-amber-900 active:scale-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-all"
-          >
-            Ödəniş
-          </button>
+        {isOrderOpen(order) && (
+          <div className="flex gap-2">
+            <button
+              onClick={onCancel}
+              className="px-4 py-2.5 rounded-xl border border-red-200 text-red-500 hover:bg-red-50 active:scale-95 text-sm font-semibold transition-all"
+            >
+              Ləğv et
+            </button>
+            <button
+              onClick={onPay}
+              className="flex-1 bg-amber-800 hover:bg-amber-900 active:scale-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-all"
+            >
+              Ödəniş
+            </button>
+          </div>
         )}
       </div>
 
@@ -1271,13 +1393,13 @@ function OrderRow({ order, tableLabel, onPay, onStatusChange }: {
       <div className="hidden md:grid grid-cols-[120px_1fr_140px_200px_110px] gap-4 px-6 py-4 border-b bg-white hover:bg-stone-50 items-center">
         <div>
           <p className="font-semibold text-stone-800 text-sm">
-            {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })}
+            {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: tz })}
           </p>
           <p className="text-xs text-stone-400">{elapsed(order.createdAt)}</p>
         </div>
         <div>
           <p className="text-sm font-medium text-stone-800">
-            <span className="text-amber-700">№{order.orderNumber}</span>{' › '}<span>{tableLabel}</span>
+            <span className="text-amber-700">№{order.orderNumber}</span>{tableLabel && <>{' › '}<span>{tableLabel}</span></>}
           </p>
           <p className="text-xs text-stone-400 truncate max-w-xs">{itemsPreview}</p>
         </div>
@@ -1286,11 +1408,16 @@ function OrderRow({ order, tableLabel, onPay, onStatusChange }: {
             {order.status}
           </span>
         </div>
-        <div>
-          {order.status !== 'ödənilib' && (
-            <button onClick={onPay} className="bg-amber-800 hover:bg-amber-900 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
-              Ödəniş
-            </button>
+        <div className="flex items-center gap-2">
+          {isOrderOpen(order) && (
+            <>
+              <button onClick={onPay} className="bg-amber-800 hover:bg-amber-900 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
+                Ödəniş
+              </button>
+              <button onClick={onCancel} className="border border-red-200 text-red-500 hover:bg-red-50 text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
+                Ləğv et
+              </button>
+            </>
           )}
         </div>
         <div className="text-right">

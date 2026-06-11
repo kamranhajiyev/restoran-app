@@ -6,30 +6,38 @@ import {
   PanelLeftClose, PanelLeftOpen, LogOut, Menu, X,
   TrendingUp, Receipt, Star, ChevronDown, Percent,
   Coffee, BarChart2, Package, Wallet, ChevronUp, ImageIcon, Trash2, RotateCcw,
-  Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload,
+  Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
 } from 'lucide-react';
 import { getSession, logout, validateSession } from '@/lib/auth';
 import {
-  fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus,
+  fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder,
   fetchShifts, fetchShiftSales, closeShift, fetchOpenShift,
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash,
   setCompanyContext, fetchAllUsers, createUser, deleteUser, toggleUserActive, updateUser,
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, fetchCompanySlug,
-  fetchCompanyProfile, updateCompanyProfile, verifyPassword,
+  fetchTablesEnabled, setTablesEnabled,
+  fetchCompanyProfile, updateMyCompanyProfile, verifyPassword,
+  fetchCompanySettings, updateCompanyHours,
 } from '@/lib/store';
+import {
+  CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc,
+  addDays, dayDiff, dayOfWeek, dayToDate, tzHour, cutoffMinutes,
+} from '@/lib/business-day';
 import { supabase } from '@/lib/supabase';
-import { CashShift, Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, TrashItem } from '@/types';
+import { CashShift, Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, TrashItem, isOrderOpen } from '@/types';
 import { exportMenuExcel, parseMenuFile, ImportPreview } from '@/lib/excel';
 import QRCode from 'react-qr-code';
 
 const COOKING_STATIONS = ['Mətbəx', 'Bar', 'Soyuq mətbəx', 'Pizza', 'Mangal'];
+const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
 const STATUS_COLORS: Record<OrderStatus, string> = {
   'gözləyir':  'bg-amber-100 text-amber-700',
   'hazırlanır':'bg-blue-100 text-blue-700',
   'hazırdır':  'bg-green-100 text-green-700',
   'ödənilib':  'bg-stone-100 text-stone-500',
+  'ləğv edildi': 'bg-red-100 text-red-600',
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
 
@@ -55,16 +63,17 @@ function orderTotal(order: Order) {
   return order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
 }
 
-function presetRange(p: ChartPreset): [string, string] {
+// Ranges are expressed in *business days* (company timezone + working-hours
+// cutoff) — `today` is the company's current business day, not the device date.
+function presetRange(p: ChartPreset, today: string): [string, string] {
   const toStr = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  const today = new Date();
-  const from = new Date(today);
+  const from = dayToDate(today);
   if (p === '7g') from.setDate(from.getDate() - 6);
   else if (p === '30g') from.setDate(from.getDate() - 29);
   else if (p === 'ay') from.setDate(1);
   else if (p === '6ay') { from.setMonth(from.getMonth() - 6); from.setDate(from.getDate() + 1); }
   else if (p === '1il') { from.setFullYear(from.getFullYear() - 1); from.setDate(from.getDate() + 1); }
-  return [toStr(from), toStr(today)];
+  return [toStr(from), today];
 }
 
 function calcMargin(price: string, cost: string): string {
@@ -185,6 +194,12 @@ function AdminPageContent() {
   const [saving, setSaving] = useState(false);
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
 
+  // cancel order modal
+  const [cancellingOrder, setCancellingOrder] = useState<Order | null>(null);
+  const [cancelReason, setCancelReason] = useState<string | null>(null);
+  const [cancelOtherText, setCancelOtherText] = useState('');
+  const [cancelBusy, setCancelBusy] = useState(false);
+
   // categories form
   const [newCat, setNewCat] = useState('');
   const [deleteCatTarget, setDeleteCatTarget] = useState<string | null>(null);
@@ -203,6 +218,7 @@ function AdminPageContent() {
   const [openShiftSales, setOpenShiftSales] = useState({ cash: 0, card: 0 });
   const [expandedShiftId, setExpandedShiftId] = useState<string | null>(null);
   const [adminCountedInput, setAdminCountedInput] = useState('');
+  const [adminTerminalInput, setAdminTerminalInput] = useState('');
   const [closingShift, setClosingShift] = useState(false);
 
   // orders tab
@@ -213,8 +229,9 @@ function AdminPageContent() {
 
   // stats chart
   const [topSort, setTopSort] = useState<'rev' | 'profit' | 'qty' | 'margin'>('rev');
-  const [customFrom, setCustomFrom] = useState(() => presetRange('bugün')[0]);
-  const [customTo, setCustomTo] = useState(() => presetRange('bugün')[1]);
+  const [bizSettings, setBizSettings] = useState<CompanySettings>(DEFAULT_SETTINGS);
+  const [customFrom, setCustomFrom] = useState(() => businessToday(DEFAULT_SETTINGS));
+  const [customTo, setCustomTo] = useState(() => businessToday(DEFAULT_SETTINGS));
   const [statsOrders, setStatsOrders] = useState<Order[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [statsLoaded, setStatsLoaded] = useState(false);
@@ -234,6 +251,8 @@ function AdminPageContent() {
   const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
   const [dragging, setDragging] = useState<{ id: number; ox: number; oy: number; mx: number; my: number } | null>(null);
   const [tableSavedToast, setTableSavedToast] = useState(false);
+  const [tablesOn, setTablesOn] = useState(true);
+  const [tablesToggleBusy, setTablesToggleBusy] = useState(false);
   const [alignGuides, setAlignGuides] = useState<{ type: 'h' | 'v'; pos: number }[]>([]);
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -254,6 +273,8 @@ function AdminPageContent() {
   const [profOwner, setProfOwner] = useState('');
   const [profAddress, setProfAddress] = useState('');
   const [profPhone, setProfPhone] = useState('');
+  const [profOpen, setProfOpen] = useState('00:00');
+  const [profClose, setProfClose] = useState('00:00');
   const [profSaving, setProfSaving] = useState(false);
   const [profMsg, setProfMsg] = useState('');
   const [pwCurrent, setPwCurrent] = useState('');
@@ -272,6 +293,8 @@ function AdminPageContent() {
     setProfOwner(profile?.ownerName ?? '');
     setProfAddress(profile?.address ?? '');
     setProfPhone(profile?.phone ?? '');
+    setProfOpen(bizSettings.workOpen);
+    setProfClose(bizSettings.workClose);
     setProfMsg('');
     setPwCurrent(''); setPwNew(''); setPwConfirm(''); setPwMsg('');
     setShowProfile(true);
@@ -281,7 +304,12 @@ function AdminPageContent() {
     const session = getSession();
     if (!session?.companyId) return;
     setProfSaving(true);
-    await updateCompanyProfile(session.companyId, profOwner.trim(), profAddress.trim(), profPhone.trim());
+    const open = profOpen || '00:00', close = profClose || '00:00';
+    await Promise.all([
+      updateMyCompanyProfile(profOwner.trim(), profAddress.trim(), profPhone.trim()),
+      updateCompanyHours(open, close),
+    ]);
+    setBizSettings(prev => ({ ...prev, workOpen: open, workClose: close }));
     setProfMsg('Yadda saxlandı');
     setProfSaving(false);
     setTimeout(() => setProfMsg(''), 2000);
@@ -314,7 +342,14 @@ function AdminPageContent() {
     setUserId(session.id);
     setSessionReady(true);
     fetchOrdersCount().then(setTotalOrders);
-    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchAllUsers(), fetchTables(), fetchCompanySlug(session.companyId ?? '')]).then(([m, o, c, t, u, tb, slug]) => {
+    fetchCompanySettings(session.companyId ?? '').then(s => {
+      setBizSettings(s);
+      // re-anchor the default "bugün" range to the company's business day
+      const t = businessToday(s);
+      setCustomFrom(t);
+      setCustomTo(t);
+    });
+    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchAllUsers(), fetchTables(), fetchCompanySlug(session.companyId ?? ''), fetchTablesEnabled()]).then(([m, o, c, t, u, tb, slug, te]) => {
       setMenu(m);
       setOrders(o);
       setCategories(c);
@@ -323,6 +358,7 @@ function AdminPageContent() {
       setStaffUsers(u.filter(x => x.companyId === session.companyId && x.role === 'seller').map(x => ({ id: x.id, username: x.username, name: x.name, active: x.active })));
       setTables(tb);
       setCompanySlug(slug);
+      setTablesOn(te);
     });
   }, [router]);
 
@@ -330,13 +366,14 @@ function AdminPageContent() {
   // Fetched ranges are cached in memory: fully-past ranges forever, ranges touching today for 60s.
   useEffect(() => {
     if (!sessionReady) return;
+    const bizT = businessToday(bizSettings);
     const valid = !!(customFrom && customTo && customFrom <= customTo);
-    const [f, t] = valid ? [customFrom, customTo] : presetRange('bugün');
-    const localDay = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
-    const from = localDay(f).toISOString();
-    const to = new Date(localDay(t).getTime() + 86399999).toISOString();
+    const [f, t] = valid ? [customFrom, customTo] : presetRange('bugün', bizT);
+    // a business day runs from cutoff to cutoff in the company timezone
+    const from = businessDayStartUtc(f, bizSettings).toISOString();
+    const to = new Date(businessDayStartUtc(addDays(t, 1), bizSettings).getTime() - 1).toISOString();
     const key = `${from}|${to}`;
-    const ttl = t >= presetRange('bugün')[1] ? 60000 : Infinity;
+    const ttl = t >= bizT ? 60000 : Infinity;
     const cached = statsCache.current.get(key);
     if (cached && Date.now() - cached.at < ttl) {
       setStatsOrders(cached.data);
@@ -349,7 +386,7 @@ function AdminPageContent() {
       statsCache.current.set(key, { at: Date.now(), data: o });
       setStatsOrders(o);
     }).finally(() => { setDataLoading(false); setStatsLoaded(true); });
-  }, [sessionReady, customFrom, customTo]);
+  }, [sessionReady, customFrom, customTo, bizSettings]);
 
   useEffect(() => {
     if (!sessionReady || tab !== 'kassa') return;
@@ -380,8 +417,9 @@ function AdminPageContent() {
       const fresh = (await fetchOpenShift()) ?? open;
       const sales = await fetchShiftSales(fresh.openedAt);
       const expected = fresh.openingCash + sales.cash + fresh.movements.reduce((t, m) => t + m.amount, 0);
-      await closeShift(fresh.id, expected, parseFloat(adminCountedInput) || 0, adminName);
-      setAdminCountedInput('');
+      const countedCard = adminTerminalInput === '' ? undefined : parseFloat(adminTerminalInput) || 0;
+      await closeShift(fresh.id, expected, parseFloat(adminCountedInput) || 0, adminName, sales.card, countedCard);
+      setAdminCountedInput(''); setAdminTerminalInput('');
       setShifts(await fetchShifts());
     } finally { setClosingShift(false); }
   }
@@ -531,6 +569,24 @@ function AdminPageContent() {
     const ok = await updateOrderStatus(orderId, status);
     if (!ok && prevStatus) {
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: prevStatus } : o));
+    }
+  }
+
+  async function confirmCancelOrder() {
+    if (!cancellingOrder || !cancelReason || cancelBusy) return;
+    const reason = cancelReason === 'Digər' ? cancelOtherText.trim() : cancelReason;
+    if (!reason) return;
+    setCancelBusy(true);
+    // Conditional in the DB — a no-op if the order got paid in the meantime
+    const ok = await cancelOrder(cancellingOrder.id, reason, adminName);
+    setCancelBusy(false);
+    setCancellingOrder(null);
+    if (ok) {
+      setOrders(prev => prev.map(o => o.id === cancellingOrder.id
+        ? { ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: adminName, cancelledAt: new Date().toISOString() }
+        : o));
+    } else {
+      refresh();
     }
   }
 
@@ -781,7 +837,7 @@ function AdminPageContent() {
   // ── stats computations ────────────────────────────────────────────────────
   // While a new range is loading, show empty charts — old orders plotted on the new axis would be misleading
   const paidOrders = (dataLoading ? [] : statsOrders).filter(o => o.status === 'ödənilib');
-  const activeOrders = orders.filter(o => o.status !== 'ödənilib');
+  const activeOrders = orders.filter(isOrderOpen);
   const orderQuery = orderSearch.trim().toLowerCase();
   const visibleOrders = orderQuery
     ? orders.filter(o => String(o.orderNumber).includes(orderQuery) || (o.sellerName ?? '').toLowerCase().includes(orderQuery))
@@ -794,10 +850,11 @@ function AdminPageContent() {
   });
 
   const isValidRange = !!(customFrom && customTo && customFrom <= customTo);
-  const [rangeFrom, rangeTo] = isValidRange ? [customFrom, customTo] : presetRange('bugün');
+  const [rangeFrom, rangeTo] = isValidRange ? [customFrom, customTo] : presetRange('bugün', businessToday(bizSettings));
 
-  const chartRangeStart: Date = new Date(rangeFrom);
-  const chartRangeEnd: Date = new Date(new Date(rangeTo).setHours(23, 59, 59, 999));
+  // Orders are grouped by the company's business day ('YYYY-MM-DD'), not the
+  // device's calendar day — night-shift sales stay on the day the shift started
+  const orderBizDay = (o: Order) => businessDay(o.createdAt, bizSettings);
 
   const chartData: { label: string; fullLabel: string; rev: number }[] = (() => {
     const dayFull = (d: Date) => `${d.getDate()} ${AZ_MON_LONG[d.getMonth()]} ${d.getFullYear()}`;
@@ -807,60 +864,58 @@ function AdminPageContent() {
     };
     const monthFull = (m: Date) => `${AZ_MON_LONG[m.getMonth()]} ${m.getFullYear()}`;
 
-    const fromDate = new Date(rangeFrom);
-    const toDate = new Date(rangeTo);
-    const msPerDay = 86400000;
-    const dayCount = Math.round((toDate.getTime() - fromDate.getTime()) / msPerDay) + 1;
+    const dayCount = dayDiff(rangeTo, rangeFrom) + 1;
     if (dayCount === 1) {
-      const ds = fromDate.toDateString();
-      const dayOrders = paidOrders.filter(o => new Date(o.createdAt).toDateString() === ds);
+      const dayOrders = paidOrders.filter(o => orderBizDay(o) === rangeFrom);
       return Array.from({ length: 24 }, (_, h) => ({
         label: `${String(h).padStart(2, '0')}:00`,
-        fullLabel: `${dayFull(fromDate)}, ${String(h).padStart(2, '0')}:00–${String(h + 1).padStart(2, '0')}:00`,
-        rev: dayOrders.filter(o => new Date(o.createdAt).getHours() === h).reduce((s, o) => s + orderTotal(o), 0),
+        fullLabel: `${dayFull(dayToDate(rangeFrom))}, ${String(h).padStart(2, '0')}:00–${String(h + 1).padStart(2, '0')}:00`,
+        rev: dayOrders.filter(o => tzHour(o.createdAt, bizSettings.timezone) === h).reduce((s, o) => s + orderTotal(o), 0),
       }));
     }
     if (dayCount <= 60) {
       return Array.from({ length: dayCount }, (_, i) => {
-        const d = new Date(fromDate); d.setDate(d.getDate() + i);
-        const ds = d.toDateString();
+        const ds = addDays(rangeFrom, i);
+        const d = dayToDate(ds);
         return {
           label: i === 0 || d.getDate() === 1 ? `${d.getDate()} ${AZ_MON_SHORT[d.getMonth()]}` : String(d.getDate()),
           fullLabel: dayFull(d),
-          rev: paidOrders.filter(o => new Date(o.createdAt).toDateString() === ds).reduce((s, o) => s + orderTotal(o), 0),
+          rev: paidOrders.filter(o => orderBizDay(o) === ds).reduce((s, o) => s + orderTotal(o), 0),
         };
       });
     }
     if (dayCount <= 200) {
       const weekCount = Math.ceil(dayCount / 7);
       return Array.from({ length: weekCount }, (_, i) => {
-        const wS = new Date(fromDate); wS.setDate(wS.getDate() + i * 7);
-        const wE = new Date(wS); wE.setDate(wE.getDate() + 7);
+        const wS = addDays(rangeFrom, i * 7);
+        const wE = addDays(rangeFrom, i * 7 + 7);
         return {
-          label: `${wS.getDate()} ${AZ_MON_SHORT[wS.getMonth()]}`,
-          fullLabel: weekFull(wS, wE),
-          rev: paidOrders.filter(o => { const d = new Date(o.createdAt); return d >= wS && d < wE; }).reduce((s, o) => s + orderTotal(o), 0),
+          label: `${dayToDate(wS).getDate()} ${AZ_MON_SHORT[dayToDate(wS).getMonth()]}`,
+          fullLabel: weekFull(dayToDate(wS), dayToDate(wE)),
+          rev: paidOrders.filter(o => { const d = orderBizDay(o); return d >= wS && d < wE; }).reduce((s, o) => s + orderTotal(o), 0),
         };
       });
     }
     const monthSet: { year: number; month: number }[] = [];
-    for (let d = new Date(fromDate.getFullYear(), fromDate.getMonth(), 1); d <= toDate; d.setMonth(d.getMonth() + 1)) {
+    const fromD = dayToDate(rangeFrom), toD = dayToDate(rangeTo);
+    for (let d = new Date(fromD.getFullYear(), fromD.getMonth(), 1); d <= toD; d.setMonth(d.getMonth() + 1)) {
       monthSet.push({ year: d.getFullYear(), month: d.getMonth() });
     }
+    const pad2 = (n: number) => String(n).padStart(2, '0');
     return monthSet.map(({ year, month }) => {
-      const mS = new Date(year, month, 1);
-      const mE = new Date(year, month + 1, 1);
+      const mS = `${year}-${pad2(month + 1)}-01`;
+      const mE = month === 11 ? `${year + 1}-01-01` : `${year}-${pad2(month + 2)}-01`;
       return {
-        label: mS.toLocaleDateString('az-AZ', { month: 'short' }),
-        fullLabel: monthFull(mS),
-        rev: paidOrders.filter(o => { const d = new Date(o.createdAt); return d >= mS && d < mE; }).reduce((s, o) => s + orderTotal(o), 0),
+        label: new Date(year, month, 1).toLocaleDateString('az-AZ', { month: 'short' }),
+        fullLabel: monthFull(new Date(year, month, 1)),
+        rev: paidOrders.filter(o => { const d = orderBizDay(o); return d >= mS && d < mE; }).reduce((s, o) => s + orderTotal(o), 0),
       };
     });
   })();
 
   const chartPaid = paidOrders.filter(o => {
-    const d = new Date(o.createdAt);
-    return d >= chartRangeStart && d <= chartRangeEnd;
+    const d = orderBizDay(o);
+    return d >= rangeFrom && d <= rangeTo;
   });
   const chartRevenue = chartPaid.reduce((s, o) => s + orderTotal(o), 0);
   const chartCost = chartPaid.reduce((s, o) => s + o.items.reduce((os, oi) => os + (menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity, 0), 0);
@@ -937,14 +992,14 @@ function AdminPageContent() {
 
   const hourlyData = Array.from({ length: 24 }, (_, h) => ({
     label: String(h),
-    rev: chartPaid.filter(o => new Date(o.createdAt).getHours() === h).reduce((s, o) => s + orderTotal(o), 0),
+    rev: chartPaid.filter(o => tzHour(o.createdAt, bizSettings.timezone) === h).reduce((s, o) => s + orderTotal(o), 0),
   }));
   const maxHourly = Math.max(...hourlyData.map(h => h.rev), 0.01);
 
   const WEEKDAYS = ['Be', 'Ça', 'Çə', 'Ca', 'Cü', 'Şə', 'Ba'];
   const weeklyData = WEEKDAYS.map((label, i) => {
     const jsDay = i === 6 ? 0 : i + 1;
-    return { label, rev: chartPaid.filter(o => new Date(o.createdAt).getDay() === jsDay).reduce((s, o) => s + orderTotal(o), 0) };
+    return { label, rev: chartPaid.filter(o => dayOfWeek(orderBizDay(o)) === jsDay).reduce((s, o) => s + orderTotal(o), 0) };
   });
   const maxWeekly = Math.max(...weeklyData.map(w => w.rev), 0.01);
 
@@ -1191,7 +1246,7 @@ function AdminPageContent() {
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5">
                       {([['bugün', 'Bu gün'], ['7g', '7 gün'], ['30g', '30 gün'], ['ay', 'Bu ay'], ['6ay', '6 ay'], ['1il', '1 il']] as [ChartPreset, string][]).map(([p, l]) => {
-                        const [f, t] = presetRange(p);
+                        const [f, t] = presetRange(p, businessToday(bizSettings));
                         const active = customFrom === f && customTo === t;
                         return (
                           <button key={p} onClick={() => { setCustomFrom(f); setCustomTo(t); }}
@@ -1533,7 +1588,6 @@ function AdminPageContent() {
 
               <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
                 {visibleOrders.map((order, i) => {
-                  const isPaid = order.status === 'ödənilib';
                   const isExpanded = expandedOrderId === order.id;
                   return (
                     <div key={order.id} className={i < visibleOrders.length - 1 ? 'border-b border-stone-50' : ''}>
@@ -1546,8 +1600,8 @@ function AdminPageContent() {
                         <span className="w-14 text-xs font-bold text-amber-900 flex-shrink-0">#{order.orderNumber}</span>
                         <span className="flex-1 text-sm text-stone-700 truncate">{order.sellerName}</span>
                         <span className="text-xs text-stone-400 flex-shrink-0 hidden sm:block">
-                          {new Date(order.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })},{' '}
-                          {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })}
+                          {new Date(order.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
+                          {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
                         </span>
                         <span className="text-sm font-semibold text-stone-800 flex-shrink-0 w-20 text-right">{orderTotal(order).toFixed(2)} ₼</span>
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 w-24 text-center ${STATUS_COLORS[order.status]}`}>{order.status}</span>
@@ -1572,9 +1626,16 @@ function AdminPageContent() {
                             ))}
                           </div>
                           {order.note && <p className="text-xs text-stone-400 italic mb-3">Qeyd: {order.note}</p>}
+                          {order.status === 'ləğv edildi' && (
+                            <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3">
+                              Ləğv edildi{order.cancelledBy ? ` — ${order.cancelledBy}` : ''}
+                              {order.cancelledAt ? `, ${new Date(order.cancelledAt).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}` : ''}
+                              {order.cancelReason ? ` · Səbəb: ${order.cancelReason}` : ''}
+                            </p>
+                          )}
                           <div className="flex items-center justify-between pt-2 border-t border-stone-200">
                             <div className="flex items-center gap-2">
-                              {!isPaid && (
+                              {isOrderOpen(order) && (
                                 <select
                                   value={order.status}
                                   onChange={e => handleStatusChange(order.id, e.target.value as OrderStatus)}
@@ -1582,6 +1643,14 @@ function AdminPageContent() {
                                 >
                                   {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                                 </select>
+                              )}
+                              {isOrderOpen(order) && (
+                                <button
+                                  onClick={() => { setCancellingOrder(order); setCancelReason(null); setCancelOtherText(''); }}
+                                  className="text-xs font-semibold text-red-500 border border-red-200 hover:bg-red-50 rounded-lg px-2.5 py-1 transition-colors"
+                                >
+                                  Ləğv et
+                                </button>
                               )}
                               {(order.cashAmount || order.cardAmount) && (
                                 <span className="text-xs text-stone-400">
@@ -1644,7 +1713,7 @@ function AdminPageContent() {
                           </h3>
                           <div className="flex items-center gap-2">
                             <span className="text-xs text-stone-400">
-                              {new Date(open.openedAt).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {open.openedBy}
+                              {new Date(open.openedAt).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })} · {open.openedBy}
                             </span>
                             <button
                               onClick={refreshKassa}
@@ -1671,9 +1740,10 @@ function AdminPageContent() {
                         <div className="flex justify-between items-center border-t pt-2.5 font-bold">
                           <span>Kassada olmalıdır</span><span className="text-amber-800 text-lg">{expected.toFixed(2)} ₼</span>
                         </div>
-                        <div className="flex justify-between text-xs text-stone-400">
-                          <span>💳 Kart (terminal üçün)</span><span>{openShiftSales.card.toFixed(2)} ₼</span>
+                        <div className="flex justify-between items-center border-t pt-2.5 font-bold">
+                          <span>💳 Terminal (kart satışı)</span><span className="text-amber-800">{openShiftSales.card.toFixed(2)} ₼</span>
                         </div>
+                        <p className="text-xs text-stone-400 -mt-1.5">Kassaya daxil deyil — bank terminalından keçir</p>
                         {open.movements.length > 0 && (
                           <ul className="border-t pt-2.5 space-y-1">
                             {open.movements.map((m, i) => (
@@ -1688,10 +1758,16 @@ function AdminPageContent() {
                         )}
                         <div className="border-t pt-3 flex gap-2">
                           <input
-                            type="number" min="0" step="0.5" placeholder="Sayılan məbləğ (₼)"
+                            type="number" min="0" step="0.5" placeholder="Sayılan nağd (₼)"
                             value={adminCountedInput}
                             onChange={e => setAdminCountedInput(e.target.value)}
-                            className="flex-1 border border-stone-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700"
+                            className="flex-1 min-w-0 border border-stone-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700"
+                          />
+                          <input
+                            type="number" min="0" step="0.5" placeholder="Terminal (₼)"
+                            value={adminTerminalInput}
+                            onChange={e => setAdminTerminalInput(e.target.value)}
+                            className="flex-1 min-w-0 border border-stone-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700"
                           />
                           <button
                             onClick={() => handleAdminCloseShift(open)}
@@ -1707,7 +1783,15 @@ function AdminPageContent() {
                             Math.abs((parseFloat(adminCountedInput) || 0) - expected) < 0.005 ? 'text-green-600'
                             : (parseFloat(adminCountedInput) || 0) < expected ? 'text-red-500' : 'text-amber-600'
                           }`}>
-                            Fərq: {((parseFloat(adminCountedInput) || 0) - expected).toFixed(2)} ₼
+                            Nağd fərq: {((parseFloat(adminCountedInput) || 0) - expected).toFixed(2)} ₼
+                          </p>
+                        )}
+                        {adminTerminalInput !== '' && (
+                          <p className={`text-xs font-semibold text-right ${
+                            Math.abs((parseFloat(adminTerminalInput) || 0) - openShiftSales.card) < 0.005 ? 'text-green-600'
+                            : (parseFloat(adminTerminalInput) || 0) < openShiftSales.card ? 'text-red-500' : 'text-amber-600'
+                          }`}>
+                            Terminal fərq: {((parseFloat(adminTerminalInput) || 0) - openShiftSales.card).toFixed(2)} ₼
                           </p>
                         )}
                       </div>
@@ -1733,10 +1817,10 @@ function AdminPageContent() {
                               >
                                 <ChevronDown className={`w-4 h-4 text-stone-300 shrink-0 transition-transform ${isExp ? 'rotate-180' : ''}`} />
                                 <span className="text-sm text-stone-700 flex-1 truncate">
-                                  {new Date(s.openedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                                  {new Date(s.openedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })}
                                   <span className="text-xs text-stone-400 ml-2">
-                                    {new Date(s.openedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })}
-                                    –{s.closedAt ? new Date(s.closedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' }) : ''}
+                                    {new Date(s.openedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
+                                    –{s.closedAt ? new Date(s.closedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone }) : ''}
                                   </span>
                                 </span>
                                 <span className="text-sm font-semibold text-stone-700 shrink-0">{(s.countedCash ?? 0).toFixed(2)} ₼</span>
@@ -1753,6 +1837,18 @@ function AdminPageContent() {
                                   <div className="flex justify-between"><span>Başlanğıc</span><span>{s.openingCash.toFixed(2)} ₼</span></div>
                                   <div className="flex justify-between"><span>Olmalı idi</span><span>{(s.expectedCash ?? 0).toFixed(2)} ₼</span></div>
                                   <div className="flex justify-between"><span>Sayıldı</span><span>{(s.countedCash ?? 0).toFixed(2)} ₼</span></div>
+                                  {s.cardSales !== undefined && (
+                                    <div className="flex justify-between"><span>💳 Kart satışı</span><span>{s.cardSales.toFixed(2)} ₼</span></div>
+                                  )}
+                                  {s.countedCard !== undefined && (
+                                    <div className="flex justify-between">
+                                      <span>💳 Terminal (Z-hesabat)</span>
+                                      <span className={
+                                        Math.abs(s.countedCard - (s.cardSales ?? 0)) < 0.005 ? 'text-green-600'
+                                        : s.countedCard < (s.cardSales ?? 0) ? 'text-red-500' : 'text-amber-600'
+                                      }>{s.countedCard.toFixed(2)} ₼</span>
+                                    </div>
+                                  )}
                                   {s.movements.length > 0 && (
                                     <ul className="pt-1.5 border-t border-stone-200 space-y-1">
                                       {s.movements.map((m, j) => (
@@ -1958,6 +2054,39 @@ function AdminPageContent() {
           {/* ── TABLES ─────────────────────────────────────────────────── */}
           {tab === 'tables' && (
             <div className="max-w-3xl space-y-4">
+              {/* Tables on/off — takeaway-only companies work without tables */}
+              <div className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-stone-800">Masa rejimi</p>
+                  <p className="text-xs text-stone-400">
+                    {tablesOn
+                      ? 'Satıcılar sifariş üçün masa seçir'
+                      : 'Deaktivdir — satıcılar masa seçmədən birbaşa məhsul seçir'}
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    const next = !tablesOn;
+                    setTablesToggleBusy(true);
+                    setTablesOn(next);
+                    await setTablesEnabled(next);
+                    setTablesToggleBusy(false);
+                  }}
+                  disabled={tablesToggleBusy}
+                  className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${tablesOn ? 'bg-amber-800' : 'bg-stone-300'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${tablesOn ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+
+              {!tablesOn && (
+                <div className="bg-white rounded-xl border border-stone-100 p-12 text-center">
+                  <LayoutDashboard className="w-10 h-10 mx-auto mb-3 text-stone-200" />
+                  <p className="text-sm text-stone-400">Masalar deaktivdir. Satıcı panelində sifarişlər masa seçilmədən yaradılır.</p>
+                </div>
+              )}
+
+              {tablesOn && (<>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <p className="text-sm text-stone-400">{tables.length} masa</p>
@@ -2007,8 +2136,8 @@ function AdminPageContent() {
                       />
                     ))}
                     {tables.map((t, idx) => {
-                      const busy = orders.some(o => o.tableNumber === t.id && o.status !== 'ödənilib');
-                      const activeOrder = orders.find(o => o.tableNumber === t.id && o.status !== 'ödənilib');
+                      const busy = orders.some(o => o.tableNumber === t.id && isOrderOpen(o));
+                      const activeOrder = orders.find(o => o.tableNumber === t.id && isOrderOpen(o));
                       const isSelected = selectedTableId === t.id;
                       const isRound = t.shape === 'round';
                       const pos = autoPos(idx, tables);
@@ -2057,7 +2186,7 @@ function AdminPageContent() {
               {tableView === 'list' && tables.length > 0 && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {tables.map(t => {
-                    const busy = orders.some(o => o.tableNumber === t.id && o.status !== 'ödənilib');
+                    const busy = orders.some(o => o.tableNumber === t.id && isOrderOpen(o));
                     return (
                       <div key={t.id} className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-800 font-bold text-sm shrink-0">
@@ -2097,11 +2226,56 @@ function AdminPageContent() {
                   })}
                 </div>
               )}
+              </>)}
             </div>
           )}
 
         </main>
       </div>
+
+      {/* ── Cancel order modal ──────────────────────────────────────────── */}
+      {cancellingOrder && (
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
+            <h3 className="font-bold text-lg text-stone-800 mb-1">Sifarişi ləğv et</h3>
+            <p className="text-sm text-stone-500 mb-4">
+              №{cancellingOrder.orderNumber} · {cancellingOrder.sellerName} · {orderTotal(cancellingOrder).toFixed(2)} ₼
+            </p>
+            <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2">Səbəb</p>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {CANCEL_REASONS.map(r => (
+                <button
+                  key={r}
+                  onClick={() => setCancelReason(r)}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${cancelReason === r ? 'border-red-400 bg-red-50 text-red-600' : 'border-stone-200 text-stone-600 hover:border-stone-300'}`}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+            {cancelReason === 'Digər' && (
+              <input
+                type="text" placeholder="Səbəbi yazın..."
+                value={cancelOtherText}
+                onChange={e => setCancelOtherText(e.target.value)}
+                className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 mb-4"
+                autoFocus
+              />
+            )}
+            <div className="flex gap-2">
+              <button onClick={() => setCancellingOrder(null)} className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">İmtina</button>
+              <button
+                onClick={confirmCancelOrder}
+                disabled={cancelBusy || !cancelReason || (cancelReason === 'Digər' && !cancelOtherText.trim())}
+                className="flex-1 py-3 rounded-xl bg-red-500 hover:bg-red-600 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2"
+              >
+                {cancelBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                Ləğv et
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Create / Edit table modal ───────────────────────────────────── */}
       {showTableForm && (
@@ -2511,6 +2685,29 @@ function AdminPageContent() {
                       className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
                       placeholder="+994 50 000 00 00"
                     />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-stone-500 flex items-center gap-1 mb-1"><Clock className="w-3.5 h-3.5" />İş saatları</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="time"
+                        value={profOpen}
+                        onChange={e => setProfOpen(e.target.value)}
+                        className="flex-1 border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      />
+                      <span className="text-stone-300 text-sm">—</span>
+                      <input
+                        type="time"
+                        value={profClose}
+                        onChange={e => setProfClose(e.target.value)}
+                        className="flex-1 border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      />
+                    </div>
+                    <p className="text-xs text-stone-400 mt-1">
+                      {cutoffMinutes({ ...bizSettings, workOpen: profOpen || '00:00', workClose: profClose || '00:00' }) > 0
+                        ? `Gecə yarısından sonrakı satışlar (saat ${profClose}-a qədər) əvvəlki günün statistikasına yazılır`
+                        : 'Statistika günü gecə yarısında dəyişir'}
+                    </p>
                   </div>
                   <div className="flex items-center gap-3 pt-1">
                     <button

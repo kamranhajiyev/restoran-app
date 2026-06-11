@@ -2,15 +2,26 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  LogOut, Plus, Building2, Trash2, EyeOff, Eye, X, ShieldCheck, UserCircle, MapPin, Phone, User, KeyRound, RotateCcw, PanelLeftClose, PanelLeftOpen, Menu, Calendar,
+  LogOut, Plus, Building2, Trash2, EyeOff, Eye, X, ShieldCheck, UserCircle, MapPin, Phone, User, KeyRound, RotateCcw, PanelLeftClose, PanelLeftOpen, Menu, Calendar, Globe,
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
 import {
   fetchCompanies, createCompany, trashCompany, toggleCompanyActive, updateCompanyName, updateCompanyExpiry,
   fetchAllUsers, createUser, deleteUser, toggleUserActive, updateCompanyProfile, updateOwnerAccount,
-  fetchCompanyTrash, restoreCompany, permanentlyDeleteCompany, verifyPassword, updateUser,
+  fetchCompanyTrash, restoreCompany, permanentlyDeleteCompany, verifyPassword, updateUser, updateCompanyTimezone,
 } from '@/lib/store';
+import { DEFAULT_TZ } from '@/lib/business-day';
 import { TrashItem } from '@/types';
+
+// Each company's clock for statistics — superadmin picks it per company
+const TIMEZONES: { value: string; label: string }[] = [
+  { value: 'Asia/Baku',       label: 'Bakı (UTC+4)' },
+  { value: 'Europe/Istanbul', label: 'İstanbul (UTC+3)' },
+  { value: 'Asia/Tbilisi',    label: 'Tbilisi (UTC+4)' },
+  { value: 'Europe/Moscow',   label: 'Moskva (UTC+3)' },
+  { value: 'Asia/Dubai',      label: 'Dubay (UTC+4)' },
+  { value: 'UTC',             label: 'UTC' },
+];
 
 interface SAUser {
   id: string;
@@ -32,6 +43,7 @@ interface Company {
   ownerName: string | null;
   address: string | null;
   phone: string | null;
+  timezone: string;
   ownerUser?: SAUser;
 }
 
@@ -52,6 +64,7 @@ export default function SuperadminPage() {
   const [profAddress, setProfAddress] = useState('');
   const [profPhone, setProfPhone] = useState('');
   const [profExpiry, setProfExpiry] = useState<string | null>(null);
+  const [profTimezone, setProfTimezone] = useState(DEFAULT_TZ);
   const [showCustomDate, setShowCustomDate] = useState(false);
   const [profSaving, setProfSaving] = useState(false);
   const [profMsg, setProfMsg] = useState('');
@@ -110,6 +123,7 @@ export default function SuperadminPage() {
     setProfAddress(c.address ?? '');
     setProfPhone(c.phone ?? '');
     setProfExpiry(c.expiresAt ?? null);
+    setProfTimezone(c.timezone || DEFAULT_TZ);
     setShowCustomDate(false);
     setProfMsg('');
     setModalOwnerUser(c.ownerUser ?? null);
@@ -125,6 +139,7 @@ export default function SuperadminPage() {
     await Promise.all([
       updateCompanyProfile(profileCompany.id, profOwner.trim(), profAddress.trim(), profPhone.trim()),
       updateCompanyExpiry(profileCompany.id, profExpiry),
+      updateCompanyTimezone(profileCompany.id, profTimezone),
     ]);
     setProfMsg('Yadda saxlandı');
     setProfSaving(false);
@@ -467,7 +482,7 @@ export default function SuperadminPage() {
                       <button
                         onClick={async () => {
                           if (!confirm(`"${c.name}" şirkəti zibil qutusuna göndərilsin?`)) return;
-                          await trashCompany({ id: c.id, name: c.name, slug: c.slug, active: c.active, expiresAt: c.expiresAt, ownerName: c.ownerName, address: c.address, phone: c.phone });
+                          await trashCompany({ id: c.id, name: c.name, slug: c.slug, active: c.active, expiresAt: c.expiresAt, ownerName: c.ownerName, address: c.address, phone: c.phone, timezone: c.timezone });
                           loadData();
                           fetchCompanyTrash().then(setCompanyTrash);
                         }}
@@ -676,6 +691,17 @@ export default function SuperadminPage() {
               <div>
                 <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><Phone className="w-3.5 h-3.5" />Mobil nömrə</label>
                 <input value={profPhone} onChange={e => setProfPhone(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2779a7]" placeholder="+994 50 000 00 00" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><Globe className="w-3.5 h-3.5" />Saat qurşağı</label>
+                <select
+                  value={profTimezone}
+                  onChange={e => setProfTimezone(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2779a7] bg-white"
+                >
+                  {TIMEZONES.map(tz => <option key={tz.value} value={tz.value}>{tz.label}</option>)}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">Statistika və hesabatlar bu saat qurşağı ilə hesablanır</p>
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><Calendar className="w-3.5 h-3.5" />Abunəlik müddəti</label>

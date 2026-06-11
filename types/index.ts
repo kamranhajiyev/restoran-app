@@ -48,7 +48,13 @@ export interface OrderItem {
   modifiers?: string;
 }
 
-export type OrderStatus = 'gözləyir' | 'hazırlanır' | 'hazırdır' | 'ödənilib';
+export type OrderStatus = 'gözləyir' | 'hazırlanır' | 'hazırdır' | 'ödənilib' | 'ləğv edildi';
+
+// Paid and cancelled orders are both closed: they free the table and leave
+// every "active" list. Only paid ones count as revenue.
+export function isOrderOpen(o: { status: OrderStatus }): boolean {
+  return o.status !== 'ödənilib' && o.status !== 'ləğv edildi';
+}
 
 export interface ShiftMovement {
   at: string;
@@ -66,6 +72,8 @@ export interface CashShift {
   closedBy?: string;
   expectedCash?: number; // snapshot at close
   countedCash?: number;
+  cardSales?: number;   // card sales recorded in the app, snapshot at close
+  countedCard?: number; // terminal Z-report total entered at close
   movements: ShiftMovement[];
 }
 
@@ -82,4 +90,7 @@ export interface Order {
   cardAmount?: number;
   tipAmount?: number;
   changeAmount?: number; // returned to the customer — display only, never revenue
+  cancelledAt?: string;
+  cancelledBy?: string;
+  cancelReason?: string;
 }
