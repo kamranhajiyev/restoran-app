@@ -40,7 +40,7 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
   'gözləyir':  'bg-amber-100 text-amber-700',
   'hazırlanır':'bg-blue-100 text-blue-700',
   'hazırdır':  'bg-green-100 text-green-700',
-  'ödənilib':  'bg-stone-100 text-stone-500',
+  'ödənilib':  'bg-stone-100 text-stone-600',
   'ləğv edildi': 'bg-red-100 text-red-600',
 };
 
@@ -151,7 +151,7 @@ export default function SellerPage() {
       setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te);
       const available = c.filter(cat => cat.available);
       setAvailableCategories(available);
-      const cats = [...new Set(m.map(i => i.category))].filter(cat => available.some(a => a.name === cat));
+      const cats = available.filter(a => m.some(i => i.category === a.name)).map(a => a.name);
       if (cats.length > 0) setActiveCategory(cats[0]);
     }).catch(() => setOnline(false));
   }, [router]);
@@ -234,7 +234,7 @@ export default function SellerPage() {
     setSelectedTable(tableNum ?? null);
     setCart([]);
     setNote('');
-    const cats = [...new Set(menu.map(i => i.category))].filter(cat => availableCategories.some(a => a.name === cat));
+    const cats = availableCategories.filter(a => menu.some(i => i.category === a.name)).map(a => a.name);
     if (cats.length > 0) setActiveCategory(cats[0]);
     setView('menu');
   }
@@ -370,7 +370,8 @@ export default function SellerPage() {
 
   const cartTotal   = cart.reduce((s, ci) => s + ci.menuItem.price * ci.quantity, 0);
   const cartCount   = cart.reduce((s, ci) => s + ci.quantity, 0);
-  const categories  = [...new Set(menu.map(i => i.category))].filter(cat => availableCategories.some(a => a.name === cat));
+  // Category tab order follows the admin's saved category order
+  const categories  = availableCategories.filter(a => menu.some(i => i.category === a.name)).map(a => a.name);
   const filtered    = menu.filter(m => m.category === activeCategory && m.available);
   const active      = orders.filter(isOrderOpen);
   const bizToday    = businessToday(bizSettings);
@@ -395,7 +396,7 @@ export default function SellerPage() {
           )}
           <button
             onClick={() => setCollapsed(c => !c)}
-            className="w-8 h-8 items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-stone-700 transition-colors flex"
+            className="w-8 h-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-stone-700 transition-colors flex"
           >
             {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </button>
@@ -417,7 +418,7 @@ export default function SellerPage() {
                   key={n.id}
                   title={n.label}
                   onClick={() => handleNav(n.id)}
-                  className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${isActive ? 'bg-amber-800/10 text-amber-800' : 'text-stone-400 hover:bg-stone-100 hover:text-stone-700'}`}
+                  className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${isActive ? 'bg-amber-800/10 text-amber-800' : 'text-stone-500 hover:bg-stone-100 hover:text-stone-700'}`}
                 >
                   <Icon className="w-4 h-4" />
                   {badge && <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-800 text-white text-[9px] rounded-full flex items-center justify-center font-bold">{badge}</span>}
@@ -429,7 +430,7 @@ export default function SellerPage() {
               <button
                 key={n.id}
                 onClick={() => handleNav(n.id)}
-                className={`flex items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium transition-colors w-full ${isActive ? 'bg-amber-800 text-white shadow-sm' : 'text-stone-500 hover:bg-amber-50 hover:text-amber-900'}`}
+                className={`flex items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium transition-colors w-full ${isActive ? 'bg-amber-800 text-white shadow-sm' : 'text-stone-600 hover:bg-amber-50 hover:text-amber-900'}`}
               >
                 <Icon className="w-4 h-4 shrink-0" />
                 <span className="flex-1 text-left truncate">{n.label}</span>
@@ -449,10 +450,10 @@ export default function SellerPage() {
               <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
                 {sellerName[0]?.toUpperCase()}
               </div>
-              <span className="text-xs text-stone-500 truncate">{sellerName}</span>
+              <span className="text-xs text-stone-600 truncate">{sellerName}</span>
               {!online && <span className="ml-auto text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">Oflayn</span>}
             </div>
-            <button onClick={() => { logout(); router.push('/login'); }} className="flex items-center gap-2 text-xs text-stone-400 hover:text-red-500 transition-colors">
+            <button onClick={() => { logout(); router.push('/login'); }} className="flex items-center gap-2 text-xs text-stone-500 hover:text-red-500 transition-colors">
               <LogOut className="w-3.5 h-3.5" /> Çıxış
             </button>
           </div>
@@ -461,7 +462,7 @@ export default function SellerPage() {
             <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
               {sellerName[0]?.toUpperCase()}
             </div>
-            <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-stone-400 hover:text-red-500 transition-colors">
+            <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-stone-500 hover:text-red-500 transition-colors">
               <LogOut className="w-4 h-4" />
             </button>
           </div>
@@ -491,7 +492,7 @@ export default function SellerPage() {
               <Wallet className="w-6 h-6 text-white" />
             </div>
             <h1 className="text-xl font-bold text-stone-800">{justClosed ? 'Növbə bağlandı ✓' : 'Növbəni aç'}</h1>
-            <p className="text-stone-500 text-sm mt-1">
+            <p className="text-stone-600 text-sm mt-1">
               {justClosed ? 'Yeni növbə açmaq üçün başlanğıc məbləği daxil et' : 'İşə başlamaq üçün kassadakı məbləği daxil et'}
             </p>
           </div>
@@ -513,7 +514,7 @@ export default function SellerPage() {
           </button>
           <button
             onClick={() => { logout(); router.push('/login'); }}
-            className="w-full mt-3 text-sm text-stone-400 hover:text-red-500 transition-colors flex items-center justify-center gap-1.5"
+            className="w-full mt-3 text-sm text-stone-500 hover:text-red-500 transition-colors flex items-center justify-center gap-1.5"
           >
             <LogOut className="w-3.5 h-3.5" /> Çıxış
           </button>
@@ -542,7 +543,7 @@ export default function SellerPage() {
         </div>
         <button
           onClick={() => { logout(); router.push('/login'); }}
-          className="w-9 h-9 flex items-center justify-center rounded-lg text-stone-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+          className="w-9 h-9 flex items-center justify-center rounded-lg text-stone-500 hover:text-red-500 hover:bg-red-50 transition-colors"
           title="Çıxış"
         >
           <LogOut className="w-4 h-4" />
@@ -564,14 +565,14 @@ export default function SellerPage() {
             <div className="flex-1 flex flex-col overflow-hidden">
               <div className="px-4 md:px-6 pt-5 pb-2">
                 <h1 className="text-lg font-semibold text-stone-900">Sifarişlər</h1>
-                <p className="text-sm text-stone-500 mt-0.5">Aktiv sifarişlər</p>
+                <p className="text-sm text-stone-600 mt-0.5">Aktiv sifarişlər</p>
               </div>
 
               <div className="px-4 md:px-6 py-2 flex items-center gap-3 flex-wrap">
                 <button
                   onClick={refreshOrders}
                   disabled={refreshing}
-                  className="flex items-center gap-1.5 text-sm text-stone-400 hover:text-stone-600 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
+                  className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
                 >
                   {refreshing
                     ? <span className="w-3.5 h-3.5 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
@@ -579,9 +580,9 @@ export default function SellerPage() {
                   Yenilə
                 </button>
                 <div className="flex gap-3 text-sm flex-wrap">
-                  <span className="text-stone-500">Cəmi <span className="font-semibold text-stone-800">{active.length}</span></span>
-                  <span className="text-stone-500">Gözləyir <span className="font-semibold text-amber-700">{orders.filter(o => o.status === 'gözləyir').length}</span></span>
-                  <span className="text-stone-500">Hazır <span className="font-semibold text-green-600">{orders.filter(o => o.status === 'hazırdır').length}</span></span>
+                  <span className="text-stone-600">Cəmi <span className="font-semibold text-stone-800">{active.length}</span></span>
+                  <span className="text-stone-600">Gözləyir <span className="font-semibold text-amber-700">{orders.filter(o => o.status === 'gözləyir').length}</span></span>
+                  <span className="text-stone-600">Hazır <span className="font-semibold text-green-600">{orders.filter(o => o.status === 'hazırdır').length}</span></span>
                   {myTodayTips > 0 && (
                     <span className="flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-2 py-0.5 font-semibold">
                       ⭐ Bəxşiş: {myTodayTips.toFixed(2)} ₼
@@ -591,26 +592,26 @@ export default function SellerPage() {
               </div>
 
               {/* Desktop table header */}
-              <div className="hidden md:grid grid-cols-[120px_1fr_140px_200px_110px] gap-4 px-6 py-2 text-xs font-medium text-stone-400 uppercase tracking-wide border-b border-t bg-white">
+              <div className="hidden md:grid grid-cols-[120px_1fr_140px_200px_110px] gap-4 px-6 py-2 text-xs font-medium text-stone-500 uppercase tracking-wide border-b border-t bg-white">
                 <span>Vaxt</span><span>Sifariş</span><span>Durum</span><span></span><span className="text-right">Ümumi</span>
               </div>
 
               <div className="flex-1 overflow-y-auto">
                 {active.length === 0 && (
-                  <div className="text-center py-20 text-stone-400">
+                  <div className="text-center py-20 text-stone-500">
                     <div className="text-5xl mb-3">📋</div>
                     <p>Aktiv sifariş yoxdur</p>
                   </div>
                 )}
                 {prevOrders.length > 0 && (
                   <div>
-                    <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-500 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
+                    <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
                     {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
-                    <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-500 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
+                    <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
                     {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
@@ -624,7 +625,7 @@ export default function SellerPage() {
               <div className="max-w-md space-y-4">
                 <div>
                   <h1 className="text-lg font-semibold text-stone-900">Kassa</h1>
-                  <p className="text-sm text-stone-500 mt-0.5">
+                  <p className="text-sm text-stone-600 mt-0.5">
                     Açılıb: {new Date(shift.openedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })} · {shift.openedBy}
                   </p>
                 </div>
@@ -656,7 +657,7 @@ export default function SellerPage() {
                     <span className="text-stone-800">💳 Terminal (kart satışı)</span>
                     <span className="text-amber-700 text-lg">{shiftSales.card.toFixed(2)} ₼</span>
                   </div>
-                  <p className="text-xs text-stone-400 mt-1">Kassaya daxil deyil — bank terminalından keçir</p>
+                  <p className="text-xs text-stone-500 mt-1">Kassaya daxil deyil — bank terminalından keçir</p>
                 </div>
 
                 {/* Movements */}
@@ -675,11 +676,11 @@ export default function SellerPage() {
                       <div className="flex rounded-lg overflow-hidden border border-stone-200">
                         <button
                           onClick={() => setMovOut(true)}
-                          className={`flex-1 py-2 text-xs font-semibold transition-colors ${movOut ? 'bg-red-500 text-white' : 'bg-white text-stone-500'}`}
+                          className={`flex-1 py-2 text-xs font-semibold transition-colors ${movOut ? 'bg-red-500 text-white' : 'bg-white text-stone-600'}`}
                         >− Məxaric</button>
                         <button
                           onClick={() => setMovOut(false)}
-                          className={`flex-1 py-2 text-xs font-semibold transition-colors ${!movOut ? 'bg-green-500 text-white' : 'bg-white text-stone-500'}`}
+                          className={`flex-1 py-2 text-xs font-semibold transition-colors ${!movOut ? 'bg-green-500 text-white' : 'bg-white text-stone-600'}`}
                         >+ Mədaxil</button>
                       </div>
                       <input
@@ -700,14 +701,14 @@ export default function SellerPage() {
                     </div>
                   )}
                   {shift.movements.length === 0
-                    ? <p className="text-xs text-stone-400">Hərəkət yoxdur</p>
+                    ? <p className="text-xs text-stone-500">Hərəkət yoxdur</p>
                     : (
                       <ul className="space-y-1.5">
                         {shift.movements.map((m, i) => (
                           <li key={i} className="flex justify-between text-sm">
                             <span className="text-stone-600 truncate mr-3">
                               {m.reason}
-                              <span className="text-xs text-stone-400 ml-1.5">
+                              <span className="text-xs text-stone-500 ml-1.5">
                                 {new Date(m.at).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })} · {m.by}
                               </span>
                             </span>
@@ -723,7 +724,7 @@ export default function SellerPage() {
                 {/* Close shift */}
                 <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5">
                   <h2 className="font-semibold text-stone-800 text-sm mb-3">Növbəni bağla</h2>
-                  <label className="block text-xs font-medium text-stone-500 mb-1.5">Sayılan nağd (₼)</label>
+                  <label className="block text-xs font-medium text-stone-600 mb-1.5">Sayılan nağd (₼)</label>
                   <input
                     type="number" min="0" step="0.5" placeholder="0.00"
                     value={countedInput} onChange={e => setCountedInput(e.target.value)}
@@ -743,7 +744,7 @@ export default function SellerPage() {
                       <span>{((parseFloat(countedInput) || 0) - expectedCash).toFixed(2)} ₼</span>
                     </div>
                   )}
-                  <label className="block text-xs font-medium text-stone-500 mb-1.5">💳 Terminal məbləği (Z-hesabat, ₼)</label>
+                  <label className="block text-xs font-medium text-stone-600 mb-1.5">💳 Terminal məbləği (Z-hesabat, ₼)</label>
                   <input
                     type="number" min="0" step="0.5" placeholder="0.00"
                     value={terminalInput} onChange={e => setTerminalInput(e.target.value)}
@@ -780,21 +781,21 @@ export default function SellerPage() {
           {view === 'new-order' && (
             <div className="flex-1 p-5 md:p-8 overflow-y-auto">
               <h1 className="text-lg font-semibold text-stone-900 mb-1">Yeni sifariş</h1>
-              <p className="text-sm text-stone-500 mb-6">Sifariş növünü seçin</p>
+              <p className="text-sm text-stone-600 mb-6">Sifariş növünü seçin</p>
 
               <div className="grid grid-cols-2 gap-4 max-w-xs mb-8">
                 <button
                   onClick={() => setOrderType('masa')}
                   className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 ${orderType === 'masa' ? 'border-amber-800 bg-amber-50' : 'border-stone-200 bg-white hover:border-amber-300'}`}
                 >
-                  <UtensilsCrossed className={`w-8 h-8 ${orderType === 'masa' ? 'text-amber-800' : 'text-stone-400'}`} />
+                  <UtensilsCrossed className={`w-8 h-8 ${orderType === 'masa' ? 'text-amber-800' : 'text-stone-500'}`} />
                   <span className={`font-semibold text-sm ${orderType === 'masa' ? 'text-amber-800' : 'text-stone-600'}`}>Masa</span>
                 </button>
                 <button
                   onClick={() => startNewOrder('takeaway')}
                   className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-stone-200 bg-white hover:border-amber-300 transition-all active:scale-95"
                 >
-                  <ShoppingBag className="w-8 h-8 text-stone-400" />
+                  <ShoppingBag className="w-8 h-8 text-stone-500" />
                   <span className="font-semibold text-sm text-stone-600">Takeaway</span>
                 </button>
               </div>
@@ -802,7 +803,7 @@ export default function SellerPage() {
               {orderType === 'masa' && (
                 <div>
                   <p className="text-sm font-medium text-stone-700 mb-3">Masanı seçin</p>
-                  <div className="flex items-center gap-3 text-xs text-stone-500 mb-4">
+                  <div className="flex items-center gap-3 text-xs text-stone-600 mb-4">
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-100 border border-green-300 inline-block" /> Boş</span>
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block" /> Dolu</span>
                   </div>
@@ -896,7 +897,7 @@ export default function SellerPage() {
                         className={`whitespace-nowrap text-sm px-3 py-1.5 rounded-full font-medium transition-colors shrink-0 flex items-center gap-1.5 ${activeCategory === cat ? 'bg-amber-800 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
                       >
                         {cat}
-                        <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${activeCategory === cat ? 'bg-amber-700 text-amber-100' : 'bg-stone-200 text-stone-500'}`}>{count}</span>
+                        <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${activeCategory === cat ? 'bg-amber-700 text-amber-100' : 'bg-stone-200 text-stone-600'}`}>{count}</span>
                       </button>
                     );
                   })}
@@ -936,11 +937,11 @@ export default function SellerPage() {
               <div className="hidden md:flex w-72 bg-white border-l flex-col">
                 <div className="px-4 py-3 border-b">
                   <h2 className="font-bold text-stone-800">Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}</h2>
-                  <p className="text-xs text-stone-400">{!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                  <p className="text-xs text-stone-500">{!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
                 </div>
                 <div className="flex-1 overflow-y-auto px-4 py-3">
                   {cart.length === 0
-                    ? <p className="text-center text-stone-400 text-sm py-8">Boşdur</p>
+                    ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
                     : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
                   }
                 </div>
@@ -998,7 +999,7 @@ export default function SellerPage() {
             <button
               key={n.id}
               onClick={() => handleNav(n.id)}
-              className={`flex-1 flex flex-col items-center gap-1 py-2.5 relative transition-colors active:opacity-70 ${isActive ? 'text-amber-800' : 'text-stone-400'}`}
+              className={`flex-1 flex flex-col items-center gap-1 py-2.5 relative transition-colors active:opacity-70 ${isActive ? 'text-amber-800' : 'text-stone-500'}`}
             >
               <div className="relative">
                 <Icon className="w-5 h-5" />
@@ -1023,15 +1024,15 @@ export default function SellerPage() {
                 <h2 className="font-bold text-stone-800">
                   Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}
                 </h2>
-                <p className="text-xs text-stone-400">{!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                <p className="text-xs text-stone-500">{!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
               </div>
-              <button onClick={() => setMobileCartOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-xl bg-stone-100 text-stone-500">
+              <button onClick={() => setMobileCartOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-xl bg-stone-100 text-stone-600">
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-3">
               {cart.length === 0
-                ? <p className="text-center text-stone-400 text-sm py-8">Boşdur</p>
+                ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
                 : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
               }
             </div>
@@ -1064,10 +1065,10 @@ export default function SellerPage() {
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
             <h3 className="font-bold text-lg text-stone-800 mb-1">Sifarişi ləğv et</h3>
-            <p className="text-sm text-stone-500 mb-4">
+            <p className="text-sm text-stone-600 mb-4">
               №{cancellingOrder.orderNumber}{tableName(cancellingOrder.tableNumber) && ` · ${tableName(cancellingOrder.tableNumber)}`} · {orderTotal(cancellingOrder).toFixed(2)} ₼
             </p>
-            <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2">Səbəb</p>
+            <p className="text-xs font-semibold text-stone-600 uppercase tracking-wide mb-2">Səbəb</p>
             <div className="flex flex-wrap gap-2 mb-4">
               {CANCEL_REASONS.map(r => (
                 <button
@@ -1116,7 +1117,7 @@ export default function SellerPage() {
           <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
             <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
               <h3 className="font-bold text-lg text-stone-800 mb-1">Ödəniş</h3>
-              <p className="text-sm text-stone-500 mb-4">
+              <p className="text-sm text-stone-600 mb-4">
                 №{payingOrder.orderNumber}{tableName(payingOrder.tableNumber) && ` · ${tableName(payingOrder.tableNumber)}`}
               </p>
               <ul className="text-sm space-y-2 mb-4 border-t pt-3 max-h-40 overflow-y-auto">
@@ -1136,7 +1137,7 @@ export default function SellerPage() {
               </div>
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div>
-                  <label className="text-xs font-medium text-stone-500 mb-1.5 flex items-center gap-1 block">💵 Nağd (₼)</label>
+                  <label className="text-xs font-medium text-stone-600 mb-1.5 flex items-center gap-1 block">💵 Nağd (₼)</label>
                   <input
                     type="number" min="0" step="0.5" placeholder="0.00"
                     value={cashInput}
@@ -1154,7 +1155,7 @@ export default function SellerPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-stone-500 mb-1.5 flex items-center gap-1 block">💳 Kart (₼)</label>
+                  <label className="text-xs font-medium text-stone-600 mb-1.5 flex items-center gap-1 block">💳 Kart (₼)</label>
                   <input
                     type="number" min="0" step="0.5" placeholder="0.00"
                     value={cardInput}
@@ -1183,13 +1184,13 @@ export default function SellerPage() {
                     <div className="rounded-xl overflow-hidden border border-stone-200 flex">
                       <button
                         onClick={() => setIsTip(false)}
-                        className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${!isTip ? 'bg-green-500 text-white' : 'bg-white text-stone-500 hover:bg-stone-50'}`}
+                        className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${!isTip ? 'bg-green-500 text-white' : 'bg-white text-stone-600 hover:bg-stone-50'}`}
                       >
                         💸 Qaytar {maxChange.toFixed(2)} ₼
                       </button>
                       <button
                         onClick={() => { setIsTip(true); setTipInput(overpay.toFixed(2)); }}
-                        className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${isTip ? 'bg-amber-500 text-white' : 'bg-white text-stone-500 hover:bg-stone-50'}`}
+                        className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${isTip ? 'bg-amber-500 text-white' : 'bg-white text-stone-600 hover:bg-stone-50'}`}
                       >
                         ⭐ Bəxşiş
                       </button>
@@ -1253,11 +1254,11 @@ export default function SellerPage() {
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
             <h3 className="font-bold text-lg text-stone-800 mb-1">{modifierItem.name}</h3>
-            <p className="text-sm text-stone-400 mb-4">Seçimləri edin</p>
+            <p className="text-sm text-stone-500 mb-4">Seçimləri edin</p>
             <div className="space-y-4">
               {(modifierItem.variants?.length ?? 0) > 0 && (
                 <div>
-                  <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2">Variant</p>
+                  <p className="text-xs font-semibold text-stone-600 uppercase tracking-wide mb-2">Variant</p>
                   <div className="flex flex-wrap gap-2">
                     {modifierItem.variants!.map(v => (
                       <button
@@ -1273,7 +1274,7 @@ export default function SellerPage() {
               )}
               {(MOD_GROUPS[modifierItem.category] ?? []).map(group => (
                 <div key={group.label}>
-                  <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2">{group.label}</p>
+                  <p className="text-xs font-semibold text-stone-600 uppercase tracking-wide mb-2">{group.label}</p>
                   <div className="flex flex-wrap gap-2">
                     {group.options.map(opt => (
                       <button
@@ -1313,7 +1314,7 @@ function CartItems({ cart, addToCart, removeFromCart }: {
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-stone-800 truncate">{ci.menuItem.name}</p>
             {ci.modifiers && <p className="text-xs text-amber-600 truncate">{ci.modifiers}</p>}
-            <p className="text-xs text-stone-400">{ci.menuItem.price.toFixed(2)} ₼</p>
+            <p className="text-xs text-stone-500">{ci.menuItem.price.toFixed(2)} ₼</p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <button
@@ -1361,7 +1362,7 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
               <span className="text-amber-700 font-bold text-sm">№{order.orderNumber}</span>
               {tableLabel && <span className="text-stone-800 font-semibold text-sm">{tableLabel}</span>}
             </div>
-            <p className="text-xs text-stone-400">
+            <p className="text-xs text-stone-500">
               {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: tz })} · {elapsed(order.createdAt)}
             </p>
           </div>
@@ -1370,7 +1371,7 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[order.status]}`}>{order.status}</span>
           </div>
         </div>
-        <p className="text-xs text-stone-500 truncate mb-3">{itemsPreview}</p>
+        <p className="text-xs text-stone-600 truncate mb-3">{itemsPreview}</p>
         {isOrderOpen(order) && (
           <div className="flex gap-2">
             <button
@@ -1395,13 +1396,13 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
           <p className="font-semibold text-stone-800 text-sm">
             {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: tz })}
           </p>
-          <p className="text-xs text-stone-400">{elapsed(order.createdAt)}</p>
+          <p className="text-xs text-stone-500">{elapsed(order.createdAt)}</p>
         </div>
         <div>
           <p className="text-sm font-medium text-stone-800">
             <span className="text-amber-700">№{order.orderNumber}</span>{tableLabel && <>{' › '}<span>{tableLabel}</span></>}
           </p>
-          <p className="text-xs text-stone-400 truncate max-w-xs">{itemsPreview}</p>
+          <p className="text-xs text-stone-500 truncate max-w-xs">{itemsPreview}</p>
         </div>
         <div>
           <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[order.status]}`}>

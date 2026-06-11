@@ -2,8 +2,6 @@ import { CashShift, Category, MenuItem, Order, RestaurantTable, ShiftMovement, T
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { supabase } from './supabase';
 
-const DEFAULT_CATEGORIES = ['Çay', 'Soyuq içkilər', 'Şirniyyat', 'Snack', 'Xüsusi'];
-
 async function authHeaders(): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession();
   return {
@@ -50,52 +48,91 @@ export async function fetchMenu(): Promise<MenuItem[]> {
   }
 }
 
-export async function saveMenu(menu: MenuItem[]): Promise<void> {
-  if (!_companyId || !_menuLoaded) { console.error('[saveMenu] refused: no company context or menu never loaded'); return; }
+// Returns an error message (for the UI to show) or null on success — a failed
+// save must never pass silently.
+// Upsert-then-prune, NOT delete-then-insert: if the write fails, the existing
+// rows are untouched. The old order (delete first) wiped the whole menu every
+// time the insert was rejected (constraint conflict, RLS, network).
+export async function saveMenu(menu: MenuItem[]): Promise<string | null> {
+  if (!_companyId || !_menuLoaded) { console.error('[saveMenu] refused: no company context or menu never loaded'); return 'Menyu hələ yüklənməyib'; }
   try {
-    await supabase.from('menu_items').delete().eq('company_id', _companyId);
-    const rows = menu.map((m, i) => ({
-      id: isValidUUID(m.id) ? m.id : crypto.randomUUID(),
-      name: m.name,
-      price: m.price,
-      category: m.category,
-      available: m.available,
-      variants: m.variants ?? null,
-      cost_price: m.costPrice ?? null,
-      image: m.image ?? null,
-      cooking_station: m.cookingStation ?? null,
-      position: i,
-      company_id: _companyId,
-    }));
-    if (rows.length > 0) await supabase.from('menu_items').insert(rows);
+    // Dedupe by id — stale UI state can hold the same item twice (e.g. a double
+    // trash-restore); one duplicate id would reject the entire write.
+    const seen = new Set<string>();
+    const rows: Record<string, unknown>[] = [];
+    for (const m of menu) {
+      const id = isValidUUID(m.id) ? m.id : crypto.randomUUID();
+      if (seen.has(id)) continue;
+      seen.add(id);
+      rows.push({
+        id,
+        name: m.name,
+        price: m.price,
+        category: m.category,
+        available: m.available,
+        variants: m.variants ?? null,
+        cost_price: m.costPrice ?? null,
+        image: m.image ?? null,
+        cooking_station: m.cookingStation ?? null,
+        position: rows.length,
+        company_id: _companyId,
+      });
+    }
+    if (rows.length > 0) {
+      const { error } = await supabase.from('menu_items').upsert(rows, { onConflict: 'id' });
+      if (error) { console.error('[saveMenu upsert]', error); return error.message; }
+    }
+    let del = supabase.from('menu_items').delete().eq('company_id', _companyId);
+    if (rows.length > 0) del = del.not('id', 'in', `(${rows.map(r => `"${r.id}"`).join(',')})`);
+    const { error: delError } = await del;
+    if (delError) { console.error('[saveMenu prune]', delError); return delError.message; }
+    return null;
   } catch (e) {
     console.error('[saveMenu]', e);
+    return 'Şəbəkə xətası — menyu yadda saxlanmadı';
   }
 }
 
 // ─── Categories ───────────────────────────────────────────────────────────────
 
+// No placeholder fallback: a company with no categories sees an empty list and
+// creates its own. The old default list ("Çay", "Snack", …) looked like real
+// data and got persisted by the next save, polluting the company's categories.
 export async function fetchCategories(): Promise<Category[]> {
   try {
     const { data, error } = await supabase.from('categories').select('name, available').order('position');
-    if (error || !data) return DEFAULT_CATEGORIES.map(name => ({ name, available: true }));
+    if (error || !data) return [];
     _categoriesLoaded = true;
-    if (data.length === 0) return DEFAULT_CATEGORIES.map(name => ({ name, available: true }));
     return data.map((r: { name: string; available: boolean }) => ({ name: r.name, available: r.available }));
   } catch {
-    return DEFAULT_CATEGORIES.map(name => ({ name, available: true }));
+    return [];
   }
 }
 
-export async function saveCategories(categories: Category[]): Promise<void> {
-  if (!_companyId || !_categoriesLoaded) { console.error('[saveCategories] refused: no company context or categories never loaded'); return; }
+// Returns an error message (for the UI to show) or null on success.
+// Same upsert-then-prune pattern as saveMenu — a failed write must not wipe.
+export async function saveCategories(categories: Category[]): Promise<string | null> {
+  if (!_companyId || !_categoriesLoaded) { console.error('[saveCategories] refused: no company context or categories never loaded'); return 'Kateqoriyalar hələ yüklənməyib'; }
   try {
-    await supabase.from('categories').delete().eq('company_id', _companyId);
-    await supabase.from('categories').insert(
-      categories.map((c, position) => ({ name: c.name, available: c.available, position, company_id: _companyId }))
-    );
+    const seen = new Set<string>();
+    const rows: { name: string; available: boolean; position: number; company_id: string }[] = [];
+    for (const c of categories) {
+      if (seen.has(c.name)) continue;
+      seen.add(c.name);
+      rows.push({ name: c.name, available: c.available, position: rows.length, company_id: _companyId });
+    }
+    if (rows.length > 0) {
+      const { error } = await supabase.from('categories').upsert(rows, { onConflict: 'company_id,name' });
+      if (error) { console.error('[saveCategories upsert]', error); return error.message; }
+    }
+    let del = supabase.from('categories').delete().eq('company_id', _companyId);
+    if (rows.length > 0) del = del.not('name', 'in', `(${rows.map(r => `"${r.name.replace(/"/g, '\\"')}"`).join(',')})`);
+    const { error: delError } = await del;
+    if (delError) { console.error('[saveCategories prune]', delError); return delError.message; }
+    return null;
   } catch (e) {
     console.error('[saveCategories]', e);
+    return 'Şəbəkə xətası — kateqoriyalar yadda saxlanmadı';
   }
 }
 
@@ -129,6 +166,18 @@ export async function permanentlyDeleteFromTrash(id: string): Promise<void> {
   try {
     await supabase.from('trash_items').delete().eq('id', id);
   } catch (e) { console.error('[permanentlyDeleteFromTrash]', e); }
+}
+
+export async function emptyTrash(): Promise<string | null> {
+  if (!_companyId) return 'Şirkət konteksti yoxdur';
+  try {
+    const { error } = await supabase.from('trash_items').delete().eq('company_id', _companyId);
+    if (error) { console.error('[emptyTrash]', error); return error.message; }
+    return null;
+  } catch (e) {
+    console.error('[emptyTrash]', e);
+    return 'Şəbəkə xətası — zibil qutusu boşaldılmadı';
+  }
 }
 
 // ─── Orders ───────────────────────────────────────────────────────────────────

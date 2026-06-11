@@ -2,18 +2,25 @@
 import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  LayoutDashboard, Tag,
+  LayoutDashboard,
   PanelLeftClose, PanelLeftOpen, LogOut, Menu, X,
   TrendingUp, Receipt, Star, ChevronDown, Percent,
-  Coffee, BarChart2, Package, Wallet, ChevronUp, ImageIcon, Trash2, RotateCcw,
+  Coffee, BarChart2, Package, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
+  GripVertical,
 } from 'lucide-react';
+import {
+  DndContext, DragEndEvent, PointerSensor, useSensor, useSensors,
+  closestCenter, pointerWithin, useDroppable,
+} from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { getSession, logout, validateSession } from '@/lib/auth';
 import {
   fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder,
   fetchShifts, fetchShiftSales, closeShift, fetchOpenShift,
   fetchCategories, saveCategories,
-  fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash,
+  fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash, emptyTrash,
   setCompanyContext, fetchAllUsers, createUser, deleteUser, toggleUserActive, updateUser,
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, fetchCompanySlug,
   fetchTablesEnabled, setTablesEnabled,
@@ -36,7 +43,7 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
   'gözləyir':  'bg-amber-100 text-amber-700',
   'hazırlanır':'bg-blue-100 text-blue-700',
   'hazırdır':  'bg-green-100 text-green-700',
-  'ödənilib':  'bg-stone-100 text-stone-500',
+  'ödənilib':  'bg-stone-100 text-stone-600',
   'ləğv edildi': 'bg-red-100 text-red-600',
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
@@ -145,7 +152,7 @@ function LineChartSvg({ data }: { data: { label: string; fullLabel: string; rev:
       {yTicks.map(t => (
         <g key={t}>
           <line x1={PL} y1={py(t)} x2={W - PR} y2={py(t)} stroke="#f3f4f6" strokeWidth="1" />
-          <text x={PL - 5} y={py(t) + 4} textAnchor="end" fontSize="11" fill="#d1d5db">
+          <text x={PL - 5} y={py(t) + 4} textAnchor="end" fontSize="11" fill="#a8a29e">
             {t === 0 ? '0' : t >= 1000 ? `${(t / 1000).toFixed(1)}k` : t}
           </text>
         </g>
@@ -156,7 +163,7 @@ function LineChartSvg({ data }: { data: { label: string; fullLabel: string; rev:
         <circle key={i} cx={x} cy={y} r={hoveredIdx === i ? 5 : 3} fill="#92400e" stroke="white" strokeWidth="1.5" />
       ))}
       {data.map((d, i) => (i % step === 0 || i === n - 1) && (
-        <text key={i} x={px(i)} y={H - 4} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize="10" fill="#9ca3af">{d.label}</text>
+        <text key={i} x={px(i)} y={H - 4} textAnchor={i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'} fontSize="11" fill="#78716c">{d.label}</text>
       ))}
       {hovered && hoveredIdx !== null && (
         <g>
@@ -167,6 +174,42 @@ function LineChartSvg({ data }: { data: { label: string; fullLabel: string; rev:
         </g>
       )}
     </svg>
+  );
+}
+
+// ── Menyu tab drag & drop wrappers ───────────────────────────────────────────
+
+type DragHandle = {
+  attributes: ReturnType<typeof useSortable>['attributes'];
+  listeners: ReturnType<typeof useSortable>['listeners'];
+};
+
+function SortableRow({ id, className, children }: {
+  id: string;
+  className?: string;
+  children: (handle: DragHandle) => React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={`${className ?? ''} ${isDragging ? 'opacity-50 relative z-10' : ''}`}
+    >
+      {children({ attributes, listeners })}
+    </div>
+  );
+}
+
+// Category headers accept product drops — dropping a product here moves it
+// into this category.
+function CategoryDropTarget({ cat, children }: { cat: string; children: React.ReactNode }) {
+  const { setNodeRef, isOver, active } = useDroppable({ id: `into:${cat}` });
+  const itemOver = isOver && active != null && String(active.id).startsWith('item:');
+  return (
+    <div ref={setNodeRef} className={`rounded-lg transition-all ${itemOver ? 'ring-2 ring-amber-500 bg-amber-50' : ''}`}>
+      {children}
+    </div>
   );
 }
 
@@ -202,12 +245,30 @@ function AdminPageContent() {
 
   // categories form
   const [newCat, setNewCat] = useState('');
+  const [showCatDialog, setShowCatDialog] = useState(false);
   const [deleteCatTarget, setDeleteCatTarget] = useState<string | null>(null);
   const [editCatTarget, setEditCatTarget] = useState<string | null>(null);
   const [editCatValue, setEditCatValue] = useState('');
   const [deleteItemTarget, setDeleteItemTarget] = useState<string | null>(null);
   const [trash, setTrash] = useState<TrashItem[]>([]);
   const [showTrash, setShowTrash] = useState(false);
+  const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
+  const [emptyingTrash, setEmptyingTrash] = useState(false);
+
+  // Collapsed category sections — persisted so the layout survives reloads.
+  // Stores the collapsed ones: new categories default to open.
+  const [collapsedCats, setCollapsedCats] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try { return new Set<string>(JSON.parse(localStorage.getItem('admin_collapsed_categories') ?? '[]')); } catch { return new Set(); }
+  });
+  function toggleCatCollapsed(cat: string) {
+    setCollapsedCats(prev => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat); else next.add(cat);
+      try { localStorage.setItem('admin_collapsed_categories', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
   const [importing, setImporting] = useState(false);
   const importFileRef = useRef<HTMLInputElement>(null);
@@ -455,12 +516,6 @@ function AdminPageContent() {
   }
 
   // ── menu form ──────────────────────────────────────────────────────────────
-  function openAdd() {
-    setEditingId(null);
-    setForm(emptyForm(categories[0]?.name ?? ''));
-    setShowForm(true);
-  }
-
   function openEdit(item: MenuItem) {
     setEditingId(item.id);
     setForm({
@@ -499,9 +554,37 @@ function AdminPageContent() {
     const updated = editingId ? menu.map(m => m.id === editingId ? item : m) : [...menu, item];
     setMenu(updated);
     setSaving(true);
-    await saveMenu(updated);
+    await persistMenu(updated);
     setSaving(false);
     cancelForm();
+  }
+
+  // All menu/category saves go through these — a failed save (RLS, constraint,
+  // network) must be shown, never swallowed: the delete+insert flow means a
+  // silent failure looks like saved data but is actually a wipe.
+  async function persistMenu(updated: MenuItem[]): Promise<void> {
+    const err = await saveMenu(updated);
+    if (err) alert('Menyu yadda saxlanmadı: ' + err);
+  }
+  async function persistCategories(updated: Category[]): Promise<void> {
+    const err = await saveCategories(updated);
+    if (err) alert('Kateqoriyalar yadda saxlanmadı: ' + err);
+  }
+
+  // Quick-add row at the bottom of each category: name + price + Enter.
+  // One shared state — typing in a category's row claims it and empties the rest.
+  const [quickAdd, setQuickAdd] = useState<{ cat: string; name: string; price: string }>({ cat: '', name: '', price: '' });
+
+  function submitQuickAdd(cat: string) {
+    if (quickAdd.cat !== cat) return;
+    const name = quickAdd.name.trim();
+    const price = parseFloat(quickAdd.price);
+    if (!name || isNaN(price) || price < 0) return;
+    const item: MenuItem = { id: crypto.randomUUID(), name, price: Math.round(price * 100) / 100, category: cat, available: true };
+    const updated = [...menu, item];
+    setMenu(updated);
+    setQuickAdd({ cat, name: '', price: '' });
+    persistMenu(updated);
   }
 
   function addVariant() {
@@ -516,7 +599,7 @@ function AdminPageContent() {
   function toggleAvailable(id: string) {
     const updated = menu.map(m => m.id === id ? { ...m, available: !m.available } : m);
     setMenu(updated);
-    saveMenu(updated);
+    persistMenu(updated);
   }
 
   // ── menu import / export ────────────────────────────────────────────────────
@@ -539,10 +622,13 @@ function AdminPageContent() {
     const mergedCats = [...categories, ...importPreview.newCategories];
     setMenu(mergedMenu);
     setCategories(mergedCats);
-    await saveCategories(mergedCats);
-    await saveMenu(mergedMenu);
+    const catErr = await saveCategories(mergedCats);
+    const menuErr = await saveMenu(mergedMenu);
     setImporting(false);
     setImportPreview(null);
+    if (catErr || menuErr) {
+      alert('İdxal yadda saxlanmadı: ' + (catErr ?? menuErr));
+    }
   }
   function duplicateItem(id: string) {
     const original = menu.find(m => m.id === id);
@@ -550,7 +636,7 @@ function AdminPageContent() {
     const copy = { ...original, id: crypto.randomUUID(), name: `${original.name} (kopya)` };
     const updated = [...menu, copy];
     setMenu(updated);
-    saveMenu(updated);
+    persistMenu(updated);
   }
   function deleteItem(id: string) {
     const item = menu.find(m => m.id === id);
@@ -560,9 +646,25 @@ function AdminPageContent() {
     );
     const updated = menu.filter(m => m.id !== id);
     setMenu(updated);
-    saveMenu(updated);
+    persistMenu(updated);
     setDeleteItemTarget(null);
   }
+  async function handleEmptyTrash() {
+    setEmptyingTrash(true);
+    // Same cleanup the per-item "Sil" does: trashed product images leave storage too
+    const marker = '/menu-images/';
+    const paths = trash
+      .map(t => (t.data as Record<string, unknown>).image as string | undefined)
+      .filter((img): img is string => !!img && img.includes(marker))
+      .map(img => img.slice(img.indexOf(marker) + marker.length));
+    if (paths.length > 0) await supabase.storage.from('menu-images').remove(paths);
+    const err = await emptyTrash();
+    setEmptyingTrash(false);
+    setConfirmEmptyTrash(false);
+    if (err) { alert('Zibil qutusu boşaldılmadı: ' + err); return; }
+    setTrash([]);
+  }
+
   async function handleStatusChange(orderId: string, status: OrderStatus) {
     const prevStatus = orders.find(o => o.id === orderId)?.status;
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
@@ -598,7 +700,16 @@ function AdminPageContent() {
     const updated = [...categories, { name: trimmed, available: true }];
     setCategories(updated);
     setNewCat('');
-    saveCategories(updated);
+    setShowCatDialog(false);
+    persistCategories(updated);
+    // Drop the cursor straight into the new category's quick-add row, so
+    // creating a section flows directly into typing its products
+    setQuickAdd({ cat: trimmed, name: '', price: '' });
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLInputElement>(`[data-quickadd="${window.CSS.escape(trimmed)}"]`);
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el?.focus();
+    });
   }
   function deleteCategory(cat: string) {
     const catObj = categories.find(c => c.name === cat);
@@ -612,8 +723,8 @@ function AdminPageContent() {
     const updatedMenu = menu.filter(m => m.category !== cat);
     setCategories(updatedCats);
     setMenu(updatedMenu);
-    saveCategories(updatedCats);
-    saveMenu(updatedMenu);
+    persistCategories(updatedCats);
+    persistMenu(updatedMenu);
     setDeleteCatTarget(null);
   }
   function renameCategory(oldName: string, newName: string) {
@@ -621,37 +732,81 @@ function AdminPageContent() {
     if (!trimmed || trimmed === oldName || categories.some(c => c.name === trimmed)) return;
     const updated = categories.map(c => c.name === oldName ? { ...c, name: trimmed } : c);
     setCategories(updated);
-    saveCategories(updated);
+    persistCategories(updated);
     const updatedMenu = menu.map(m => m.category === oldName ? { ...m, category: trimmed } : m);
     setMenu(updatedMenu);
-    saveMenu(updatedMenu);
+    persistMenu(updatedMenu);
     setEditCatTarget(null);
   }
-  function moveCategoryOrder(index: number, dir: -1 | 1) {
-    const target = index + dir;
-    if (target < 0 || target >= categories.length) return;
-    const reordered = [...categories];
-    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
-    setCategories(reordered);
-    saveCategories(reordered);
+  // ── menu drag & drop ────────────────────────────────────────────────────
+  // 8px activation distance keeps plain clicks (edit, delete, …) working
+  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+
+  // Category drags only sort against categories; item drags prefer a category
+  // header under the pointer (move into it), otherwise sort against items.
+  function menuCollision(args: Parameters<typeof closestCenter>[0]) {
+    const activeId = String(args.active.id);
+    if (activeId.startsWith('cat:')) {
+      return closestCenter({ ...args, droppableContainers: args.droppableContainers.filter(c => String(c.id).startsWith('cat:')) });
+    }
+    const intoZones = args.droppableContainers.filter(c => String(c.id).startsWith('into:'));
+    const hit = pointerWithin({ ...args, droppableContainers: intoZones });
+    if (hit.length > 0) return hit;
+    return closestCenter({ ...args, droppableContainers: args.droppableContainers.filter(c => String(c.id).startsWith('item:')) });
   }
-  function moveItemOrder(cat: string, indexInCat: number, dir: -1 | 1) {
-    const catItems = menu.filter(m => m.category === cat);
-    const targetInCat = indexInCat + dir;
-    if (targetInCat < 0 || targetInCat >= catItems.length) return;
-    const aId = catItems[indexInCat].id;
-    const bId = catItems[targetInCat].id;
-    const reordered = [...menu];
-    const aIdx = reordered.findIndex(m => m.id === aId);
-    const bIdx = reordered.findIndex(m => m.id === bId);
-    [reordered[aIdx], reordered[bIdx]] = [reordered[bIdx], reordered[aIdx]];
-    setMenu(reordered);
-    saveMenu(reordered);
+
+  // Reorder one category's items while keeping every other item's slot in the
+  // global menu array (array order = saved position).
+  function applyItemOrder(cat: string, orderedIds: string[]) {
+    const byId = new Map(menu.map(m => [m.id, m]));
+    const queue = orderedIds.map(id => byId.get(id)).filter((m): m is MenuItem => !!m);
+    let qi = 0;
+    const updated = menu.map(m => m.category === cat ? queue[qi++] : m);
+    setMenu(updated);
+    persistMenu(updated);
+  }
+
+  function moveItemToCategory(itemId: string, cat: string) {
+    const item = menu.find(m => m.id === itemId);
+    if (!item || item.category === cat || !categories.some(c => c.name === cat)) return;
+    const updated = [...menu.filter(m => m.id !== itemId), { ...item, category: cat }];
+    setMenu(updated);
+    persistMenu(updated);
+  }
+
+  function handleMenuDragEnd(e: DragEndEvent) {
+    const a = String(e.active.id);
+    const o = e.over ? String(e.over.id) : null;
+    if (!o || a === o) return;
+    if (a.startsWith('cat:') && o.startsWith('cat:')) {
+      const from = categories.findIndex(c => c.name === a.slice(4));
+      const to = categories.findIndex(c => c.name === o.slice(4));
+      if (from < 0 || to < 0 || from === to) return;
+      const reordered = arrayMove(categories, from, to);
+      setCategories(reordered);
+      persistCategories(reordered);
+    } else if (a.startsWith('item:')) {
+      const itemId = a.slice(5);
+      const item = menu.find(m => m.id === itemId);
+      if (!item) return;
+      if (o.startsWith('into:')) {
+        moveItemToCategory(itemId, o.slice(5));
+      } else if (o.startsWith('item:')) {
+        const overItem = menu.find(m => m.id === o.slice(5));
+        if (!overItem) return;
+        if (overItem.category === item.category) {
+          const ids = menu.filter(m => m.category === item.category).map(m => m.id);
+          applyItemOrder(item.category, arrayMove(ids, ids.indexOf(itemId), ids.indexOf(overItem.id)));
+        } else {
+          moveItemToCategory(itemId, overItem.category);
+        }
+      }
+    }
   }
   function toggleCategoryAvailable(name: string) {
     const updated = categories.map(c => c.name === name ? { ...c, available: !c.available } : c);
     setCategories(updated);
-    saveCategories(updated);
+    persistCategories(updated);
   }
 
   // ── table canvas drag ─────────────────────────────────────────────────────
@@ -738,7 +893,7 @@ function AdminPageContent() {
         <h3 className="font-semibold text-stone-800">{editingId ? 'Məhsulu düzəlt' : 'Yeni Məhsul'}</h3>
 
         <div>
-          <label className="text-xs font-medium text-stone-500 mb-1.5 block">Ad</label>
+          <label className="text-xs font-medium text-stone-600 mb-1.5 block">Ad</label>
           <input type="text" placeholder="Məhsulun adı" value={form.name}
             onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
             className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
@@ -746,7 +901,7 @@ function AdminPageContent() {
         </div>
 
         <div>
-          <label className="text-xs font-medium text-stone-500 mb-1.5 block">Kateqoriya</label>
+          <label className="text-xs font-medium text-stone-600 mb-1.5 block">Kateqoriya</label>
           <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
             className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white">
             {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
@@ -754,10 +909,10 @@ function AdminPageContent() {
         </div>
 
         <div>
-          <label className="text-xs font-medium text-stone-500 mb-1.5 block">Şəkil</label>
+          <label className="text-xs font-medium text-stone-600 mb-1.5 block">Şəkil</label>
           <div className="flex gap-3 items-center">
             <button type="button" onClick={() => imgRef.current?.click()}
-              className="w-16 h-16 rounded-lg border-2 border-dashed border-stone-200 hover:border-amber-400 flex items-center justify-center text-stone-300 hover:text-amber-500 transition-colors shrink-0">
+              className="w-16 h-16 rounded-lg border-2 border-dashed border-stone-200 hover:border-amber-400 flex items-center justify-center text-stone-400 hover:text-amber-500 transition-colors shrink-0">
               <ImageIcon className="w-6 h-6" />
             </button>
             <input ref={imgRef} type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
@@ -780,13 +935,13 @@ function AdminPageContent() {
         {!form.hasVariants ? (
           <div className="grid grid-cols-3 gap-3 items-end">
             <div>
-              <label className="text-xs font-medium text-stone-500 mb-1.5 block">Qiymət (₼)</label>
+              <label className="text-xs font-medium text-stone-600 mb-1.5 block">Qiymət (₼)</label>
               <input type="number" placeholder="0.00" step="0.5" min="0" value={form.price}
                 onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
                 className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" required />
             </div>
             <div>
-              <label className="text-xs font-medium text-stone-500 mb-1.5 block">Maya dəyəri (₼)</label>
+              <label className="text-xs font-medium text-stone-600 mb-1.5 block">Maya dəyəri (₼)</label>
               <input type="number" placeholder="0.00" step="0.01" min="0" value={form.costPrice}
                 onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))}
                 className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
@@ -797,7 +952,7 @@ function AdminPageContent() {
           </div>
         ) : (
           <div className="space-y-2">
-            <div className="grid grid-cols-9 gap-2 text-xs text-stone-400 px-1">
+            <div className="grid grid-cols-9 gap-2 text-xs text-stone-500 px-1">
               <span className="col-span-3">Variant adı</span>
               <span className="col-span-2">Qiymət (₼)</span>
               <span className="col-span-2">Maya (₼)</span>
@@ -828,7 +983,7 @@ function AdminPageContent() {
             {saving && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
             {saving ? 'Saxlanır…' : editingId ? 'Yadda saxla' : 'Əlavə et'}
           </button>
-          <button type="button" onClick={cancelForm} disabled={saving} className="text-sm text-stone-400 hover:text-stone-600 px-4 py-2 rounded-lg hover:bg-stone-100 transition-colors disabled:opacity-40">Ləğv et</button>
+          <button type="button" onClick={cancelForm} disabled={saving} className="text-sm text-stone-500 hover:text-stone-600 px-4 py-2 rounded-lg hover:bg-stone-100 transition-colors disabled:opacity-40">Ləğv et</button>
         </div>
       </form>
     );
@@ -1019,7 +1174,7 @@ function AdminPageContent() {
           )}
           <button
             onClick={() => setCollapsed(c => !c)}
-            className="hidden md:flex w-8 h-8 items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-stone-700 transition-colors"
+            className="hidden md:flex w-8 h-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-stone-700 transition-colors"
           >
             {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </button>
@@ -1041,10 +1196,10 @@ function AdminPageContent() {
                   className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
                     isActive
                       ? 'bg-amber-800/10 text-amber-800 before:absolute before:left-[-9px] before:top-1/2 before:-translate-y-1/2 before:w-[3px] before:h-4 before:rounded-r-full before:bg-amber-800'
-                      : 'text-stone-400 hover:bg-stone-100 hover:text-stone-700'
+                      : 'text-stone-500 hover:bg-stone-100 hover:text-stone-700'
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className="w-5 h-5" />
                   {badge && <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-800 text-white text-[9px] rounded-full flex items-center justify-center font-bold">{badge}</span>}
                 </button>
               );
@@ -1054,13 +1209,13 @@ function AdminPageContent() {
               <button
                 key={n.id}
                 onClick={() => { navigate(n.id); onNavigate?.(); if (n.id === 'orders') refresh(); }}
-                className={`flex items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium transition-colors w-full ${
+                className={`flex items-center gap-3 h-10 px-3 rounded-lg text-[15px] font-semibold transition-colors w-full ${
                   isActive
                     ? 'bg-amber-800 text-white shadow-sm'
-                    : 'text-stone-500 hover:bg-amber-50 hover:text-amber-900'
+                    : 'text-stone-600 hover:bg-amber-50 hover:text-amber-900'
                 }`}
               >
-                <Icon className="w-4 h-4 shrink-0" />
+                <Icon className="w-5 h-5 shrink-0" />
                 <span className="flex-1 text-left truncate">{n.label}</span>
                 {badge && (
                   <span className={`text-xs rounded-full px-1.5 py-0.5 font-semibold ${isActive ? 'bg-white/20 text-white' : 'bg-amber-800 text-white'}`}>
@@ -1082,12 +1237,12 @@ function AdminPageContent() {
               <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold shrink-0">
                 {adminName[0]?.toUpperCase()}
               </div>
-              <span className="text-xs text-stone-500 truncate">{adminName}</span>
+              <span className="text-sm font-medium text-stone-700 truncate">{adminName}</span>
               {!online && <span className="ml-auto text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">Oflayn</span>}
             </button>
             <button
               onClick={() => { logout(); router.push('/login'); }}
-              className="flex items-center gap-2 text-xs text-stone-400 hover:text-red-500 transition-colors"
+              className="flex items-center gap-2 text-sm text-stone-600 hover:text-red-500 transition-colors"
             >
               <LogOut className="w-3.5 h-3.5" />
               Çıxış
@@ -1103,7 +1258,7 @@ function AdminPageContent() {
             >
               {adminName[0]?.toUpperCase()}
             </button>
-            <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-stone-400 hover:text-red-500 transition-colors">
+            <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-stone-500 hover:text-red-500 transition-colors">
               <LogOut className="w-4 h-4" />
             </button>
           </div>
@@ -1121,7 +1276,7 @@ function AdminPageContent() {
       <header className="sticky top-0 z-50 h-16 border-b border-stone-100/60 bg-white/80 backdrop-blur-sm flex items-center gap-3 px-4">
         {/* Mobile menu */}
         <button
-          className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100"
+          className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg text-stone-600 hover:bg-stone-100"
           onClick={() => setMobileOpen(true)}
         >
           <Menu className="w-5 h-5" />
@@ -1144,16 +1299,16 @@ function AdminPageContent() {
             {adminName[0]?.toUpperCase()}
           </div>
           <div className="hidden sm:flex flex-col leading-tight">
-            <span className="text-sm font-medium text-stone-700">{adminName}</span>
+            <span className="text-sm font-semibold text-stone-800">{adminName}</span>
             {getSession()?.companyName && (
-              <span className="text-xs text-stone-400">{getSession()?.companyName}</span>
+              <span className="text-xs font-medium text-stone-600">{getSession()?.companyName}</span>
             )}
           </div>
         </button>
 
         <button
           onClick={() => { logout(); router.push('/login'); }}
-          className="w-9 h-9 flex items-center justify-center rounded-lg text-stone-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+          className="w-9 h-9 flex items-center justify-center rounded-lg text-stone-500 hover:text-red-500 hover:bg-red-50 transition-colors"
           title="Çıxış"
         >
           <LogOut className="w-4 h-4" />
@@ -1195,7 +1350,7 @@ function AdminPageContent() {
           <div className="fixed inset-0 bg-black/30 z-[60] md:hidden" onClick={() => setMobileOpen(false)} />
           <div className="fixed inset-y-0 left-0 z-[70] w-64 md:hidden shadow-xl">
             <div className="absolute top-3 right-3 z-10">
-              <button onClick={() => setMobileOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100 text-stone-500">
+              <button onClick={() => setMobileOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100 text-stone-600">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1214,15 +1369,15 @@ function AdminPageContent() {
         {/* ── Main ── */}
         <main className="flex-1 min-w-0 bg-[#f7f3ed] rounded-tl-2xl border-l border-t border-stone-100/60 p-6 md:p-8 overflow-y-auto">
           <div className="mb-6">
-            <h1 className="text-lg font-semibold text-stone-900">{meta.title}</h1>
-            <p className="text-sm text-stone-500 mt-0.5">{meta.subtitle}</p>
+            <h1 className="text-xl font-bold text-stone-900">{meta.title}</h1>
+            <p className="text-sm font-medium text-stone-600 mt-0.5">{meta.subtitle}</p>
           </div>
 
           {/* ── STATS ─────────────────────────────────────────────────── */}
           {tab === 'stats' && !statsLoaded && (
             <div className="flex flex-col items-center justify-center gap-3 py-24 max-w-5xl">
               <span className="w-8 h-8 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
-              <p className="text-sm text-stone-400">Yüklənir...</p>
+              <p className="text-sm text-stone-500">Yüklənir...</p>
             </div>
           )}
           {tab === 'stats' && statsLoaded && (
@@ -1231,7 +1386,7 @@ function AdminPageContent() {
                 <div className="absolute inset-x-0 top-32 z-10 flex justify-center pointer-events-none">
                   <div className="flex flex-col items-center gap-2 bg-white/95 rounded-xl px-8 py-5 shadow-lg border border-stone-100">
                     <span className="w-7 h-7 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
-                    <p className="text-sm text-stone-500">Yüklənir...</p>
+                    <p className="text-sm text-stone-600">Yüklənir...</p>
                   </div>
                 </div>
               )}
@@ -1250,7 +1405,7 @@ function AdminPageContent() {
                         const active = customFrom === f && customTo === t;
                         return (
                           <button key={p} onClick={() => { setCustomFrom(f); setCustomTo(t); }}
-                            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${active ? 'bg-white shadow-sm text-stone-800' : 'text-stone-400 hover:text-stone-600'}`}>
+                            className={`px-3 py-1 rounded-md text-sm font-semibold transition-colors ${active ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
                             {l}
                           </button>
                         );
@@ -1261,14 +1416,14 @@ function AdminPageContent() {
                         type="date"
                         value={customFrom}
                         onChange={e => setCustomFrom(e.target.value)}
-                        className="text-xs text-stone-600 bg-transparent border-none outline-none w-[118px]"
+                        className="text-sm font-medium text-stone-700 bg-transparent border-none outline-none w-[124px]"
                       />
-                      <span className="text-stone-300 text-xs">—</span>
+                      <span className="text-stone-500 text-xs">—</span>
                       <input
                         type="date"
                         value={customTo}
                         onChange={e => setCustomTo(e.target.value)}
-                        className="text-xs text-stone-600 bg-transparent border-none outline-none w-[118px]"
+                        className="text-sm font-medium text-stone-700 bg-transparent border-none outline-none w-[124px]"
                       />
                     </div>
                   </div>
@@ -1290,10 +1445,10 @@ function AdminPageContent() {
                     return (
                       <div key={kpi.label} className={`flex-1 min-w-[100px] px-4 py-3 ${i < arr.length - 1 ? 'border-r border-stone-100' : ''}`}>
                         <div className="flex items-center gap-1.5 mb-1">
-                          <Icon className="w-3 h-3 text-stone-300" />
-                          <p className="text-xs text-stone-400 whitespace-nowrap">{kpi.label}</p>
+                          <Icon className="w-3.5 h-3.5 text-stone-500" />
+                          <p className="text-xs font-semibold text-stone-600 whitespace-nowrap">{kpi.label}</p>
                         </div>
-                        <p className={`font-bold text-sm whitespace-nowrap ${kpi.color}`}>{kpi.value}</p>
+                        <p className={`font-bold text-base whitespace-nowrap ${kpi.color}`}>{kpi.value}</p>
                       </div>
                     );
                   })}
@@ -1305,7 +1460,7 @@ function AdminPageContent() {
                 <div className="bg-white rounded-xl border border-stone-100 card p-5">
                   <h3 className="font-semibold text-stone-800 text-sm mb-4">Ödəniş üsulları</h3>
                   {totalPayRev === 0 ? (
-                    <p className="text-sm text-stone-300 text-center py-4">Məlumat yoxdur</p>
+                    <p className="text-sm text-stone-400 text-center py-4">Məlumat yoxdur</p>
                   ) : (
                     <div className="space-y-3">
                       {[{ label: 'Nağd', rev: cashRev }, { label: 'Kart', rev: cardRev }].map(pm => {
@@ -1315,7 +1470,7 @@ function AdminPageContent() {
                             <div className="flex justify-between items-center mb-1.5">
                               <span className="text-sm text-stone-600">{pm.label}</span>
                               <div className="flex items-center gap-2">
-                                <span className="text-xs text-stone-400">{pct.toFixed(0)}%</span>
+                                <span className="text-xs text-stone-500">{pct.toFixed(0)}%</span>
                                 <span className="font-semibold text-stone-800 text-sm">{pm.rev.toFixed(2)} ₼</span>
                               </div>
                             </div>
@@ -1332,7 +1487,7 @@ function AdminPageContent() {
                 <div className="bg-white rounded-xl border border-stone-100 card p-5">
                   <h3 className="font-semibold text-stone-800 text-sm mb-4">Kateqoriya mənfəəti</h3>
                   {repCategories.length === 0 ? (
-                    <p className="text-sm text-stone-300 text-center py-4">Məlumat yoxdur</p>
+                    <p className="text-sm text-stone-400 text-center py-4">Məlumat yoxdur</p>
                   ) : (
                     <div className="space-y-3">
                       {repCategories.slice(0, 5).map(({ cat, rev, profit }) => {
@@ -1342,7 +1497,7 @@ function AdminPageContent() {
                             <div className="flex justify-between items-center mb-1.5">
                               <span className="text-sm text-stone-600 truncate flex-1 mr-3">{cat}</span>
                               <div className="flex items-center gap-2 shrink-0">
-                                <span className="text-xs text-stone-400">{margin}%</span>
+                                <span className="text-xs text-stone-500">{margin}%</span>
                                 <span className={`font-semibold text-sm ${profit >= 0 ? 'text-stone-800' : 'text-red-500'}`}>{profit.toFixed(2)} ₼</span>
                               </div>
                             </div>
@@ -1383,7 +1538,7 @@ function AdminPageContent() {
                   <div className="flex gap-0.5 mt-1.5">
                     {hourlyData.map((d, i) => (
                       <div key={i} className="flex-1 text-center">
-                        {i % 2 === 0 && <span className="text-[9px] text-stone-300">{i}</span>}
+                        {i % 2 === 0 && <span className="text-[9px] text-stone-400">{i}</span>}
                       </div>
                     ))}
                   </div>
@@ -1401,7 +1556,7 @@ function AdminPageContent() {
                           title={`${d.label} — ${d.rev.toFixed(2)} ₼`}
                         >
                           {d.rev > 0 && (
-                            <span className={`absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] font-bold whitespace-nowrap ${isPeak ? 'text-amber-800' : 'text-stone-500'}`}>
+                            <span className={`absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] font-bold whitespace-nowrap ${isPeak ? 'text-amber-800' : 'text-stone-600'}`}>
                               {d.rev >= 1000 ? `${(d.rev / 1000).toFixed(1)}k` : `${d.rev.toFixed(0)}₼`}
                             </span>
                           )}
@@ -1411,7 +1566,7 @@ function AdminPageContent() {
                   </div>
                   <div className="flex mt-1.5">
                     {weeklyData.map(d => (
-                      <span key={d.label} className="flex-1 text-center text-xs text-stone-400">{d.label}</span>
+                      <span key={d.label} className="flex-1 text-center text-xs text-stone-500">{d.label}</span>
                     ))}
                   </div>
                 </div>
@@ -1428,7 +1583,7 @@ function AdminPageContent() {
                     <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5">
                       {([['rev','Gəlir'],['profit','Mənfəət'],['qty','Ədəd'],['margin','Marja']] as const).map(([v, l]) => (
                         <button key={v} onClick={() => setTopSort(v)}
-                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${topSort === v ? 'bg-white shadow-sm text-stone-800' : 'text-stone-400 hover:text-stone-600'}`}>
+                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${topSort === v ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-600'}`}>
                           {l}
                         </button>
                       ))}
@@ -1459,7 +1614,7 @@ function AdminPageContent() {
                               {topSort === 'rev' && (
                                 <span className="font-semibold text-stone-800 text-sm">{item.rev.toFixed(2)} ₼</span>
                               )}
-                              <span className="text-xs text-stone-300">
+                              <span className="text-xs text-stone-400">
                                 {topSort !== 'qty' && `${item.qty} ədəd`}
                                 {topSort !== 'rev' && topSort !== 'qty' && ` · ${item.rev.toFixed(2)} ₼`}
                               </span>
@@ -1480,7 +1635,7 @@ function AdminPageContent() {
                 <div className="bg-white rounded-xl border border-stone-100 card p-5">
                   <h3 className="font-semibold text-stone-800 text-sm mb-4">Satıcı statistikası</h3>
                   {sellerStats.length === 0 ? (
-                    <p className="text-sm text-stone-300 text-center py-4">Məlumat yoxdur</p>
+                    <p className="text-sm text-stone-400 text-center py-4">Məlumat yoxdur</p>
                   ) : (
                     <div className="space-y-3">
                       {sellerStats.map(s => (
@@ -1492,7 +1647,7 @@ function AdminPageContent() {
                             <span className="text-sm text-stone-700 truncate">{s.name}</span>
                           </div>
                           <div className="flex items-center gap-3 shrink-0 text-sm">
-                            <span className="text-stone-400">{s.orders} sif.</span>
+                            <span className="text-stone-500">{s.orders} sif.</span>
                             <span className="font-semibold text-stone-800">{s.rev.toFixed(2)} ₼</span>
                             {s.tips > 0 && (
                               <span className="bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-2 py-0.5 text-xs font-semibold">
@@ -1512,7 +1667,7 @@ function AdminPageContent() {
                     {totalTips > 0 && <span className="text-lg font-bold text-amber-600">⭐ {totalTips.toFixed(2)} ₼</span>}
                   </div>
                   {totalTips === 0 ? (
-                    <p className="text-sm text-stone-300 text-center py-4">Bəxşiş yoxdur</p>
+                    <p className="text-sm text-stone-400 text-center py-4">Bəxşiş yoxdur</p>
                   ) : (
                     <div className="space-y-3">
                       {sellerStats.filter(s => s.tips > 0).map(s => {
@@ -1522,7 +1677,7 @@ function AdminPageContent() {
                             <div className="flex justify-between items-center mb-1.5">
                               <span className="text-sm text-stone-600">{s.name}</span>
                               <div className="flex items-center gap-2">
-                                <span className="text-xs text-stone-400">{pct.toFixed(0)}%</span>
+                                <span className="text-xs text-stone-500">{pct.toFixed(0)}%</span>
                                 <span className="font-semibold text-amber-700 text-sm">{s.tips.toFixed(2)} ₼</span>
                               </div>
                             </div>
@@ -1538,7 +1693,7 @@ function AdminPageContent() {
               </div>
 
               {paidOrders.length === 0 && (
-                <div className="text-center py-16 text-stone-400">
+                <div className="text-center py-16 text-stone-500">
                   <TrendingUp className="w-12 h-12 mx-auto mb-3 opacity-30" />
                   <p className="text-sm">Hələlik heç bir ödəniş yoxdur</p>
                 </div>
@@ -1550,7 +1705,7 @@ function AdminPageContent() {
           {tab === 'orders' && (
             <div className="max-w-3xl space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-sm text-stone-400">
+                <p className="text-sm text-stone-500">
                   {totalOrders > orders.length ? `${totalOrders} sifariş · son ${orders.length}` : `${orders.length} sifariş`} · {activeOrders.length} aktiv
                 </p>
                 <button
@@ -1564,25 +1719,25 @@ function AdminPageContent() {
               </div>
 
               <div className="relative">
-                <Search className="w-4 h-4 text-stone-300 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   value={orderSearch}
                   onChange={e => setOrderSearch(e.target.value)}
                   placeholder="Sifariş № və ya satıcı adı ilə axtar"
-                  className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-3 py-2 text-sm text-stone-700 placeholder:text-stone-300 focus:outline-none focus:border-amber-300"
+                  className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-3 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-amber-300"
                 />
               </div>
 
               {orders.length === 0 && (
                 <div className="bg-white rounded-xl border border-stone-100 card p-16 text-center">
                   <Coffee className="w-10 h-10 mx-auto mb-3 text-stone-200" />
-                  <p className="text-sm text-stone-400">Sifariş yoxdur</p>
+                  <p className="text-sm text-stone-500">Sifariş yoxdur</p>
                 </div>
               )}
 
               {orders.length > 0 && visibleOrders.length === 0 && (
                 <div className="bg-white rounded-xl border border-stone-100 card p-10 text-center">
-                  <p className="text-sm text-stone-400">Axtarışa uyğun sifariş tapılmadı (yüklənmiş {orders.length} sifariş arasında)</p>
+                  <p className="text-sm text-stone-500">Axtarışa uyğun sifariş tapılmadı (yüklənmiş {orders.length} sifariş arasında)</p>
                 </div>
               )}
 
@@ -1596,10 +1751,10 @@ function AdminPageContent() {
                         onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
                         className="w-full flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors text-left"
                       >
-                        <ChevronDown className={`w-4 h-4 text-stone-300 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                        <ChevronDown className={`w-4 h-4 text-stone-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                         <span className="w-14 text-xs font-bold text-amber-900 flex-shrink-0">#{order.orderNumber}</span>
                         <span className="flex-1 text-sm text-stone-700 truncate">{order.sellerName}</span>
-                        <span className="text-xs text-stone-400 flex-shrink-0 hidden sm:block">
+                        <span className="text-xs text-stone-500 flex-shrink-0 hidden sm:block">
                           {new Date(order.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
                           {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
                         </span>
@@ -1611,7 +1766,7 @@ function AdminPageContent() {
                       {isExpanded && (
                         <div className="px-4 pb-4 bg-stone-50 border-t border-stone-100">
                           <div className="pt-3 space-y-1 mb-3">
-                            <div className="hidden sm:grid grid-cols-[1fr_80px_80px] gap-2 text-xs font-medium text-stone-400 uppercase tracking-wide pb-1 border-b border-stone-200 mb-2">
+                            <div className="hidden sm:grid grid-cols-[1fr_80px_80px] gap-2 text-xs font-medium text-stone-500 uppercase tracking-wide pb-1 border-b border-stone-200 mb-2">
                               <span>Məhsul</span><span className="text-right">Say</span><span className="text-right">Cəmi</span>
                             </div>
                             {order.items.map((oi, j) => (
@@ -1620,12 +1775,12 @@ function AdminPageContent() {
                                   {oi.menuItem.name}
                                   {oi.modifiers && <span className="text-xs text-amber-600 ml-1">({oi.modifiers})</span>}
                                 </span>
-                                <span className="text-stone-400 mx-4">{oi.quantity} əd</span>
+                                <span className="text-stone-500 mx-4">{oi.quantity} əd</span>
                                 <span className="font-medium">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
                               </div>
                             ))}
                           </div>
-                          {order.note && <p className="text-xs text-stone-400 italic mb-3">Qeyd: {order.note}</p>}
+                          {order.note && <p className="text-xs text-stone-500 italic mb-3">Qeyd: {order.note}</p>}
                           {order.status === 'ləğv edildi' && (
                             <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3">
                               Ləğv edildi{order.cancelledBy ? ` — ${order.cancelledBy}` : ''}
@@ -1653,7 +1808,7 @@ function AdminPageContent() {
                                 </button>
                               )}
                               {(order.cashAmount || order.cardAmount) && (
-                                <span className="text-xs text-stone-400">
+                                <span className="text-xs text-stone-500">
                                   {[order.cashAmount ? `💵 ${order.cashAmount.toFixed(2)}` : '', order.cardAmount ? `💳 ${order.cardAmount.toFixed(2)}` : ''].filter(Boolean).join(' · ')}
                                 </span>
                               )}
@@ -1663,7 +1818,7 @@ function AdminPageContent() {
                                 </span>
                               )}
                               {(order.changeAmount ?? 0) > 0 && (
-                                <span className="text-xs text-stone-400">
+                                <span className="text-xs text-stone-500">
                                   💸 {((order.cashAmount ?? 0) + order.changeAmount!).toFixed(2)} alındı · {order.changeAmount!.toFixed(2)} qaytarıldı
                                 </span>
                               )}
@@ -1712,12 +1867,12 @@ function AdminPageContent() {
                             <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Açıq növbə
                           </h3>
                           <div className="flex items-center gap-2">
-                            <span className="text-xs text-stone-400">
+                            <span className="text-xs text-stone-500">
                               {new Date(open.openedAt).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })} · {open.openedBy}
                             </span>
                             <button
                               onClick={refreshKassa}
-                              className="text-xs font-semibold text-stone-500 hover:text-stone-700 border border-stone-200 rounded-lg px-2 py-1 flex items-center gap-1 transition-colors"
+                              className="text-xs font-semibold text-stone-600 hover:text-stone-700 border border-stone-200 rounded-lg px-2 py-1 flex items-center gap-1 transition-colors"
                             >
                               <RotateCcw className="w-3 h-3" /> Yenilə
                             </button>
@@ -1743,11 +1898,11 @@ function AdminPageContent() {
                         <div className="flex justify-between items-center border-t pt-2.5 font-bold">
                           <span>💳 Terminal (kart satışı)</span><span className="text-amber-800">{openShiftSales.card.toFixed(2)} ₼</span>
                         </div>
-                        <p className="text-xs text-stone-400 -mt-1.5">Kassaya daxil deyil — bank terminalından keçir</p>
+                        <p className="text-xs text-stone-500 -mt-1.5">Kassaya daxil deyil — bank terminalından keçir</p>
                         {open.movements.length > 0 && (
                           <ul className="border-t pt-2.5 space-y-1">
                             {open.movements.map((m, i) => (
-                              <li key={i} className="flex justify-between text-xs text-stone-500">
+                              <li key={i} className="flex justify-between text-xs text-stone-600">
                                 <span className="truncate mr-3">{m.reason} · {m.by}</span>
                                 <span className={`font-semibold shrink-0 ${m.amount < 0 ? 'text-red-500' : 'text-green-600'}`}>
                                   {m.amount > 0 ? '+' : ''}{m.amount.toFixed(2)} ₼
@@ -1798,14 +1953,14 @@ function AdminPageContent() {
                     ) : (
                       <div className="bg-white rounded-xl border border-stone-100 card p-8 text-center">
                         <Wallet className="w-8 h-8 mx-auto mb-2 text-stone-200" />
-                        <p className="text-sm text-stone-400">Hazırda açıq növbə yoxdur — satıcı işə başlayanda açır</p>
+                        <p className="text-sm text-stone-500">Hazırda açıq növbə yoxdur — satıcı işə başlayanda açır</p>
                       </div>
                     )}
 
                     {/* History */}
                     {closed.length > 0 && (
                       <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
-                        <div className="px-4 py-3 border-b border-stone-50 text-xs font-semibold text-stone-400 uppercase tracking-wide">Bağlanmış növbələr</div>
+                        <div className="px-4 py-3 border-b border-stone-50 text-xs font-semibold text-stone-500 uppercase tracking-wide">Bağlanmış növbələr</div>
                         {closed.map((s, i) => {
                           const diff = (s.countedCash ?? 0) - (s.expectedCash ?? 0);
                           const isExp = expandedShiftId === s.id;
@@ -1815,10 +1970,10 @@ function AdminPageContent() {
                                 onClick={() => setExpandedShiftId(isExp ? null : s.id)}
                                 className="w-full flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors text-left"
                               >
-                                <ChevronDown className={`w-4 h-4 text-stone-300 shrink-0 transition-transform ${isExp ? 'rotate-180' : ''}`} />
+                                <ChevronDown className={`w-4 h-4 text-stone-400 shrink-0 transition-transform ${isExp ? 'rotate-180' : ''}`} />
                                 <span className="text-sm text-stone-700 flex-1 truncate">
                                   {new Date(s.openedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })}
-                                  <span className="text-xs text-stone-400 ml-2">
+                                  <span className="text-xs text-stone-500 ml-2">
                                     {new Date(s.openedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
                                     –{s.closedAt ? new Date(s.closedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone }) : ''}
                                   </span>
@@ -1852,7 +2007,7 @@ function AdminPageContent() {
                                   {s.movements.length > 0 && (
                                     <ul className="pt-1.5 border-t border-stone-200 space-y-1">
                                       {s.movements.map((m, j) => (
-                                        <li key={j} className="flex justify-between text-xs text-stone-500">
+                                        <li key={j} className="flex justify-between text-xs text-stone-600">
                                           <span className="truncate mr-3">{m.reason} · {m.by}</span>
                                           <span className={m.amount < 0 ? 'text-red-500' : 'text-green-600'}>
                                             {m.amount > 0 ? '+' : ''}{m.amount.toFixed(2)} ₼
@@ -1878,80 +2033,88 @@ function AdminPageContent() {
           {tab === 'menu' && (
             <div className="max-w-3xl">
               <div className="flex items-center justify-between mb-5">
-                <p className="text-sm text-stone-400">{menu.filter(m => categories.some(c => c.name === m.category)).length} məhsul</p>
+                <p className="text-sm font-semibold text-stone-600">{menu.filter(m => categories.some(c => c.name === m.category)).length} məhsul</p>
                 <div className="flex items-center gap-2">
                   <input ref={importFileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportFile} />
-                  <button onClick={() => importFileRef.current?.click()} title="Excel-dən idxal et" className="flex items-center gap-1.5 text-sm text-stone-400 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
+                  <button onClick={() => importFileRef.current?.click()} title="Excel-dən idxal et" className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
                     <Upload className="w-4 h-4" /> <span className="hidden sm:inline">İdxal</span>
                   </button>
-                  <button onClick={() => exportMenuExcel(menu, categories)} title="Excel-ə ixrac et" className="flex items-center gap-1.5 text-sm text-stone-400 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
+                  <button onClick={() => exportMenuExcel(menu, categories)} title="Excel-ə ixrac et" className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
                     <Download className="w-4 h-4" /> <span className="hidden sm:inline">İxrac</span>
                   </button>
-                  <button onClick={() => setShowTrash(true)} className="relative flex items-center gap-1.5 text-sm text-stone-400 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
+                  <button onClick={() => setShowTrash(true)} className="relative flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
                     <Trash2 className="w-4 h-4" />
                     {trash.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-400 text-white text-[10px] rounded-full flex items-center justify-center font-bold">{trash.length}</span>}
                   </button>
-                  <button onClick={openAdd} className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-sm">
-                    <span className="text-base leading-none">+</span>
-                    Məhsul əlavə et
+                  <button onClick={() => { setNewCat(''); setShowCatDialog(true); }} className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-sm">
+                    <Plus className="w-4 h-4" /> Kateqoriya əlavə et
                   </button>
                 </div>
               </div>
 
-              {showForm && !editingId && renderItemForm('bg-white rounded-xl border border-stone-100 card p-6 mb-5 space-y-4')}
-
-              {categories.map(({ name: cat, available: catAvailable }, catIdx) => {
+              <DndContext sensors={dndSensors} collisionDetection={menuCollision} onDragEnd={handleMenuDragEnd}>
+              <SortableContext items={categories.map(c => `cat:${c.name}`)} strategy={verticalListSortingStrategy}>
+              {categories.map(({ name: cat, available: catAvailable }) => {
                 const items = menu.filter(m => m.category === cat);
+                const isCollapsed = collapsedCats.has(cat);
                 return (
-                  <div key={cat} className="mb-5">
+                  <SortableRow key={cat} id={`cat:${cat}`} className="mb-5">
+                  {catHandle => (<>
+                    <CategoryDropTarget cat={cat}>
                     <div className="flex items-center gap-2 mb-2 px-1 group">
-                      <div className="flex flex-col -space-y-1">
-                        <button onClick={() => moveCategoryOrder(catIdx, -1)} disabled={catIdx === 0} className="text-stone-300 hover:text-stone-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
-                          <ChevronUp className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => moveCategoryOrder(catIdx, 1)} disabled={catIdx === categories.length - 1} className="text-stone-300 hover:text-stone-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
-                          <ChevronDown className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider">{cat}</p>
-                      <span className="text-xs text-stone-300">{items.length}</span>
-                      {!catAvailable && <span className="text-xs bg-stone-100 text-stone-400 px-1.5 py-0.5 rounded font-medium">Gizli</span>}
+                      <button
+                        title="Sürüklə"
+                        className="cursor-grab active:cursor-grabbing touch-none text-stone-400 hover:text-stone-600 p-0.5 shrink-0"
+                        {...catHandle.attributes} {...catHandle.listeners}
+                      >
+                        <GripVertical className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => toggleCatCollapsed(cat)} className="flex items-center gap-2 min-w-0 group/toggle py-1">
+                        <ChevronDown className={`w-4 h-4 text-stone-500 group-hover/toggle:text-stone-600 transition-transform shrink-0 ${isCollapsed ? '-rotate-90' : ''}`} />
+                        <p className="text-sm font-bold text-stone-700 group-hover/toggle:text-stone-900 uppercase tracking-wide truncate transition-colors">{cat}</p>
+                        <span className="text-xs font-semibold text-stone-500 bg-stone-100 rounded-full px-1.5 py-0.5">{items.length}</span>
+                      </button>
+                      {!catAvailable && <span className="text-xs bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded font-medium">Gizli</span>}
                       <div className="flex items-center gap-0.5 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => toggleCategoryAvailable(cat)} className={`text-xs px-2 py-0.5 rounded-lg font-medium transition-colors ${catAvailable ? 'text-stone-400 hover:bg-stone-100' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
+                        <button onClick={() => toggleCategoryAvailable(cat)} className={`text-xs px-2 py-0.5 rounded-lg font-medium transition-colors ${catAvailable ? 'text-stone-500 hover:bg-stone-100' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
                           {catAvailable ? 'Bağla' : 'Aç'}
                         </button>
                         <button onClick={() => { setEditCatTarget(cat); setEditCatValue(cat); }} className="text-xs text-amber-600 hover:text-amber-800 px-2 py-0.5 rounded-lg hover:bg-amber-50 transition-colors font-medium">Dəyiş</button>
                         <button onClick={() => setDeleteCatTarget(cat)} className="text-xs text-red-400 hover:text-red-600 px-2 py-0.5 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
                       </div>
                     </div>
+                    </CategoryDropTarget>
+                    {!isCollapsed && (
                     <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
                       {items.length === 0 && (
-                        <p className="px-4 py-3 text-xs text-stone-300">Bu kateqoriyada məhsul yoxdur</p>
+                        <p className="px-4 py-3 text-xs text-stone-400">Bu kateqoriyada məhsul yoxdur</p>
                       )}
+                      <SortableContext items={items.map(m => `item:${m.id}`)} strategy={verticalListSortingStrategy}>
                       {items.map((item, i) => (
                         <React.Fragment key={item.id}>
-                        <div className={`flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors ${(i < items.length - 1 && editingId !== item.id) ? 'border-b border-stone-50' : ''}`}>
-                          <div className="flex flex-col gap-0.5 shrink-0">
-                            <button onClick={() => moveItemOrder(cat, i, -1)} disabled={i === 0} className="text-stone-300 hover:text-stone-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
-                              <ChevronUp className="w-3.5 h-3.5" />
-                            </button>
-                            <button onClick={() => moveItemOrder(cat, i, 1)} disabled={i === items.length - 1} className="text-stone-300 hover:text-stone-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
-                              <ChevronDown className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
+                        <SortableRow id={`item:${item.id}`}>
+                        {handle => (
+                        <div className={`flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors bg-white ${(i < items.length - 1 && editingId !== item.id) ? 'border-b border-stone-50' : ''}`}>
+                          <button
+                            title="Sürüklə"
+                            className="cursor-grab active:cursor-grabbing touch-none text-stone-400 hover:text-stone-600 shrink-0 p-0.5"
+                            {...handle.attributes} {...handle.listeners}
+                          >
+                            <GripVertical className="w-4 h-4" />
+                          </button>
                           {item.image
                             ? <img src={item.image} alt={item.name} className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-stone-100" />
-                            : <div className="w-10 h-10 rounded-lg bg-stone-100 flex items-center justify-center flex-shrink-0"><Coffee className="w-4 h-4 text-stone-300" /></div>
+                            : <div className="w-10 h-10 rounded-lg bg-stone-100 flex items-center justify-center flex-shrink-0"><Coffee className="w-4 h-4 text-stone-400" /></div>
                           }
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${item.available ? 'bg-green-400' : 'bg-stone-300'}`} />
-                              <span className={`text-sm font-medium ${item.available ? 'text-stone-800' : 'text-stone-400 line-through'}`}>{item.name}</span>
+                              <span className={`text-sm font-medium ${item.available ? 'text-stone-800' : 'text-stone-500 line-through'}`}>{item.name}</span>
                             </div>
                             {item.variants?.length ? (
-                              <p className="text-xs text-stone-400 mt-0.5">{item.variants.map(v => `${v.name}: ${v.price.toFixed(2)}₼`).join(' · ')}</p>
+                              <p className="text-xs text-stone-500 mt-0.5">{item.variants.map(v => `${v.name}: ${v.price.toFixed(2)}₼`).join(' · ')}</p>
                             ) : (
-                              <p className="text-xs text-stone-400 mt-0.5">
+                              <p className="text-xs text-stone-500 mt-0.5">
                                 {item.price.toFixed(2)} ₼
                                 {item.costPrice ? ` · Maya: ${item.costPrice.toFixed(2)}₼ · Marja: ${Math.round((1 - item.costPrice / item.price) * 100)}%` : ''}
                               </p>
@@ -1966,29 +2129,63 @@ function AdminPageContent() {
                             <button onClick={() => setDeleteItemTarget(item.id)} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
                           </div>
                         </div>
+                        )}
+                        </SortableRow>
                         {editingId === item.id && renderItemForm(`border-t border-amber-100 bg-amber-50/20 px-5 py-4 space-y-4${i < items.length - 1 ? ' border-b border-stone-50' : ''}`)}
                         </React.Fragment>
                       ))}
+                      </SortableContext>
+                      {/* Quick add: type name + price, Enter — details via Düzəlt later */}
+                      <div className="flex items-center gap-2 px-4 py-2.5 border-t border-stone-100 bg-stone-50/60">
+                        <input
+                          type="text" placeholder="Yeni məhsul adı…"
+                          data-quickadd={cat}
+                          value={quickAdd.cat === cat ? quickAdd.name : ''}
+                          onChange={e => setQuickAdd({ cat, name: e.target.value, price: quickAdd.cat === cat ? quickAdd.price : '' })}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') { e.preventDefault(); (e.currentTarget.nextElementSibling as HTMLInputElement)?.focus(); }
+                          }}
+                          className="flex-1 min-w-0 bg-white border border-stone-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700"
+                        />
+                        <input
+                          type="number" placeholder="₼" step="0.1" min="0"
+                          value={quickAdd.cat === cat ? quickAdd.price : ''}
+                          onChange={e => setQuickAdd({ cat, name: quickAdd.cat === cat ? quickAdd.name : '', price: e.target.value })}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const nameEl = e.currentTarget.previousElementSibling as HTMLInputElement;
+                              submitQuickAdd(cat);
+                              nameEl?.focus();
+                            }
+                          }}
+                          className="w-24 bg-white border border-stone-200 rounded-lg px-3 py-1.5 text-sm text-right focus:outline-none focus:ring-2 focus:ring-amber-700"
+                        />
+                        <button
+                          onClick={() => submitQuickAdd(cat)}
+                          disabled={!(quickAdd.cat === cat && quickAdd.name.trim() !== '' && quickAdd.price !== '' && parseFloat(quickAdd.price) >= 0)}
+                          title="Əlavə et"
+                          className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-amber-800 hover:bg-amber-900 disabled:opacity-30 text-white transition-colors"
+                        >
+                          <Plus className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                    )}
+                  </>)}
+                  </SortableRow>
                 );
               })}
+              </SortableContext>
+              </DndContext>
 
               {menu.length === 0 && categories.length === 0 && !showForm && (
                 <div className="bg-white rounded-xl border border-stone-100 card p-16 text-center">
                   <Coffee className="w-10 h-10 mx-auto mb-3 text-stone-200" />
-                  <p className="text-sm text-stone-400">Məhsul yoxdur</p>
+                  <p className="text-sm text-stone-500">Məhsul yoxdur</p>
                 </div>
               )}
 
-              <form onSubmit={addCategory} className="flex gap-2 mt-2">
-                <input type="text" placeholder="Yeni kateqoriya adı" value={newCat}
-                  onChange={e => setNewCat(e.target.value)}
-                  className="flex-1 border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
-                <button type="submit" className="flex items-center gap-1.5 text-sm font-medium text-amber-800 border border-amber-200 hover:bg-amber-50 px-4 py-2 rounded-lg transition-colors">
-                  <Tag className="w-3.5 h-3.5" /> Kateqoriya əlavə et
-                </button>
-              </form>
             </div>
           )}
 
@@ -1996,7 +2193,7 @@ function AdminPageContent() {
           {tab === 'users' && (
             <div className="max-w-lg space-y-4">
               <div className="flex items-center justify-between">
-                <p className="text-sm text-stone-400">{staffUsers.length} əməkdaş</p>
+                <p className="text-sm font-semibold text-stone-600">{staffUsers.length} əməkdaş</p>
                 <button
                   onClick={() => { setEditingUser(null); setUName(''); setUUsername(''); setUPassword(''); setUError(''); setShowUserForm(true); }}
                   className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors"
@@ -2008,7 +2205,7 @@ function AdminPageContent() {
               {staffUsers.length === 0 && !showUserForm && (
                 <div className="bg-white rounded-xl border border-stone-100 p-16 text-center">
                   <Users className="w-10 h-10 mx-auto mb-3 text-stone-200" />
-                  <p className="text-sm text-stone-400">Əməkdaş yoxdur</p>
+                  <p className="text-sm text-stone-500">Əməkdaş yoxdur</p>
                 </div>
               )}
 
@@ -2019,29 +2216,29 @@ function AdminPageContent() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-stone-800">{u.name}</p>
-                    <p className="text-xs text-stone-400">@{u.username}</p>
+                    <p className="text-xs text-stone-500">@{u.username}</p>
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${u.active ? 'bg-green-100 text-green-700' : 'bg-stone-100 text-stone-500'}`}>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${u.active ? 'bg-green-100 text-green-700' : 'bg-stone-100 text-stone-600'}`}>
                     {u.active ? 'Aktiv' : 'Deaktiv'}
                   </span>
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={() => { setEditingUser(u); setUName(u.name); setUUsername(u.username); setUPassword(''); setUError(''); setShowUserForm(true); }}
                       title="Düzəlt"
-                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-amber-700 transition-colors"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-amber-700 transition-colors"
                     >
                       <Pencil className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => toggleUserActive(u.id, !u.active).then(() => setStaffUsers(prev => prev.map(x => x.id === u.id ? { ...x, active: !x.active } : x)))}
                       title={u.active ? 'Deaktiv et' : 'Aktiv et'}
-                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 transition-colors"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 transition-colors"
                     >
                       {u.active ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                     <button
                       onClick={() => { if (confirm(`"${u.name}" silinsin?`)) deleteUser(u.id).then(err => { if (err) alert('Silinmədi: ' + err); else setStaffUsers(prev => prev.filter(x => x.id !== u.id)); }); }}
-                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-red-50 hover:text-red-500 transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -2058,7 +2255,7 @@ function AdminPageContent() {
               <div className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-stone-800">Masa rejimi</p>
-                  <p className="text-xs text-stone-400">
+                  <p className="text-xs text-stone-500">
                     {tablesOn
                       ? 'Satıcılar sifariş üçün masa seçir'
                       : 'Deaktivdir — satıcılar masa seçmədən birbaşa məhsul seçir'}
@@ -2082,17 +2279,17 @@ function AdminPageContent() {
               {!tablesOn && (
                 <div className="bg-white rounded-xl border border-stone-100 p-12 text-center">
                   <LayoutDashboard className="w-10 h-10 mx-auto mb-3 text-stone-200" />
-                  <p className="text-sm text-stone-400">Masalar deaktivdir. Satıcı panelində sifarişlər masa seçilmədən yaradılır.</p>
+                  <p className="text-sm text-stone-500">Masalar deaktivdir. Satıcı panelində sifarişlər masa seçilmədən yaradılır.</p>
                 </div>
               )}
 
               {tablesOn && (<>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <p className="text-sm text-stone-400">{tables.length} masa</p>
+                  <p className="text-sm font-semibold text-stone-600">{tables.length} masa</p>
                   <div className="flex bg-stone-100 rounded-lg p-0.5 gap-0.5">
-                    <button onClick={() => setTableView('floor')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${tableView === 'floor' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-400 hover:text-stone-600'}`}>Plan</button>
-                    <button onClick={() => setTableView('list')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${tableView === 'list' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-400 hover:text-stone-600'}`}>Siyahı</button>
+                    <button onClick={() => setTableView('floor')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${tableView === 'floor' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-600'}`}>Plan</button>
+                    <button onClick={() => setTableView('list')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${tableView === 'list' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-600'}`}>Siyahı</button>
                   </div>
                 </div>
                 <button
@@ -2106,17 +2303,17 @@ function AdminPageContent() {
               {tables.length === 0 && (
                 <div className="bg-white rounded-xl border border-stone-100 p-16 text-center">
                   <LayoutDashboard className="w-10 h-10 mx-auto mb-3 text-stone-200" />
-                  <p className="text-sm text-stone-400">Masa yoxdur</p>
+                  <p className="text-sm text-stone-500">Masa yoxdur</p>
                 </div>
               )}
 
               {/* Floor plan / canvas view */}
               {tableView === 'floor' && tables.length > 0 && (
                 <div className="bg-white rounded-xl border border-stone-100 overflow-hidden">
-                  <div className="flex items-center gap-4 px-4 py-3 border-b border-stone-50 text-xs text-stone-400">
+                  <div className="flex items-center gap-4 px-4 py-3 border-b border-stone-50 text-xs text-stone-500">
                     <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-green-400 inline-block" />Boş</span>
                     <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-red-400 inline-block" />Dolu</span>
-                    <span className="ml-auto text-stone-300">Masaları sürükləyərək yerini dəyiş</span>
+                    <span className="ml-auto text-stone-400">Masaları sürükləyərək yerini dəyiş</span>
                     {tableSavedToast && (
                       <span className="ml-2 text-xs text-green-600 font-medium transition-opacity">✓ Saxlanıldı</span>
                     )}
@@ -2163,9 +2360,9 @@ function AdminPageContent() {
                         >
                           {isSelected && (
                             <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex gap-1 bg-white rounded-lg shadow border border-stone-100 px-1.5 py-1">
-                              <button onClick={e => { e.stopPropagation(); setQrTable(t); }} className="w-5 h-5 flex items-center justify-center text-stone-400 hover:text-amber-700"><QrCode className="w-3 h-3" /></button>
-                              <button onClick={e => { e.stopPropagation(); setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} className="w-5 h-5 flex items-center justify-center text-stone-400 hover:text-amber-700"><Pencil className="w-3 h-3" /></button>
-                              <button onClick={e => { e.stopPropagation(); if (busy) { alert('Aktiv sifarişi olan masanı silmək olmaz.'); return; } if (confirm(`"${t.name}" silinsin?`)) deleteTable(t.id).then(err => { if (err) alert('Silinmədi: ' + err); else setTables(prev => prev.filter(x => x.id !== t.id)); }); }} className="w-5 h-5 flex items-center justify-center text-stone-400 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); setQrTable(t); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-amber-700"><QrCode className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-amber-700"><Pencil className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); if (busy) { alert('Aktiv sifarişi olan masanı silmək olmaz.'); return; } if (confirm(`"${t.name}" silinsin?`)) deleteTable(t.id).then(err => { if (err) alert('Silinmədi: ' + err); else setTables(prev => prev.filter(x => x.id !== t.id)); }); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
                             </div>
                           )}
                           <span className={`text-xs font-bold ${busy ? 'text-red-600' : 'text-stone-600'}`}>{t.name}</span>
@@ -2194,16 +2391,16 @@ function AdminPageContent() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-stone-800 truncate">{t.name}</p>
-                          <p className="text-xs text-stone-400">{t.capacity} nəfər</p>
+                          <p className="text-xs text-stone-500">{t.capacity} nəfər</p>
                         </div>
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${busy ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
                           {busy ? 'Dolu' : 'Boş'}
                         </span>
                         <div className="flex items-center gap-1 shrink-0">
-                          <button onClick={() => setQrTable(t)} title="QR kod" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-amber-700 transition-colors">
+                          <button onClick={() => setQrTable(t)} title="QR kod" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-amber-700 transition-colors">
                             <QrCode className="w-4 h-4" />
                           </button>
-                          <button onClick={() => { setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} title="Düzəlt" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-amber-700 transition-colors">
+                          <button onClick={() => { setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} title="Düzəlt" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-amber-700 transition-colors">
                             <Pencil className="w-4 h-4" />
                           </button>
                           <button
@@ -2216,7 +2413,7 @@ function AdminPageContent() {
                                 });
                               }
                             }}
-                            className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                            className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-red-50 hover:text-red-500 transition-colors"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -2238,10 +2435,10 @@ function AdminPageContent() {
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
             <h3 className="font-bold text-lg text-stone-800 mb-1">Sifarişi ləğv et</h3>
-            <p className="text-sm text-stone-500 mb-4">
+            <p className="text-sm text-stone-600 mb-4">
               №{cancellingOrder.orderNumber} · {cancellingOrder.sellerName} · {orderTotal(cancellingOrder).toFixed(2)} ₼
             </p>
-            <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-2">Səbəb</p>
+            <p className="text-xs font-semibold text-stone-600 uppercase tracking-wide mb-2">Səbəb</p>
             <div className="flex flex-wrap gap-2 mb-4">
               {CANCEL_REASONS.map(r => (
                 <button
@@ -2310,7 +2507,7 @@ function AdminPageContent() {
               className="space-y-3"
             >
               <div>
-                <label className="text-xs font-medium text-stone-500 block mb-1">Ad</label>
+                <label className="text-xs font-medium text-stone-600 block mb-1">Ad</label>
                 <input
                   value={tName}
                   onChange={e => setTName(e.target.value)}
@@ -2320,7 +2517,7 @@ function AdminPageContent() {
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-stone-500 block mb-1">Tutum (nəfər)</label>
+                <label className="text-xs font-medium text-stone-600 block mb-1">Tutum (nəfər)</label>
                 <input
                   type="number"
                   min={1}
@@ -2332,7 +2529,7 @@ function AdminPageContent() {
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-stone-500 block mb-2">Forma</label>
+                <label className="text-xs font-medium text-stone-600 block mb-2">Forma</label>
                 <div className="flex gap-2">
                   {([
                     { value: 'rect' as const,   label: 'Üfüqi',   w: 'w-6', h: 'h-4', round: false },
@@ -2340,7 +2537,7 @@ function AdminPageContent() {
                     { value: 'round' as const,  label: 'Dairəvi', w: 'w-5', h: 'h-5', round: true },
                   ]).map(s => (
                     <button key={s.value} type="button" onClick={() => setTShape(s.value)}
-                      className={`flex-1 py-2 rounded-xl border-2 text-xs font-medium transition-colors flex flex-col items-center justify-center gap-1.5 ${tShape === s.value ? 'border-amber-600 bg-amber-50 text-amber-800' : 'border-stone-200 text-stone-400 hover:border-stone-300'}`}>
+                      className={`flex-1 py-2 rounded-xl border-2 text-xs font-medium transition-colors flex flex-col items-center justify-center gap-1.5 ${tShape === s.value ? 'border-amber-600 bg-amber-50 text-amber-800' : 'border-stone-200 text-stone-500 hover:border-stone-300'}`}>
                       <span className={`inline-block border-2 ${s.w} ${s.h} ${s.round ? 'rounded-full' : 'rounded-sm'} ${tShape === s.value ? 'border-amber-600' : 'border-stone-300'}`} />
                       {s.label}
                     </button>
@@ -2372,7 +2569,7 @@ function AdminPageContent() {
             <div className="flex justify-center p-4 bg-white rounded-xl border border-stone-100">
               <QRCode value={`${typeof window !== 'undefined' ? window.location.origin : ''}/${companySlug}/menu?table=${qrTable.id}`} size={180} />
             </div>
-            <p className="text-xs text-stone-400 mt-3">/{companySlug}/menu?table={qrTable.id}</p>
+            <p className="text-xs text-stone-500 mt-3">/{companySlug}/menu?table={qrTable.id}</p>
           </div>
         </div>
       )}
@@ -2412,7 +2609,7 @@ function AdminPageContent() {
               className="space-y-3"
             >
               <div>
-                <label className="text-xs font-medium text-stone-500 block mb-1">Ad</label>
+                <label className="text-xs font-medium text-stone-600 block mb-1">Ad</label>
                 <input
                   value={uName}
                   onChange={e => setUName(e.target.value)}
@@ -2423,7 +2620,7 @@ function AdminPageContent() {
               </div>
               {!editingUser && (
                 <div>
-                  <label className="text-xs font-medium text-stone-500 block mb-1">İstifadəçi adı</label>
+                  <label className="text-xs font-medium text-stone-600 block mb-1">İstifadəçi adı</label>
                   <input
                     value={uUsername}
                     onChange={e => setUUsername(e.target.value)}
@@ -2434,7 +2631,7 @@ function AdminPageContent() {
                 </div>
               )}
               <div>
-                <label className="text-xs font-medium text-stone-500 block mb-1">
+                <label className="text-xs font-medium text-stone-600 block mb-1">
                   {editingUser ? 'Yeni şifrə' : 'Şifrə'}
                 </label>
                 <input
@@ -2459,12 +2656,37 @@ function AdminPageContent() {
         </div>
       )}
 
+      {/* ── New category dialog ─────────────────────────────────────────── */}
+      {showCatDialog && (() => {
+        const dup = categories.some(c => c.name === newCat.trim());
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <form onSubmit={addCategory} className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
+              <h3 className="text-base font-semibold text-stone-800">Yeni kateqoriya</h3>
+              <input
+                autoFocus
+                type="text"
+                placeholder="Kateqoriya adı"
+                value={newCat}
+                onChange={e => setNewCat(e.target.value)}
+                className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+              />
+              {dup && newCat.trim() !== '' && <p className="text-xs text-red-500">Bu adda kateqoriya artıq var</p>}
+              <div className="flex gap-2 justify-end">
+                <button type="button" onClick={() => setShowCatDialog(false)} className="px-4 py-2 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors">Ləğv et</button>
+                <button type="submit" disabled={!newCat.trim() || dup} className="px-4 py-2 text-sm rounded-lg bg-amber-800 hover:bg-amber-900 disabled:opacity-40 text-white font-medium transition-colors">Əlavə et</button>
+              </div>
+            </form>
+          </div>
+        );
+      })()}
+
       {/* ── Delete category confirmation dialog ─────────────────────────── */}
       {deleteCatTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
             <h3 className="text-base font-semibold text-stone-800">Kateqoriyanı sil?</h3>
-            <p className="text-sm text-stone-500">
+            <p className="text-sm text-stone-600">
               <span className="font-medium text-stone-700">&ldquo;{deleteCatTarget}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.
             </p>
             <div className="flex gap-2 justify-end">
@@ -2480,7 +2702,7 @@ function AdminPageContent() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
             <h3 className="text-base font-semibold text-stone-800">Məhsulu sil?</h3>
-            <p className="text-sm text-stone-500">
+            <p className="text-sm text-stone-600">
               <span className="font-medium text-stone-700">&ldquo;{menu.find(m => m.id === deleteItemTarget)?.name}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.
             </p>
             <div className="flex gap-2 justify-end">
@@ -2500,7 +2722,7 @@ function AdminPageContent() {
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-md flex flex-col max-h-[85vh]">
               <div className="p-6 pb-4">
                 <h3 className="text-base font-semibold text-stone-800">Menyu idxalı</h3>
-                <p className="text-sm text-stone-500 mt-1">{totalRows} sətir oxundu</p>
+                <p className="text-sm text-stone-600 mt-1">{totalRows} sətir oxundu</p>
               </div>
               <div className="px-6 space-y-2 overflow-y-auto flex-1">
                 <div className="grid grid-cols-3 gap-2 text-center">
@@ -2518,7 +2740,7 @@ function AdminPageContent() {
                   </div>
                 </div>
                 {newCategories.length > 0 && (
-                  <p className="text-xs text-stone-500">Yeni kateqoriyalar: {newCategories.map(c => c.name).join(', ')}</p>
+                  <p className="text-xs text-stone-600">Yeni kateqoriyalar: {newCategories.map(c => c.name).join(', ')}</p>
                 )}
                 {errors.length > 0 && (
                   <div className="bg-red-50 border border-red-100 rounded-xl p-3 space-y-1">
@@ -2526,7 +2748,7 @@ function AdminPageContent() {
                     {errors.map((e, i) => <p key={i} className="text-xs text-red-500">{e}</p>)}
                   </div>
                 )}
-                <p className="text-xs text-stone-400">
+                <p className="text-xs text-stone-500">
                   Mövcud məhsullar ad üzrə tapılıb yenilənir (şəkilləri qalır). Faylda olmayan məhsullara toxunulmur — heç nə silinmir.
                 </p>
               </div>
@@ -2552,15 +2774,25 @@ function AdminPageContent() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between p-5 border-b border-stone-100">
               <div className="flex items-center gap-2">
-                <Trash2 className="w-4 h-4 text-stone-400" />
+                <Trash2 className="w-4 h-4 text-stone-500" />
                 <h3 className="text-base font-semibold text-stone-800">Zibil qutusu</h3>
-                <span className="text-xs text-stone-400">(30 gün saxlanılır)</span>
+                <span className="text-xs text-stone-500">(30 gün saxlanılır)</span>
               </div>
-              <button onClick={() => setShowTrash(false)} className="text-stone-400 hover:text-stone-600"><X className="w-4 h-4" /></button>
+              <div className="flex items-center gap-3">
+                {trash.length > 0 && (
+                  <button
+                    onClick={() => setConfirmEmptyTrash(true)}
+                    className="text-xs font-medium text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors"
+                  >
+                    Hamısını sil
+                  </button>
+                )}
+                <button onClick={() => setShowTrash(false)} className="text-stone-500 hover:text-stone-600"><X className="w-4 h-4" /></button>
+              </div>
             </div>
             <div className="overflow-y-auto flex-1 p-4 space-y-2">
               {trash.length === 0 && (
-                <p className="text-sm text-stone-400 text-center py-8">Zibil qutusu boşdur</p>
+                <p className="text-sm text-stone-500 text-center py-8">Zibil qutusu boşdur</p>
               )}
               {trash.map(item => {
                 const d = item.data as Record<string, unknown>;
@@ -2571,22 +2803,28 @@ function AdminPageContent() {
                   <div key={item.id} className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-stone-100 hover:bg-stone-50">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-stone-800 truncate">{label}</p>
-                      <p className="text-xs text-stone-400">{sub} · {daysLeft} gün qalıb</p>
+                      <p className="text-xs text-stone-500">{sub} · {daysLeft} gün qalıb</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         onClick={async () => {
                           await restoreFromTrash(item.id);
+                          // Skip if already in the menu (double click / re-restore) —
+                          // a duplicate would poison every following save
                           if (item.type === 'menu') {
                             const restored = item.data as unknown as MenuItem;
-                            const updatedMenu = [...menu, restored];
-                            setMenu(updatedMenu);
-                            await saveMenu(updatedMenu);
+                            if (!menu.some(m => m.id === restored.id)) {
+                              const updatedMenu = [...menu, restored];
+                              setMenu(updatedMenu);
+                              await persistMenu(updatedMenu);
+                            }
                           } else if (item.type === 'category') {
                             const restored = item.data as unknown as Category;
-                            const updatedCats = [...categories, restored];
-                            setCategories(updatedCats);
-                            await saveCategories(updatedCats);
+                            if (!categories.some(c => c.name === restored.name)) {
+                              const updatedCats = [...categories, restored];
+                              setCategories(updatedCats);
+                              await persistCategories(updatedCats);
+                            }
                           }
                           setTrash(t => t.filter(x => x.id !== item.id));
                         }}
@@ -2640,6 +2878,29 @@ function AdminPageContent() {
         </div>
       )}
 
+      {/* ── Empty trash confirmation dialog ─────────────────────────────── */}
+      {confirmEmptyTrash && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
+            <h3 className="text-base font-semibold text-stone-800">Zibil qutusunu boşalt?</h3>
+            <p className="text-sm text-stone-600">
+              <span className="font-medium text-stone-700">{trash.length} element</span> həmişəlik silinəcək. Bu əməliyyat geri qaytarıla bilməz.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setConfirmEmptyTrash(false)} className="px-4 py-2 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors">Ləğv et</button>
+              <button
+                onClick={handleEmptyTrash}
+                disabled={emptyingTrash}
+                className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-red-500 hover:bg-red-600 disabled:opacity-60 text-white font-medium transition-colors"
+              >
+                {emptyingTrash && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                Hamısını sil
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Profile Modal ── */}
       {showProfile && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -2657,10 +2918,10 @@ function AdminPageContent() {
             <div className="p-6 space-y-6">
               {/* ── Business Info ── */}
               <div>
-                <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide mb-3">Müəssisə məlumatları</p>
+                <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-3">Müəssisə məlumatları</p>
                 <div className="space-y-3">
                   <div>
-                    <label className="text-xs font-medium text-stone-500 flex items-center gap-1 mb-1"><User className="w-3.5 h-3.5" />Sahibin adı</label>
+                    <label className="text-xs font-medium text-stone-600 flex items-center gap-1 mb-1"><User className="w-3.5 h-3.5" />Sahibin adı</label>
                     <input
                       value={profOwner}
                       onChange={e => setProfOwner(e.target.value)}
@@ -2669,7 +2930,7 @@ function AdminPageContent() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-stone-500 flex items-center gap-1 mb-1"><MapPin className="w-3.5 h-3.5" />Ünvan</label>
+                    <label className="text-xs font-medium text-stone-600 flex items-center gap-1 mb-1"><MapPin className="w-3.5 h-3.5" />Ünvan</label>
                     <input
                       value={profAddress}
                       onChange={e => setProfAddress(e.target.value)}
@@ -2678,7 +2939,7 @@ function AdminPageContent() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-stone-500 flex items-center gap-1 mb-1"><Phone className="w-3.5 h-3.5" />Mobil nömrə</label>
+                    <label className="text-xs font-medium text-stone-600 flex items-center gap-1 mb-1"><Phone className="w-3.5 h-3.5" />Mobil nömrə</label>
                     <input
                       value={profPhone}
                       onChange={e => setProfPhone(e.target.value)}
@@ -2687,7 +2948,7 @@ function AdminPageContent() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-stone-500 flex items-center gap-1 mb-1"><Clock className="w-3.5 h-3.5" />İş saatları</label>
+                    <label className="text-xs font-medium text-stone-600 flex items-center gap-1 mb-1"><Clock className="w-3.5 h-3.5" />İş saatları</label>
                     <div className="flex items-center gap-2">
                       <input
                         type="time"
@@ -2695,7 +2956,7 @@ function AdminPageContent() {
                         onChange={e => setProfOpen(e.target.value)}
                         className="flex-1 border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
                       />
-                      <span className="text-stone-300 text-sm">—</span>
+                      <span className="text-stone-400 text-sm">—</span>
                       <input
                         type="time"
                         value={profClose}
@@ -2703,7 +2964,7 @@ function AdminPageContent() {
                         className="flex-1 border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
                       />
                     </div>
-                    <p className="text-xs text-stone-400 mt-1">
+                    <p className="text-xs text-stone-500 mt-1">
                       {cutoffMinutes({ ...bizSettings, workOpen: profOpen || '00:00', workClose: profClose || '00:00' }) > 0
                         ? `Gecə yarısından sonrakı satışlar (saat ${profClose}-a qədər) əvvəlki günün statistikasına yazılır`
                         : 'Statistika günü gecə yarısında dəyişir'}
@@ -2726,10 +2987,10 @@ function AdminPageContent() {
 
               {/* ── Password Change ── */}
               <div>
-                <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Lock className="w-3.5 h-3.5" />Şifrəni dəyiş</p>
+                <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-3 flex items-center gap-1"><Lock className="w-3.5 h-3.5" />Şifrəni dəyiş</p>
                 <div className="space-y-3">
                   <div>
-                    <label className="text-xs font-medium text-stone-500 block mb-1">Cari şifrə</label>
+                    <label className="text-xs font-medium text-stone-600 block mb-1">Cari şifrə</label>
                     <div className="relative">
                       <input
                         type={pwShowCurrent ? 'text' : 'password'}
@@ -2738,13 +2999,13 @@ function AdminPageContent() {
                         className="w-full border border-stone-200 rounded-xl px-3 py-2.5 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
                         placeholder="••••••••"
                       />
-                      <button type="button" onClick={() => setPwShowCurrent(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400">
+                      <button type="button" onClick={() => setPwShowCurrent(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-500">
                         {pwShowCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-stone-500 block mb-1">Yeni şifrə</label>
+                    <label className="text-xs font-medium text-stone-600 block mb-1">Yeni şifrə</label>
                     <div className="relative">
                       <input
                         type={pwShowNew ? 'text' : 'password'}
@@ -2753,13 +3014,13 @@ function AdminPageContent() {
                         className="w-full border border-stone-200 rounded-xl px-3 py-2.5 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
                         placeholder="••••••••"
                       />
-                      <button type="button" onClick={() => setPwShowNew(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400">
+                      <button type="button" onClick={() => setPwShowNew(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-500">
                         {pwShowNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-stone-500 block mb-1">Yeni şifrəni təsdiqlə</label>
+                    <label className="text-xs font-medium text-stone-600 block mb-1">Yeni şifrəni təsdiqlə</label>
                     <input
                       type="password"
                       value={pwConfirm}
