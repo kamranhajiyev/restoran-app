@@ -56,6 +56,15 @@ export async function login(username: string, password: string): Promise<LoginRe
     };
 
     localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+
+    // Fire-and-forget: the audit trail must never block or fail a login.
+    if (data.session?.access_token) {
+      fetch('/api/login-events', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${data.session.access_token}` },
+      }).catch(() => {});
+    }
+
     return { session };
   } catch {
     return { error: 'invalid' };

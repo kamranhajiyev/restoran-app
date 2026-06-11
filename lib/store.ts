@@ -529,6 +529,38 @@ export async function verifyPassword(id: string, password: string): Promise<bool
   } catch { return false; }
 }
 
+// ─── Login events ─────────────────────────────────────────────────────────────
+
+export interface LoginEvent {
+  id: string;
+  ip: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  name: string;
+  username: string;
+  role: string;
+}
+
+export async function fetchLoginEvents(): Promise<LoginEvent[]> {
+  try {
+    const res = await fetch('/api/login-events', { headers: await authHeaders() });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.map((e: Record<string, unknown>) => {
+      const p = (e.profiles ?? {}) as Record<string, unknown>;
+      return {
+        id: e.id,
+        ip: e.ip ?? null,
+        userAgent: e.user_agent ?? null,
+        createdAt: e.created_at,
+        name: p.name ?? '—',
+        username: p.username ?? '',
+        role: p.role ?? '',
+      };
+    });
+  } catch { return []; }
+}
+
 // ─── Superadmin: Users ────────────────────────────────────────────────────────
 
 export async function fetchAllUsers(): Promise<{ id: string; username: string; name: string; role: string; companyId: string | null; active: boolean; createdAt: string }[]> {

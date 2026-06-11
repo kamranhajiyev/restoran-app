@@ -7,7 +7,7 @@ import {
   TrendingUp, Receipt, Star, ChevronDown, Percent,
   Coffee, BarChart2, Package, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
-  GripVertical,
+  GripVertical, Globe,
 } from 'lucide-react';
 import {
   DndContext, DragEndEvent, PointerSensor, useSensor, useSensors,
@@ -26,6 +26,7 @@ import {
   fetchTablesEnabled, setTablesEnabled,
   fetchCompanyProfile, updateMyCompanyProfile, verifyPassword,
   fetchCompanySettings, updateCompanyHours,
+  fetchLoginEvents, LoginEvent,
 } from '@/lib/store';
 import {
   CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc,
@@ -33,6 +34,9 @@ import {
 } from '@/lib/business-day';
 import { supabase } from '@/lib/supabase';
 import { CashShift, Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, TrashItem, isOrderOpen } from '@/types';
+import AppDialog, { DialogState } from '@/components/AppDialog';
+import PasswordField from '@/components/PasswordField';
+import { validatePassword } from '@/lib/password';
 import { exportMenuExcel, parseMenuFile, ImportPreview } from '@/lib/excel';
 import QRCode from 'react-qr-code';
 
@@ -48,7 +52,7 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
 
-type Tab = 'stats' | 'orders' | 'kassa' | 'menu' | 'users' | 'tables';
+type Tab = 'stats' | 'orders' | 'kassa' | 'menu' | 'users' | 'tables' | 'logins';
 
 interface StaffUser {
   id: string;
@@ -83,6 +87,26 @@ function presetRange(p: ChartPreset, today: string): [string, string] {
   return [toStr(from), today];
 }
 
+// Human-readable device summary; raw user agents are unreadable in a table.
+function deviceLabel(ua: string | null): string {
+  if (!ua) return '—';
+  const os = /Windows/.test(ua) ? 'Windows'
+    : /Android/.test(ua) ? 'Android'
+    : /iPhone|iPad|iPod/.test(ua) ? 'iOS'
+    : /Mac OS X/.test(ua) ? 'macOS'
+    : /Linux/.test(ua) ? 'Linux' : '';
+  const browser = /Edg\//.test(ua) ? 'Edge'
+    : /OPR\/|Opera/.test(ua) ? 'Opera'
+    : /Chrome\//.test(ua) ? 'Chrome'
+    : /Firefox\//.test(ua) ? 'Firefox'
+    : /Safari\//.test(ua) ? 'Safari' : '';
+  return [os, browser].filter(Boolean).join(' · ') || ua.slice(0, 40);
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  owner: 'Admin', seller: 'Satıcı', waiter: 'Ofisiant', superadmin: 'Superadmin',
+};
+
 function calcMargin(price: string, cost: string): string {
   const p = parseFloat(price), c = parseFloat(cost);
   if (!p || !c || c >= p) return '';
@@ -96,6 +120,7 @@ const NAV_ITEMS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'menu',       label: 'Menyu',         icon: Coffee },
   { id: 'users',      label: 'Əməkdaşlar', icon: Users },
   { id: 'tables',     label: 'Masalar',     icon: LayoutDashboard },
+  { id: 'logins',     label: 'Girişlər',    icon: Globe },
 ];
 
 const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
@@ -105,6 +130,7 @@ const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
   menu:       { title: 'Menyu',                    subtitle: 'Kateqoriyalar və məhsullar' },
   users:      { title: 'Əməkdaşlar',              subtitle: 'Satıcıları idarə et' },
   tables:     { title: 'Masalar',                 subtitle: 'Restoran masalarını idarə et' },
+  logins:     { title: 'Girişlər',                subtitle: 'Sistemə kim, haradan daxil olub' },
 };
 
 function LineChartSvg({ data }: { data: { label: string; fullLabel: string; rev: number }[] }) {
@@ -246,14 +272,15 @@ function AdminPageContent() {
   // categories form
   const [newCat, setNewCat] = useState('');
   const [showCatDialog, setShowCatDialog] = useState(false);
-  const [deleteCatTarget, setDeleteCatTarget] = useState<string | null>(null);
   const [editCatTarget, setEditCatTarget] = useState<string | null>(null);
   const [editCatValue, setEditCatValue] = useState('');
-  const [deleteItemTarget, setDeleteItemTarget] = useState<string | null>(null);
   const [trash, setTrash] = useState<TrashItem[]>([]);
   const [showTrash, setShowTrash] = useState(false);
   const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
   const [emptyingTrash, setEmptyingTrash] = useState(false);
+
+  // shared confirm/notice dialog
+  const [dialog, setDialog] = useState<DialogState | null>(null);
 
   // Collapsed category sections — persisted so the layout survives reloads.
   // Stores the collapsed ones: new categories default to open.
@@ -329,6 +356,10 @@ function AdminPageContent() {
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [companySlug, setCompanySlug] = useState<string | null>(null);
 
+  // logins tab
+  const [loginEvents, setLoginEvents] = useState<LoginEvent[]>([]);
+  const [loginsLoaded, setLoginsLoaded] = useState(false);
+
   // profile modal
   const [showProfile, setShowProfile] = useState(false);
   const [profOwner, setProfOwner] = useState('');
@@ -344,7 +375,6 @@ function AdminPageContent() {
   const [pwSaving, setPwSaving] = useState(false);
   const [pwMsg, setPwMsg] = useState('');
   const [pwShowCurrent, setPwShowCurrent] = useState(false);
-  const [pwShowNew, setPwShowNew] = useState(false);
   const [userId, setUserId] = useState('');
 
   async function openProfile() {
@@ -378,7 +408,8 @@ function AdminPageContent() {
 
   async function handleChangePassword() {
     if (!pwNew || pwNew !== pwConfirm) { setPwMsg('Yeni şifrələr uyğun deyil'); return; }
-    if (pwNew.length < 4) { setPwMsg('Şifrə ən az 4 simvol olmalıdır'); return; }
+    const pwErr = validatePassword(pwNew);
+    if (pwErr) { setPwMsg(pwErr); return; }
     const session = getSession();
     if (!session) return;
     setPwSaving(true);
@@ -396,6 +427,12 @@ function AdminPageContent() {
     if (!session || session.role !== 'owner') { router.replace('/login'); return; }
     validateSession(session).then(valid => {
       if (!valid) { logout(); router.replace('/login'); }
+    });
+    // If another tab logs into a different account, this tab's company context
+    // no longer matches the shared auth token — force re-login instead of
+    // firing doomed cross-company requests.
+    const { data: authSub } = supabase.auth.onAuthStateChange((_event, s) => {
+      if (!s || s.user.id !== session.id) { logout(); router.replace('/login'); }
     });
     setCompanyContext(session.companyId);
     setAdminName(session.name);
@@ -421,7 +458,14 @@ function AdminPageContent() {
       setCompanySlug(slug);
       setTablesOn(te);
     });
+    return () => authSub.subscription.unsubscribe();
   }, [router]);
+
+  // Login history is rarely opened — fetched once, on first visit to the tab.
+  useEffect(() => {
+    if (tab !== 'logins' || !sessionReady || loginsLoaded) return;
+    fetchLoginEvents().then(ev => { setLoginEvents(ev); setLoginsLoaded(true); });
+  }, [tab, sessionReady, loginsLoaded]);
 
   // Stats orders are fetched per selected range — only the period being viewed is downloaded.
   // Fetched ranges are cached in memory: fully-past ranges forever, ranges touching today for 60s.
@@ -510,7 +554,7 @@ function AdminPageContent() {
     const ext = file.name.split('.').pop();
     const path = `${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from('menu-images').upload(path, file, { upsert: true });
-    if (error) { alert('Şəkil yüklənmədi: ' + error.message); return; }
+    if (error) { setDialog({ title: 'Xəta', message: 'Şəkil yüklənmədi: ' + error.message }); return; }
     const { data } = supabase.storage.from('menu-images').getPublicUrl(path);
     setForm(f => ({ ...f, image: data.publicUrl }));
   }
@@ -564,11 +608,11 @@ function AdminPageContent() {
   // silent failure looks like saved data but is actually a wipe.
   async function persistMenu(updated: MenuItem[]): Promise<void> {
     const err = await saveMenu(updated);
-    if (err) alert('Menyu yadda saxlanmadı: ' + err);
+    if (err) setDialog({ title: 'Xəta', message: 'Menyu yadda saxlanmadı: ' + err });
   }
   async function persistCategories(updated: Category[]): Promise<void> {
     const err = await saveCategories(updated);
-    if (err) alert('Kateqoriyalar yadda saxlanmadı: ' + err);
+    if (err) setDialog({ title: 'Xəta', message: 'Kateqoriyalar yadda saxlanmadı: ' + err });
   }
 
   // Quick-add row at the bottom of each category: name + price + Enter.
@@ -627,7 +671,7 @@ function AdminPageContent() {
     setImporting(false);
     setImportPreview(null);
     if (catErr || menuErr) {
-      alert('İdxal yadda saxlanmadı: ' + (catErr ?? menuErr));
+      setDialog({ title: 'Xəta', message: 'İdxal yadda saxlanmadı: ' + (catErr ?? menuErr) });
     }
   }
   function duplicateItem(id: string) {
@@ -647,7 +691,6 @@ function AdminPageContent() {
     const updated = menu.filter(m => m.id !== id);
     setMenu(updated);
     persistMenu(updated);
-    setDeleteItemTarget(null);
   }
   async function handleEmptyTrash() {
     setEmptyingTrash(true);
@@ -661,7 +704,7 @@ function AdminPageContent() {
     const err = await emptyTrash();
     setEmptyingTrash(false);
     setConfirmEmptyTrash(false);
-    if (err) { alert('Zibil qutusu boşaldılmadı: ' + err); return; }
+    if (err) { setDialog({ title: 'Xəta', message: 'Zibil qutusu boşaldılmadı: ' + err }); return; }
     setTrash([]);
   }
 
@@ -725,7 +768,6 @@ function AdminPageContent() {
     setMenu(updatedMenu);
     persistCategories(updatedCats);
     persistMenu(updatedMenu);
-    setDeleteCatTarget(null);
   }
   function renameCategory(oldName: string, newName: string) {
     const trimmed = newName.trim();
@@ -2076,11 +2118,11 @@ function AdminPageContent() {
                       </button>
                       {!catAvailable && <span className="text-xs bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded font-medium">Gizli</span>}
                       <div className="flex items-center gap-0.5 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => toggleCategoryAvailable(cat)} className={`text-xs px-2 py-0.5 rounded-lg font-medium transition-colors ${catAvailable ? 'text-stone-500 hover:bg-stone-100' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
-                          {catAvailable ? 'Bağla' : 'Aç'}
+                        <button onClick={() => toggleCategoryAvailable(cat)} title={catAvailable ? 'Kateqoriyanı satışda gizlət — satıcı və QR menyuda görünməyəcək' : 'Kateqoriyanı yenidən satışa aç'} className={`text-xs px-2 py-0.5 rounded-lg font-medium transition-colors ${catAvailable ? 'text-stone-500 hover:bg-stone-100' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
+                          {catAvailable ? 'Gizlət' : 'Aç'}
                         </button>
-                        <button onClick={() => { setEditCatTarget(cat); setEditCatValue(cat); }} className="text-xs text-amber-600 hover:text-amber-800 px-2 py-0.5 rounded-lg hover:bg-amber-50 transition-colors font-medium">Dəyiş</button>
-                        <button onClick={() => setDeleteCatTarget(cat)} className="text-xs text-red-400 hover:text-red-600 px-2 py-0.5 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
+                        <button onClick={() => { setEditCatTarget(cat); setEditCatValue(cat); }} title="Kateqoriyanın adını dəyiş" className="text-xs text-amber-600 hover:text-amber-800 px-2 py-0.5 rounded-lg hover:bg-amber-50 transition-colors font-medium">Adını dəyiş</button>
+                        <button onClick={() => setDialog({ title: 'Kateqoriyanı sil?', message: <><span className="font-medium text-stone-700">&ldquo;{cat}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.</>, onConfirm: () => deleteCategory(cat) })} title="Kateqoriyanı və içindəki məhsulları sil (zibil qutusuna gedir)" className="text-xs text-red-400 hover:text-red-600 px-2 py-0.5 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
                       </div>
                     </div>
                     </CategoryDropTarget>
@@ -2121,12 +2163,12 @@ function AdminPageContent() {
                             )}
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
-                            <button onClick={() => openEdit(item)} className="text-xs text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors font-medium">Düzəlt</button>
-                            <button onClick={() => duplicateItem(item.id)} className="text-xs text-purple-500 hover:text-purple-700 px-2 py-1 rounded-lg hover:bg-purple-50 transition-colors font-medium">Kopyala</button>
-                            <button onClick={() => toggleAvailable(item.id)} className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${item.available ? 'bg-stone-100 text-stone-600 hover:bg-stone-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
-                              {item.available ? 'Bağla' : 'Aç'}
+                            <button onClick={() => openEdit(item)} title="Məhsulu düzəlt — qiymət, şəkil, variantlar, maya dəyəri" className="text-xs text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors font-medium">Düzəlt</button>
+                            <button onClick={() => duplicateItem(item.id)} title="Məhsulun kopyasını yarat" className="text-xs text-purple-500 hover:text-purple-700 px-2 py-1 rounded-lg hover:bg-purple-50 transition-colors font-medium">Kopyala</button>
+                            <button onClick={() => toggleAvailable(item.id)} title={item.available ? 'Satışdan götür — satıcı və QR menyuda görünməyəcək' : 'Yenidən satışa qaytar'} className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${item.available ? 'bg-stone-100 text-stone-600 hover:bg-stone-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
+                              {item.available ? 'Gizlət' : 'Aç'}
                             </button>
-                            <button onClick={() => setDeleteItemTarget(item.id)} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
+                            <button onClick={() => setDialog({ title: 'Məhsulu sil?', message: <><span className="font-medium text-stone-700">&ldquo;{item.name}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.</>, onConfirm: () => deleteItem(item.id) })} title="Məhsulu sil (zibil qutusuna gedir)" className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
                           </div>
                         </div>
                         )}
@@ -2237,7 +2279,11 @@ function AdminPageContent() {
                       {u.active ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                     <button
-                      onClick={() => { if (confirm(`"${u.name}" silinsin?`)) deleteUser(u.id).then(err => { if (err) alert('Silinmədi: ' + err); else setStaffUsers(prev => prev.filter(x => x.id !== u.id)); }); }}
+                      onClick={() => setDialog({
+                        title: 'İstifadəçini sil?',
+                        message: <><span className="font-medium text-stone-700">&ldquo;{u.name}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.</>,
+                        onConfirm: () => deleteUser(u.id).then(err => { if (err) setDialog({ title: 'Silinmədi', message: err }); else setStaffUsers(prev => prev.filter(x => x.id !== u.id)); }),
+                      })}
                       className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-red-50 hover:text-red-500 transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -2245,6 +2291,71 @@ function AdminPageContent() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* ── LOGINS ─────────────────────────────────────────────────── */}
+          {tab === 'logins' && (
+            <div className="max-w-3xl space-y-4">
+              {!loginsLoaded && (
+                <div className="bg-white rounded-xl border border-stone-100 p-16 text-center">
+                  <p className="text-sm text-stone-500">Yüklənir…</p>
+                </div>
+              )}
+
+              {loginsLoaded && loginEvents.length === 0 && (
+                <div className="bg-white rounded-xl border border-stone-100 p-16 text-center">
+                  <Globe className="w-10 h-10 mx-auto mb-3 text-stone-200" />
+                  <p className="text-sm text-stone-500">Hələ giriş qeydi yoxdur</p>
+                  <p className="text-xs text-stone-400 mt-1">Növbəti girişlərdən etibarən burada görünəcək</p>
+                </div>
+              )}
+
+              {loginsLoaded && loginEvents.length > 0 && (
+                <div className="bg-white rounded-xl border border-stone-100 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-xs text-stone-500 border-b border-stone-100">
+                          <th className="px-4 py-3 font-medium">İstifadəçi</th>
+                          <th className="px-4 py-3 font-medium">Vaxt</th>
+                          <th className="px-4 py-3 font-medium">IP ünvanı</th>
+                          <th className="px-4 py-3 font-medium">Cihaz</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {loginEvents.map(e => {
+                          const d = new Date(e.createdAt);
+                          return (
+                            <tr key={e.id} className="border-b border-stone-50 last:border-0">
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2.5">
+                                  <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold shrink-0">
+                                    {e.name[0]?.toUpperCase()}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="font-semibold text-stone-800 truncate">{e.name}</p>
+                                    <p className="text-xs text-stone-500">{ROLE_LABELS[e.role] ?? e.role}{e.username ? ` · @${e.username}` : ''}</p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-stone-600 whitespace-nowrap">
+                                {d.getDate()} {AZ_MON_SHORT[d.getMonth()]} {String(d.getHours()).padStart(2, '0')}:{String(d.getMinutes()).padStart(2, '0')}
+                              </td>
+                              <td className="px-4 py-3 font-mono text-xs text-stone-600 whitespace-nowrap">{e.ip ?? '—'}</td>
+                              <td className="px-4 py-3 text-stone-600 whitespace-nowrap">{deviceLabel(e.userAgent)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {loginsLoaded && loginEvents.length > 0 && (
+                <p className="text-xs text-stone-400">Eyni Wi-Fi şəbəkəsindəki bütün cihazlar eyni IP ilə görünür. Son 200 giriş göstərilir.</p>
+              )}
             </div>
           )}
 
@@ -2362,7 +2473,7 @@ function AdminPageContent() {
                             <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex gap-1 bg-white rounded-lg shadow border border-stone-100 px-1.5 py-1">
                               <button onClick={e => { e.stopPropagation(); setQrTable(t); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-amber-700"><QrCode className="w-3 h-3" /></button>
                               <button onClick={e => { e.stopPropagation(); setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-amber-700"><Pencil className="w-3 h-3" /></button>
-                              <button onClick={e => { e.stopPropagation(); if (busy) { alert('Aktiv sifarişi olan masanı silmək olmaz.'); return; } if (confirm(`"${t.name}" silinsin?`)) deleteTable(t.id).then(err => { if (err) alert('Silinmədi: ' + err); else setTables(prev => prev.filter(x => x.id !== t.id)); }); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); if (busy) { setDialog({ title: 'Silinmədi', message: 'Aktiv sifarişi olan masanı silmək olmaz.' }); return; } setDialog({ title: 'Masanı sil?', message: <><span className="font-medium text-stone-700">&ldquo;{t.name}&rdquo;</span> silinəcək.</>, onConfirm: () => deleteTable(t.id).then(err => { if (err) setDialog({ title: 'Silinmədi', message: err }); else setTables(prev => prev.filter(x => x.id !== t.id)); }) }); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
                             </div>
                           )}
                           <span className={`text-xs font-bold ${busy ? 'text-red-600' : 'text-stone-600'}`}>{t.name}</span>
@@ -2405,13 +2516,15 @@ function AdminPageContent() {
                           </button>
                           <button
                             onClick={() => {
-                              if (busy) { alert('Aktiv sifarişi olan masanı silmək olmaz.'); return; }
-                              if (confirm(`"${t.name}" silinsin?`)) {
-                                deleteTable(t.id).then(err => {
-                                  if (err) alert('Silinmədi: ' + err);
+                              if (busy) { setDialog({ title: 'Silinmədi', message: 'Aktiv sifarişi olan masanı silmək olmaz.' }); return; }
+                              setDialog({
+                                title: 'Masanı sil?',
+                                message: <><span className="font-medium text-stone-700">&ldquo;{t.name}&rdquo;</span> silinəcək.</>,
+                                onConfirm: () => deleteTable(t.id).then(err => {
+                                  if (err) setDialog({ title: 'Silinmədi', message: err });
                                   else setTables(prev => prev.filter(x => x.id !== t.id));
-                                });
-                              }
+                                }),
+                              });
                             }}
                             className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-red-50 hover:text-red-500 transition-colors"
                           >
@@ -2497,7 +2610,7 @@ function AdminPageContent() {
                   setTables(prev => prev.map(x => x.id === editingTable.id ? { ...x, name: tName.trim(), capacity: cap, shape: tShape, w: sw, h: sh } : x));
                 } else {
                   const err = await createTable(tName.trim(), cap, tShape, sw, sh);
-                  if (err) { alert('Xəta: ' + err); setTSaving(false); return; }
+                  if (err) { setDialog({ title: 'Xəta', message: err }); setTSaving(false); return; }
                   const fresh = await fetchTables();
                   setTables(fresh);
                 }
@@ -2588,6 +2701,11 @@ function AdminPageContent() {
               onSubmit={async e => {
                 e.preventDefault();
                 setUError('');
+                // edit with empty password = keep the old one; otherwise enforce the rules
+                if (uPassword || !editingUser) {
+                  const pwErr = validatePassword(uPassword, editingUser ? editingUser.username : uUsername);
+                  if (pwErr) { setUError(pwErr); return; }
+                }
                 setUSaving(true);
                 if (editingUser) {
                   await updateUser(editingUser.id, uName.trim(), uPassword);
@@ -2634,12 +2752,10 @@ function AdminPageContent() {
                 <label className="text-xs font-medium text-stone-600 block mb-1">
                   {editingUser ? 'Yeni şifrə' : 'Şifrə'}
                 </label>
-                <input
-                  type="password"
+                <PasswordField
                   value={uPassword}
-                  onChange={e => setUPassword(e.target.value)}
-                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  placeholder={editingUser ? 'Dəyişmək üçün daxil edin' : ''}
+                  onChange={setUPassword}
+                  placeholder={editingUser ? 'Dəyişmək üçün daxil edin' : undefined}
                   required={!editingUser}
                 />
               </div>
@@ -2680,38 +2796,6 @@ function AdminPageContent() {
           </div>
         );
       })()}
-
-      {/* ── Delete category confirmation dialog ─────────────────────────── */}
-      {deleteCatTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
-            <h3 className="text-base font-semibold text-stone-800">Kateqoriyanı sil?</h3>
-            <p className="text-sm text-stone-600">
-              <span className="font-medium text-stone-700">&ldquo;{deleteCatTarget}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.
-            </p>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleteCatTarget(null)} className="px-4 py-2 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors">Ləğv et</button>
-              <button onClick={() => deleteCategory(deleteCatTarget)} className="px-4 py-2 text-sm rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition-colors">Sil</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Delete product confirmation dialog ──────────────────────────── */}
-      {deleteItemTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
-            <h3 className="text-base font-semibold text-stone-800">Məhsulu sil?</h3>
-            <p className="text-sm text-stone-600">
-              <span className="font-medium text-stone-700">&ldquo;{menu.find(m => m.id === deleteItemTarget)?.name}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.
-            </p>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleteItemTarget(null)} className="px-4 py-2 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors">Ləğv et</button>
-              <button onClick={() => deleteItem(deleteItemTarget)} className="px-4 py-2 text-sm rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition-colors">Sil</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── Import preview modal ────────────────────────────────────────── */}
       {importPreview && (() => {
@@ -3006,18 +3090,7 @@ function AdminPageContent() {
                   </div>
                   <div>
                     <label className="text-xs font-medium text-stone-600 block mb-1">Yeni şifrə</label>
-                    <div className="relative">
-                      <input
-                        type={pwShowNew ? 'text' : 'password'}
-                        value={pwNew}
-                        onChange={e => setPwNew(e.target.value)}
-                        className="w-full border border-stone-200 rounded-xl px-3 py-2.5 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-                        placeholder="••••••••"
-                      />
-                      <button type="button" onClick={() => setPwShowNew(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-500">
-                        {pwShowNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
+                    <PasswordField value={pwNew} onChange={setPwNew} focusClass="focus:ring-amber-400" />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-stone-600 block mb-1">Yeni şifrəni təsdiqlə</label>
@@ -3046,6 +3119,7 @@ function AdminPageContent() {
         </div>
       )}
 
+      <AppDialog dialog={dialog} onClose={() => setDialog(null)} />
     </div>
   );
 }
