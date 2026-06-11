@@ -12,6 +12,9 @@ import {
 } from '@/lib/store';
 import { DEFAULT_TZ } from '@/lib/business-day';
 import { TrashItem } from '@/types';
+import AppDialog, { DialogState } from '@/components/AppDialog';
+import PasswordField from '@/components/PasswordField';
+import { validatePassword } from '@/lib/password';
 
 // Each company's clock for statistics — superadmin picks it per company
 const TIMEZONES: { value: string; label: string }[] = [
@@ -87,6 +90,9 @@ export default function SuperadminPage() {
   const [companyTrash, setCompanyTrash] = useState<TrashItem[]>([]);
   const [showTrash, setShowTrash] = useState(false);
 
+  // shared confirm/notice dialog
+  const [dialog, setDialog] = useState<DialogState | null>(null);
+
   // account / password modal
   const [showAccount, setShowAccount] = useState(false);
   const [pwCurrent, setPwCurrent] = useState('');
@@ -95,7 +101,6 @@ export default function SuperadminPage() {
   const [pwSaving, setPwSaving] = useState(false);
   const [pwMsg, setPwMsg] = useState('');
   const [pwShowCurrent, setPwShowCurrent] = useState(false);
-  const [pwShowNew, setPwShowNew] = useState(false);
 
   useEffect(() => {
     const session = getSession();
@@ -164,6 +169,10 @@ export default function SuperadminPage() {
 
   async function handleSaveOwner() {
     if (!profileCompany || !modalOwnerUser) return;
+    if (ownerPassword) {
+      const pwErr = validatePassword(ownerPassword, ownerUsername);
+      if (pwErr) { setOwnerMsg('Xəta: ' + pwErr); return; }
+    }
     setOwnerSaving(true);
     const err = await updateOwnerAccount(modalOwnerUser.id, ownerName.trim(), ownerUsername.trim(), ownerPassword || undefined);
     if (err) {
@@ -184,6 +193,8 @@ export default function SuperadminPage() {
       setOwnerMsg('Bütün sahələri doldurun');
       return;
     }
+    const pwErr = validatePassword(ownerPassword, ownerUsername);
+    if (pwErr) { setOwnerMsg('Xəta: ' + pwErr); return; }
     setOwnerSaving(true);
     const err = await createUser(ownerUsername.trim(), ownerPassword, ownerName.trim(), 'owner', profileCompany.id);
     if (err) {
@@ -206,20 +217,26 @@ export default function SuperadminPage() {
     loadData();
   }
 
-  async function handleDeleteOwner() {
+  function handleDeleteOwner() {
     if (!modalOwnerUser) return;
-    if (!confirm(`"${modalOwnerUser.name}" admin hesabı silinsin?`)) return;
-    await deleteUser(modalOwnerUser.id);
-    setModalOwnerUser(null);
-    setOwnerName('');
-    setOwnerUsername('');
-    setOwnerPassword('');
-    loadData();
+    setDialog({
+      title: 'Admin hesabını sil?',
+      message: <><span className="font-medium text-stone-700">&ldquo;{modalOwnerUser.name}&rdquo;</span> admin hesabı silinəcək. Bu əməliyyat geri qaytarıla bilməz.</>,
+      onConfirm: async () => {
+        await deleteUser(modalOwnerUser.id);
+        setModalOwnerUser(null);
+        setOwnerName('');
+        setOwnerUsername('');
+        setOwnerPassword('');
+        loadData();
+      },
+    });
   }
 
   async function handleChangePassword() {
     if (!pwNew || pwNew !== pwConfirm) { setPwMsg('Yeni şifrələr uyğun deyil'); return; }
-    if (pwNew.length < 4) { setPwMsg('Şifrə ən az 4 simvol olmalıdır'); return; }
+    const pwErr = validatePassword(pwNew);
+    if (pwErr) { setPwMsg(pwErr); return; }
     const session = getSession();
     if (!session) return;
     setPwSaving(true);
@@ -480,12 +497,16 @@ export default function SuperadminPage() {
                         {c.active ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                       <button
-                        onClick={async () => {
-                          if (!confirm(`"${c.name}" şirkəti zibil qutusuna göndərilsin?`)) return;
-                          await trashCompany({ id: c.id, name: c.name, slug: c.slug, active: c.active, expiresAt: c.expiresAt, ownerName: c.ownerName, address: c.address, phone: c.phone, timezone: c.timezone });
-                          loadData();
-                          fetchCompanyTrash().then(setCompanyTrash);
-                        }}
+                        onClick={() => setDialog({
+                          title: 'Şirkəti sil?',
+                          message: <><span className="font-medium text-stone-700">&ldquo;{c.name}&rdquo;</span> zibil qutusuna göndəriləcək. Məlumatları silinmir — bərpa edəndə hər şey geri qayıdır.</>,
+                          onConfirm: async () => {
+                            const err = await trashCompany(c.id);
+                            if (err) { setDialog({ title: 'Silinmədi', message: err }); return; }
+                            loadData();
+                            fetchCompanyTrash().then(setCompanyTrash);
+                          },
+                        })}
                         className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -534,11 +555,15 @@ export default function SuperadminPage() {
                         <RotateCcw className="w-3 h-3" /> Bərpa et
                       </button>
                       <button
-                        onClick={async () => {
-                          if (!confirm(`"${String(c.name)}" həmişəlik silinsin?`)) return;
-                          await permanentlyDeleteCompany(item.id, String(c.id));
-                          setCompanyTrash(t => t.filter(x => x.id !== item.id));
-                        }}
+                        onClick={() => setDialog({
+                          title: 'Həmişəlik sil?',
+                          message: <><span className="font-medium text-stone-700">&ldquo;{String(c.name)}&rdquo;</span> bütün məlumatları ilə birlikdə (admin, menyu, sifarişlər) həmişəlik silinəcək. Bu əməliyyat geri qaytarıla bilməz.</>,
+                          onConfirm: async () => {
+                            const err = await permanentlyDeleteCompany(String(c.id));
+                            if (err) { setDialog({ title: 'Silinmədi', message: err }); return; }
+                            setCompanyTrash(t => t.filter(x => x.id !== item.id));
+                          },
+                        })}
                         className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium"
                       >
                         Sil
@@ -626,18 +651,7 @@ export default function SuperadminPage() {
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Yeni şifrə</label>
-                <div className="relative">
-                  <input
-                    type={pwShowNew ? 'text' : 'password'}
-                    value={pwNew}
-                    onChange={e => setPwNew(e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm pr-10 focus:outline-none focus:ring-2 focus:ring-[#2779a7]"
-                    placeholder="••••••"
-                  />
-                  <button type="button" onClick={() => setPwShowNew(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                    {pwShowNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
+                <PasswordField value={pwNew} onChange={setPwNew} placeholder="••••••" focusClass="focus:ring-[#2779a7]" />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 block mb-1">Yeni şifrəni təsdiqlə</label>
@@ -767,7 +781,7 @@ export default function SuperadminPage() {
                   <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1">
                     <KeyRound className="w-3.5 h-3.5" />Yeni şifrə <span className="text-gray-300 font-normal">(boş = dəyişdirmə)</span>
                   </label>
-                  <input type="password" value={ownerPassword} onChange={e => setOwnerPassword(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2779a7]" placeholder="••••••" />
+                  <PasswordField value={ownerPassword} onChange={setOwnerPassword} placeholder="••••••" focusClass="focus:ring-[#2779a7]" />
                 </div>
                 <div className="flex items-center justify-between py-0.5">
                   <span className="text-xs font-medium text-gray-500">Hesab statusu</span>
@@ -801,7 +815,7 @@ export default function SuperadminPage() {
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><KeyRound className="w-3.5 h-3.5" />Şifrə</label>
-                  <input type="password" value={ownerPassword} onChange={e => setOwnerPassword(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2779a7]" placeholder="••••••" />
+                  <PasswordField value={ownerPassword} onChange={setOwnerPassword} placeholder="••••••" focusClass="focus:ring-[#2779a7]" />
                 </div>
                 <button onClick={handleCreateOwner} disabled={ownerSaving} className="w-full bg-[#2779a7] hover:bg-[#21678e] disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors">
                   {ownerSaving ? 'Yaradılır...' : '+ Hesab yarat'}
@@ -812,6 +826,8 @@ export default function SuperadminPage() {
           </div>
         </div>
       )}
+
+      <AppDialog dialog={dialog} onClose={() => setDialog(null)} />
     </div>
   );
 }

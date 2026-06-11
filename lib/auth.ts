@@ -38,10 +38,10 @@ export async function login(username: string, password: string): Promise<LoginRe
     if (profile.company_id) {
       const { data: co } = await supabase
         .from('companies')
-        .select('name, expires_at, active')
+        .select('name, expires_at, active, trashed_at')
         .eq('id', profile.company_id)
         .single();
-      if (!co || !co.active) return { error: 'inactive' };
+      if (!co || !co.active || co.trashed_at) return { error: 'inactive' };
       companyName = co.name ?? null;
       expiresAt = co.expires_at ?? null;
     }
@@ -78,6 +78,12 @@ export async function validateSession(session: Session): Promise<boolean> {
     const { data } = await supabase.auth.getUser();
     if (!data.user) return false;
 
+    // The auth token is shared by every tab of this browser. Logging into a
+    // different account in another tab replaces it — this tab would then act
+    // on its old company with the new account's permissions (RLS errors at
+    // best, cross-company writes at worst). Treat that as an invalid session.
+    if (data.user.id !== session.id) return false;
+
     const { data: profile } = await supabase
       .from('profiles')
       .select('active')
@@ -88,10 +94,10 @@ export async function validateSession(session: Session): Promise<boolean> {
     if (session.companyId) {
       const { data: co } = await supabase
         .from('companies')
-        .select('active, expires_at')
+        .select('active, expires_at, trashed_at')
         .eq('id', session.companyId)
         .single();
-      if (!co?.active) return false;
+      if (!co?.active || co.trashed_at) return false;
       if (co.expires_at && new Date(co.expires_at) < new Date()) return false;
     }
 

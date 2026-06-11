@@ -405,7 +405,7 @@ export async function deleteTable(id: number): Promise<string | null> {
 
 export async function fetchCompanies(): Promise<{ id: string; name: string; slug: string; active: boolean; createdAt: string; expiresAt: string | null; ownerName: string | null; address: string | null; phone: string | null; timezone: string }[]> {
   try {
-    const { data, error } = await supabase.from('companies').select('*').order('created_at');
+    const { data, error } = await supabase.from('companies').select('*').is('trashed_at', null).order('created_at');
     if (error || !data) return [];
     return data.map(c => ({ id: c.id, name: c.name, slug: c.slug, active: c.active, createdAt: c.created_at, expiresAt: c.expires_at ?? null, ownerName: c.owner_name ?? null, address: c.address ?? null, phone: c.phone ?? null, timezone: c.timezone || DEFAULT_TZ }));
   } catch { return []; }
@@ -417,41 +417,39 @@ export async function createCompany(name: string, slug: string): Promise<void> {
   } catch (e) { console.error('[createCompany]', e); }
 }
 
-export async function deleteCompany(id: string): Promise<void> {
-  try {
-    await supabase.from('companies').delete().eq('id', id);
-  } catch (e) { console.error('[deleteCompany]', e); }
-}
-
+// Trash = soft delete. The company row and ALL its data (profiles, menu,
+// orders, tables, shifts) stay untouched; only trashed_at is set. Real
+// deletion happens solely in permanentlyDeleteCompany.
 export async function fetchCompanyTrash(): Promise<TrashItem[]> {
   try {
-    await supabase.from('trash_items').delete().eq('type', 'company').lt('deleted_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
-    const { data, error } = await supabase.from('trash_items').select('*').eq('type', 'company').order('deleted_at', { ascending: false });
+    // auto-purge: anything in the bin longer than 30 days is gone for good
+    await supabase.from('companies').delete().not('trashed_at', 'is', null).lt('trashed_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+    const { data, error } = await supabase.from('companies').select('*').not('trashed_at', 'is', null).order('trashed_at', { ascending: false });
     if (error || !data) return [];
-    return data.map(r => ({ id: r.id, type: r.type, data: r.data, deletedAt: r.deleted_at }));
+    return data.map(c => ({
+      id: c.id,
+      type: 'company',
+      data: { id: c.id, name: c.name, slug: c.slug, active: c.active, expiresAt: c.expires_at ?? null, ownerName: c.owner_name ?? null, address: c.address ?? null, phone: c.phone ?? null, timezone: c.timezone || DEFAULT_TZ },
+      deletedAt: c.trashed_at,
+    }));
   } catch { return []; }
 }
 
-export async function trashCompany(company: { id: string; name: string; slug: string; active: boolean; expiresAt: string | null; ownerName: string | null; address: string | null; phone: string | null; timezone?: string }): Promise<void> {
-  try {
-    await supabase.from('trash_items').insert({ type: 'company', data: company, company_id: null });
-    await supabase.from('companies').delete().eq('id', company.id);
-  } catch (e) { console.error('[trashCompany]', e); }
+export async function trashCompany(companyId: string): Promise<string | null> {
+  const { error } = await supabase.from('companies').update({ trashed_at: new Date().toISOString() }).eq('id', companyId);
+  if (error) { console.error('[trashCompany]', error); return error.message; }
+  return null;
 }
 
 export async function restoreCompany(item: TrashItem): Promise<void> {
-  try {
-    const c = item.data as Record<string, unknown>;
-    await supabase.from('companies').insert({ id: c.id, name: c.name, slug: c.slug, active: c.active, expires_at: c.expiresAt ?? null, owner_name: c.ownerName ?? null, address: c.address ?? null, phone: c.phone ?? null, timezone: (c.timezone as string) || DEFAULT_TZ });
-    await supabase.from('trash_items').delete().eq('id', item.id);
-  } catch (e) { console.error('[restoreCompany]', e); }
+  const { error } = await supabase.from('companies').update({ trashed_at: null }).eq('id', item.id);
+  if (error) console.error('[restoreCompany]', error);
 }
 
-export async function permanentlyDeleteCompany(trashId: string, companyId: string): Promise<void> {
-  try {
-    await supabase.from('profiles').delete().eq('company_id', companyId);
-    await supabase.from('trash_items').delete().eq('id', trashId);
-  } catch (e) { console.error('[permanentlyDeleteCompany]', e); }
+export async function permanentlyDeleteCompany(companyId: string): Promise<string | null> {
+  const { error } = await supabase.from('companies').delete().eq('id', companyId);
+  if (error) { console.error('[permanentlyDeleteCompany]', error); return error.message; }
+  return null;
 }
 
 export async function toggleCompanyActive(id: string, active: boolean): Promise<void> {
