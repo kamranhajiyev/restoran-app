@@ -7,6 +7,7 @@ import {
   ShoppingCart, ChevronLeft, Minus, Plus, Wallet,
 } from 'lucide-react';
 import { getSession, logout, validateSession } from '@/lib/auth';
+import { supabase } from '@/lib/supabase';
 import {
   fetchMenu, addOrder, fetchOrders, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
   fetchTablesEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
@@ -143,6 +144,12 @@ export default function SellerPage() {
     validateSession(session).then(valid => {
       if (!valid) { logout(); router.replace('/login'); }
     });
+    // If another tab logs into a different account, this tab's company context
+    // no longer matches the shared auth token — force re-login instead of
+    // firing doomed cross-company requests.
+    const { data: authSub } = supabase.auth.onAuthStateChange((_event, s) => {
+      if (!s || s.user.id !== session.id) { logout(); router.replace('/login'); }
+    });
     setCompanyContext(session.companyId);
     setSellerName(session.name);
     fetchCompanySettings(session.companyId ?? '').then(setBizSettings);
@@ -154,6 +161,7 @@ export default function SellerPage() {
       const cats = available.filter(a => m.some(i => i.category === a.name)).map(a => a.name);
       if (cats.length > 0) setActiveCategory(cats[0]);
     }).catch(() => setOnline(false));
+    return () => authSub.subscription.unsubscribe();
   }, [router]);
 
   useEffect(() => {
