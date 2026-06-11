@@ -6,7 +6,7 @@ import {
   PanelLeftClose, PanelLeftOpen, LogOut, Menu, X,
   TrendingUp, Receipt, Star, ChevronDown, Percent,
   Coffee, BarChart2, Package, Wallet, ChevronUp, ImageIcon, Trash2, RotateCcw,
-  Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search,
+  Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload,
 } from 'lucide-react';
 import { getSession, logout, validateSession } from '@/lib/auth';
 import {
@@ -20,6 +20,7 @@ import {
 } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { CashShift, Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, TrashItem } from '@/types';
+import { exportMenuExcel, parseMenuFile, ImportPreview } from '@/lib/excel';
 import QRCode from 'react-qr-code';
 
 const COOKING_STATIONS = ['Mətbəx', 'Bar', 'Soyuq mətbəx', 'Pizza', 'Mangal'];
@@ -32,7 +33,7 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
 
-type Tab = 'stats' | 'orders' | 'kassa' | 'menu' | 'categories' | 'users' | 'tables';
+type Tab = 'stats' | 'orders' | 'kassa' | 'menu' | 'users' | 'tables';
 
 interface StaffUser {
   id: string;
@@ -77,7 +78,6 @@ const NAV_ITEMS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'orders',     label: 'Sifarişlər',    icon: Receipt },
   { id: 'kassa',      label: 'Kassa',         icon: Wallet },
   { id: 'menu',       label: 'Menyu',         icon: Coffee },
-  { id: 'categories', label: 'Kateqoriyalar', icon: Tag },
   { id: 'users',      label: 'Əməkdaşlar', icon: Users },
   { id: 'tables',     label: 'Masalar',     icon: LayoutDashboard },
 ];
@@ -86,8 +86,7 @@ const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
   stats:      { title: 'Statistika & Hesabatlar', subtitle: 'Satış analitikası' },
   orders:     { title: 'Sifarişlər',              subtitle: 'Aktiv sifarişlər' },
   kassa:      { title: 'Kassa',                   subtitle: 'Növbələr və nağd pul nəzarəti' },
-  menu:       { title: 'Menyu',                    subtitle: 'Məhsulları əlavə et, düzəlt, sil' },
-  categories: { title: 'Kateqoriyalar',           subtitle: 'Menyu kateqoriyaları' },
+  menu:       { title: 'Menyu',                    subtitle: 'Kateqoriyalar və məhsullar' },
   users:      { title: 'Əməkdaşlar',              subtitle: 'Satıcıları idarə et' },
   tables:     { title: 'Masalar',                 subtitle: 'Restoran masalarını idarə et' },
 };
@@ -165,7 +164,9 @@ function LineChartSvg({ data }: { data: { label: string; fullLabel: string; rev:
 function AdminPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const tab = (searchParams.get('tab') as Tab | null) ?? 'stats';
+  const rawTab = searchParams.get('tab');
+  // 'categories' merged into 'menu' — keep old links working
+  const tab = (rawTab === 'categories' ? 'menu' : rawTab as Tab | null) ?? 'stats';
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -192,6 +193,9 @@ function AdminPageContent() {
   const [deleteItemTarget, setDeleteItemTarget] = useState<string | null>(null);
   const [trash, setTrash] = useState<TrashItem[]>([]);
   const [showTrash, setShowTrash] = useState(false);
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+  const [importing, setImporting] = useState(false);
+  const importFileRef = useRef<HTMLInputElement>(null);
 
   // kassa tab
   const [shifts, setShifts] = useState<CashShift[]>([]);
@@ -475,6 +479,32 @@ function AdminPageContent() {
     const updated = menu.map(m => m.id === id ? { ...m, available: !m.available } : m);
     setMenu(updated);
     saveMenu(updated);
+  }
+
+  // ── menu import / export ────────────────────────────────────────────────────
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      setImportPreview(await parseMenuFile(file, menu, categories));
+    } catch {
+      setImportPreview({ newItems: [], updatedItems: [], newCategories: [], errors: ['Fayl oxuna bilmədi — .xlsx və ya .csv faylı seçin'], totalRows: 0 });
+    }
+  }
+
+  async function applyImport() {
+    if (!importPreview) return;
+    setImporting(true);
+    const updatedById = new Map(importPreview.updatedItems.map(u => [u.id, u]));
+    const mergedMenu = [...menu.map(m => updatedById.get(m.id) ?? m), ...importPreview.newItems];
+    const mergedCats = [...categories, ...importPreview.newCategories];
+    setMenu(mergedMenu);
+    setCategories(mergedCats);
+    await saveCategories(mergedCats);
+    await saveMenu(mergedMenu);
+    setImporting(false);
+    setImportPreview(null);
   }
   function duplicateItem(id: string) {
     const original = menu.find(m => m.id === id);
@@ -1754,6 +1784,13 @@ function AdminPageContent() {
               <div className="flex items-center justify-between mb-5">
                 <p className="text-sm text-stone-400">{menu.filter(m => categories.some(c => c.name === m.category)).length} məhsul</p>
                 <div className="flex items-center gap-2">
+                  <input ref={importFileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportFile} />
+                  <button onClick={() => importFileRef.current?.click()} title="Excel-dən idxal et" className="flex items-center gap-1.5 text-sm text-stone-400 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
+                    <Upload className="w-4 h-4" /> <span className="hidden sm:inline">İdxal</span>
+                  </button>
+                  <button onClick={() => exportMenuExcel(menu, categories)} title="Excel-ə ixrac et" className="flex items-center gap-1.5 text-sm text-stone-400 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
+                    <Download className="w-4 h-4" /> <span className="hidden sm:inline">İxrac</span>
+                  </button>
                   <button onClick={() => setShowTrash(true)} className="relative flex items-center gap-1.5 text-sm text-stone-400 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
                     <Trash2 className="w-4 h-4" />
                     {trash.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-400 text-white text-[10px] rounded-full flex items-center justify-center font-bold">{trash.length}</span>}
@@ -1767,16 +1804,34 @@ function AdminPageContent() {
 
               {showForm && !editingId && renderItemForm('bg-white rounded-xl border border-stone-100 card p-6 mb-5 space-y-4')}
 
-              {categories.map(({ name: cat, available: catAvailable }) => {
+              {categories.map(({ name: cat, available: catAvailable }, catIdx) => {
                 const items = menu.filter(m => m.category === cat);
-                if (items.length === 0) return null;
                 return (
                   <div key={cat} className="mb-5">
-                    <div className="flex items-center gap-2 mb-2 px-1">
+                    <div className="flex items-center gap-2 mb-2 px-1 group">
+                      <div className="flex flex-col -space-y-1">
+                        <button onClick={() => moveCategoryOrder(catIdx, -1)} disabled={catIdx === 0} className="text-stone-300 hover:text-stone-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => moveCategoryOrder(catIdx, 1)} disabled={catIdx === categories.length - 1} className="text-stone-300 hover:text-stone-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                       <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider">{cat}</p>
+                      <span className="text-xs text-stone-300">{items.length}</span>
                       {!catAvailable && <span className="text-xs bg-stone-100 text-stone-400 px-1.5 py-0.5 rounded font-medium">Gizli</span>}
+                      <div className="flex items-center gap-0.5 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => toggleCategoryAvailable(cat)} className={`text-xs px-2 py-0.5 rounded-lg font-medium transition-colors ${catAvailable ? 'text-stone-400 hover:bg-stone-100' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
+                          {catAvailable ? 'Bağla' : 'Aç'}
+                        </button>
+                        <button onClick={() => { setEditCatTarget(cat); setEditCatValue(cat); }} className="text-xs text-amber-600 hover:text-amber-800 px-2 py-0.5 rounded-lg hover:bg-amber-50 transition-colors font-medium">Dəyiş</button>
+                        <button onClick={() => setDeleteCatTarget(cat)} className="text-xs text-red-400 hover:text-red-600 px-2 py-0.5 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
+                      </div>
                     </div>
                     <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
+                      {items.length === 0 && (
+                        <p className="px-4 py-3 text-xs text-stone-300">Bu kateqoriyada məhsul yoxdur</p>
+                      )}
                       {items.map((item, i) => (
                         <React.Fragment key={item.id}>
                         <div className={`flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors ${(i < items.length - 1 && editingId !== item.id) ? 'border-b border-stone-50' : ''}`}>
@@ -1823,12 +1878,21 @@ function AdminPageContent() {
                 );
               })}
 
-              {menu.length === 0 && !showForm && (
+              {menu.length === 0 && categories.length === 0 && !showForm && (
                 <div className="bg-white rounded-xl border border-stone-100 card p-16 text-center">
                   <Coffee className="w-10 h-10 mx-auto mb-3 text-stone-200" />
                   <p className="text-sm text-stone-400">Məhsul yoxdur</p>
                 </div>
               )}
+
+              <form onSubmit={addCategory} className="flex gap-2 mt-2">
+                <input type="text" placeholder="Yeni kateqoriya adı" value={newCat}
+                  onChange={e => setNewCat(e.target.value)}
+                  className="flex-1 border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
+                <button type="submit" className="flex items-center gap-1.5 text-sm font-medium text-amber-800 border border-amber-200 hover:bg-amber-50 px-4 py-2 rounded-lg transition-colors">
+                  <Tag className="w-3.5 h-3.5" /> Kateqoriya əlavə et
+                </button>
+              </form>
             </div>
           )}
 
@@ -1888,56 +1952,6 @@ function AdminPageContent() {
                   </div>
                 </div>
               ))}
-            </div>
-          )}
-
-          {/* ── CATEGORIES ─────────────────────────────────────────────── */}
-          {tab === 'categories' && (
-            <div className="max-w-lg space-y-4">
-              <form onSubmit={addCategory} className="flex gap-2">
-                <input type="text" placeholder="Yeni kateqoriya adı" value={newCat}
-                  onChange={e => setNewCat(e.target.value)}
-                  className="flex-1 border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
-                <button type="submit" className="bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors">Əlavə et</button>
-                <button type="button" onClick={() => setShowTrash(true)} className="relative flex items-center justify-center text-stone-400 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors border border-stone-200">
-                  <Trash2 className="w-4 h-4" />
-                  {trash.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-400 text-white text-[10px] rounded-full flex items-center justify-center font-bold">{trash.length}</span>}
-                </button>
-              </form>
-
-              <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
-                {categories.map(({ name: cat, available: catAvailable }, i) => (
-                  <div key={cat} className={`flex items-center justify-between px-5 py-3 hover:bg-stone-50 transition-colors ${i < categories.length - 1 ? 'border-b border-stone-50' : ''}`}>
-                    <div className="flex items-center gap-3">
-                      <div className="flex flex-col gap-0.5">
-                        <button onClick={() => moveCategoryOrder(i, -1)} disabled={i === 0} className="text-stone-300 hover:text-stone-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
-                          <ChevronUp className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => moveCategoryOrder(i, 1)} disabled={i === categories.length - 1} className="text-stone-300 hover:text-stone-600 disabled:opacity-20 disabled:cursor-not-allowed transition-colors">
-                          <ChevronDown className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      <span className="w-6 h-6 bg-amber-50 text-amber-800 rounded-lg flex items-center justify-center text-xs font-bold">{i + 1}</span>
-                      <span className={`text-sm font-medium ${catAvailable ? 'text-stone-800' : 'text-stone-400'}`}>{cat}</span>
-                      {!catAvailable && <span className="text-xs bg-stone-100 text-stone-400 px-1.5 py-0.5 rounded font-medium">Gizli</span>}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-stone-400">{menu.filter(m => m.category === cat).length} məhsul</span>
-                      <button onClick={() => toggleCategoryAvailable(cat)} className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${catAvailable ? 'bg-stone-100 text-stone-600 hover:bg-stone-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
-                        {catAvailable ? 'Bağla' : 'Aç'}
-                      </button>
-                      <button onClick={() => { setEditCatTarget(cat); setEditCatValue(cat); }} className="text-xs text-amber-600 hover:text-amber-800 px-2 py-1 rounded-lg hover:bg-amber-50 transition-colors font-medium">Dəyiş</button>
-                      <button onClick={() => setDeleteCatTarget(cat)} className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
-                    </div>
-                  </div>
-                ))}
-                {categories.length === 0 && (
-                  <div className="p-10 text-center">
-                    <Tag className="w-8 h-8 mx-auto mb-2 text-stone-200" />
-                    <p className="text-sm text-stone-400">Kateqoriya yoxdur</p>
-                  </div>
-                )}
-              </div>
             </div>
           )}
 
@@ -2302,6 +2316,61 @@ function AdminPageContent() {
           </div>
         </div>
       )}
+
+      {/* ── Import preview modal ────────────────────────────────────────── */}
+      {importPreview && (() => {
+        const { newItems, updatedItems, newCategories, errors, totalRows } = importPreview;
+        const validCount = newItems.length + updatedItems.length;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md flex flex-col max-h-[85vh]">
+              <div className="p-6 pb-4">
+                <h3 className="text-base font-semibold text-stone-800">Menyu idxalı</h3>
+                <p className="text-sm text-stone-500 mt-1">{totalRows} sətir oxundu</p>
+              </div>
+              <div className="px-6 space-y-2 overflow-y-auto flex-1">
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-green-50 rounded-xl py-3">
+                    <p className="text-xl font-bold text-green-700">{newItems.length}</p>
+                    <p className="text-xs text-green-600">yeni məhsul</p>
+                  </div>
+                  <div className="bg-amber-50 rounded-xl py-3">
+                    <p className="text-xl font-bold text-amber-700">{updatedItems.length}</p>
+                    <p className="text-xs text-amber-600">yenilənəcək</p>
+                  </div>
+                  <div className="bg-blue-50 rounded-xl py-3">
+                    <p className="text-xl font-bold text-blue-700">{newCategories.length}</p>
+                    <p className="text-xs text-blue-600">yeni kateqoriya</p>
+                  </div>
+                </div>
+                {newCategories.length > 0 && (
+                  <p className="text-xs text-stone-500">Yeni kateqoriyalar: {newCategories.map(c => c.name).join(', ')}</p>
+                )}
+                {errors.length > 0 && (
+                  <div className="bg-red-50 border border-red-100 rounded-xl p-3 space-y-1">
+                    <p className="text-xs font-semibold text-red-600">{errors.length} xəta — bu sətirlər ötürüləcək:</p>
+                    {errors.map((e, i) => <p key={i} className="text-xs text-red-500">{e}</p>)}
+                  </div>
+                )}
+                <p className="text-xs text-stone-400">
+                  Mövcud məhsullar ad üzrə tapılıb yenilənir (şəkilləri qalır). Faylda olmayan məhsullara toxunulmur — heç nə silinmir.
+                </p>
+              </div>
+              <div className="flex gap-2 justify-end p-6 pt-4">
+                <button onClick={() => setImportPreview(null)} className="px-4 py-2 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors">Ləğv et</button>
+                <button
+                  onClick={applyImport}
+                  disabled={importing || validCount === 0}
+                  className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-amber-800 hover:bg-amber-900 disabled:opacity-40 text-white font-medium transition-colors"
+                >
+                  {importing && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                  Tətbiq et ({validCount})
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Trash modal ─────────────────────────────────────────────────── */}
       {showTrash && (
