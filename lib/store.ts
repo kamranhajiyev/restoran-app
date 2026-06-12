@@ -1,4 +1,4 @@
-import { CashShift, Category, MenuItem, Order, RestaurantTable, ShiftMovement, TrashItem } from '@/types';
+import { CashShift, Category, MenuItem, Order, RestaurantTable, ShiftMovement, Staff, TrashItem } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { supabase } from './supabase';
 
@@ -218,6 +218,7 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
       orderNumber: (totalCount ?? all.length) - offset - i,
       tableNumber: o.table_id ?? 0,
       sellerName: o.waiter_name,
+      staffId: o.staff_id ?? undefined,
       status: o.status as Order['status'],
       note: o.note ?? undefined,
       createdAt: o.created_at,
@@ -251,6 +252,7 @@ export async function addOrder(order: Order): Promise<void> {
       id: order.id,
       table_id: order.tableNumber === 0 ? null : order.tableNumber,
       waiter_name: order.sellerName,
+      staff_id: order.staffId ?? null,
       status: order.status,
       note: order.note ?? null,
       created_at: order.createdAt,
@@ -317,6 +319,63 @@ export async function cancelOrder(orderId: string, reason: string, by: string): 
     .select('id');
   if (error) { console.error('[cancelOrder]', error.message); return false; }
   return (data?.length ?? 0) > 0;
+}
+
+// ─── Staff (Poster-style PIN sellers) ────────────────────────────────────────
+// Staff are not auth users: the terminal stays logged in and people identify
+// themselves with a 4-digit PIN. All writes go through owner-only RPCs; the
+// PIN is verified server-side (hashed, company-wide lockout on brute force).
+
+export async function fetchStaff(): Promise<Staff[]> {
+  try {
+    const { data, error } = await supabase.from('staff')
+      .select('id, name, active, created_at')
+      .order('created_at');
+    if (error || !data) return [];
+    return data.map(s => ({ id: s.id, name: s.name, active: s.active, createdAt: s.created_at }));
+  } catch { return []; }
+}
+
+// RPC errors carry machine codes (bad_pin, pin_taken, …); the UI translates them
+function staffError(error: { message: string } | null): string | null {
+  return error ? error.message : null;
+}
+
+export async function createStaff(name: string, pin: string): Promise<string | null> {
+  const { error } = await supabase.rpc('create_staff', { p_name: name, p_pin: pin });
+  return staffError(error);
+}
+
+export async function updateStaff(id: string, name: string, active: boolean): Promise<string | null> {
+  const { error } = await supabase.rpc('update_staff', { p_id: id, p_name: name, p_active: active });
+  return staffError(error);
+}
+
+export async function setStaffPin(id: string, pin: string): Promise<string | null> {
+  const { error } = await supabase.rpc('set_staff_pin', { p_id: id, p_pin: pin });
+  return staffError(error);
+}
+
+export async function deleteStaff(id: string): Promise<string | null> {
+  const { error } = await supabase.rpc('delete_staff', { p_id: id });
+  return staffError(error);
+}
+
+export type PinResult =
+  | { ok: true; id: string; name: string }
+  | { ok: false; error: 'wrong'; attemptsLeft: number }
+  | { ok: false; error: 'locked'; lockedUntil: string }
+  | { ok: false; error: 'no_company' | 'network' };
+
+export async function verifyStaffPin(pin: string): Promise<PinResult> {
+  try {
+    const { data, error } = await supabase.rpc('verify_staff_pin', { p_pin: pin });
+    if (error || !data) return { ok: false, error: 'network' };
+    if (data.ok) return { ok: true, id: data.id, name: data.name };
+    if (data.error === 'locked') return { ok: false, error: 'locked', lockedUntil: data.locked_until };
+    if (data.error === 'wrong') return { ok: false, error: 'wrong', attemptsLeft: data.attempts_left ?? 0 };
+    return { ok: false, error: 'no_company' };
+  } catch { return { ok: false, error: 'network' }; }
 }
 
 // ─── Public: company by slug ──────────────────────────────────────────────────

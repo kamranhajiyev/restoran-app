@@ -77,6 +77,15 @@ export interface CashShift {
   movements: ShiftMovement[];
 }
 
+// Poster-style floor staff: identified by a 4-digit PIN on a logged-in
+// terminal instead of an auth account. The PIN hash never leaves the database.
+export interface Staff {
+  id: string;
+  name: string;
+  active: boolean;
+  createdAt: string;
+}
+
 export interface Order {
   id: string;
   orderNumber: number;
@@ -85,6 +94,7 @@ export interface Order {
   status: OrderStatus;
   createdAt: string;
   sellerName: string;
+  staffId?: string;
   note?: string;
   cashAmount?: number;   // money kept in the till (net of change given back)
   cardAmount?: number;

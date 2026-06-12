@@ -7,7 +7,7 @@ import {
   TrendingUp, Receipt, Star, ChevronDown, Percent,
   Coffee, BarChart2, Package, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
-  GripVertical, Globe,
+  GripVertical, Globe, KeyRound,
 } from 'lucide-react';
 import {
   DndContext, DragEndEvent, PointerSensor, useSensor, useSensors,
@@ -27,13 +27,14 @@ import {
   fetchCompanyProfile, updateMyCompanyProfile, verifyPassword,
   fetchCompanySettings, updateCompanyHours,
   fetchLoginEvents, LoginEvent,
+  fetchStaff, createStaff, updateStaff, setStaffPin, deleteStaff,
 } from '@/lib/store';
 import {
   CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc,
   addDays, dayDiff, dayOfWeek, dayToDate, tzHour, cutoffMinutes,
 } from '@/lib/business-day';
 import { supabase } from '@/lib/supabase';
-import { CashShift, Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, TrashItem, isOrderOpen } from '@/types';
+import { CashShift, Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, Staff, TrashItem, isOrderOpen } from '@/types';
 import AppDialog, { DialogState } from '@/components/AppDialog';
 import PasswordField from '@/components/PasswordField';
 import { validatePassword } from '@/lib/password';
@@ -41,6 +42,17 @@ import { exportMenuExcel, parseMenuFile, ImportPreview } from '@/lib/excel';
 import QRCode from 'react-qr-code';
 
 const COOKING_STATIONS = ['Mətbəx', 'Bar', 'Soyuq mətbəx', 'Pizza', 'Mangal'];
+// RPC raise messages are machine codes — translated here for display
+const STAFF_ERRORS: Record<string, string> = {
+  pin_taken: 'Bu PIN artıq başqa əməkdaşda istifadə olunur',
+  bad_pin: 'PIN 4 rəqəmdən ibarət olmalıdır',
+  bad_name: 'Ad boş ola bilməz',
+  not_owner: 'Bu əməliyyat üçün icazəniz yoxdur',
+};
+function staffErrorText(err: string): string {
+  const code = Object.keys(STAFF_ERRORS).find(c => err.includes(c));
+  return code ? STAFF_ERRORS[code] : 'Xəta baş verdi, yenidən cəhd edin';
+}
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
 const STATUS_COLORS: Record<OrderStatus, string> = {
@@ -363,6 +375,15 @@ function AdminPageContent() {
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [companySlug, setCompanySlug] = useState<string | null>(null);
 
+  // PIN staff (Poster-style sellers — identified by PIN on the terminal)
+  const [pinStaff, setPinStaff] = useState<Staff[]>([]);
+  const [showStaffForm, setShowStaffForm] = useState(false);
+  const [editingStaff, setEditingStaff] = useState<Staff | null>(null);
+  const [sName, setSName] = useState('');
+  const [sPin, setSPin] = useState('');
+  const [sSaving, setSSaving] = useState(false);
+  const [sError, setSError] = useState('');
+
   // logins tab
   const [loginEvents, setLoginEvents] = useState<LoginEvent[]>([]);
   const [loginsLoaded, setLoginsLoaded] = useState(false);
@@ -454,6 +475,7 @@ function AdminPageContent() {
       setCustomFrom(t);
       setCustomTo(t);
     });
+    fetchStaff().then(setPinStaff);
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchAllUsers(), fetchTables(), fetchCompanySlug(session.companyId ?? ''), fetchTablesEnabled()]).then(([m, o, c, t, u, tb, slug, te]) => {
       setMenu(m);
       setOrders(o);
@@ -2328,6 +2350,78 @@ function AdminPageContent() {
                   </div>
                 </div>
               ))}
+
+              {/* Poster-style PIN sellers: no login — they identify themselves
+                  on the logged-in terminal with a 4-digit PIN */}
+              <div className="pt-6 space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-stone-600">PIN ilə satıcılar · {pinStaff.length}</p>
+                    <p className="text-xs text-stone-400 mt-0.5">Terminal yuxarıdakı hesabla daxil olur, satıcılar özlərini 4 rəqəmli PIN ilə tanıdır</p>
+                  </div>
+                  <button
+                    onClick={() => { setEditingStaff(null); setSName(''); setSPin(''); setSError(''); setShowStaffForm(true); }}
+                    className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors shrink-0"
+                  >
+                    <Plus className="w-4 h-4" /> PIN əməkdaşı
+                  </button>
+                </div>
+
+                {pinStaff.length === 0 && (
+                  <div className="bg-white rounded-xl border border-stone-100 p-10 text-center">
+                    <KeyRound className="w-8 h-8 mx-auto mb-3 text-stone-200" />
+                    <p className="text-sm text-stone-500">PIN əməkdaşı yoxdur</p>
+                    <p className="text-xs text-stone-400 mt-1">Əlavə etdikdən sonra satıcı səhifəsi PIN ekranı ilə açılacaq</p>
+                  </div>
+                )}
+
+                {pinStaff.map(s => (
+                  <div key={s.id} className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full bg-stone-100 flex items-center justify-center text-stone-500 shrink-0">
+                      <KeyRound className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-stone-800">{s.name}</p>
+                      <p className="text-xs text-stone-500">PIN: ••••</p>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${s.active ? 'bg-green-100 text-green-700' : 'bg-stone-100 text-stone-600'}`}>
+                      {s.active ? 'Aktiv' : 'Deaktiv'}
+                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => { setEditingStaff(s); setSName(s.name); setSPin(''); setSError(''); setShowStaffForm(true); }}
+                        title="Düzəlt"
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-amber-700 transition-colors"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => updateStaff(s.id, s.name, !s.active).then(err => {
+                          if (err) setDialog({ title: 'Alınmadı', message: staffErrorText(err) });
+                          else setPinStaff(prev => prev.map(x => x.id === s.id ? { ...x, active: !x.active } : x));
+                        })}
+                        title={s.active ? 'Deaktiv et' : 'Aktiv et'}
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 transition-colors"
+                      >
+                        {s.active ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                      <button
+                        onClick={() => setDialog({
+                          title: 'Əməkdaşı sil?',
+                          message: <><span className="font-medium text-stone-700">&ldquo;{s.name}&rdquo;</span> silinəcək. Köhnə sifarişlərdə adı qalacaq.</>,
+                          onConfirm: () => deleteStaff(s.id).then(err => {
+                            if (err) setDialog({ title: 'Silinmədi', message: staffErrorText(err) });
+                            else setPinStaff(prev => prev.filter(x => x.id !== s.id));
+                          }),
+                        })}
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-red-50 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -2725,6 +2819,74 @@ function AdminPageContent() {
       )}
 
       {/* ── Create / Edit user modal ────────────────────────────────────── */}
+      {showStaffForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-stone-800">{editingStaff ? 'PIN əməkdaşını düzəlt' : 'Yeni PIN əməkdaşı'}</h3>
+              <button onClick={() => setShowStaffForm(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form
+              onSubmit={async e => {
+                e.preventDefault();
+                setSError('');
+                const name = sName.trim();
+                // edit with empty PIN = keep the old one
+                if ((sPin || !editingStaff) && !/^\d{4}$/.test(sPin)) { setSError(STAFF_ERRORS.bad_pin); return; }
+                setSSaving(true);
+                let err: string | null;
+                if (editingStaff) {
+                  err = await updateStaff(editingStaff.id, name, editingStaff.active);
+                  if (!err && sPin) err = await setStaffPin(editingStaff.id, sPin);
+                } else {
+                  err = await createStaff(name, sPin);
+                }
+                setSSaving(false);
+                if (err) { setSError(staffErrorText(err)); return; }
+                setPinStaff(await fetchStaff());
+                setShowStaffForm(false);
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="text-xs font-medium text-stone-600 block mb-1">Ad</label>
+                <input
+                  value={sName}
+                  onChange={e => setSName(e.target.value)}
+                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder="Tam ad"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-stone-600 block mb-1">
+                  {editingStaff ? 'Yeni PIN' : 'PIN'}
+                </label>
+                <input
+                  value={sPin}
+                  onChange={e => setSPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                  inputMode="numeric"
+                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  placeholder={editingStaff ? 'Dəyişmək üçün daxil edin' : '4 rəqəm'}
+                  required={!editingStaff}
+                />
+              </div>
+              {sError && <p className="text-red-500 text-sm">{sError}</p>}
+              <button
+                type="submit"
+                disabled={sSaving}
+                className="w-full bg-amber-800 hover:bg-amber-900 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+              >
+                {sSaving && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                {editingStaff ? 'Yadda saxla' : 'Əlavə et'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {showUserForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
