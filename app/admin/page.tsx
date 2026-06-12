@@ -203,6 +203,12 @@ function LineChartSvg({ data }: { data: { label: string; fullLabel: string; rev:
   );
 }
 
+// Diacritic-insensitive normalization so "cay" matches "Çay" and "e" matches "ə"
+const AZ_CHARS: Record<string, string> = { 'ç': 'c', 'ə': 'e', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u' };
+function azNormalize(s: string): string {
+  return s.toLocaleLowerCase('az').replace(/[çəğıöşü]/g, ch => AZ_CHARS[ch]);
+}
+
 // ── Menyu tab drag & drop wrappers ───────────────────────────────────────────
 
 type DragHandle = {
@@ -296,6 +302,7 @@ function AdminPageContent() {
       return next;
     });
   }
+  const [menuSearch, setMenuSearch] = useState('');
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
   const [importing, setImporting] = useState(false);
   const importFileRef = useRef<HTMLInputElement>(null);
@@ -1036,6 +1043,10 @@ function AdminPageContent() {
   const paidOrders = (dataLoading ? [] : statsOrders).filter(o => o.status === 'ödənilib');
   const activeOrders = orders.filter(isOrderOpen);
   const orderQuery = orderSearch.trim().toLowerCase();
+  const menuQuery = azNormalize(menuSearch.trim());
+  const menuMatchCount = menuQuery
+    ? menu.filter(m => categories.some(c => c.name === m.category) && azNormalize(m.name).includes(menuQuery)).length
+    : 0;
   const visibleOrders = orderQuery
     ? orders.filter(o => String(o.orderNumber).includes(orderQuery) || (o.sellerName ?? '').toLowerCase().includes(orderQuery))
     : orders;
@@ -2094,11 +2105,28 @@ function AdminPageContent() {
                 </div>
               </div>
 
+              <div className="relative mb-5">
+                <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  value={menuSearch}
+                  onChange={e => setMenuSearch(e.target.value)}
+                  placeholder="Məhsul adı ilə axtar"
+                  className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-9 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-amber-300"
+                />
+                {menuSearch && (
+                  <button onClick={() => setMenuSearch('')} title="Axtarışı təmizlə" className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-lg text-stone-400 hover:text-stone-600 hover:bg-stone-100 transition-colors">
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
               <DndContext sensors={dndSensors} collisionDetection={menuCollision} onDragEnd={handleMenuDragEnd}>
               <SortableContext items={categories.map(c => `cat:${c.name}`)} strategy={verticalListSortingStrategy}>
               {categories.map(({ name: cat, available: catAvailable }) => {
-                const items = menu.filter(m => m.category === cat);
-                const isCollapsed = collapsedCats.has(cat);
+                const allItems = menu.filter(m => m.category === cat);
+                const items = menuQuery ? allItems.filter(m => azNormalize(m.name).includes(menuQuery)) : allItems;
+                if (menuQuery && items.length === 0) return null;
+                const isCollapsed = !menuQuery && collapsedCats.has(cat);
                 return (
                   <SortableRow key={cat} id={`cat:${cat}`} className="mb-5">
                   {catHandle => (<>
@@ -2178,6 +2206,7 @@ function AdminPageContent() {
                       ))}
                       </SortableContext>
                       {/* Quick add: type name + price, Enter — details via Düzəlt later */}
+                      {!menuQuery && (
                       <div className="flex items-center gap-2 px-4 py-2.5 border-t border-stone-100 bg-stone-50/60">
                         <input
                           type="text" placeholder="Yeni məhsul adı…"
@@ -2212,6 +2241,7 @@ function AdminPageContent() {
                           <Plus className="w-4 h-4" />
                         </button>
                       </div>
+                      )}
                     </div>
                     )}
                   </>)}
@@ -2220,6 +2250,13 @@ function AdminPageContent() {
               })}
               </SortableContext>
               </DndContext>
+
+              {menuQuery !== '' && menuMatchCount === 0 && (
+                <div className="bg-white rounded-xl border border-stone-100 card p-16 text-center">
+                  <Search className="w-10 h-10 mx-auto mb-3 text-stone-200" />
+                  <p className="text-sm text-stone-500">&ldquo;{menuSearch.trim()}&rdquo; üzrə məhsul tapılmadı</p>
+                </div>
+              )}
 
               {menu.length === 0 && categories.length === 0 && !showForm && (
                 <div className="bg-white rounded-xl border border-stone-100 card p-16 text-center">

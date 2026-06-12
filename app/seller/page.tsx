@@ -4,12 +4,13 @@ import { useRouter } from 'next/navigation';
 import {
   PanelLeftClose, PanelLeftOpen, LogOut, X,
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
-  ShoppingCart, ChevronLeft, Minus, Plus, Wallet,
+  ShoppingCart, ChevronLeft, ChevronDown, Minus, Plus, Wallet,
+  History, Search,
 } from 'lucide-react';
 import { getSession, logout, validateSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
-  fetchMenu, addOrder, fetchOrders, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
+  fetchMenu, addOrder, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
   fetchTablesEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings,
 } from '@/lib/store';
@@ -18,7 +19,7 @@ import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, Restauran
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
-type View = 'orders' | 'new-order' | 'menu' | 'kassa';
+type View = 'orders' | 'new-order' | 'menu' | 'kassa' | 'history';
 type PayMethod = 'nağd' | 'kart';
 type OrderType = 'masa' | 'takeaway';
 
@@ -96,6 +97,12 @@ export default function SellerPage() {
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [submitting, setSubmitting]         = useState(false);
 
+  // order history
+  const [historySearch, setHistorySearch]   = useState('');
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [totalOrders, setTotalOrders]       = useState(0);
+  const [loadingMore, setLoadingMore]       = useState(false);
+
   // cancel modal — preset reason required, free text only for "Digər"
   const [cancellingOrder, setCancellingOrder] = useState<Order | null>(null);
   const [cancelReason, setCancelReason]       = useState<string | null>(null);
@@ -135,7 +142,10 @@ export default function SellerPage() {
   const [refreshing, setRefreshing] = useState(false);
   const refreshOrders = useCallback(async () => {
     setRefreshing(true);
-    try { setOrders(await fetchOrders({ limit: 200 })); } finally { setRefreshing(false); }
+    try {
+      const [o, total] = await Promise.all([fetchOrders({ limit: 200 }), fetchOrdersCount()]);
+      setOrders(o); setTotalOrders(total);
+    } finally { setRefreshing(false); }
   }, []);
 
   useEffect(() => {
@@ -154,6 +164,7 @@ export default function SellerPage() {
     setSellerName(session.name);
     fetchCompanySettings(session.companyId ?? '').then(setBizSettings);
     fetchOpenShift().then(s => { setShift(s); setShiftChecked(true); });
+    fetchOrdersCount().then(setTotalOrders);
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled()]).then(([m, o, c, tb, te]) => {
       setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te);
       const available = c.filter(cat => cat.available);
@@ -367,6 +378,14 @@ export default function SellerPage() {
     setJustClosed(true);
   }
 
+  async function loadMoreOrders() {
+    setLoadingMore(true);
+    try {
+      const more = await fetchOrders({ limit: 200, offset: orders.length });
+      setOrders(prev => [...prev, ...more.filter(m => !prev.some(p => p.id === m.id))]);
+    } finally { setLoadingMore(false); }
+  }
+
   async function handleStatusChange(id: string, status: OrderStatus) {
     const prevStatus = orders.find(o => o.id === id)?.status;
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
@@ -387,6 +406,13 @@ export default function SellerPage() {
   const todayOrders = active.filter(o => isToday(o.createdAt));
   const prevOrders  = active.filter(o => !isToday(o.createdAt));
   const myTodayTips = orders.filter(o => o.sellerName === sellerName && isToday(o.createdAt) && (o.tipAmount ?? 0) > 0).reduce((s, o) => s + (o.tipAmount ?? 0), 0);
+  const historyQuery = historySearch.trim().toLowerCase();
+  const historyOrders = historyQuery
+    ? orders.filter(o =>
+        String(o.orderNumber).includes(historyQuery) ||
+        (o.sellerName ?? '').toLowerCase().includes(historyQuery) ||
+        tableName(o.tableNumber).toLowerCase().includes(historyQuery))
+    : orders;
 
   // ── sidebar (desktop only) ────────────────────────────────────────────────
 
@@ -415,6 +441,7 @@ export default function SellerPage() {
             { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
             { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
             { id: 'kassa' as View,     label: 'Kassa',        icon: Wallet },
+            { id: 'history' as View,   label: 'Tarixçə',      icon: History },
           ].map(n => {
             const Icon = n.icon;
             const isActive = view === n.id || (n.id === 'new-order' && view === 'menu');
@@ -622,6 +649,162 @@ export default function SellerPage() {
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
                     {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onStatusChange={handleStatusChange} />)}
                   </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── HISTORY ── */}
+          {view === 'history' && (
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="px-4 md:px-6 pt-5 pb-2 flex items-end justify-between gap-3">
+                <div>
+                  <h1 className="text-lg font-semibold text-stone-900">Tarixçə</h1>
+                  <p className="text-sm text-stone-600 mt-0.5">
+                    {totalOrders > orders.length ? `${totalOrders} sifariş · son ${orders.length}` : `${orders.length} sifariş`}
+                  </p>
+                </div>
+                <button
+                  onClick={refreshOrders}
+                  disabled={refreshing}
+                  className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
+                >
+                  {refreshing
+                    ? <span className="w-3.5 h-3.5 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
+                    : <span>↻</span>}
+                  Yenilə
+                </button>
+              </div>
+
+              <div className="px-4 md:px-6 py-2">
+                <div className="relative max-w-md">
+                  <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    value={historySearch}
+                    onChange={e => setHistorySearch(e.target.value)}
+                    placeholder="Sifariş №, masa və ya satıcı ilə axtar"
+                    className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-3 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-amber-300"
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-4">
+                {orders.length === 0 && (
+                  <div className="text-center py-20 text-stone-500">
+                    <div className="text-5xl mb-3">🕐</div>
+                    <p>Hələlik sifariş yoxdur</p>
+                  </div>
+                )}
+
+                {orders.length > 0 && historyOrders.length === 0 && (
+                  <div className="bg-white rounded-xl border border-stone-100 p-10 text-center">
+                    <p className="text-sm text-stone-500">Axtarışa uyğun sifariş tapılmadı (yüklənmiş {orders.length} sifariş arasında)</p>
+                  </div>
+                )}
+
+                {historyOrders.length > 0 && (
+                  <div className="bg-white rounded-xl border border-stone-100 overflow-hidden">
+                    {historyOrders.map((order, i) => {
+                      const isExpanded = expandedOrderId === order.id;
+                      const tLabel = tableName(order.tableNumber);
+                      return (
+                        <div key={order.id} className={i < historyOrders.length - 1 ? 'border-b border-stone-50' : ''}>
+                          <button
+                            onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
+                            className="w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 hover:bg-stone-50 transition-colors text-left"
+                          >
+                            <ChevronDown className={`w-4 h-4 text-stone-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                            <span className="w-12 text-xs font-bold text-amber-900 flex-shrink-0">№{order.orderNumber}</span>
+                            <span className="flex-1 text-sm text-stone-700 truncate">
+                              {[tLabel, order.sellerName].filter(Boolean).join(' · ')}
+                            </span>
+                            <span className="text-xs text-stone-500 flex-shrink-0 hidden sm:block">
+                              {new Date(order.createdAt).toLocaleDateString('az-AZ', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
+                              {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
+                            </span>
+                            <span className="text-sm font-semibold text-stone-800 flex-shrink-0 w-16 sm:w-20 text-right">{orderTotal(order).toFixed(2)} ₼</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 w-20 sm:w-24 text-center truncate ${STATUS_COLORS[order.status]}`}>{order.status}</span>
+                          </button>
+
+                          {isExpanded && (
+                            <div className="px-4 pb-4 bg-stone-50 border-t border-stone-100">
+                              <p className="pt-3 text-xs text-stone-500 sm:hidden">
+                                {new Date(order.createdAt).toLocaleDateString('az-AZ', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
+                                {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
+                              </p>
+                              <div className="pt-3 space-y-1 mb-3">
+                                {order.items.map((oi, j) => (
+                                  <div key={j} className="flex justify-between text-sm text-stone-700 py-0.5">
+                                    <span className="flex-1">
+                                      {oi.menuItem.name}
+                                      {oi.modifiers && <span className="text-xs text-amber-600 ml-1">({oi.modifiers})</span>}
+                                    </span>
+                                    <span className="text-stone-500 mx-4">{oi.quantity} əd</span>
+                                    <span className="font-medium">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
+                                  </div>
+                                ))}
+                              </div>
+                              {order.note && <p className="text-xs text-stone-500 italic mb-3">Qeyd: {order.note}</p>}
+                              {order.status === 'ləğv edildi' && (
+                                <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3">
+                                  Ləğv edildi{order.cancelledBy ? ` — ${order.cancelledBy}` : ''}
+                                  {order.cancelledAt ? `, ${new Date(order.cancelledAt).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}` : ''}
+                                  {order.cancelReason ? ` · Səbəb: ${order.cancelReason}` : ''}
+                                </p>
+                              )}
+                              <div className="flex items-center justify-between gap-2 flex-wrap pt-2 border-t border-stone-200">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {isOrderOpen(order) && (
+                                    <>
+                                      <button
+                                        onClick={() => openPayment(order)}
+                                        className="text-xs font-semibold text-white bg-amber-800 hover:bg-amber-900 rounded-lg px-2.5 py-1 transition-colors"
+                                      >
+                                        Ödəniş
+                                      </button>
+                                      <button
+                                        onClick={() => openCancel(order)}
+                                        className="text-xs font-semibold text-red-500 border border-red-200 hover:bg-red-50 rounded-lg px-2.5 py-1 transition-colors"
+                                      >
+                                        Ləğv et
+                                      </button>
+                                    </>
+                                  )}
+                                  {(order.cashAmount || order.cardAmount) && (
+                                    <span className="text-xs text-stone-500">
+                                      {[order.cashAmount ? `💵 ${order.cashAmount.toFixed(2)}` : '', order.cardAmount ? `💳 ${order.cardAmount.toFixed(2)}` : ''].filter(Boolean).join(' · ')}
+                                    </span>
+                                  )}
+                                  {(order.tipAmount ?? 0) > 0 && (
+                                    <span className="text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                                      ⭐ bəxşiş {order.tipAmount!.toFixed(2)} ₼
+                                    </span>
+                                  )}
+                                  {(order.changeAmount ?? 0) > 0 && (
+                                    <span className="text-xs text-stone-500">
+                                      💸 {((order.cashAmount ?? 0) + order.changeAmount!).toFixed(2)} alındı · {order.changeAmount!.toFixed(2)} qaytarıldı
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="font-bold text-amber-900">{orderTotal(order).toFixed(2)} ₼</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {!historyQuery && orders.length < totalOrders && (
+                  <button
+                    onClick={loadMoreOrders}
+                    disabled={loadingMore}
+                    className="w-full mt-3 flex items-center justify-center gap-2 bg-white border border-stone-200 rounded-xl py-2.5 text-sm font-medium text-amber-800 hover:bg-amber-50 transition-colors disabled:opacity-60"
+                  >
+                    {loadingMore && <span className="w-3.5 h-3.5 border-2 border-amber-200 border-t-amber-800 rounded-full animate-spin" />}
+                    Daha çox göstər ({totalOrders - orders.length} qalıb)
+                  </button>
                 )}
               </div>
             </div>
@@ -999,6 +1182,7 @@ export default function SellerPage() {
           { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
           { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
           { id: 'kassa' as View,     label: 'Kassa',        icon: Wallet },
+          { id: 'history' as View,   label: 'Tarixçə',      icon: History },
         ].map(n => {
           const Icon = n.icon;
           const isActive = view === n.id || (n.id === 'new-order' && view === 'menu');
