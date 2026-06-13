@@ -145,6 +145,11 @@ export default function SellerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pinLocked, pinInput, pinBusy]);
 
+  // Always start PIN screen with a clean slate
+  useEffect(() => {
+    if (pinLocked) { setPinInput(''); setPinMsg(''); }
+  }, [pinLocked]);
+
   // Unattended terminal locks itself so sales don't land on the wrong person
   useEffect(() => {
     if (!pinEnabled || !activeStaff) return;
@@ -209,7 +214,7 @@ export default function SellerPage() {
 
   useEffect(() => {
     const session = getSession();
-    if (!session || session.role !== 'seller') { router.replace('/login'); return; }
+    if (!session || (session.role !== 'seller' && session.role !== 'owner')) { router.replace('/login'); return; }
     validateSession(session).then(valid => {
       if (!valid) { logout(); router.replace('/login'); }
     });

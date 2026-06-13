@@ -7,7 +7,7 @@ import {
   TrendingUp, Receipt, Star, ChevronDown, Percent,
   Coffee, BarChart2, Package, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
-  GripVertical, Globe, KeyRound,
+  GripVertical, Globe, KeyRound, Tablet,
 } from 'lucide-react';
 import {
   DndContext, DragEndEvent, PointerSensor, useSensor, useSensors,
@@ -21,7 +21,7 @@ import {
   fetchShifts, fetchShiftSales, closeShift, fetchOpenShift,
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash, emptyTrash,
-  setCompanyContext, fetchAllUsers, createUser, deleteUser, toggleUserActive, updateUser,
+  setCompanyContext, updateUser,
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, fetchCompanySlug,
   fetchTablesEnabled, setTablesEnabled,
   fetchCompanyProfile, updateMyCompanyProfile, verifyPassword,
@@ -66,12 +66,6 @@ const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır
 
 type Tab = 'stats' | 'orders' | 'kassa' | 'menu' | 'users' | 'tables' | 'logins';
 
-interface StaffUser {
-  id: string;
-  username: string;
-  name: string;
-  active: boolean;
-}
 type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
 
@@ -364,14 +358,6 @@ function AdminPageContent() {
   const canvasRef = useRef<HTMLDivElement>(null);
 
   // users tab
-  const [staffUsers, setStaffUsers] = useState<StaffUser[]>([]);
-  const [showUserForm, setShowUserForm] = useState(false);
-  const [editingUser, setEditingUser] = useState<StaffUser | null>(null);
-  const [uName, setUName] = useState('');
-  const [uUsername, setUUsername] = useState('');
-  const [uPassword, setUPassword] = useState('');
-  const [uSaving, setUSaving] = useState(false);
-  const [uError, setUError] = useState('');
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [companySlug, setCompanySlug] = useState<string | null>(null);
 
@@ -476,13 +462,12 @@ function AdminPageContent() {
       setCustomTo(t);
     });
     fetchStaff().then(setPinStaff);
-    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchAllUsers(), fetchTables(), fetchCompanySlug(session.companyId ?? ''), fetchTablesEnabled()]).then(([m, o, c, t, u, tb, slug, te]) => {
+    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchTables(), fetchCompanySlug(session.companyId ?? ''), fetchTablesEnabled()]).then(([m, o, c, t, tb, slug, te]) => {
       setMenu(m);
       setOrders(o);
       setCategories(c);
       setTrash(t);
       setOnline(m.length > 0 || o.length > 0);
-      setStaffUsers(u.filter(x => x.companyId === session.companyId && x.role === 'seller').map(x => ({ id: x.id, username: x.username, name: x.name, active: x.active })));
       setTables(tb);
       setCompanySlug(slug);
       setTablesOn(te);
@@ -1301,6 +1286,27 @@ function AdminPageContent() {
             );
           })}
         </nav>
+
+        {/* Seller terminal shortcut */}
+        <div className={`px-3 pb-2 ${collapsed ? 'flex justify-center' : ''}`}>
+          {collapsed ? (
+            <button
+              title="Satıcı terminalı"
+              onClick={() => router.push('/seller')}
+              className="flex items-center justify-center w-9 h-9 rounded-lg text-stone-500 hover:bg-amber-50 hover:text-amber-800 transition-colors"
+            >
+              <Tablet className="w-5 h-5" />
+            </button>
+          ) : (
+            <button
+              onClick={() => router.push('/seller')}
+              className="flex items-center gap-3 h-10 px-3 rounded-lg text-[15px] font-semibold text-stone-600 hover:bg-amber-50 hover:text-amber-900 transition-colors w-full"
+            >
+              <Tablet className="w-5 h-5 shrink-0" />
+              <span className="flex-1 text-left">Satıcı terminalı</span>
+            </button>
+          )}
+        </div>
 
         {/* User + logout */}
         {!collapsed && (
@@ -2293,68 +2299,7 @@ function AdminPageContent() {
           {/* ── USERS ──────────────────────────────────────────────────── */}
           {tab === 'users' && (
             <div className="max-w-lg space-y-4">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-stone-600">{staffUsers.length} əməkdaş</p>
-                <button
-                  onClick={() => { setEditingUser(null); setUName(''); setUUsername(''); setUPassword(''); setUError(''); setShowUserForm(true); }}
-                  className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors"
-                >
-                  <Plus className="w-4 h-4" /> Əməkdaş əlavə et
-                </button>
-              </div>
-
-              {staffUsers.length === 0 && !showUserForm && (
-                <div className="bg-white rounded-xl border border-stone-100 p-16 text-center">
-                  <Users className="w-10 h-10 mx-auto mb-3 text-stone-200" />
-                  <p className="text-sm text-stone-500">Əməkdaş yoxdur</p>
-                </div>
-              )}
-
-              {staffUsers.map(u => (
-                <div key={u.id} className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-sm font-bold shrink-0">
-                    {u.name[0]?.toUpperCase()}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-stone-800">{u.name}</p>
-                    <p className="text-xs text-stone-500">@{u.username}</p>
-                  </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${u.active ? 'bg-green-100 text-green-700' : 'bg-stone-100 text-stone-600'}`}>
-                    {u.active ? 'Aktiv' : 'Deaktiv'}
-                  </span>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => { setEditingUser(u); setUName(u.name); setUUsername(u.username); setUPassword(''); setUError(''); setShowUserForm(true); }}
-                      title="Düzəlt"
-                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-amber-700 transition-colors"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => toggleUserActive(u.id, !u.active).then(() => setStaffUsers(prev => prev.map(x => x.id === u.id ? { ...x, active: !x.active } : x)))}
-                      title={u.active ? 'Deaktiv et' : 'Aktiv et'}
-                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 transition-colors"
-                    >
-                      {u.active ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                    <button
-                      onClick={() => setDialog({
-                        title: 'İstifadəçini sil?',
-                        message: <><span className="font-medium text-stone-700">&ldquo;{u.name}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.</>,
-                        onConfirm: () => deleteUser(u.id).then(err => { if (err) setDialog({ title: 'Silinmədi', message: err }); else setStaffUsers(prev => prev.filter(x => x.id !== u.id)); }),
-                      })}
-                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-red-50 hover:text-red-500 transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-
-              {/* Poster-style PIN sellers: no login — they identify themselves
-                  on the logged-in terminal with a 4-digit PIN */}
-              <div className="pt-6 space-y-4">
-                <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-stone-600">PIN ilə satıcılar · {pinStaff.length}</p>
                     <p className="text-xs text-stone-400 mt-0.5">Terminal yuxarıdakı hesabla daxil olur, satıcılar özlərini 4 rəqəmli PIN ilə tanıdır</p>
@@ -2421,7 +2366,6 @@ function AdminPageContent() {
                     </div>
                   </div>
                 ))}
-              </div>
             </div>
           )}
 
@@ -2881,90 +2825,6 @@ function AdminPageContent() {
               >
                 {sSaving && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
                 {editingStaff ? 'Yadda saxla' : 'Əlavə et'}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {showUserForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-stone-800">{editingUser ? 'Əməkdaşı düzəlt' : 'Yeni əməkdaş'}</h3>
-              <button onClick={() => setShowUserForm(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <form
-              onSubmit={async e => {
-                e.preventDefault();
-                setUError('');
-                // edit with empty password = keep the old one; otherwise enforce the rules
-                if (uPassword || !editingUser) {
-                  const pwErr = validatePassword(uPassword, editingUser ? editingUser.username : uUsername);
-                  if (pwErr) { setUError(pwErr); return; }
-                }
-                setUSaving(true);
-                if (editingUser) {
-                  await updateUser(editingUser.id, uName.trim(), uPassword);
-                  setStaffUsers(prev => prev.map(x => x.id === editingUser.id ? { ...x, name: uName.trim() } : x));
-                  setUSaving(false);
-                  setShowUserForm(false);
-                } else {
-                  const err = await createUser(uUsername.trim(), uPassword, uName.trim(), 'seller', companyId);
-                  setUSaving(false);
-                  if (err) {
-                    setUError('Bu istifadəçi adı artıq mövcuddur');
-                    return;
-                  }
-                  const all = await fetchAllUsers();
-                  setStaffUsers(all.filter(x => x.companyId === companyId && x.role === 'seller').map(x => ({ id: x.id, username: x.username, name: x.name, active: x.active })));
-                  setShowUserForm(false);
-                }
-              }}
-              className="space-y-3"
-            >
-              <div>
-                <label className="text-xs font-medium text-stone-600 block mb-1">Ad</label>
-                <input
-                  value={uName}
-                  onChange={e => setUName(e.target.value)}
-                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  placeholder="Tam ad"
-                  required
-                />
-              </div>
-              {!editingUser && (
-                <div>
-                  <label className="text-xs font-medium text-stone-600 block mb-1">İstifadəçi adı</label>
-                  <input
-                    value={uUsername}
-                    onChange={e => setUUsername(e.target.value)}
-                    className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-                    placeholder="login"
-                    required
-                  />
-                </div>
-              )}
-              <div>
-                <label className="text-xs font-medium text-stone-600 block mb-1">
-                  {editingUser ? 'Yeni şifrə' : 'Şifrə'}
-                </label>
-                <PasswordField
-                  value={uPassword}
-                  onChange={setUPassword}
-                  placeholder={editingUser ? 'Dəyişmək üçün daxil edin' : undefined}
-                  required={!editingUser}
-                />
-              </div>
-              {uError && <p className="text-red-500 text-sm">{uError}</p>}
-              <button
-                type="submit"
-                disabled={uSaving}
-                className="w-full bg-amber-800 hover:bg-amber-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors mt-2"
-              >
-                {uSaving ? 'Saxlanır...' : editingUser ? 'Yadda saxla' : 'Yarat'}
               </button>
             </form>
           </div>

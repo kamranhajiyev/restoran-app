@@ -24,14 +24,14 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await requireAuth(req);
   if (auth instanceof Response) return auth;
-  if (auth.role !== 'superadmin' && auth.role !== 'owner') {
+  if (auth.role !== 'superadmin') {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   const body = await req.json();
   const { username, password, name } = body;
-  const role = auth.role === 'owner' ? 'seller' : body.role;
-  const companyId = auth.role === 'owner' ? auth.companyId : body.companyId;
+  const role = body.role;
+  const companyId = body.companyId;
 
   if (!/^[a-z0-9_.-]{2,30}$/i.test(username ?? '')) {
     return Response.json({ error: 'İstifadəçi adı yanlış formatdadır' }, { status: 400 });
