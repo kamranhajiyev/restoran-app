@@ -1,10 +1,10 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   PanelLeftClose, PanelLeftOpen, LogOut, X,
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
-  ShoppingCart, ChevronLeft, ChevronDown, Minus, Plus, Wallet,
+  ShoppingCart, ChevronLeft, ChevronRight, ChevronDown, Minus, Plus, Wallet,
   History, Search, Delete, KeyRound,
 } from 'lucide-react';
 import { getSession, logout, validateSession } from '@/lib/auth';
@@ -210,6 +210,7 @@ export default function SellerPage() {
   // night shift's post-midnight orders stay under today until closing time
   const [bizSettings, setBizSettings] = useState<CompanySettings>(DEFAULT_SETTINGS);
 
+  const catScrollRef = useRef<HTMLDivElement>(null);
   const [refreshing, setRefreshing] = useState(false);
   const refreshOrders = useCallback(async () => {
     setRefreshing(true);
@@ -1171,20 +1172,34 @@ export default function SellerPage() {
                 </div>
 
                 {/* Category tabs */}
-                <div className="bg-white border-b px-3 py-2 flex gap-2 overflow-x-auto shrink-0 scrollbar-none">
-                  {categories.map(cat => {
-                    const count = menu.filter(m => m.category === cat && m.available).length;
-                    return (
-                      <button
-                        key={cat}
-                        onClick={() => setActiveCategory(cat)}
-                        className={`whitespace-nowrap text-sm px-3 py-1.5 rounded-full font-medium transition-colors shrink-0 flex items-center gap-1.5 ${activeCategory === cat ? 'bg-amber-800 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
-                      >
-                        {cat}
-                        <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${activeCategory === cat ? 'bg-amber-700 text-amber-100' : 'bg-stone-200 text-stone-600'}`}>{count}</span>
-                      </button>
-                    );
-                  })}
+                <div className="bg-white border-b py-2 flex items-center gap-1 shrink-0 px-1">
+                  <button
+                    onClick={() => catScrollRef.current?.scrollBy({ left: -160, behavior: 'smooth' })}
+                    className="shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-stone-400 hover:bg-stone-100 hover:text-stone-700 transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <div ref={catScrollRef} className="flex gap-2 overflow-x-auto scrollbar-none flex-1">
+                    {categories.map(cat => {
+                      const count = menu.filter(m => m.category === cat && m.available).length;
+                      return (
+                        <button
+                          key={cat}
+                          onClick={() => setActiveCategory(cat)}
+                          className={`whitespace-nowrap text-sm px-3 py-1.5 rounded-full font-medium transition-colors shrink-0 flex items-center gap-1.5 ${activeCategory === cat ? 'bg-amber-800 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
+                        >
+                          {cat}
+                          <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${activeCategory === cat ? 'bg-amber-700 text-amber-100' : 'bg-stone-200 text-stone-600'}`}>{count}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => catScrollRef.current?.scrollBy({ left: 160, behavior: 'smooth' })}
+                    className="shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-stone-400 hover:bg-stone-100 hover:text-stone-700 transition-colors"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
                 </div>
 
                 {/* Menu grid */}
