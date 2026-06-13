@@ -1080,7 +1080,7 @@ export default function SellerPage() {
                   onClick={() => startNewOrder('takeaway')}
                   className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-stone-200 bg-white hover:border-amber-300 transition-all active:scale-95"
                 >
-                  <ShoppingBag className="w-8 h-8 text-stone-500" />
+                  <span className="text-4xl">🥡</span>
                   <span className="font-semibold text-sm text-stone-600">Takeaway</span>
                 </button>
               </div>
@@ -1157,7 +1157,7 @@ export default function SellerPage() {
                     <ChevronLeft className="w-5 h-5" />
                   </button>
                   <span className="font-semibold text-stone-800 text-sm flex-1">
-                    {!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? '🛍 Takeaway' : tableName(selectedTable)}
+                    {!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? '🥡 Takeaway' : tableName(selectedTable)}
                   </span>
                   {/* Cart icon — mobile only */}
                   <button
