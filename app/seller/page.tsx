@@ -418,6 +418,15 @@ export default function SellerPage() {
     if (view === 'kassa' && shift) fetchShiftSales(shift.openedAt).then(setShiftSales);
   }, [view, shift]);
 
+  // Detect when admin closes the shift externally
+  useEffect(() => {
+    const id = setInterval(async () => {
+      const open = await fetchOpenShift();
+      if (!open && shift) { setShift(null); setView('orders'); }
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [shift]);
+
   async function handleOpenShift() {
     const cash = parseFloat(openCashInput) || 0;
     setShiftBusy(true);
