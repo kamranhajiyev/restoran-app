@@ -45,6 +45,13 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
   'ödənilib':  'bg-stone-100 text-stone-600',
   'ləğv edildi': 'bg-red-100 text-red-600',
 };
+const STATUS_LABELS: Record<OrderStatus, string> = {
+  'gözləyir':   'gözləyir',
+  'hazırlanır': 'hazırlanır',
+  'hazırdır':   'hazırdır',
+  'ödənilib':   'ödənilib',
+  'ləğv edildi':'ödənişsiz bağlandı',
+};
 
 function elapsed(iso: string): string {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -800,7 +807,7 @@ export default function SellerPage() {
                               {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
                             </span>
                             <span className="text-sm font-semibold text-stone-800 flex-shrink-0 w-16 sm:w-20 text-right">{orderTotal(order).toFixed(2)} ₼</span>
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 w-20 sm:w-24 text-center truncate ${STATUS_COLORS[order.status]}`}>{order.status}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 text-center truncate ${STATUS_COLORS[order.status]}`}>{STATUS_LABELS[order.status]}</span>
                           </button>
 
                           {isExpanded && (
@@ -824,7 +831,7 @@ export default function SellerPage() {
                               {order.note && <p className="text-xs text-stone-500 italic mb-3">Qeyd: {order.note}</p>}
                               {order.status === 'ləğv edildi' && (
                                 <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3">
-                                  Ləğv edildi{order.cancelledBy ? ` — ${order.cancelledBy}` : ''}
+                                  Ödənişsiz bağlandı{order.cancelledBy ? ` — ${order.cancelledBy}` : ''}
                                   {order.cancelledAt ? `, ${new Date(order.cancelledAt).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}` : ''}
                                   {order.cancelReason ? ` · Səbəb: ${order.cancelReason}` : ''}
                                 </p>
@@ -1392,7 +1399,7 @@ export default function SellerPage() {
       {cancellingOrder && (
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
-            <h3 className="font-bold text-lg text-stone-800 mb-1">Sifarişi ləğv et</h3>
+            <h3 className="font-bold text-lg text-stone-800 mb-1">Sifarişi ödənişsiz bağla</h3>
             <p className="text-sm text-stone-600 mb-4">
               №{cancellingOrder.orderNumber}{tableName(cancellingOrder.tableNumber) && ` · ${tableName(cancellingOrder.tableNumber)}`} · {orderTotal(cancellingOrder).toFixed(2)} ₼
             </p>
@@ -1425,7 +1432,7 @@ export default function SellerPage() {
                 className="flex-1 py-3 rounded-xl bg-red-500 hover:bg-red-600 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2"
               >
                 {cancelBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
-                Ləğv et
+                Ödənişsiz bağla
               </button>
             </div>
           </div>
@@ -1696,7 +1703,7 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
           </div>
           <div className="text-right">
             <p className="font-bold text-stone-800">{total.toFixed(2)} ₼</p>
-            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[order.status]}`}>{order.status}</span>
+            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[order.status]}`}>{STATUS_LABELS[order.status]}</span>
           </div>
         </div>
         <p className="text-xs text-stone-600 truncate mb-3">{itemsPreview}</p>
@@ -1734,7 +1741,7 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
         </div>
         <div>
           <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[order.status]}`}>
-            {order.status}
+            {STATUS_LABELS[order.status]}
           </span>
         </div>
         <div className="flex items-center gap-2">
