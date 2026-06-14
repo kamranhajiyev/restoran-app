@@ -1892,7 +1892,7 @@ function AdminPageContent() {
                                   onClick={() => { setCancellingOrder(order); setCancelReason(null); setCancelOtherText(''); }}
                                   className="text-xs font-semibold text-red-500 border border-red-200 hover:bg-red-50 rounded-lg px-2.5 py-1 transition-colors"
                                 >
-                                  Ləğv et
+                                  Ödənişsiz bağla
                                 </button>
                               )}
                               {(order.cashAmount || order.cardAmount) && (
