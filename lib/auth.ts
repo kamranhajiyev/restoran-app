@@ -108,6 +108,12 @@ export async function validateSession(session: Session): Promise<boolean> {
         .single();
       if (!co?.active || co.trashed_at) return false;
       if (co.expires_at && new Date(co.expires_at) < new Date()) return false;
+      // Write fresh expiry back so the banner always reflects the DB value
+      const stored = getSession();
+      if (stored) {
+        stored.expiresAt = co.expires_at ?? null;
+        localStorage.setItem(AUTH_KEY, JSON.stringify(stored));
+      }
     }
 
     return true;

@@ -210,6 +210,8 @@ export default function SellerPage() {
   // night shift's post-midnight orders stay under today until closing time
   const [bizSettings, setBizSettings] = useState<CompanySettings>(DEFAULT_SETTINGS);
 
+  const [expiresAt, setExpiresAt] = useState<string | null>(() => getSession()?.expiresAt ?? null);
+
   const catScrollRef = useRef<HTMLDivElement>(null);
   const [refreshing, setRefreshing] = useState(false);
   const refreshOrders = useCallback(async () => {
@@ -224,7 +226,9 @@ export default function SellerPage() {
     const session = getSession();
     if (!session || (session.role !== 'seller' && session.role !== 'owner')) { router.replace('/login'); return; }
     validateSession(session).then(valid => {
-      if (!valid) { logout(); router.replace('/login'); }
+      if (!valid) { logout(); router.replace('/login'); return; }
+      const exp = getSession()?.expiresAt;
+      if (exp !== undefined) setExpiresAt(exp);
     });
     // If another tab logs into a different account, this tab's company context
     // no longer matches the shared auth token — force re-login instead of
@@ -678,6 +682,34 @@ export default function SellerPage() {
           <LogOut className="w-4 h-4" />
         </button>
       </header>
+
+      {/* ── Subscription warning banner ── */}
+      {(() => {
+        if (!expiresAt) return null;
+        const days = Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86400000);
+        if (days > 10) return null;
+        const expired = days < 0;
+        return (
+          <div className={`relative flex items-center justify-between gap-4 px-5 py-3 ${expired ? 'bg-red-600' : 'bg-amber-500'}`}>
+            <div className="flex items-center gap-3">
+              <span className={`w-2 h-2 rounded-full animate-pulse shrink-0 ${expired ? 'bg-red-200' : 'bg-amber-200'}`} />
+              <p className="text-white text-sm font-medium">
+                {expired
+                  ? 'Abunəliyinizin müddəti bitib. Sistemə giriş məhdudlaşdırıla bilər.'
+                  : `Abunəliyinizin müddəti ${days} gün sonra bitir. Xidmətin fasiləsiz davam etməsi üçün ödənişi tamamlayın.`}
+              </p>
+            </div>
+            <a
+              href="https://wa.me/994998989876"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`shrink-0 text-xs font-bold px-4 py-1.5 rounded-lg transition-colors ${expired ? 'bg-white text-red-600 hover:bg-red-50' : 'bg-white text-amber-600 hover:bg-amber-50'}`}
+            >
+              Ödəniş et
+            </a>
+          </div>
+        );
+      })()}
 
       <div className="flex min-h-[calc(100vh-3.5rem)] bg-white">
 
