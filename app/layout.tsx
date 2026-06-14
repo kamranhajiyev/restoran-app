@@ -9,8 +9,8 @@ const quicksand = Quicksand({
 });
 
 export const metadata: Metadata = {
-  title: 'Kafe',
-  description: 'Kafe idarəetmə sistemi',
+  title: 'possiblle',
+  description: 'Everything possible with us — restoran idarəetmə sistemi',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
