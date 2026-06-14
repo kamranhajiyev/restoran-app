@@ -181,30 +181,77 @@ export default function Home() {
             </p>
           </div>
 
-          {/* Row 1 */}
+          {/* Row 1 — Profit first */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-            {BENTO.slice(0, 2).map(f => (
-              <div key={f.subtitle} className="bg-[#f5f5f5] rounded-2xl p-8 flex flex-col justify-between min-h-[240px]">
-                <IconBox Icon={f.icon} />
-                <div>
-                  <p className="text-2xl font-bold leading-snug mt-6">{f.subtitle}</p>
-                  <p className="text-sm text-gray-400 mt-2 leading-relaxed">{f.desc}</p>
+            {/* Stats / Profit — hero card */}
+            <div className="bg-[#f5f5f5] rounded-2xl p-8 flex flex-col justify-between min-h-[260px]">
+              <IconBox Icon={BENTO[2].icon} />
+              <div className="mt-6">
+                <div className="flex items-baseline gap-2 mb-1">
+                  <span className="text-4xl font-bold">12,450 ₼</span>
+                  <span className="text-xs font-semibold bg-black text-white px-2.5 py-1 rounded-full">↑ 18%</span>
                 </div>
+                <p className="text-sm text-gray-400">bu ay ümumi qazanc</p>
               </div>
-            ))}
+              <div>
+                <p className="text-2xl font-bold leading-snug">{BENTO[2].subtitle}</p>
+                <p className="text-sm text-gray-400 mt-1 leading-relaxed">{BENTO[2].desc}</p>
+              </div>
+            </div>
+            {/* QR Menu */}
+            <div className="bg-[#f5f5f5] rounded-2xl p-8 flex flex-col justify-between min-h-[260px]">
+              <IconBox Icon={BENTO[0].icon} />
+              <div className="mt-6 flex items-center gap-2">
+                <span className="text-4xl font-bold">47</span>
+                <span className="text-sm text-gray-400">sifariş bu gün</span>
+              </div>
+              <div>
+                <p className="text-2xl font-bold leading-snug">{BENTO[0].subtitle}</p>
+                <p className="text-sm text-gray-400 mt-1 leading-relaxed">{BENTO[0].desc}</p>
+              </div>
+            </div>
           </div>
 
           {/* Row 2 */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-            {BENTO.slice(2, 5).map(f => (
-              <div key={f.subtitle} className="bg-[#f5f5f5] rounded-2xl p-7 flex flex-col justify-between min-h-[200px]">
-                <IconBox Icon={f.icon} />
-                <div>
-                  <p className="text-lg font-bold leading-snug mt-6">{f.subtitle}</p>
-                  <p className="text-xs text-gray-400 mt-1.5 leading-relaxed">{f.desc}</p>
-                </div>
+            {/* Notifications */}
+            <div className="bg-[#f5f5f5] rounded-2xl p-7 flex flex-col justify-between min-h-[220px]">
+              <IconBox Icon={BENTO[1].icon} />
+              <div className="mt-6 flex items-baseline gap-2">
+                <span className="text-2xl font-bold">~2 dəq</span>
+                <span className="text-xs text-gray-400">çatdırılma</span>
               </div>
-            ))}
+              <div>
+                <p className="text-base font-bold leading-snug">{BENTO[1].subtitle}</p>
+                <p className="text-xs text-gray-400 mt-1 leading-relaxed">{BENTO[1].desc}</p>
+              </div>
+            </div>
+            {/* Team */}
+            <div className="bg-[#f5f5f5] rounded-2xl p-7 flex flex-col justify-between min-h-[220px]">
+              <IconBox Icon={BENTO[3].icon} />
+              <div className="mt-6 flex flex-wrap gap-1.5">
+                {['Admin', 'Ofisiant', 'Satıcı'].map(r => (
+                  <span key={r} className="text-xs font-medium bg-black text-white px-2.5 py-1 rounded-full">{r}</span>
+                ))}
+              </div>
+              <div>
+                <p className="text-base font-bold leading-snug">{BENTO[3].subtitle}</p>
+                <p className="text-xs text-gray-400 mt-1 leading-relaxed">{BENTO[3].desc}</p>
+              </div>
+            </div>
+            {/* Tables */}
+            <div className="bg-[#f5f5f5] rounded-2xl p-7 flex flex-col justify-between min-h-[220px]">
+              <IconBox Icon={BENTO[4].icon} />
+              <div className="mt-6 grid grid-cols-4 gap-1.5">
+                {[1,2,3,4,5,6,7,8].map(n => (
+                  <div key={n} className={`h-7 rounded-md text-[10px] font-bold flex items-center justify-center ${n <= 5 ? 'bg-black text-white' : 'bg-black/10 text-gray-400'}`}>{n}</div>
+                ))}
+              </div>
+              <div>
+                <p className="text-base font-bold leading-snug">{BENTO[4].subtitle}</p>
+                <p className="text-xs text-gray-400 mt-1 leading-relaxed">{BENTO[4].desc}</p>
+              </div>
+            </div>
           </div>
 
           {/* Row 3 — full width dark card */}
