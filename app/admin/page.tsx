@@ -345,6 +345,7 @@ function AdminPageContent() {
   const [statsLoaded, setStatsLoaded] = useState(false);
   const statsCache = useRef<Map<string, { at: number; data: Order[] }>>(new Map());
   const [sessionReady, setSessionReady] = useState(false);
+  const [expiresAt, setExpiresAt] = useState<string | null>(() => getSession()?.expiresAt ?? null);
 
   // tables tab
   const [tables, setTables] = useState<RestaurantTable[]>([]);
@@ -447,7 +448,9 @@ function AdminPageContent() {
     const session = getSession();
     if (!session || session.role !== 'owner') { router.replace('/login'); return; }
     validateSession(session).then(valid => {
-      if (!valid) { logout(); router.replace('/login'); }
+      if (!valid) { logout(); router.replace('/login'); return; }
+      const exp = getSession()?.expiresAt;
+      if (exp) setExpiresAt(exp);
     });
     // If another tab logs into a different account, this tab's company context
     // no longer matches the shared auth token — force re-login instead of
@@ -1405,7 +1408,7 @@ function AdminPageContent() {
 
       {/* ── Subscription warning banner ── */}
       {(() => {
-        const exp = getSession()?.expiresAt;
+        const exp = expiresAt;
         if (!exp) return null;
         const days = Math.ceil((new Date(exp).getTime() - Date.now()) / 86400000);
         if (days > 10) return null;
