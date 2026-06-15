@@ -228,10 +228,15 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   const refreshOrders = useCallback(async () => {
     setRefreshing(true);
     try {
-      const [o, total] = await Promise.all([fetchOrders({ limit: 200 }), fetchOrdersCount()]);
-      setOrders(o); setTotalOrders(total);
+      if (overrideCompanyId) {
+        const d = await fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).catch(() => ({ orders: [], total: 0 }));
+        setOrders(d.orders ?? []); setTotalOrders(d.total ?? 0);
+      } else {
+        const [o, total] = await Promise.all([fetchOrders({ limit: 200 }), fetchOrdersCount()]);
+        setOrders(o); setTotalOrders(total);
+      }
     } finally { setRefreshing(false); }
-  }, []);
+  }, [overrideCompanyId]);
 
   useEffect(() => {
     if (overrideCompanyId) {
@@ -250,7 +255,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         setShift(shiftData.shift ?? null);
         setShiftChecked(true);
       });
-      Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled()]).then(([m, o, c, tb, te]) => {
+      Promise.all([
+        fetchMenu(),
+        fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
+        fetchCategories(),
+        fetchTables(),
+        fetchTablesEnabled(),
+      ]).then(([m, o, c, tb, te]) => {
         setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te);
         const available = c.filter(cat => cat.available);
         setAvailableCategories(available);
@@ -539,8 +550,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   async function loadMoreOrders() {
     setLoadingMore(true);
     try {
-      const more = await fetchOrders({ limit: 200, offset: orders.length });
-      setOrders(prev => [...prev, ...more.filter(m => !prev.some(p => p.id === m.id))]);
+      const more = overrideCompanyId
+        ? await fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200&offset=${orders.length}`).then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
+        : await fetchOrders({ limit: 200, offset: orders.length });
+      setOrders(prev => [...prev, ...more.filter((m: { id: string }) => !prev.some(p => p.id === m.id))]);
     } finally { setLoadingMore(false); }
   }
 
