@@ -93,6 +93,10 @@ export async function saveMenu(menu: MenuItem[]): Promise<string | null> {
   }
 }
 
+export async function setMenuItemAvailable(id: string, available: boolean): Promise<void> {
+  await supabase.from('menu_items').update({ available }).eq('id', id).eq('company_id', _companyId);
+}
+
 // ─── Categories ───────────────────────────────────────────────────────────────
 
 // No placeholder fallback: a company with no categories sees an empty list and

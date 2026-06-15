@@ -5,17 +5,17 @@ import {
   PanelLeftClose, PanelLeftOpen, LogOut, X,
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
   ShoppingCart, ChevronLeft, ChevronRight, ChevronDown, Minus, Plus, Wallet,
-  History, Search, Delete, KeyRound,
+  History, Search, EyeOff,
 } from 'lucide-react';
 import { getSession, logout, validateSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
   fetchMenu, addOrder, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
   fetchTablesEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
-  fetchCompanySettings, fetchStaff, verifyStaffPin,
+  fetchCompanySettings, setMenuItemAvailable,
 } from '@/lib/store';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday } from '@/lib/business-day';
-import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, isOrderOpen } from '@/types';
+import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, isOrderOpen } from '@/types';
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
@@ -109,70 +109,6 @@ export default function SellerPage() {
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [submitting, setSubmitting]         = useState(false);
 
-  // Poster-style PIN lock: when the company has active PIN staff, the terminal
-  // stays logged in but each person identifies themselves with a 4-digit PIN
-  const [pinStaffList, setPinStaffList] = useState<Staff[]>([]);
-  const [activeStaff, setActiveStaff]   = useState<{ id: string; name: string } | null>(null);
-  const [pinInput, setPinInput]         = useState('');
-  const [pinBusy, setPinBusy]           = useState(false);
-  const [pinMsg, setPinMsg]             = useState('');
-
-  // No PIN staff defined → the page behaves exactly as before (no lock screen)
-  const pinEnabled = pinStaffList.some(s => s.active);
-  const pinLocked  = pinEnabled && !activeStaff;
-  // Orders, cancellations and kassa actions are attributed to the unlocked
-  // staff member; the terminal account name is the fallback
-  const effectiveSeller = activeStaff?.name ?? sellerName;
-
-  async function pressPin(digit: string) {
-    if (pinBusy || pinInput.length >= 4) return;
-    const next = pinInput + digit;
-    setPinInput(next);
-    setPinMsg('');
-    if (next.length < 4) return;
-    setPinBusy(true);
-    const res = await verifyStaffPin(next);
-    setPinBusy(false);
-    setPinInput('');
-    if (res.ok) {
-      setActiveStaff({ id: res.id, name: res.name });
-    } else if (res.error === 'wrong') {
-      setPinMsg(`Yanlış PIN${res.attemptsLeft > 0 ? ` · ${res.attemptsLeft} cəhd qaldı` : ''}`);
-    } else if (res.error === 'locked') {
-      setPinMsg('Çox sayda yanlış cəhd — 1 dəqiqə gözləyin');
-    } else {
-      setPinMsg('Şəbəkə xətası, yenidən cəhd edin');
-    }
-  }
-
-  // Hardware keyboard on the lock screen (desktop terminals)
-  useEffect(() => {
-    if (!pinLocked) return;
-    const h = (e: KeyboardEvent) => {
-      if (/^\d$/.test(e.key)) pressPin(e.key);
-      else if (e.key === 'Backspace') setPinInput(p => p.slice(0, -1));
-    };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pinLocked, pinInput, pinBusy]);
-
-  // Always start PIN screen with a clean slate
-  useEffect(() => {
-    if (pinLocked) { setPinInput(''); setPinMsg(''); }
-  }, [pinLocked]);
-
-  // Unattended terminal locks itself so sales don't land on the wrong person
-  useEffect(() => {
-    if (!pinEnabled || !activeStaff) return;
-    const IDLE_MS = 5 * 60 * 1000;
-    let t = setTimeout(() => setActiveStaff(null), IDLE_MS);
-    const reset = () => { clearTimeout(t); t = setTimeout(() => setActiveStaff(null), IDLE_MS); };
-    window.addEventListener('pointerdown', reset);
-    window.addEventListener('keydown', reset);
-    return () => { clearTimeout(t); window.removeEventListener('pointerdown', reset); window.removeEventListener('keydown', reset); };
-  }, [pinEnabled, activeStaff]);
-
   // order history
   const [historySearch, setHistorySearch]   = useState('');
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
@@ -207,7 +143,7 @@ export default function SellerPage() {
   const [justClosed, setJustClosed]     = useState(false);
 
   const [menuSearch, setMenuSearch] = useState('');
-  const [logoutConfirm, setLogoutConfirm] = useState(false);
+  const [unavailableItem, setUnavailableItem] = useState<MenuItem | null>(null);
 
   // modifier / variant modal
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
@@ -249,7 +185,6 @@ export default function SellerPage() {
     fetchCompanySettings(session.companyId ?? '').then(setBizSettings);
     fetchOpenShift().then(s => { setShift(s); setShiftChecked(true); });
     fetchOrdersCount().then(setTotalOrders);
-    fetchStaff().then(setPinStaffList);
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled()]).then(([m, o, c, tb, te]) => {
       setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te);
       const available = c.filter(cat => cat.available);
@@ -262,10 +197,9 @@ export default function SellerPage() {
 
   useEffect(() => {
     async function sync() {
-      const [m, o, c, st] = await Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff()]);
+      const [m, o, c] = await Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories()]);
       setMenu(m); setOrders(o);
       setAvailableCategories(c.filter(cat => cat.available));
-      setPinStaffList(st);
     }
     window.addEventListener('focus', sync);
     return () => window.removeEventListener('focus', sync);
@@ -294,6 +228,13 @@ export default function SellerPage() {
           ? { ...ci, quantity: ci.quantity - 1 } : ci
       );
     });
+  }
+
+  function confirmUnavailable() {
+    if (!unavailableItem) return;
+    setMenu(prev => prev.map(m => m.id === unavailableItem.id ? { ...m, available: false } : m));
+    setMenuItemAvailable(unavailableItem.id, false);
+    setUnavailableItem(null);
   }
 
   function handleMenuItemTap(item: MenuItem) {
@@ -356,8 +297,7 @@ export default function SellerPage() {
       items: cart,
       status: 'gözləyir',
       createdAt: new Date().toISOString(),
-      sellerName: effectiveSeller,
-      staffId: activeStaff?.id,
+      sellerName: sellerName,
       note: note.trim() || undefined,
     };
     setOrders(prev => [order, ...prev]);
@@ -411,12 +351,12 @@ export default function SellerPage() {
     if (!reason) return;
     setCancelBusy(true);
     // Conditional in the DB — a no-op if the order got paid in the meantime
-    const ok = await cancelOrder(cancellingOrder.id, reason, effectiveSeller);
+    const ok = await cancelOrder(cancellingOrder.id, reason, sellerName);
     setCancelBusy(false);
     setCancellingOrder(null);
     if (ok) {
       setOrders(prev => prev.map(o => o.id === cancellingOrder.id
-        ? { ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: effectiveSeller, cancelledAt: new Date().toISOString() }
+        ? { ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: sellerName, cancelledAt: new Date().toISOString() }
         : o));
     } else {
       refreshOrders();
@@ -444,7 +384,7 @@ export default function SellerPage() {
   async function handleOpenShift() {
     const cash = parseFloat(openCashInput) || 0;
     setShiftBusy(true);
-    const s = await openShift(cash, effectiveSeller);
+    const s = await openShift(cash, sellerName);
     setShiftBusy(false);
     if (s) { setShift(s); setOpenCashInput(''); setJustClosed(false); }
   }
@@ -453,7 +393,7 @@ export default function SellerPage() {
     if (!shift) return;
     const raw = parseFloat(movAmount) || 0;
     if (raw <= 0 || !movReason.trim()) return;
-    const mv: ShiftMovement = { at: new Date().toISOString(), amount: movOut ? -raw : raw, reason: movReason.trim(), by: effectiveSeller };
+    const mv: ShiftMovement = { at: new Date().toISOString(), amount: movOut ? -raw : raw, reason: movReason.trim(), by: sellerName };
     setShift({ ...shift, movements: [...shift.movements, mv] });
     setShowMovForm(false); setMovAmount(''); setMovReason('');
     await addShiftMovement(shift.id, mv);
@@ -469,7 +409,7 @@ export default function SellerPage() {
     const fresh = (await fetchOpenShift()) ?? shift;
     const sales = await fetchShiftSales(fresh.openedAt);
     const expected = fresh.openingCash + sales.cash + movementsTotal(fresh);
-    await closeShift(fresh.id, expected, counted, effectiveSeller, sales.card, countedCard);
+    await closeShift(fresh.id, expected, counted, sellerName, sales.card, countedCard);
     setShiftBusy(false);
     setShift(null); setCountedInput(''); setTerminalInput(''); setView('orders');
     setJustClosed(true);
@@ -505,7 +445,7 @@ export default function SellerPage() {
   const isToday     = (iso: string) => businessDay(iso, bizSettings) === bizToday;
   const todayOrders = active.filter(o => isToday(o.createdAt));
   const prevOrders  = active.filter(o => !isToday(o.createdAt));
-  const myTodayTips = orders.filter(o => o.sellerName === effectiveSeller && isToday(o.createdAt) && (o.tipAmount ?? 0) > 0).reduce((s, o) => s + (o.tipAmount ?? 0), 0);
+  const myTodayTips = orders.filter(o => o.sellerName === sellerName && isToday(o.createdAt) && (o.tipAmount ?? 0) > 0).reduce((s, o) => s + (o.tipAmount ?? 0), 0);
   const historyQuery = historySearch.trim().toLowerCase();
   const historyOrders = historyQuery
     ? orders.filter(o =>
@@ -583,9 +523,9 @@ export default function SellerPage() {
           <div className="px-4 py-4 border-t border-stone-100/50">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
-                {effectiveSeller[0]?.toUpperCase()}
+                {sellerName[0]?.toUpperCase()}
               </div>
-              <span className="text-xs text-stone-600 truncate">{effectiveSeller}</span>
+              <span className="text-xs text-stone-600 truncate">{sellerName}</span>
               {!online && <span className="ml-auto text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">Oflayn</span>}
             </div>
             <button onClick={() => { logout(); router.push('/login'); }} className="flex items-center gap-2 text-xs text-stone-500 hover:text-red-500 transition-colors">
@@ -595,7 +535,7 @@ export default function SellerPage() {
         ) : (
           <div className="py-4 flex flex-col items-center gap-2 border-t border-stone-100/50">
             <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
-              {effectiveSeller[0]?.toUpperCase()}
+              {sellerName[0]?.toUpperCase()}
             </div>
             <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-stone-500 hover:text-red-500 transition-colors">
               <LogOut className="w-4 h-4" />
@@ -672,20 +612,10 @@ export default function SellerPage() {
         <div className="flex-1" />
         <div className="flex items-center gap-2 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl">
           <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
-            {effectiveSeller[0]?.toUpperCase()}
+            {sellerName[0]?.toUpperCase()}
           </div>
-          <span className="text-sm font-medium text-stone-700 hidden sm:inline">{effectiveSeller}</span>
+          <span className="text-sm font-medium text-stone-700 hidden sm:inline">{sellerName}</span>
         </div>
-        {pinEnabled && activeStaff && (
-          <button
-            onClick={() => setActiveStaff(null)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
-            title="Satıcını dəyiş"
-          >
-            <KeyRound className="w-4 h-4" />
-            <span className="hidden sm:inline">Dəyiş</span>
-          </button>
-        )}
       </header>
 
       {/* ── Subscription warning banner ── */}
@@ -1258,23 +1188,31 @@ export default function SellerPage() {
                   {filtered.map(item => {
                     const inCart = cart.filter(ci => ci.menuItem.id === item.id).reduce((s, ci) => s + ci.quantity, 0);
                     return (
-                      <button
-                        key={item.id}
-                        onClick={() => handleMenuItemTap(item)}
-                        className="bg-white rounded-2xl shadow-sm text-left active:scale-95 border border-transparent hover:border-amber-200 transition-all relative overflow-hidden"
-                      >
-                        {inCart > 0 && (
-                          <span className="absolute top-2 right-2 z-10 bg-amber-800 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">{inCart}</span>
-                        )}
-                        {item.image
-                          ? <img src={item.image} alt={item.name} className="w-full h-24 object-cover" />
-                          : <div className="w-full h-24 bg-amber-50 flex items-center justify-center text-3xl">☕</div>
-                        }
-                        <div className="p-2.5">
-                          <p className="text-sm font-medium text-stone-800 leading-tight">{item.name}</p>
-                          <p className="text-amber-700 font-bold text-sm mt-0.5">{item.price.toFixed(2)} ₼</p>
-                        </div>
-                      </button>
+                      <div key={item.id} className="bg-white rounded-2xl shadow-sm border border-transparent hover:border-amber-200 transition-all relative overflow-hidden">
+                        <button
+                          onClick={() => handleMenuItemTap(item)}
+                          className="w-full text-left active:scale-95"
+                        >
+                          {inCart > 0 && (
+                            <span className="absolute top-2 right-2 z-10 bg-amber-800 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">{inCart}</span>
+                          )}
+                          {item.image
+                            ? <img src={item.image} alt={item.name} className="w-full h-24 object-cover" />
+                            : <div className="w-full h-24 bg-amber-50 flex items-center justify-center text-3xl">☕</div>
+                          }
+                          <div className="p-2.5">
+                            <p className="text-sm font-medium text-stone-800 leading-tight">{item.name}</p>
+                            <p className="text-amber-700 font-bold text-sm mt-0.5">{item.price.toFixed(2)} ₼</p>
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => setUnavailableItem(item)}
+                          className="absolute top-2 left-2 z-10 w-6 h-6 bg-white/80 hover:bg-red-50 rounded-full flex items-center justify-center text-stone-400 hover:text-red-500 transition-colors"
+                          title="Mövcud deyil et"
+                        >
+                          <EyeOff className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -1362,87 +1300,6 @@ export default function SellerPage() {
         })}
       </nav>
 
-      {/* PIN lock screen — covers everything until a staff member unlocks */}
-      {pinLocked && (
-        <div className="fixed inset-0 z-[80] bg-[#f7f3ed] flex flex-col items-center justify-center p-6">
-          <div className="w-12 h-12 rounded-2xl bg-amber-800 flex items-center justify-center mb-4">
-            <Coffee className="w-6 h-6 text-white" />
-          </div>
-          <h2 className="font-bold text-xl text-stone-800">{getSession()?.companyName || 'Satıcı Paneli'}</h2>
-          <p className="text-sm text-stone-500 mt-1 mb-6">PIN kodunuzu daxil edin</p>
-
-          {/* 4 dots */}
-          <div className="flex gap-3 mb-3 h-4 items-center">
-            {[0, 1, 2, 3].map(i => (
-              <span
-                key={i}
-                className={`rounded-full transition-all ${i < pinInput.length ? 'w-3.5 h-3.5 bg-amber-800' : 'w-3 h-3 bg-stone-300'}`}
-              />
-            ))}
-          </div>
-          <p className={`text-sm h-5 mb-4 ${pinMsg ? 'text-red-500' : 'text-transparent'}`}>{pinMsg || '·'}</p>
-
-          <div className="grid grid-cols-3 gap-3">
-            {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(d => (
-              <button
-                key={d}
-                onClick={() => pressPin(d)}
-                disabled={pinBusy}
-                className="w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl bg-white border border-stone-200 text-2xl font-semibold text-stone-700 hover:bg-stone-50 active:scale-95 transition-all disabled:opacity-50"
-              >
-                {d}
-              </button>
-            ))}
-            <span />
-            <button
-              onClick={() => pressPin('0')}
-              disabled={pinBusy}
-              className="w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl bg-white border border-stone-200 text-2xl font-semibold text-stone-700 hover:bg-stone-50 active:scale-95 transition-all disabled:opacity-50"
-            >
-              0
-            </button>
-            <button
-              onClick={() => setPinInput(p => p.slice(0, -1))}
-              disabled={pinBusy || pinInput.length === 0}
-              className="w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center text-stone-500 hover:bg-stone-200/50 active:scale-95 transition-all disabled:opacity-30"
-            >
-              {pinBusy
-                ? <span className="w-5 h-5 border-2 border-stone-300 border-t-amber-800 rounded-full animate-spin" />
-                : <Delete className="w-6 h-6" />}
-            </button>
-          </div>
-
-          <button
-            onClick={() => setLogoutConfirm(true)}
-            className="mt-8 flex items-center gap-2 text-xs text-stone-400 hover:text-red-500 transition-colors"
-          >
-            <LogOut className="w-3.5 h-3.5" /> Terminaldan çıxış
-          </button>
-
-          {logoutConfirm && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-4">
-              <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-xs text-center">
-                <p className="font-semibold text-stone-800 mb-1">Terminaldan çıxmaq istəyirsiniz?</p>
-                <p className="text-sm text-stone-500 mb-5">Hesabdan tam çıxış olacaq. Davam etmək üçün sahibkarın yenidən daxil olması tələb olunacaq.</p>
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setLogoutConfirm(false)}
-                    className="flex-1 py-2.5 rounded-xl border border-stone-200 text-sm font-semibold text-stone-600 hover:bg-stone-50 transition-colors"
-                  >
-                    Ləğv et
-                  </button>
-                  <button
-                    onClick={() => { logout(); router.push('/login'); }}
-                    className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition-colors"
-                  >
-                    Çıxış
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Mobile cart bottom sheet */}
       {mobileCartOpen && (
@@ -1722,6 +1579,29 @@ export default function SellerPage() {
             <div className="flex gap-2 mt-6">
               <button onClick={() => setModifierItem(null)} className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">Ləğv et</button>
               <button onClick={confirmModifiers} className="flex-1 py-3 rounded-xl bg-amber-800 hover:bg-amber-900 text-white font-semibold text-sm active:scale-95">Əlavə et</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {unavailableItem && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-xs text-center">
+            <p className="font-semibold text-stone-800 mb-1">"{unavailableItem.name}" mövcud deyil et?</p>
+            <p className="text-sm text-stone-500 mb-5">Məhsul menyudan gizlədiləcək. Admin paneldən yenidən aktiv edə bilərsiniz.</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setUnavailableItem(null)}
+                className="flex-1 py-2.5 rounded-xl border border-stone-200 text-sm font-semibold text-stone-600 hover:bg-stone-50 transition-colors"
+              >
+                Ləğv et
+              </button>
+              <button
+                onClick={confirmUnavailable}
+                className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition-colors"
+              >
+                Gizlət
+              </button>
             </div>
           </div>
         </div>
