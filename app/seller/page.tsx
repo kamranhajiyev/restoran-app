@@ -156,6 +156,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   }
 
   // Hardware keyboard on the lock screen (desktop terminals)
+  useEffect(() => { setExpiresAt(getSession()?.expiresAt ?? null); }, []);
+
   useEffect(() => {
     if (!pinLocked) return;
     const h = (e: KeyboardEvent) => {
@@ -219,7 +221,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   // night shift's post-midnight orders stay under today until closing time
   const [bizSettings, setBizSettings] = useState<CompanySettings>(DEFAULT_SETTINGS);
 
-  const [expiresAt, setExpiresAt] = useState<string | null>(() => getSession()?.expiresAt ?? null);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
 
   const catScrollRef = useRef<HTMLDivElement>(null);
   const [refreshing, setRefreshing] = useState(false);

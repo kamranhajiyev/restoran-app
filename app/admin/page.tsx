@@ -346,7 +346,7 @@ function AdminPageContent() {
   const [statsLoaded, setStatsLoaded] = useState(false);
   const statsCache = useRef<Map<string, { at: number; data: Order[] }>>(new Map());
   const [sessionReady, setSessionReady] = useState(false);
-  const [expiresAt, setExpiresAt] = useState<string | null>(() => getSession()?.expiresAt ?? null);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
 
   // tables tab
   const [tables, setTables] = useState<RestaurantTable[]>([]);
@@ -356,7 +356,7 @@ function AdminPageContent() {
   const [tCapacity, setTCapacity] = useState('4');
   const [tSaving, setTSaving] = useState(false);
   const [qrTable, setQrTable] = useState<RestaurantTable | null>(null);
-  const [tableView, setTableView] = useState<'list' | 'floor'>(() => typeof window !== 'undefined' && window.innerWidth < 768 ? 'list' : 'floor');
+  const [tableView, setTableView] = useState<'list' | 'floor'>('floor');
   const [tShape, setTShape] = useState<'rect' | 'round' | 'rect-v'>('rect');
   const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
   const [dragging, setDragging] = useState<{ id: number; ox: number; oy: number; mx: number; my: number } | null>(null);
@@ -447,6 +447,11 @@ function AdminPageContent() {
     setPwSaving(false);
     setTimeout(() => setPwMsg(''), 2000);
   }
+
+  useEffect(() => {
+    if (window.innerWidth < 768) setTableView('list');
+    setExpiresAt(getSession()?.expiresAt ?? null);
+  }, []);
 
   useEffect(() => {
     const session = getSession();
