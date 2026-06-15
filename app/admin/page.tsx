@@ -1407,8 +1407,8 @@ function AdminPageContent() {
           </div>
           <div className="hidden sm:flex flex-col leading-tight">
             <span className="text-sm font-semibold text-stone-800">{adminName}</span>
-            {getSession()?.companyName && (
-              <span className="text-xs font-medium text-stone-600">{getSession()?.companyName}</span>
+            {companyName && (
+              <span className="text-xs font-medium text-stone-600">{companyName}</span>
             )}
           </div>
         </button>
