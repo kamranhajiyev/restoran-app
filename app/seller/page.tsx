@@ -149,7 +149,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     } else if (res.error === 'wrong') {
       setPinMsg(`Yanlış PIN${res.attemptsLeft > 0 ? ` · ${res.attemptsLeft} cəhd qaldı` : ''}`);
     } else if (res.error === 'locked') {
-      setPinMsg('Çox sayda yanlış cəhd — 1 dəqiqə gözləyin');
+      const until = res.locked_until ? new Date(res.locked_until) : null;
+      const mins = until ? Math.ceil((until.getTime() - Date.now()) / 60000) : '?';
+      setPinMsg(`Çox sayda yanlış cəhd — ${mins} dəqiqə gözləyin`);
     } else {
       setPinMsg('Şəbəkə xətası, yenidən cəhd edin');
     }
