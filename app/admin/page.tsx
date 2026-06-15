@@ -1713,7 +1713,7 @@ function AdminPageContent() {
                       const profit = item.rev - item.cost;
                       const metricVal = topMetricVal(item);
                       return (
-                        <div key={item.name}>
+                        <div key={`${item.name}-${idx}`}>
                           <div className="flex justify-between items-center mb-1">
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="text-[10px] font-bold text-stone-200 w-4 shrink-0">#{idx + 1}</span>
@@ -1756,8 +1756,8 @@ function AdminPageContent() {
                     <p className="text-sm text-stone-400 text-center py-4">Məlumat yoxdur</p>
                   ) : (
                     <div className="space-y-3">
-                      {sellerStats.map(s => (
-                        <div key={s.name} className="flex items-center justify-between gap-2">
+                      {sellerStats.map((s, i) => (
+                        <div key={`${s.name}-${i}`} className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 min-w-0">
                             <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold shrink-0">
                               {s.name[0]?.toUpperCase()}
@@ -1788,10 +1788,10 @@ function AdminPageContent() {
                     <p className="text-sm text-stone-400 text-center py-4">Bəxşiş yoxdur</p>
                   ) : (
                     <div className="space-y-3">
-                      {sellerStats.filter(s => s.tips > 0).map(s => {
+                      {sellerStats.filter(s => s.tips > 0).map((s, i) => {
                         const pct = totalTips > 0 ? (s.tips / totalTips) * 100 : 0;
                         return (
-                          <div key={s.name}>
+                          <div key={`${s.name}-tip-${i}`}>
                             <div className="flex justify-between items-center mb-1.5">
                               <span className="text-sm text-stone-600">{s.name}</span>
                               <div className="flex items-center gap-2">
