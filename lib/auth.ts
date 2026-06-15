@@ -82,6 +82,12 @@ export function logout() {
   localStorage.removeItem(AUTH_KEY);
 }
 
+// Use inside onAuthStateChange callbacks instead of logout().
+// logout() calls signOut() which fires SIGNED_OUT which retriggers the callback → infinite loop.
+export function clearLocalSession() {
+  localStorage.removeItem(AUTH_KEY);
+}
+
 export async function validateSession(session: Session): Promise<boolean> {
   try {
     const { data } = await supabase.auth.getUser();

@@ -7,7 +7,7 @@ import {
   ShoppingCart, ChevronLeft, ChevronRight, ChevronDown, Minus, Plus, Wallet,
   History, Search, Delete, KeyRound,
 } from 'lucide-react';
-import { getSession, logout, validateSession } from '@/lib/auth';
+import { getSession, logout, validateSession, clearLocalSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
   fetchMenu, addOrder, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
@@ -270,7 +270,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     // no longer matches the shared auth token — force re-login instead of
     // firing doomed cross-company requests.
     const { data: authSub } = supabase.auth.onAuthStateChange((_event, s) => {
-      if (!s || s.user.id !== session.id) { logout(); router.replace('/login'); }
+      if (!s || s.user.id !== session.id) { clearLocalSession(); router.replace('/login'); }
     });
     setCompanyContext(session.companyId);
     setSellerName(session.name);

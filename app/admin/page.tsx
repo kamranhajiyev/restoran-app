@@ -15,7 +15,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getSession, logout, validateSession } from '@/lib/auth';
+import { getSession, logout, validateSession, clearLocalSession } from '@/lib/auth';
 import {
   fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder,
   fetchShifts, fetchShiftSales, closeShift, fetchOpenShift,
@@ -460,7 +460,7 @@ function AdminPageContent() {
     // no longer matches the shared auth token — force re-login instead of
     // firing doomed cross-company requests.
     const { data: authSub } = supabase.auth.onAuthStateChange((_event, s) => {
-      if (!s || s.user.id !== session.id) { logout(); router.replace('/login'); }
+      if (!s || s.user.id !== session.id) { clearLocalSession(); router.replace('/login'); }
     });
     setCompanyContext(session.companyId);
     setAdminName(session.name);
@@ -2352,19 +2352,23 @@ function AdminPageContent() {
                       <p className="text-xs text-stone-400">Linki dəyişdirmək köhnə linki işdən çıxarır</p>
                       <button
                         disabled={tokenRegenerating}
-                        onClick={async () => {
-                          if (!confirm('Köhnə link işdən çıxacaq. Davam etmək istəyirsiniz?')) return;
-                          setTokenRegenerating(true);
-                          try {
-                            const { data: { session } } = await supabase.auth.getSession();
-                            const r = await fetch('/api/seller-token', {
-                              method: 'POST',
-                              headers: { Authorization: `Bearer ${session?.access_token}` },
-                            });
-                            const d = await r.json();
-                            if (d.token) setSellerToken(d.token);
-                          } finally { setTokenRegenerating(false); }
-                        }}
+                        onClick={() => setDialog({
+                          title: 'Linki yenilə?',
+                          message: 'Köhnə link dərhal işdən çıxacaq. Satıcılar yeni link olmadan daxil ola bilməyəcək.',
+                          confirmLabel: 'Yenilə',
+                          onConfirm: async () => {
+                            setTokenRegenerating(true);
+                            try {
+                              const { data: { session } } = await supabase.auth.getSession();
+                              const r = await fetch('/api/seller-token', {
+                                method: 'POST',
+                                headers: { Authorization: `Bearer ${session?.access_token}` },
+                              });
+                              const d = await r.json();
+                              if (d.token) setSellerToken(d.token);
+                            } finally { setTokenRegenerating(false); }
+                          },
+                        })}
                         className="flex items-center gap-1.5 text-xs text-red-500 hover:text-red-700 transition-colors disabled:opacity-50"
                       >
                         <RefreshCw className={`w-3 h-3 ${tokenRegenerating ? 'animate-spin' : ''}`} />
