@@ -54,6 +54,14 @@ function staffErrorText(err: string): string {
   const code = Object.keys(STAFF_ERRORS).find(c => err.includes(c));
   return code ? STAFF_ERRORS[code] : 'Xəta baş verdi, yenidən cəhd edin';
 }
+const WEAK_PINS = new Set([
+  '0000','1111','2222','3333','4444','5555','6666','7777','8888','9999',
+  '0123','1234','2345','3456','4567','5678','6789','7890',
+  '9876','8765','7654','6543','5432','4321','3210','0987',
+  '1212','2121','1122','2211','0101','1010','1100','0011','1221','2112','0110','1001',
+  '0852','1357','2580','1470','7410',
+]);
+
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
 const STATUS_COLORS: Record<OrderStatus, string> = {
@@ -2866,6 +2874,7 @@ function AdminPageContent() {
                 const name = sName.trim();
                 // edit with empty PIN = keep the old one
                 if ((sPin || !editingStaff) && !/^\d{4}$/.test(sPin)) { setSError(STAFF_ERRORS.bad_pin); return; }
+                if (sPin && WEAK_PINS.has(sPin)) { setSError('Bu PIN çox sadədir, başqa PIN seçin'); return; }
                 setSSaving(true);
                 let err: string | null;
                 if (editingStaff) {
@@ -2899,10 +2908,13 @@ function AdminPageContent() {
                   value={sPin}
                   onChange={e => setSPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                   inputMode="numeric"
-                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  className={`w-full border rounded-xl px-3 py-2.5 text-sm tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-amber-500 ${sPin.length === 4 && WEAK_PINS.has(sPin) ? 'border-red-400 bg-red-50' : 'border-stone-200'}`}
                   placeholder={editingStaff ? 'Dəyişmək üçün daxil edin' : '4 rəqəm'}
                   required={!editingStaff}
                 />
+                {sPin.length === 4 && WEAK_PINS.has(sPin) && (
+                  <p className="text-xs text-red-500 mt-1">Bu PIN çox sadədir — 1111, 1234 kimi ardıcıl PINlər qəbul edilmir</p>
+                )}
               </div>
               {sError && <p className="text-red-500 text-sm">{sError}</p>}
               <button
