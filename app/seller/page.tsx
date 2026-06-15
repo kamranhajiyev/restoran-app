@@ -1769,7 +1769,7 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
               onClick={onCancel}
               className="px-4 py-2.5 rounded-xl border border-red-200 text-red-500 hover:bg-red-50 active:scale-95 text-sm font-semibold transition-all"
             >
-              Ləğv et
+              Ödənişsiz bağla
             </button>
             <button
               onClick={onPay}
@@ -1807,7 +1807,7 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
                 Ödəniş
               </button>
               <button onClick={onCancel} className="border border-red-200 text-red-500 hover:bg-red-50 text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
-                Ləğv et
+                Ödənişsiz bağla
               </button>
             </>
           )}
