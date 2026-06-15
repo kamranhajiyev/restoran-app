@@ -1322,27 +1322,6 @@ function AdminPageContent() {
           })}
         </nav>
 
-        {/* Seller terminal shortcut */}
-        <div className={`px-3 pb-2 ${collapsed ? 'flex justify-center' : ''}`}>
-          {collapsed ? (
-            <button
-              title="Satıcı terminalı"
-              onClick={() => router.push('/seller')}
-              className="flex items-center justify-center w-9 h-9 rounded-lg text-stone-500 hover:bg-amber-50 hover:text-amber-800 transition-colors"
-            >
-              <Tablet className="w-5 h-5" />
-            </button>
-          ) : (
-            <button
-              onClick={() => router.push('/seller')}
-              className="flex items-center gap-3 h-10 px-3 rounded-lg text-[15px] font-semibold text-stone-600 hover:bg-amber-50 hover:text-amber-900 transition-colors w-full"
-            >
-              <Tablet className="w-5 h-5 shrink-0" />
-              <span className="flex-1 text-left">Satıcı terminalı</span>
-            </button>
-          )}
-        </div>
-
         {/* User + logout */}
         {!collapsed && (
           <div className="px-4 py-4 border-t border-stone-100/50">
