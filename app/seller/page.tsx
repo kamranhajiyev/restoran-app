@@ -507,10 +507,20 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     setShiftBusy(true);
     // re-fetch shift + sales right before closing so movements added elsewhere
     // and last-second payments are all in the snapshot
-    const fresh = (await fetchOpenShift()) ?? shift;
+    const fresh = overrideCompanyId
+      ? await fetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.shift ?? shift).catch(() => shift)
+      : (await fetchOpenShift()) ?? shift;
     const sales = await fetchShiftSales(fresh.openedAt);
     const expected = fresh.openingCash + sales.cash + movementsTotal(fresh);
-    await closeShift(fresh.id, expected, counted, effectiveSeller, sales.card, countedCard);
+    if (overrideCompanyId) {
+      await fetch('/api/close-shift', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shiftId: fresh.id, expectedCash: expected, countedCash: counted, closedBy: effectiveSeller, cardSales: sales.card, countedCard }),
+      });
+    } else {
+      await closeShift(fresh.id, expected, counted, effectiveSeller, sales.card, countedCard);
+    }
     setShiftBusy(false);
     setShift(null); setCountedInput(''); setTerminalInput(''); setView('orders');
     setJustClosed(true);
