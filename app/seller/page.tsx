@@ -19,6 +19,11 @@ import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, Restauran
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
+const AZ_CHARS: Record<string, string> = { 'ç': 'c', 'ə': 'e', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u' };
+function azNormalize(s: string): string {
+  return s.toLocaleLowerCase('az').replace(/[çəğıöşü]/g, ch => AZ_CHARS[ch]);
+}
+
 type View = 'orders' | 'new-order' | 'menu' | 'kassa' | 'history';
 type PayMethod = 'nağd' | 'kart';
 type OrderType = 'masa' | 'takeaway';
@@ -201,6 +206,9 @@ export default function SellerPage() {
   const [showMovForm, setShowMovForm]   = useState(false);
   const [justClosed, setJustClosed]     = useState(false);
 
+  const [menuSearch, setMenuSearch] = useState('');
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
+
   // modifier / variant modal
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
   const [selectedMods, setSelectedMods] = useState<Record<string, string>>({});
@@ -331,6 +339,7 @@ export default function SellerPage() {
     setSelectedTable(tableNum ?? null);
     setCart([]);
     setNote('');
+    setMenuSearch('');
     const cats = availableCategories.filter(a => menu.some(i => i.category === a.name)).map(a => a.name);
     if (cats.length > 0) setActiveCategory(cats[0]);
     setView('menu');
@@ -487,7 +496,10 @@ export default function SellerPage() {
   const cartCount   = cart.reduce((s, ci) => s + ci.quantity, 0);
   // Category tab order follows the admin's saved category order
   const categories  = availableCategories.filter(a => menu.some(i => i.category === a.name)).map(a => a.name);
-  const filtered    = menu.filter(m => m.category === activeCategory && m.available);
+  const menuQuery   = azNormalize(menuSearch.trim());
+  const filtered    = menuQuery
+    ? menu.filter(m => m.available && azNormalize(m.name).includes(menuQuery))
+    : menu.filter(m => m.category === activeCategory && m.available);
   const active      = orders.filter(isOrderOpen);
   const bizToday    = businessToday(bizSettings);
   const isToday     = (iso: string) => businessDay(iso, bizSettings) === bizToday;
@@ -674,13 +686,6 @@ export default function SellerPage() {
             <span className="hidden sm:inline">Dəyiş</span>
           </button>
         )}
-        <button
-          onClick={() => { logout(); router.push('/login'); }}
-          className="w-9 h-9 flex items-center justify-center rounded-lg text-stone-500 hover:text-red-500 hover:bg-red-50 transition-colors"
-          title="Çıxış"
-        >
-          <LogOut className="w-4 h-4" />
-        </button>
       </header>
 
       {/* ── Subscription warning banner ── */}
@@ -1183,14 +1188,25 @@ export default function SellerPage() {
                 {/* Menu toolbar */}
                 <div className="px-3 py-2.5 border-b bg-white flex items-center gap-2 shrink-0">
                   <button
-                    onClick={() => { setView(tablesOn ? 'new-order' : 'orders'); setOrderType(tablesOn ? 'masa' : null); setCart([]); }}
+                    onClick={() => { setView(tablesOn ? 'new-order' : 'orders'); setOrderType(tablesOn ? 'masa' : null); setCart([]); setMenuSearch(''); }}
                     className="w-9 h-9 flex items-center justify-center rounded-xl text-amber-700 hover:bg-amber-50 active:scale-95 transition-all"
                   >
                     <ChevronLeft className="w-5 h-5" />
                   </button>
-                  <span className="font-semibold text-stone-800 text-sm flex-1">
-                    {!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? '🥡 Takeaway' : tableName(selectedTable)}
-                  </span>
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      value={menuSearch}
+                      onChange={e => setMenuSearch(e.target.value)}
+                      placeholder="Məhsul axtar..."
+                      className="w-full bg-stone-50 border border-stone-200 rounded-xl pl-9 pr-8 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-amber-300"
+                    />
+                    {menuSearch && (
+                      <button onClick={() => setMenuSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                   {/* Cart icon — mobile only */}
                   <button
                     onClick={() => setMobileCartOpen(true)}
@@ -1397,11 +1413,34 @@ export default function SellerPage() {
           </div>
 
           <button
-            onClick={() => { logout(); router.push('/login'); }}
+            onClick={() => setLogoutConfirm(true)}
             className="mt-8 flex items-center gap-2 text-xs text-stone-400 hover:text-red-500 transition-colors"
           >
             <LogOut className="w-3.5 h-3.5" /> Terminaldan çıxış
           </button>
+
+          {logoutConfirm && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-4">
+              <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-xs text-center">
+                <p className="font-semibold text-stone-800 mb-1">Terminaldan çıxmaq istəyirsiniz?</p>
+                <p className="text-sm text-stone-500 mb-5">Hesabdan tam çıxış olacaq. Davam etmək üçün sahibkarın yenidən daxil olması tələb olunacaq.</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setLogoutConfirm(false)}
+                    className="flex-1 py-2.5 rounded-xl border border-stone-200 text-sm font-semibold text-stone-600 hover:bg-stone-50 transition-colors"
+                  >
+                    Ləğv et
+                  </button>
+                  <button
+                    onClick={() => { logout(); router.push('/login'); }}
+                    className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition-colors"
+                  >
+                    Çıxış
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
