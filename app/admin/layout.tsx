@@ -1,17 +1,14 @@
-'use client';
+import type { Metadata } from 'next';
+import AdminSWRegister from './AdminSWRegister';
 
-import { useEffect } from 'react';
+export const metadata: Metadata = {
+  manifest: '/admin-manifest.json',
+};
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js', { scope: '/admin' }).catch(() => {});
-    }
-  }, []);
-
   return (
     <>
-      <link rel="manifest" href="/admin-manifest.json" />
+      <AdminSWRegister />
       {children}
     </>
   );
