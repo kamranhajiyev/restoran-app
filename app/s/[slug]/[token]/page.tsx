@@ -12,20 +12,6 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
   >({ status: 'loading' });
 
   useEffect(() => {
-    // Point the manifest at this specific slug/token so "Add to Home Screen" reopens the full URL.
-    const existing = document.querySelector('link[rel="manifest"]');
-    const manifestUrl = `/api/seller-manifest?slug=${encodeURIComponent(slug)}&token=${encodeURIComponent(token)}`;
-    if (existing) {
-      existing.setAttribute('href', manifestUrl);
-    } else {
-      const link = document.createElement('link');
-      link.rel = 'manifest';
-      link.href = manifestUrl;
-      document.head.appendChild(link);
-    }
-  }, [slug, token]);
-
-  useEffect(() => {
     fetch(`/api/seller-token?slug=${encodeURIComponent(slug)}&token=${encodeURIComponent(token)}`)
       .then(r => r.json())
       .then(d => {
