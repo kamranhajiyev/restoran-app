@@ -893,24 +893,32 @@ function AdminPageContent() {
     const dragState = { id: t.id, ox: t.x ?? 20, oy: t.y ?? 20, mx: e.clientX, my: e.clientY };
     setDragging(dragState);
 
+    // Snapshot other tables once at drag start — they don't move during the drag.
+    const otherTables = tables.filter(x => x.id !== t.id);
+    let rafId: number | null = null;
+
     function onMove(ev: MouseEvent) {
       if (!canvasRef.current) return;
-      const rect = canvasRef.current.getBoundingClientRect();
-      const w = t.w ?? 100; const h = t.h ?? 70;
-      let newX = Math.max(0, Math.min(rect.width - w, dragState.ox + ev.clientX - dragState.mx));
-      let newY = Math.max(0, Math.min(rect.height - h, dragState.oy + ev.clientY - dragState.my));
+      // Throttle to one update per animation frame — mousemove fires at 60+ Hz
+      // and two setState calls per event (tables + alignGuides) caused the admin
+      // page to re-render 120+ times/second, freezing the browser.
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        if (!canvasRef.current) return;
+        const rect = canvasRef.current.getBoundingClientRect();
+        const w = t.w ?? 100; const h = t.h ?? 70;
+        let newX = Math.max(0, Math.min(rect.width - w, dragState.ox + ev.clientX - dragState.mx));
+        let newY = Math.max(0, Math.min(rect.height - h, dragState.oy + ev.clientY - dragState.my));
 
-      const SNAP = 8;
-      const guides: { type: 'h' | 'v'; pos: number }[] = [];
-
-      setTables(prev => {
-        const others = prev.filter(x => x.id !== dragState.id);
+        const SNAP = 8;
+        const guides: { type: 'h' | 'v'; pos: number }[] = [];
         const dxPoints = [newX, newX + w / 2, newX + w];
         const dyPoints = [newY, newY + h / 2, newY + h];
         const dxOffsets = [0, w / 2, w];
         const dyOffsets = [0, h / 2, h];
 
-        others.forEach(other => {
+        otherTables.forEach(other => {
           const ow = other.w ?? 100; const oh = other.h ?? 70;
           const ox2 = other.x ?? 20; const oy2 = other.y ?? 20;
           const oxPoints = [ox2, ox2 + ow / 2, ox2 + ow];
@@ -918,27 +926,23 @@ function AdminPageContent() {
 
           oxPoints.forEach(op => {
             dxPoints.forEach((dp, di) => {
-              if (Math.abs(dp - op) < SNAP) {
-                guides.push({ type: 'v', pos: op });
-                newX = op - dxOffsets[di];
-              }
+              if (Math.abs(dp - op) < SNAP) { guides.push({ type: 'v', pos: op }); newX = op - dxOffsets[di]; }
             });
           });
           oyPoints.forEach(op => {
             dyPoints.forEach((dp, di) => {
-              if (Math.abs(dp - op) < SNAP) {
-                guides.push({ type: 'h', pos: op });
-                newY = op - dyOffsets[di];
-              }
+              if (Math.abs(dp - op) < SNAP) { guides.push({ type: 'h', pos: op }); newY = op - dyOffsets[di]; }
             });
           });
         });
 
+        // Separate state updates — never call setState inside another setState updater
         setAlignGuides(guides);
-        return prev.map(x => x.id === dragState.id ? { ...x, x: newX, y: newY } : x);
+        setTables(prev => prev.map(x => x.id === dragState.id ? { ...x, x: newX, y: newY } : x));
       });
     }
     function onUp() {
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
       setAlignGuides([]);
