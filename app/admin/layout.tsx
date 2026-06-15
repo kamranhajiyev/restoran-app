@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect } from 'react';
-import InstallPWA from '@/components/InstallPWA';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
@@ -14,7 +13,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <>
       <link rel="manifest" href="/admin-manifest.json" />
       {children}
-      <InstallPWA />
     </>
   );
 }

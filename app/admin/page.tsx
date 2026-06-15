@@ -41,6 +41,7 @@ import PasswordField from '@/components/PasswordField';
 import { validatePassword } from '@/lib/password';
 import { exportMenuExcel, parseMenuFile, ImportPreview } from '@/lib/excel';
 import QRCode from 'react-qr-code';
+import InstallPWA from '@/components/InstallPWA';
 
 const COOKING_STATIONS = ['Mətbəx', 'Bar', 'Soyuq mətbəx', 'Pizza', 'Mangal'];
 // RPC raise messages are machine codes — translated here for display
@@ -1420,6 +1421,8 @@ function AdminPageContent() {
             )}
           </div>
         </button>
+
+        <InstallPWA />
 
         <button
           onClick={() => { logout(); router.push('/login'); }}
