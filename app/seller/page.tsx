@@ -132,7 +132,14 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     setPinMsg('');
     if (next.length < 4) return;
     setPinBusy(true);
-    const res = await verifyStaffPin(next);
+    // Public terminal has no Supabase session — verify via server-side API route
+    const res = overrideCompanyId
+      ? await fetch('/api/verify-pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ companyId: overrideCompanyId, pin: next }),
+        }).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }))
+      : await verifyStaffPin(next);
     setPinBusy(false);
     setPinInput('');
     if (res.ok) {
@@ -231,9 +238,17 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       setCompanyContext(overrideCompanyId);
       setSellerName(overrideCompanyName ?? 'Satıcı');
       fetchCompanySettings(overrideCompanyId).then(setBizSettings);
-      fetchOpenShift().then(s => { setShift(s); setShiftChecked(true); });
       fetchOrdersCount().then(setTotalOrders);
-      fetchStaff().then(setPinStaffList);
+      // Fetch staff and shift together — only mark ready when both resolve so
+      // the PIN screen is shown immediately instead of kassa flashing first.
+      Promise.all([
+        fetch(`/api/public-staff?companyId=${overrideCompanyId}`).then(r => r.json()).catch(() => ({ staff: [] })),
+        fetchOpenShift(),
+      ]).then(([staffData, s]) => {
+        setPinStaffList(staffData.staff ?? []);
+        setShift(s);
+        setShiftChecked(true);
+      });
       Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled()]).then(([m, o, c, tb, te]) => {
         setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te);
         const available = c.filter(cat => cat.available);
