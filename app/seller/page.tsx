@@ -5,17 +5,17 @@ import {
   PanelLeftClose, PanelLeftOpen, LogOut, X,
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
   ShoppingCart, ChevronLeft, ChevronRight, ChevronDown, Minus, Plus, Wallet,
-  History, Search, EyeOff,
+  History, Search, Delete, KeyRound, EyeOff,
 } from 'lucide-react';
 import { getSession, logout, validateSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
   fetchMenu, addOrder, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
   fetchTablesEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
-  fetchCompanySettings, setMenuItemAvailable,
+  fetchCompanySettings, fetchStaff, verifyStaffPin, setMenuItemAvailable,
 } from '@/lib/store';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday } from '@/lib/business-day';
-import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, isOrderOpen } from '@/types';
+import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, isOrderOpen } from '@/types';
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
@@ -109,6 +109,55 @@ export default function SellerPage() {
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [submitting, setSubmitting]         = useState(false);
 
+  // Poster-style PIN lock
+  const [pinStaffList, setPinStaffList] = useState<Staff[]>([]);
+  const [activeStaff, setActiveStaff]   = useState<{ id: string; name: string } | null>(null);
+  const [pinInput, setPinInput]         = useState('');
+  const [pinBusy, setPinBusy]           = useState(false);
+  const [pinMsg, setPinMsg]             = useState('');
+
+  const pinEnabled = pinStaffList.some(s => s.active);
+  const pinLocked  = pinEnabled && !activeStaff;
+  const effectiveSeller = activeStaff?.name ?? sellerName;
+
+  async function pressPin(digit: string) {
+    if (pinBusy || pinInput.length >= 4) return;
+    const next = pinInput + digit;
+    setPinInput(next);
+    setPinMsg('');
+    if (next.length < 4) return;
+    setPinBusy(true);
+    const res = await verifyStaffPin(next);
+    setPinBusy(false);
+    setPinInput('');
+    if (res.ok) {
+      setActiveStaff({ id: res.id, name: res.name });
+    } else if (res.error === 'wrong') {
+      setPinMsg(`Yanlış PIN${res.attemptsLeft > 0 ? ` · ${res.attemptsLeft} cəhd qaldı` : ''}`);
+    } else if (res.error === 'locked') {
+      setPinMsg('Çox sayda yanlış cəhd — 1 dəqiqə gözləyin');
+    } else {
+      setPinMsg('Şəbəkə xətası, yenidən cəhd edin');
+    }
+  }
+
+  // Hardware keyboard on the lock screen (desktop terminals)
+  useEffect(() => {
+    if (!pinLocked) return;
+    const h = (e: KeyboardEvent) => {
+      if (/^\d$/.test(e.key)) pressPin(e.key);
+      else if (e.key === 'Backspace') setPinInput(p => p.slice(0, -1));
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinLocked, pinInput, pinBusy]);
+
+  // Always start PIN screen with a clean slate
+  useEffect(() => {
+    if (pinLocked) { setPinInput(''); setPinMsg(''); }
+  }, [pinLocked]);
+
   // order history
   const [historySearch, setHistorySearch]   = useState('');
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
@@ -127,6 +176,8 @@ export default function SellerPage() {
   const [cardInput, setCardInput]     = useState('');
   const [isTip, setIsTip]             = useState(false);
   const [tipInput, setTipInput]       = useState('');
+  const [discountInput, setDiscountInput] = useState('');
+  const [discountType, setDiscountType]   = useState<'%' | '₼'>('₼');
 
   // kassa (cash shift)
   const [shift, setShift]               = useState<CashShift | null>(null);
@@ -143,6 +194,7 @@ export default function SellerPage() {
   const [justClosed, setJustClosed]     = useState(false);
 
   const [menuSearch, setMenuSearch] = useState('');
+  const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [unavailableItem, setUnavailableItem] = useState<MenuItem | null>(null);
 
   // modifier / variant modal
@@ -185,6 +237,7 @@ export default function SellerPage() {
     fetchCompanySettings(session.companyId ?? '').then(setBizSettings);
     fetchOpenShift().then(s => { setShift(s); setShiftChecked(true); });
     fetchOrdersCount().then(setTotalOrders);
+    fetchStaff().then(setPinStaffList);
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled()]).then(([m, o, c, tb, te]) => {
       setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te);
       const available = c.filter(cat => cat.available);
@@ -197,9 +250,10 @@ export default function SellerPage() {
 
   useEffect(() => {
     async function sync() {
-      const [m, o, c] = await Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories()]);
+      const [m, o, c, st] = await Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff()]);
       setMenu(m); setOrders(o);
       setAvailableCategories(c.filter(cat => cat.available));
+      setPinStaffList(st);
     }
     window.addEventListener('focus', sync);
     return () => window.removeEventListener('focus', sync);
@@ -297,7 +351,8 @@ export default function SellerPage() {
       items: cart,
       status: 'gözləyir',
       createdAt: new Date().toISOString(),
-      sellerName: sellerName,
+      sellerName: effectiveSeller,
+      staffId: activeStaff?.id,
       note: note.trim() || undefined,
     };
     setOrders(prev => [order, ...prev]);
@@ -317,22 +372,32 @@ export default function SellerPage() {
     setCardInput('');
     setIsTip(false);
     setTipInput('');
+    setDiscountInput('');
+    setDiscountType('₼');
+  }
+
+  function calcDiscount(fullTotal: number): number {
+    const raw = parseFloat(discountInput) || 0;
+    if (discountType === '%') return Math.min(fullTotal, (fullTotal * raw) / 100);
+    return Math.min(fullTotal, raw);
   }
 
   async function confirmPayment() {
     if (!payingOrder) return;
     const cash = parseFloat(cashInput) || 0;
     const card = parseFloat(cardInput) || 0;
-    const total = orderTotal(payingOrder);
+    const fullTotal = orderTotal(payingOrder);
+    const discountAmt = calcDiscount(fullTotal);
+    const total = fullTotal - discountAmt;
     const { tip, change } = paymentBreakdown(total, cash, card, isTip, tipInput);
     const cashKept = cash - change;
     setPayingOrder(null);
     setIsTip(false);
     // The DB update is conditional — a no-op if someone else already paid this order
-    const paid = await updateOrderStatus(payingOrder.id, 'ödənilib', cashKept, card, tip, change);
+    const paid = await updateOrderStatus(payingOrder.id, 'ödənilib', cashKept, card, tip, change, discountAmt || undefined, discountAmt ? discountType : undefined);
     if (paid) {
       setOrders(prev => prev.map(o => o.id === payingOrder.id
-        ? { ...o, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, tipAmount: tip, changeAmount: change }
+        ? { ...o, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, tipAmount: tip, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined }
         : o));
     } else {
       refreshOrders();
@@ -351,12 +416,12 @@ export default function SellerPage() {
     if (!reason) return;
     setCancelBusy(true);
     // Conditional in the DB — a no-op if the order got paid in the meantime
-    const ok = await cancelOrder(cancellingOrder.id, reason, sellerName);
+    const ok = await cancelOrder(cancellingOrder.id, reason, effectiveSeller);
     setCancelBusy(false);
     setCancellingOrder(null);
     if (ok) {
       setOrders(prev => prev.map(o => o.id === cancellingOrder.id
-        ? { ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: sellerName, cancelledAt: new Date().toISOString() }
+        ? { ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: effectiveSeller, cancelledAt: new Date().toISOString() }
         : o));
     } else {
       refreshOrders();
@@ -384,7 +449,7 @@ export default function SellerPage() {
   async function handleOpenShift() {
     const cash = parseFloat(openCashInput) || 0;
     setShiftBusy(true);
-    const s = await openShift(cash, sellerName);
+    const s = await openShift(cash, effectiveSeller);
     setShiftBusy(false);
     if (s) { setShift(s); setOpenCashInput(''); setJustClosed(false); }
   }
@@ -393,7 +458,7 @@ export default function SellerPage() {
     if (!shift) return;
     const raw = parseFloat(movAmount) || 0;
     if (raw <= 0 || !movReason.trim()) return;
-    const mv: ShiftMovement = { at: new Date().toISOString(), amount: movOut ? -raw : raw, reason: movReason.trim(), by: sellerName };
+    const mv: ShiftMovement = { at: new Date().toISOString(), amount: movOut ? -raw : raw, reason: movReason.trim(), by: effectiveSeller };
     setShift({ ...shift, movements: [...shift.movements, mv] });
     setShowMovForm(false); setMovAmount(''); setMovReason('');
     await addShiftMovement(shift.id, mv);
@@ -409,7 +474,7 @@ export default function SellerPage() {
     const fresh = (await fetchOpenShift()) ?? shift;
     const sales = await fetchShiftSales(fresh.openedAt);
     const expected = fresh.openingCash + sales.cash + movementsTotal(fresh);
-    await closeShift(fresh.id, expected, counted, sellerName, sales.card, countedCard);
+    await closeShift(fresh.id, expected, counted, effectiveSeller, sales.card, countedCard);
     setShiftBusy(false);
     setShift(null); setCountedInput(''); setTerminalInput(''); setView('orders');
     setJustClosed(true);
@@ -445,7 +510,7 @@ export default function SellerPage() {
   const isToday     = (iso: string) => businessDay(iso, bizSettings) === bizToday;
   const todayOrders = active.filter(o => isToday(o.createdAt));
   const prevOrders  = active.filter(o => !isToday(o.createdAt));
-  const myTodayTips = orders.filter(o => o.sellerName === sellerName && isToday(o.createdAt) && (o.tipAmount ?? 0) > 0).reduce((s, o) => s + (o.tipAmount ?? 0), 0);
+  const myTodayTips = orders.filter(o => o.sellerName === effectiveSeller && isToday(o.createdAt) && (o.tipAmount ?? 0) > 0).reduce((s, o) => s + (o.tipAmount ?? 0), 0);
   const historyQuery = historySearch.trim().toLowerCase();
   const historyOrders = historyQuery
     ? orders.filter(o =>
@@ -523,9 +588,9 @@ export default function SellerPage() {
           <div className="px-4 py-4 border-t border-stone-100/50">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
-                {sellerName[0]?.toUpperCase()}
+                {effectiveSeller[0]?.toUpperCase()}
               </div>
-              <span className="text-xs text-stone-600 truncate">{sellerName}</span>
+              <span className="text-xs text-stone-600 truncate">{effectiveSeller}</span>
               {!online && <span className="ml-auto text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">Oflayn</span>}
             </div>
             <button onClick={() => { logout(); router.push('/login'); }} className="flex items-center gap-2 text-xs text-stone-500 hover:text-red-500 transition-colors">
@@ -535,7 +600,7 @@ export default function SellerPage() {
         ) : (
           <div className="py-4 flex flex-col items-center gap-2 border-t border-stone-100/50">
             <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
-              {sellerName[0]?.toUpperCase()}
+              {effectiveSeller[0]?.toUpperCase()}
             </div>
             <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-stone-500 hover:text-red-500 transition-colors">
               <LogOut className="w-4 h-4" />
@@ -612,10 +677,20 @@ export default function SellerPage() {
         <div className="flex-1" />
         <div className="flex items-center gap-2 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl">
           <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
-            {sellerName[0]?.toUpperCase()}
+            {effectiveSeller[0]?.toUpperCase()}
           </div>
-          <span className="text-sm font-medium text-stone-700 hidden sm:inline">{sellerName}</span>
+          <span className="text-sm font-medium text-stone-700 hidden sm:inline">{effectiveSeller}</span>
         </div>
+        {pinEnabled && activeStaff && (
+          <button
+            onClick={() => setActiveStaff(null)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
+            title="Satıcını dəyiş"
+          >
+            <KeyRound className="w-4 h-4" />
+            <span className="hidden sm:inline">Dəyiş</span>
+          </button>
+        )}
       </header>
 
       {/* ── Subscription warning banner ── */}
@@ -836,6 +911,11 @@ export default function SellerPage() {
                                       {[order.cashAmount ? `💵 ${order.cashAmount.toFixed(2)}` : '', order.cardAmount ? `💳 ${order.cardAmount.toFixed(2)}` : ''].filter(Boolean).join(' · ')}
                                     </span>
                                   )}
+                                  {(order.discountAmount ?? 0) > 0 && (
+                                    <span className="text-xs font-semibold text-green-600 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">
+                                      🏷️ endirim -{order.discountAmount!.toFixed(2)} ₼{order.discountType === '%' ? ` (${order.discountType})` : ''}
+                                    </span>
+                                  )}
                                   {(order.tipAmount ?? 0) > 0 && (
                                     <span className="text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
                                       ⭐ bəxşiş {order.tipAmount!.toFixed(2)} ₼
@@ -847,7 +927,10 @@ export default function SellerPage() {
                                     </span>
                                   )}
                                 </div>
-                                <span className="font-bold text-amber-900">{orderTotal(order).toFixed(2)} ₼</span>
+                                <div className="text-right">
+                                  {(order.discountAmount ?? 0) > 0 && <p className="text-xs text-stone-400 line-through">{orderTotal(order).toFixed(2)} ₼</p>}
+                                  <span className="font-bold text-amber-900">{(orderTotal(order) - (order.discountAmount ?? 0)).toFixed(2)} ₼</span>
+                                </div>
                               </div>
                             </div>
                           )}
@@ -1300,6 +1383,86 @@ export default function SellerPage() {
         })}
       </nav>
 
+      {/* PIN lock screen — covers everything until a staff member unlocks */}
+      {pinLocked && (
+        <div className="fixed inset-0 z-[80] bg-[#f7f3ed] flex flex-col items-center justify-center p-6">
+          <div className="w-12 h-12 rounded-2xl bg-amber-800 flex items-center justify-center mb-4">
+            <Coffee className="w-6 h-6 text-white" />
+          </div>
+          <h2 className="font-bold text-xl text-stone-800">{getSession()?.companyName || 'Satıcı Paneli'}</h2>
+          <p className="text-sm text-stone-500 mt-1 mb-6">PIN kodunuzu daxil edin</p>
+
+          <div className="flex gap-3 mb-3 h-4 items-center">
+            {[0, 1, 2, 3].map(i => (
+              <span
+                key={i}
+                className={`rounded-full transition-all ${i < pinInput.length ? 'w-3.5 h-3.5 bg-amber-800' : 'w-3 h-3 bg-stone-300'}`}
+              />
+            ))}
+          </div>
+          <p className={`text-sm h-5 mb-4 ${pinMsg ? 'text-red-500' : 'text-transparent'}`}>{pinMsg || '·'}</p>
+
+          <div className="grid grid-cols-3 gap-3">
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(d => (
+              <button
+                key={d}
+                onClick={() => pressPin(d)}
+                disabled={pinBusy}
+                className="w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl bg-white border border-stone-200 text-2xl font-semibold text-stone-700 hover:bg-stone-50 active:scale-95 transition-all disabled:opacity-50"
+              >
+                {d}
+              </button>
+            ))}
+            <span />
+            <button
+              onClick={() => pressPin('0')}
+              disabled={pinBusy}
+              className="w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl bg-white border border-stone-200 text-2xl font-semibold text-stone-700 hover:bg-stone-50 active:scale-95 transition-all disabled:opacity-50"
+            >
+              0
+            </button>
+            <button
+              onClick={() => setPinInput(p => p.slice(0, -1))}
+              disabled={pinBusy || pinInput.length === 0}
+              className="w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center text-stone-500 hover:bg-stone-200/50 active:scale-95 transition-all disabled:opacity-30"
+            >
+              {pinBusy
+                ? <span className="w-5 h-5 border-2 border-stone-300 border-t-amber-800 rounded-full animate-spin" />
+                : <Delete className="w-6 h-6" />}
+            </button>
+          </div>
+
+          <button
+            onClick={() => setLogoutConfirm(true)}
+            className="mt-8 flex items-center gap-2 text-xs text-stone-400 hover:text-red-500 transition-colors"
+          >
+            <LogOut className="w-3.5 h-3.5" /> Terminaldan çıxış
+          </button>
+
+          {logoutConfirm && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-4">
+              <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-xs text-center">
+                <p className="font-semibold text-stone-800 mb-1">Terminaldan çıxmaq istəyirsiniz?</p>
+                <p className="text-sm text-stone-500 mb-5">Hesabdan tam çıxış olacaq. Davam etmək üçün sahibkarın yenidən daxil olması tələb olunacaq.</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setLogoutConfirm(false)}
+                    className="flex-1 py-2.5 rounded-xl border border-stone-200 text-sm font-semibold text-stone-600 hover:bg-stone-50 transition-colors"
+                  >
+                    Ləğv et
+                  </button>
+                  <button
+                    onClick={() => { logout(); router.push('/login'); }}
+                    className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition-colors"
+                  >
+                    Çıxış
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Mobile cart bottom sheet */}
       {mobileCartOpen && (
@@ -1393,7 +1556,9 @@ export default function SellerPage() {
 
       {/* Payment modal — bottom sheet on mobile */}
       {payingOrder && (() => {
-        const total = orderTotal(payingOrder);
+        const fullTotal = orderTotal(payingOrder);
+        const discountAmt = calcDiscount(fullTotal);
+        const total = fullTotal - discountAmt;
         const cash = parseFloat(cashInput) || 0;
         const card = parseFloat(cardInput) || 0;
         const paid = cash + card;
@@ -1418,9 +1583,35 @@ export default function SellerPage() {
                   </li>
                 ))}
               </ul>
+              {/* Discount row */}
+              <div className="flex items-center gap-2 mb-3">
+                <div className="flex rounded-lg overflow-hidden border border-stone-200 shrink-0">
+                  <button
+                    onClick={() => setDiscountType('₼')}
+                    className={`px-3 py-1.5 text-sm font-semibold transition-colors ${discountType === '₼' ? 'bg-amber-800 text-white' : 'bg-white text-stone-600'}`}
+                  >₼</button>
+                  <button
+                    onClick={() => setDiscountType('%')}
+                    className={`px-3 py-1.5 text-sm font-semibold transition-colors ${discountType === '%' ? 'bg-amber-800 text-white' : 'bg-white text-stone-600'}`}
+                  >%</button>
+                </div>
+                <input
+                  type="number" min="0" step="0.5" placeholder="Endirim..."
+                  value={discountInput}
+                  onChange={e => setDiscountInput(e.target.value)}
+                  onFocus={e => e.target.select()}
+                  className="flex-1 border border-stone-200 rounded-xl px-3 py-1.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700 text-center"
+                />
+                {discountAmt > 0 && (
+                  <span className="text-sm font-bold text-green-600 shrink-0">-{discountAmt.toFixed(2)} ₼</span>
+                )}
+              </div>
               <div className="flex justify-between items-center font-bold text-xl border-t pt-3 mb-5">
                 <span>Cəmi</span>
-                <span className="text-amber-700">{total.toFixed(2)} ₼</span>
+                <div className="text-right">
+                  {discountAmt > 0 && <p className="text-xs text-stone-400 line-through font-normal">{fullTotal.toFixed(2)} ₼</p>}
+                  <span className="text-amber-700">{total.toFixed(2)} ₼</span>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div>

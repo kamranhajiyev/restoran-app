@@ -230,6 +230,8 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
       cardAmount: o.card_amount ? Number(o.card_amount) : undefined,
       tipAmount: o.tip_amount ? Number(o.tip_amount) : undefined,
       changeAmount: o.change_amount ? Number(o.change_amount) : undefined,
+      discountAmount: o.discount_amount ? Number(o.discount_amount) : undefined,
+      discountType: (o.discount_type as '%' | '₼') ?? undefined,
       cancelledAt: o.cancelled_at ?? undefined,
       cancelledBy: o.cancelled_by ?? undefined,
       cancelReason: o.cancel_reason ?? undefined,
@@ -286,6 +288,8 @@ export async function updateOrderStatus(
   cardAmount?: number,
   tipAmount?: number,
   changeAmount?: number,
+  discountAmount?: number,
+  discountType?: '%' | '₼',
 ): Promise<boolean> {
   const updates: Record<string, unknown> = { status };
   // Plain status changes must not touch payment data
@@ -295,6 +299,8 @@ export async function updateOrderStatus(
     updates.card_amount = cardAmount ?? 0;
     updates.tip_amount = tipAmount ?? 0;
     updates.change_amount = changeAmount ?? 0;
+    updates.discount_amount = discountAmount ?? 0;
+    updates.discount_type = discountType ?? '₼';
   }
   if (status === 'ödənilib') updates.paid_at = new Date().toISOString();
   let q = supabase.from('orders').update(updates).eq('id', orderId);

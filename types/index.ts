@@ -100,6 +100,8 @@ export interface Order {
   cardAmount?: number;
   tipAmount?: number;
   changeAmount?: number; // returned to the customer — display only, never revenue
+  discountAmount?: number;
+  discountType?: '%' | '₼';
   cancelledAt?: string;
   cancelledBy?: string;
   cancelReason?: string;

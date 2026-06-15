@@ -2133,10 +2133,10 @@ function AdminPageContent() {
                 <div className="flex items-center gap-2">
                   <input ref={importFileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportFile} />
                   <button onClick={() => importFileRef.current?.click()} title="Excel-dən idxal et" className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
-                    <Upload className="w-4 h-4" /> <span className="hidden sm:inline">İdxal</span>
+                    <Download className="w-4 h-4" /> <span className="hidden sm:inline">İdxal</span>
                   </button>
                   <button onClick={() => exportMenuExcel(menu, categories)} title="Excel-ə ixrac et" className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
-                    <Download className="w-4 h-4" /> <span className="hidden sm:inline">İxrac</span>
+                    <Upload className="w-4 h-4" /> <span className="hidden sm:inline">İxrac</span>
                   </button>
                   <button onClick={() => setShowTrash(true)} className="relative flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
                     <Trash2 className="w-4 h-4" />
