@@ -5,14 +5,14 @@ import {
   PanelLeftClose, PanelLeftOpen, LogOut, X,
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
   ShoppingCart, ChevronLeft, ChevronRight, ChevronDown, Minus, Plus, Wallet,
-  History, Search, Delete, KeyRound, EyeOff,
+  History, Search, Delete, KeyRound,
 } from 'lucide-react';
 import { getSession, logout, validateSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
   fetchMenu, addOrder, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
   fetchTablesEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
-  fetchCompanySettings, fetchStaff, verifyStaffPin, setMenuItemAvailable,
+  fetchCompanySettings, fetchStaff, verifyStaffPin,
 } from '@/lib/store';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday } from '@/lib/business-day';
 import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, isOrderOpen } from '@/types';
@@ -86,7 +86,7 @@ function tableHasActive(n: number, orders: Order[]): boolean {
   return orders.some(o => o.tableNumber === n && isOrderOpen(o));
 }
 
-export default function SellerPage() {
+export default function SellerPage({ overrideCompanyId, overrideCompanyName }: { overrideCompanyId?: string; overrideCompanyName?: string } = {}) {
   const router = useRouter();
   const [view, setView]             = useState<View>('orders');
   const [menu, setMenu]             = useState<MenuItem[]>([]);
@@ -202,7 +202,6 @@ export default function SellerPage() {
 
   const [menuSearch, setMenuSearch] = useState('');
   const [logoutConfirm, setLogoutConfirm] = useState(false);
-  const [unavailableItem, setUnavailableItem] = useState<MenuItem | null>(null);
 
   // modifier / variant modal
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
@@ -226,6 +225,25 @@ export default function SellerPage() {
   }, []);
 
   useEffect(() => {
+    if (overrideCompanyId) {
+      // Public terminal mode — company context comes from the secret URL token,
+      // no Supabase auth session required.
+      setCompanyContext(overrideCompanyId);
+      setSellerName(overrideCompanyName ?? 'Satıcı');
+      fetchCompanySettings(overrideCompanyId).then(setBizSettings);
+      fetchOpenShift().then(s => { setShift(s); setShiftChecked(true); });
+      fetchOrdersCount().then(setTotalOrders);
+      fetchStaff().then(setPinStaffList);
+      Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled()]).then(([m, o, c, tb, te]) => {
+        setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te);
+        const available = c.filter(cat => cat.available);
+        setAvailableCategories(available);
+        const cats = available.filter(a => m.some(i => i.category === a.name)).map(a => a.name);
+        if (cats.length > 0) setActiveCategory(cats[0]);
+      }).catch(() => setOnline(false));
+      return;
+    }
+
     const session = getSession();
     if (!session || (session.role !== 'seller' && session.role !== 'owner')) { router.replace('/login'); return; }
     validateSession(session).then(valid => {
@@ -253,7 +271,7 @@ export default function SellerPage() {
       if (cats.length > 0) setActiveCategory(cats[0]);
     }).catch(() => setOnline(false));
     return () => authSub.subscription.unsubscribe();
-  }, [router]);
+  }, [router, overrideCompanyId, overrideCompanyName]);
 
   useEffect(() => {
     async function sync() {
@@ -289,13 +307,6 @@ export default function SellerPage() {
           ? { ...ci, quantity: ci.quantity - 1 } : ci
       );
     });
-  }
-
-  function confirmUnavailable() {
-    if (!unavailableItem) return;
-    setMenu(prev => prev.map(m => m.id === unavailableItem.id ? { ...m, available: false } : m));
-    setMenuItemAvailable(unavailableItem.id, false);
-    setUnavailableItem(null);
   }
 
   function handleMenuItemTap(item: MenuItem) {
@@ -600,18 +611,22 @@ export default function SellerPage() {
               <span className="text-xs text-stone-600 truncate">{effectiveSeller}</span>
               {!online && <span className="ml-auto text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">Oflayn</span>}
             </div>
-            <button onClick={() => { logout(); router.push('/login'); }} className="flex items-center gap-2 text-xs text-stone-500 hover:text-red-500 transition-colors">
-              <LogOut className="w-3.5 h-3.5" /> Çıxış
-            </button>
+            {!overrideCompanyId && (
+              <button onClick={() => { logout(); router.push('/login'); }} className="flex items-center gap-2 text-xs text-stone-500 hover:text-red-500 transition-colors">
+                <LogOut className="w-3.5 h-3.5" /> Çıxış
+              </button>
+            )}
           </div>
         ) : (
           <div className="py-4 flex flex-col items-center gap-2 border-t border-stone-100/50">
             <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
               {effectiveSeller[0]?.toUpperCase()}
             </div>
-            <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-stone-500 hover:text-red-500 transition-colors">
-              <LogOut className="w-4 h-4" />
-            </button>
+            {!overrideCompanyId && (
+              <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-stone-500 hover:text-red-500 transition-colors">
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -659,12 +674,14 @@ export default function SellerPage() {
             {shiftBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
             Növbəni aç
           </button>
-          <button
-            onClick={() => { logout(); router.push('/login'); }}
-            className="w-full mt-3 text-sm text-stone-500 hover:text-red-500 transition-colors flex items-center justify-center gap-1.5"
-          >
-            <LogOut className="w-3.5 h-3.5" /> Çıxış
-          </button>
+          {!overrideCompanyId && (
+            <button
+              onClick={() => { logout(); router.push('/login'); }}
+              className="w-full mt-3 text-sm text-stone-500 hover:text-red-500 transition-colors flex items-center justify-center gap-1.5"
+            >
+              <LogOut className="w-3.5 h-3.5" /> Çıxış
+            </button>
+          )}
         </div>
       </div>
     );
@@ -1295,13 +1312,6 @@ export default function SellerPage() {
                             <p className="text-amber-700 font-bold text-sm mt-0.5">{item.price.toFixed(2)} ₼</p>
                           </div>
                         </button>
-                        <button
-                          onClick={() => setUnavailableItem(item)}
-                          className="absolute top-2 left-2 z-10 w-6 h-6 bg-white/80 hover:bg-red-50 rounded-full flex items-center justify-center text-stone-400 hover:text-red-500 transition-colors"
-                          title="Mövcud deyil et"
-                        >
-                          <EyeOff className="w-3.5 h-3.5" />
-                        </button>
                       </div>
                     );
                   })}
@@ -1439,12 +1449,14 @@ export default function SellerPage() {
             </button>
           </div>
 
-          <button
-            onClick={() => setLogoutConfirm(true)}
-            className="mt-8 flex items-center gap-2 text-xs text-stone-400 hover:text-red-500 transition-colors"
-          >
-            <LogOut className="w-3.5 h-3.5" /> Terminaldan çıxış
-          </button>
+          {!overrideCompanyId && (
+            <button
+              onClick={() => setLogoutConfirm(true)}
+              className="mt-8 flex items-center gap-2 text-xs text-stone-400 hover:text-red-500 transition-colors"
+            >
+              <LogOut className="w-3.5 h-3.5" /> Terminaldan çıxış
+            </button>
+          )}
 
           {logoutConfirm && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-4">
@@ -1782,28 +1794,6 @@ export default function SellerPage() {
         </div>
       )}
 
-      {unavailableItem && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-4">
-          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-xs text-center">
-            <p className="font-semibold text-stone-800 mb-1">"{unavailableItem.name}" mövcud deyil et?</p>
-            <p className="text-sm text-stone-500 mb-5">Məhsul menyudan gizlədiləcək. Admin paneldən yenidən aktiv edə bilərsiniz.</p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setUnavailableItem(null)}
-                className="flex-1 py-2.5 rounded-xl border border-stone-200 text-sm font-semibold text-stone-600 hover:bg-stone-50 transition-colors"
-              >
-                Ləğv et
-              </button>
-              <button
-                onClick={confirmUnavailable}
-                className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition-colors"
-              >
-                Gizlət
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

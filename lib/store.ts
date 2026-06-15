@@ -405,6 +405,13 @@ export async function fetchCompanySlug(id: string): Promise<string | null> {
   } catch { return null; }
 }
 
+export async function fetchSellerToken(companyId: string): Promise<string | null> {
+  try {
+    const { data } = await supabase.from('companies').select('seller_token').eq('id', companyId).single();
+    return data?.seller_token ?? null;
+  } catch { return null; }
+}
+
 // ─── Tables ───────────────────────────────────────────────────────────────────
 
 // Takeaway-only companies turn tables off: sellers then skip table selection

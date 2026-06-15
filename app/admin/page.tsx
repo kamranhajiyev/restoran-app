@@ -7,7 +7,7 @@ import {
   TrendingUp, Receipt, Star, ChevronDown, Percent,
   Coffee, BarChart2, Package, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
-  GripVertical, Globe, KeyRound, Tablet,
+  GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link,
 } from 'lucide-react';
 import {
   DndContext, DragEndEvent, PointerSensor, useSensor, useSensors,
@@ -28,6 +28,7 @@ import {
   fetchCompanySettings, updateCompanyHours,
   fetchLoginEvents, LoginEvent,
   fetchStaff, createStaff, updateStaff, setStaffPin, deleteStaff,
+  fetchSellerToken,
 } from '@/lib/store';
 import {
   CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc,
@@ -368,6 +369,9 @@ function AdminPageContent() {
   // users tab
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [companySlug, setCompanySlug] = useState<string | null>(null);
+  const [sellerToken, setSellerToken] = useState<string | null>(null);
+  const [tokenCopied, setTokenCopied] = useState(false);
+  const [tokenRegenerating, setTokenRegenerating] = useState(false);
 
   // PIN staff (Poster-style sellers — identified by PIN on the terminal)
   const [pinStaff, setPinStaff] = useState<Staff[]>([]);
@@ -472,6 +476,7 @@ function AdminPageContent() {
       setCustomTo(t);
     });
     fetchStaff().then(setPinStaff);
+    fetchSellerToken(session.companyId ?? '').then(setSellerToken);
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchTables(), fetchCompanySlug(session.companyId ?? ''), fetchTablesEnabled()]).then(([m, o, c, t, tb, slug, te]) => {
       setMenu(m);
       setOrders(o);
@@ -2314,10 +2319,62 @@ function AdminPageContent() {
           {/* ── USERS ──────────────────────────────────────────────────── */}
           {tab === 'users' && (
             <div className="max-w-lg space-y-4">
+
+              {/* Seller terminal URL */}
+              {companySlug && sellerToken && (() => {
+                const terminalUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/s/${companySlug}/${sellerToken}`;
+                return (
+                  <div className="bg-white rounded-xl border border-stone-100 p-4 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Link className="w-4 h-4 text-amber-700" />
+                      <p className="text-sm font-semibold text-stone-700">Satıcı terminal linki</p>
+                    </div>
+                    <p className="text-xs text-stone-500">Bu linki satıcılara verin. Açdıqda yalnız PIN daxil edirlər — başqa şey lazım deyil.</p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        readOnly
+                        value={terminalUrl}
+                        className="flex-1 text-xs bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 text-stone-700 font-mono truncate focus:outline-none"
+                      />
+                      <button
+                        onClick={() => { navigator.clipboard.writeText(terminalUrl); setTokenCopied(true); setTimeout(() => setTokenCopied(false), 2000); }}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-stone-200 text-xs text-stone-600 hover:bg-stone-50 transition-colors shrink-0"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        {tokenCopied ? 'Kopyalandı!' : 'Kopyala'}
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between pt-1">
+                      <p className="text-xs text-stone-400">Linki dəyişdirmək köhnə linki işdən çıxarır</p>
+                      <button
+                        disabled={tokenRegenerating}
+                        onClick={async () => {
+                          if (!confirm('Köhnə link işdən çıxacaq. Davam etmək istəyirsiniz?')) return;
+                          setTokenRegenerating(true);
+                          try {
+                            const { data: { session } } = await supabase.auth.getSession();
+                            const r = await fetch('/api/seller-token', {
+                              method: 'POST',
+                              headers: { Authorization: `Bearer ${session?.access_token}` },
+                            });
+                            const d = await r.json();
+                            if (d.token) setSellerToken(d.token);
+                          } finally { setTokenRegenerating(false); }
+                        }}
+                        className="flex items-center gap-1.5 text-xs text-red-500 hover:text-red-700 transition-colors disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${tokenRegenerating ? 'animate-spin' : ''}`} />
+                        Linki yenilə
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-stone-600">PIN ilə satıcılar · {pinStaff.length}</p>
-                    <p className="text-xs text-stone-400 mt-0.5">Terminal yuxarıdakı hesabla daxil olur, satıcılar özlərini 4 rəqəmli PIN ilə tanıdır</p>
+                    <p className="text-xs text-stone-400 mt-0.5">Satıcılar yuxarıdakı linkdən daxil olur, özlərini 4 rəqəmli PIN ilə tanıdır</p>
                   </div>
                   <button
                     onClick={() => { setEditingStaff(null); setSName(''); setSPin(''); setSError(''); setShowStaffForm(true); }}
