@@ -241,14 +241,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       setSellerName(overrideCompanyName ?? 'Satıcı');
       fetchCompanySettings(overrideCompanyId).then(setBizSettings);
       fetchOrdersCount().then(setTotalOrders);
-      // Fetch staff and shift together — only mark ready when both resolve so
-      // the PIN screen is shown immediately instead of kassa flashing first.
+      // Fetch staff and shift together via server-side routes (bypass RLS — no auth session).
       Promise.all([
         fetch(`/api/public-staff?companyId=${overrideCompanyId}`).then(r => r.json()).catch(() => ({ staff: [] })),
-        fetchOpenShift(),
-      ]).then(([staffData, s]) => {
+        fetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).catch(() => ({ shift: null })),
+      ]).then(([staffData, shiftData]) => {
         setPinStaffList(staffData.staff ?? []);
-        setShift(s);
+        setShift(shiftData.shift ?? null);
         setShiftChecked(true);
       });
       Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled()]).then(([m, o, c, tb, te]) => {
@@ -475,11 +474,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   // Detect when admin closes the shift externally
   useEffect(() => {
     const id = setInterval(async () => {
-      const open = await fetchOpenShift();
+      const open = overrideCompanyId
+        ? await fetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.shift ?? null).catch(() => null)
+        : await fetchOpenShift();
       if (!open && shift) { setShift(null); setView('orders'); }
     }, 30_000);
     return () => clearInterval(id);
-  }, [shift]);
+  }, [shift, overrideCompanyId]);
 
   async function handleOpenShift() {
     const cash = parseFloat(openCashInput) || 0;
@@ -535,7 +536,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   const cartTotal   = cart.reduce((s, ci) => s + ci.menuItem.price * ci.quantity, 0);
   const cartCount   = cart.reduce((s, ci) => s + ci.quantity, 0);
   // Category tab order follows the admin's saved category order
-  const categories  = availableCategories.filter(a => menu.some(i => i.category === a.name)).map(a => a.name);
+  const categories  = [...new Set(availableCategories.filter(a => menu.some(i => i.category === a.name)).map(a => a.name))];
   const menuQuery   = azNormalize(menuSearch.trim());
   const filtered    = menuQuery
     ? menu.filter(m => m.available && azNormalize(m.name).includes(menuQuery))

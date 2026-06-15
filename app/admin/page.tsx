@@ -189,8 +189,8 @@ function LineChartSvg({ data }: { data: { label: string; fullLabel: string; rev:
           <stop offset="100%" stopColor="#92400e" stopOpacity="0.02" />
         </linearGradient>
       </defs>
-      {yTicks.map(t => (
-        <g key={t}>
+      {yTicks.map((t, i) => (
+        <g key={i}>
           <line x1={PL} y1={py(t)} x2={W - PR} y2={py(t)} stroke="#f3f4f6" strokeWidth="1" />
           <text x={PL - 5} y={py(t) + 4} textAnchor="end" fontSize="11" fill="#a8a29e">
             {t === 0 ? '0' : t >= 1000 ? `${(t / 1000).toFixed(1)}k` : t}
@@ -269,6 +269,7 @@ function AdminPageContent() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [adminName, setAdminName] = useState('Admin');
+  const [companyName, setCompanyName] = useState('');
   const [online, setOnline] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -469,6 +470,7 @@ function AdminPageContent() {
     });
     setCompanyContext(session.companyId);
     setAdminName(session.name);
+    setCompanyName(session.companyName ?? '');
     setCompanyId(session.companyId);
     setUserId(session.id);
     setSessionReady(true);
@@ -1253,7 +1255,7 @@ function AdminPageContent() {
               <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
                 <Coffee className="w-4 h-4 text-white" />
               </div>
-              <span className="font-semibold text-stone-800 text-sm truncate max-w-[140px]">{getSession()?.companyName || 'Admin Paneli'}</span>
+              <span className="font-semibold text-stone-800 text-sm truncate max-w-[140px]">{companyName || 'Admin Paneli'}</span>
             </div>
           )}
           <button
@@ -1391,7 +1393,7 @@ function AdminPageContent() {
           <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
             <Coffee className="w-4 h-4 text-white" />
           </div>
-          <span className="font-semibold text-stone-800 text-sm truncate max-w-[160px]">{getSession()?.companyName || 'Kafe'}</span>
+          <span className="font-semibold text-stone-800 text-sm truncate max-w-[160px]">{companyName || 'Kafe'}</span>
         </div>
 
         <div className="flex-1" />
