@@ -637,6 +637,63 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
 
   // No taking money without an open shift: until one exists, the only screen
   // a seller can see is the open-shift form.
+  if (pinLocked) {
+    return (
+      <div className="min-h-screen bg-[#f7f3ed] flex flex-col items-center justify-center p-6">
+        <div className="w-12 h-12 rounded-2xl bg-amber-800 flex items-center justify-center mb-4">
+          <Coffee className="w-6 h-6 text-white" />
+        </div>
+        <h2 className="font-bold text-xl text-stone-800">{overrideCompanyName || getSession()?.companyName || 'Satıcı Paneli'}</h2>
+        <p className="text-sm text-stone-500 mt-1 mb-6">PIN kodunuzu daxil edin</p>
+
+        <div className="flex gap-3 mb-3 h-4 items-center">
+          {[0, 1, 2, 3].map(i => (
+            <span key={i} className={`rounded-full transition-all ${i < pinInput.length ? 'w-3.5 h-3.5 bg-amber-800' : 'w-3 h-3 bg-stone-300'}`} />
+          ))}
+        </div>
+        <p className={`text-sm h-5 mb-4 ${pinMsg ? 'text-red-500' : 'text-transparent'}`}>{pinMsg || '·'}</p>
+
+        <div className="grid grid-cols-3 gap-3">
+          {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(d => (
+            <button key={d} onClick={() => pressPin(d)} disabled={pinBusy}
+              className="w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl bg-white border border-stone-200 text-2xl font-semibold text-stone-700 hover:bg-stone-50 active:scale-95 transition-all disabled:opacity-50">
+              {d}
+            </button>
+          ))}
+          <span />
+          <button onClick={() => pressPin('0')} disabled={pinBusy}
+            className="w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl bg-white border border-stone-200 text-2xl font-semibold text-stone-700 hover:bg-stone-50 active:scale-95 transition-all disabled:opacity-50">
+            0
+          </button>
+          <button onClick={() => setPinInput(p => p.slice(0, -1))} disabled={pinBusy || pinInput.length === 0}
+            className="w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center text-stone-500 hover:bg-stone-200/50 active:scale-95 transition-all disabled:opacity-30">
+            {pinBusy
+              ? <span className="w-5 h-5 border-2 border-stone-300 border-t-amber-800 rounded-full animate-spin" />
+              : <Delete className="w-6 h-6" />}
+          </button>
+        </div>
+
+        {!overrideCompanyId && (
+          <button onClick={() => setLogoutConfirm(true)} className="mt-8 flex items-center gap-2 text-xs text-stone-400 hover:text-red-500 transition-colors">
+            <LogOut className="w-3.5 h-3.5" /> Terminaldan çıxış
+          </button>
+        )}
+        {logoutConfirm && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-4">
+            <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-xs text-center">
+              <p className="font-semibold text-stone-800 mb-1">Terminaldan çıxmaq istəyirsiniz?</p>
+              <p className="text-sm text-stone-500 mb-5">Hesabdan tam çıxış olacaq. Davam etmək üçün sahibkarın yenidən daxil olması tələb olunacaq.</p>
+              <div className="flex gap-3">
+                <button onClick={() => setLogoutConfirm(false)} className="flex-1 py-2.5 rounded-xl border border-stone-200 text-sm font-semibold text-stone-600 hover:bg-stone-50 transition-colors">Ləğv et</button>
+                <button onClick={() => { logout(); router.push('/login'); }} className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition-colors">Çıxış</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (!shiftChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f7f3ed]">
@@ -1401,87 +1458,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       </nav>
 
       {/* PIN lock screen — covers everything until a staff member unlocks */}
-      {pinLocked && (
-        <div className="fixed inset-0 z-[80] bg-[#f7f3ed] flex flex-col items-center justify-center p-6">
-          <div className="w-12 h-12 rounded-2xl bg-amber-800 flex items-center justify-center mb-4">
-            <Coffee className="w-6 h-6 text-white" />
-          </div>
-          <h2 className="font-bold text-xl text-stone-800">{getSession()?.companyName || 'Satıcı Paneli'}</h2>
-          <p className="text-sm text-stone-500 mt-1 mb-6">PIN kodunuzu daxil edin</p>
-
-          <div className="flex gap-3 mb-3 h-4 items-center">
-            {[0, 1, 2, 3].map(i => (
-              <span
-                key={i}
-                className={`rounded-full transition-all ${i < pinInput.length ? 'w-3.5 h-3.5 bg-amber-800' : 'w-3 h-3 bg-stone-300'}`}
-              />
-            ))}
-          </div>
-          <p className={`text-sm h-5 mb-4 ${pinMsg ? 'text-red-500' : 'text-transparent'}`}>{pinMsg || '·'}</p>
-
-          <div className="grid grid-cols-3 gap-3">
-            {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(d => (
-              <button
-                key={d}
-                onClick={() => pressPin(d)}
-                disabled={pinBusy}
-                className="w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl bg-white border border-stone-200 text-2xl font-semibold text-stone-700 hover:bg-stone-50 active:scale-95 transition-all disabled:opacity-50"
-              >
-                {d}
-              </button>
-            ))}
-            <span />
-            <button
-              onClick={() => pressPin('0')}
-              disabled={pinBusy}
-              className="w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl bg-white border border-stone-200 text-2xl font-semibold text-stone-700 hover:bg-stone-50 active:scale-95 transition-all disabled:opacity-50"
-            >
-              0
-            </button>
-            <button
-              onClick={() => setPinInput(p => p.slice(0, -1))}
-              disabled={pinBusy || pinInput.length === 0}
-              className="w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center text-stone-500 hover:bg-stone-200/50 active:scale-95 transition-all disabled:opacity-30"
-            >
-              {pinBusy
-                ? <span className="w-5 h-5 border-2 border-stone-300 border-t-amber-800 rounded-full animate-spin" />
-                : <Delete className="w-6 h-6" />}
-            </button>
-          </div>
-
-          {!overrideCompanyId && (
-            <button
-              onClick={() => setLogoutConfirm(true)}
-              className="mt-8 flex items-center gap-2 text-xs text-stone-400 hover:text-red-500 transition-colors"
-            >
-              <LogOut className="w-3.5 h-3.5" /> Terminaldan çıxış
-            </button>
-          )}
-
-          {logoutConfirm && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-4">
-              <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-xs text-center">
-                <p className="font-semibold text-stone-800 mb-1">Terminaldan çıxmaq istəyirsiniz?</p>
-                <p className="text-sm text-stone-500 mb-5">Hesabdan tam çıxış olacaq. Davam etmək üçün sahibkarın yenidən daxil olması tələb olunacaq.</p>
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setLogoutConfirm(false)}
-                    className="flex-1 py-2.5 rounded-xl border border-stone-200 text-sm font-semibold text-stone-600 hover:bg-stone-50 transition-colors"
-                  >
-                    Ləğv et
-                  </button>
-                  <button
-                    onClick={() => { logout(); router.push('/login'); }}
-                    className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition-colors"
-                  >
-                    Çıxış
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Mobile cart bottom sheet */}
       {mobileCartOpen && (
