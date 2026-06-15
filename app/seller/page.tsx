@@ -439,7 +439,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     setPayingOrder(null);
     setIsTip(false);
     // The DB update is conditional — a no-op if someone else already paid this order
-    const paid = await updateOrderStatus(payingOrder.id, 'ödənilib', cashKept, card, tip, change, discountAmt || undefined, discountAmt ? discountType : undefined);
+    const paid = overrideCompanyId
+      ? await fetch('/api/update-order-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: payingOrder.id, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, tipAmount: tip, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      : await updateOrderStatus(payingOrder.id, 'ödənilib', cashKept, card, tip, change, discountAmt || undefined, discountAmt ? discountType : undefined);
     if (paid) {
       setOrders(prev => prev.map(o => o.id === payingOrder.id
         ? { ...o, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, tipAmount: tip, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined }
@@ -461,7 +463,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     if (!reason) return;
     setCancelBusy(true);
     // Conditional in the DB — a no-op if the order got paid in the meantime
-    const ok = await cancelOrder(cancellingOrder.id, reason, effectiveSeller);
+    const ok = overrideCompanyId
+      ? await fetch('/api/cancel-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: cancellingOrder.id, reason, by: effectiveSeller }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      : await cancelOrder(cancellingOrder.id, reason, effectiveSeller);
     setCancelBusy(false);
     setCancellingOrder(null);
     if (ok) {
@@ -560,7 +564,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   async function handleStatusChange(id: string, status: OrderStatus) {
     const prevStatus = orders.find(o => o.id === id)?.status;
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
-    const ok = await updateOrderStatus(id, status);
+    const ok = overrideCompanyId
+      ? await fetch('/api/update-order-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: id, status }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      : await updateOrderStatus(id, status);
     if (!ok && prevStatus) {
       setOrders(prev => prev.map(o => o.id === id ? { ...o, status: prevStatus } : o));
     }
