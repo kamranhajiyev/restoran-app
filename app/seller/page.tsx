@@ -111,7 +111,12 @@ export default function SellerPage() {
 
   // Poster-style PIN lock
   const [pinStaffList, setPinStaffList] = useState<Staff[]>([]);
-  const [activeStaff, setActiveStaff]   = useState<{ id: string; name: string } | null>(null);
+  const [activeStaff, setActiveStaff]   = useState<{ id: string; name: string } | null>(() => {
+    try {
+      const saved = sessionStorage.getItem('activeStaff');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
   const [pinInput, setPinInput]         = useState('');
   const [pinBusy, setPinBusy]           = useState(false);
   const [pinMsg, setPinMsg]             = useState('');
@@ -131,7 +136,9 @@ export default function SellerPage() {
     setPinBusy(false);
     setPinInput('');
     if (res.ok) {
-      setActiveStaff({ id: res.id, name: res.name });
+      const staff = { id: res.id, name: res.name };
+      sessionStorage.setItem('activeStaff', JSON.stringify(staff));
+      setActiveStaff(staff);
     } else if (res.error === 'wrong') {
       setPinMsg(`Yanlış PIN${res.attemptsLeft > 0 ? ` · ${res.attemptsLeft} cəhd qaldı` : ''}`);
     } else if (res.error === 'locked') {
@@ -683,7 +690,7 @@ export default function SellerPage() {
         </div>
         {pinEnabled && activeStaff && (
           <button
-            onClick={() => setActiveStaff(null)}
+            onClick={() => { sessionStorage.removeItem('activeStaff'); setActiveStaff(null); }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
             title="Satıcını dəyiş"
           >
