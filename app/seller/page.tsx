@@ -485,7 +485,17 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   async function handleOpenShift() {
     const cash = parseFloat(openCashInput) || 0;
     setShiftBusy(true);
-    const s = await openShift(cash, effectiveSeller);
+    let s = null;
+    if (overrideCompanyId) {
+      const d = await fetch('/api/open-shift', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: overrideCompanyId, openingCash: cash, openedBy: effectiveSeller }),
+      }).then(r => r.json()).catch(() => ({ shift: null }));
+      if (d.shift) s = { id: d.shift.id, openedAt: d.shift.opened_at, openedBy: d.shift.opened_by, openingCash: Number(d.shift.opening_cash), closedAt: d.shift.closed_at ?? undefined, movements: Array.isArray(d.shift.movements) ? d.shift.movements : [] };
+    } else {
+      s = await openShift(cash, effectiveSeller);
+    }
     setShiftBusy(false);
     if (s) { setShift(s); setOpenCashInput(''); setJustClosed(false); }
   }
