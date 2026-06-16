@@ -259,16 +259,16 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         setShiftChecked(true);
       });
       Promise.all([
-        fetchMenu(),
+        fetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
         fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
-        fetchCategories(),
-        fetchTables(),
+        fetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
+        fetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.tables ?? []).catch(() => []),
         fetchTablesEnabled(),
       ]).then(([m, o, c, tb, te]) => {
         setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te);
-        const available = c.filter(cat => cat.available);
+        const available = c.filter((cat: { available: boolean }) => cat.available);
         setAvailableCategories(available);
-        const cats = available.filter(a => m.some(i => i.category === a.name)).map(a => a.name);
+        const cats = available.filter((a: { name: string }) => m.some((i: { category: string }) => i.category === a.name)).map((a: { name: string }) => a.name);
         if (cats.length > 0) setActiveCategory(cats[0]);
       }).catch(() => setOnline(false));
       return;
