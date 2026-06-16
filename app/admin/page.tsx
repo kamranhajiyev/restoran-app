@@ -345,6 +345,10 @@ function AdminPageContent() {
   const [orderSearch, setOrderSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const touchStartY = useRef<number | null>(null);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const PULL_THRESHOLD = 72;
 
   // stats chart
   const [topSort, setTopSort] = useState<'rev' | 'profit' | 'qty' | 'margin'>('rev');
@@ -581,6 +585,32 @@ function AdminPageContent() {
       setOrders(o);
       setTotalOrders(total);
     } finally { setRefreshing(false); }
+  }
+
+  async function refreshAll() {
+    if (pullRefreshing) return;
+    setPullRefreshing(true);
+    try {
+      const [m, o, c, tb, total] = await Promise.all([
+        fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchOrdersCount(),
+      ]);
+      setMenu(m); setOrders(o); setCategories(c); setTables(tb); setTotalOrders(total);
+    } catch { /* ignore */ } finally { setPullRefreshing(false); }
+  }
+
+  function onTouchStart(e: React.TouchEvent) {
+    touchStartY.current = e.touches[0].clientY;
+  }
+  function onTouchMove(e: React.TouchEvent) {
+    if (touchStartY.current === null) return;
+    const delta = e.touches[0].clientY - touchStartY.current;
+    if (delta > 5) setPullDistance(Math.min(delta * 0.5, PULL_THRESHOLD));
+    else setPullDistance(0);
+  }
+  function onTouchEnd() {
+    if (pullDistance >= PULL_THRESHOLD && !pullRefreshing) refreshAll();
+    setPullDistance(0);
+    touchStartY.current = null;
   }
 
   async function loadMoreOrders() {
@@ -1366,7 +1396,12 @@ function AdminPageContent() {
   const meta = PAGE_META[tab];
 
   return (
-    <div className="min-h-screen bg-[#f7f3ed]">
+    <div
+      className="min-h-screen bg-[#f7f3ed]"
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+    >
 
       {/* ── Top header ── */}
       <header className="sticky top-0 z-50 h-16 border-b border-stone-100/60 bg-white/80 backdrop-blur-sm flex items-center gap-3 px-4">
@@ -1412,6 +1447,22 @@ function AdminPageContent() {
           <LogOut className="w-4 h-4" />
         </button>
       </header>
+
+      {(pullDistance > 0 || pullRefreshing) && (
+        <div
+          className="flex items-center justify-center gap-2 text-sm text-stone-500 overflow-hidden"
+          style={{ height: pullRefreshing ? 44 : Math.round(pullDistance * (44 / PULL_THRESHOLD)) }}
+        >
+          {pullRefreshing ? (
+            <><span className="w-4 h-4 border-2 border-stone-300 border-t-amber-800 rounded-full animate-spin" /><span>Yenilənir...</span></>
+          ) : (
+            <>
+              <span style={{ display: 'inline-block', transform: `rotate(${pullDistance >= PULL_THRESHOLD ? 180 : 0}deg)`, transition: 'transform 0.2s' }}>↓</span>
+              <span>{pullDistance >= PULL_THRESHOLD ? 'Buraxın' : 'Yeniləmək üçün çəkin'}</span>
+            </>
+          )}
+        </div>
+      )}
 
       {/* ── Subscription warning banner ── */}
       {(() => {
