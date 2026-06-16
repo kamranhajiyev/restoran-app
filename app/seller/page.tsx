@@ -227,6 +227,36 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
 
   const catScrollRef = useRef<HTMLDivElement>(null);
+  const touchStartY = useRef<number | null>(null);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const PULL_THRESHOLD = 72;
+
+  const refreshAll = useCallback(async () => {
+    setPullRefreshing(true);
+    try {
+      if (overrideCompanyId) {
+        const [m, o, c, tb] = await Promise.all([
+          fetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
+          fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
+          fetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
+          fetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.tables ?? []).catch(() => []),
+        ]);
+        setMenu(m); setOrders(o); setTables(tb);
+        setAvailableCategories(c.filter((cat: { available: boolean }) => cat.available));
+      } else {
+        const [m, o, c, st, s] = await Promise.all([
+          fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(),
+        ]);
+        setMenu(m); setOrders(o); setShift(s);
+        setAvailableCategories(c.filter(cat => cat.available));
+        setPinStaffList(st);
+      }
+    } catch { /* ignore */ } finally {
+      setPullRefreshing(false);
+    }
+  }, [overrideCompanyId]);
+
   const [refreshing, setRefreshing] = useState(false);
   const refreshOrders = useCallback(async () => {
     setRefreshing(true);
@@ -290,9 +320,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     setCompanyContext(session.companyId);
     setSellerName(session.name);
     fetchCompanySettings(session.companyId ?? '').then(setBizSettings);
-    fetchOpenShift().then(s => { setShift(s); setShiftChecked(true); });
+    Promise.all([fetchOpenShift(), fetchStaff()]).then(([s, st]) => {
+      setShift(s); setPinStaffList(st); setShiftChecked(true);
+    });
     fetchOrdersCount().then(setTotalOrders);
-    fetchStaff().then(setPinStaffList);
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled()]).then(([m, o, c, tb, te]) => {
       setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te);
       const available = c.filter(cat => cat.available);
@@ -304,15 +335,21 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   }, [router, overrideCompanyId, overrideCompanyName]);
 
   useEffect(() => {
+    if (overrideCompanyId) return;
     async function sync() {
-      const [m, o, c, st] = await Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff()]);
-      setMenu(m); setOrders(o);
-      setAvailableCategories(c.filter(cat => cat.available));
-      setPinStaffList(st);
+      if (!getSession()) return;
+      try {
+        const [m, o, c, st, s] = await Promise.all([
+          fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(),
+        ]);
+        setMenu(m); setOrders(o); setShift(s);
+        setAvailableCategories(c.filter(cat => cat.available));
+        setPinStaffList(st);
+      } catch { /* ignore focus sync errors */ }
     }
     window.addEventListener('focus', sync);
     return () => window.removeEventListener('focus', sync);
-  }, []);
+  }, [overrideCompanyId]);
 
   // ── cart helpers ──────────────────────────────────────────────────────────
 
@@ -804,8 +841,28 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     );
   }
 
+  function onTouchStart(e: React.TouchEvent) {
+    touchStartY.current = e.touches[0].clientY;
+  }
+  function onTouchMove(e: React.TouchEvent) {
+    if (touchStartY.current === null) return;
+    const delta = e.touches[0].clientY - touchStartY.current;
+    if (delta > 5) setPullDistance(Math.min(delta * 0.5, PULL_THRESHOLD));
+    else setPullDistance(0);
+  }
+  function onTouchEnd() {
+    if (pullDistance >= PULL_THRESHOLD && !pullRefreshing) refreshAll();
+    setPullDistance(0);
+    touchStartY.current = null;
+  }
+
   return (
-    <div className="min-h-screen bg-[#f7f3ed]">
+    <div
+      className="min-h-screen bg-[#f7f3ed]"
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+    >
 
       {/* Header */}
       <header className="sticky top-0 z-50 h-14 border-b border-stone-100/60 bg-white/90 backdrop-blur-sm flex items-center gap-3 px-4">
@@ -834,6 +891,23 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         )}
         <InstallPWA />
       </header>
+
+      {/* Pull-to-refresh indicator */}
+      {(pullDistance > 0 || pullRefreshing) && (
+        <div
+          className="flex items-center justify-center gap-2 text-sm text-stone-500 overflow-hidden"
+          style={{ height: pullRefreshing ? 44 : Math.round(pullDistance * (44 / PULL_THRESHOLD)) }}
+        >
+          {pullRefreshing ? (
+            <><span className="w-4 h-4 border-2 border-stone-300 border-t-amber-800 rounded-full animate-spin" /><span>Yenilənir...</span></>
+          ) : (
+            <>
+              <span style={{ display: 'inline-block', transform: `rotate(${pullDistance >= PULL_THRESHOLD ? 180 : 0}deg)`, transition: 'transform 0.2s' }}>↓</span>
+              <span>{pullDistance >= PULL_THRESHOLD ? 'Buraxın' : 'Yeniləmək üçün çəkin'}</span>
+            </>
+          )}
+        </div>
+      )}
 
       {/* ── Subscription warning banner ── */}
       {(() => {
