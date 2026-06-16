@@ -345,6 +345,10 @@ function AdminPageContent() {
   const [orderSearch, setOrderSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const touchStartY = useRef<number | null>(null);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const PULL_THRESHOLD = 72;
 
   // stats chart
   const [topSort, setTopSort] = useState<'rev' | 'profit' | 'qty' | 'margin'>('rev');
@@ -581,6 +585,32 @@ function AdminPageContent() {
       setOrders(o);
       setTotalOrders(total);
     } finally { setRefreshing(false); }
+  }
+
+  async function refreshAll() {
+    if (pullRefreshing) return;
+    setPullRefreshing(true);
+    try {
+      const [m, o, c, tb, total] = await Promise.all([
+        fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchOrdersCount(),
+      ]);
+      setMenu(m); setOrders(o); setCategories(c); setTables(tb); setTotalOrders(total);
+    } catch { /* ignore */ } finally { setPullRefreshing(false); }
+  }
+
+  function onTouchStart(e: React.TouchEvent) {
+    touchStartY.current = e.touches[0].clientY;
+  }
+  function onTouchMove(e: React.TouchEvent) {
+    if (touchStartY.current === null) return;
+    const delta = e.touches[0].clientY - touchStartY.current;
+    if (delta > 5) setPullDistance(Math.min(delta * 0.5, PULL_THRESHOLD));
+    else setPullDistance(0);
+  }
+  function onTouchEnd() {
+    if (pullDistance >= PULL_THRESHOLD && !pullRefreshing) refreshAll();
+    setPullDistance(0);
+    touchStartY.current = null;
   }
 
   async function loadMoreOrders() {
@@ -1254,11 +1284,12 @@ function AdminPageContent() {
   const maxWeekly = Math.max(...weeklyData.map(w => w.rev), 0.01);
 
   // ── sidebar ────────────────────────────────────────────────────────────────
-  function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+  function SidebarContent({ onNavigate, forceExpanded }: { onNavigate?: () => void; forceExpanded?: boolean }) {
+    const isCollapsed = forceExpanded ? false : collapsed;
     return (
       <div className="flex flex-col h-full bg-white min-h-[calc(100vh-4rem)]">
         {/* Logo row */}
-        <div className={`flex items-center h-16 border-b border-stone-100/50 ${collapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
+        <div className={`flex items-center h-16 border-b border-stone-100/50 ${isCollapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
           {!collapsed && (
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
@@ -1271,18 +1302,18 @@ function AdminPageContent() {
             onClick={() => setCollapsed(c => !c)}
             className="hidden md:flex w-8 h-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-stone-700 transition-colors"
           >
-            {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+            {isCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </button>
         </div>
 
         {/* Nav */}
-        <nav className={`flex flex-col gap-1 p-3 flex-1 ${collapsed ? 'items-center' : ''}`}>
+        <nav className={`flex flex-col gap-1 p-3 flex-1 ${isCollapsed ? 'items-center' : ''}`}>
           {NAV_ITEMS.map(n => {
             const Icon = n.icon;
             const isActive = tab === n.id;
             const badge = n.id === 'orders' && activeOrders.length > 0 ? activeOrders.length : null;
 
-            if (collapsed) {
+            if (isCollapsed) {
               return (
                 <button
                   key={n.id}
@@ -1323,7 +1354,7 @@ function AdminPageContent() {
         </nav>
 
         {/* User + logout */}
-        {!collapsed && (
+        {!isCollapsed && (
           <div className="px-4 py-4 border-t border-stone-100/50">
             <button
               onClick={openProfile}
@@ -1344,7 +1375,7 @@ function AdminPageContent() {
             </button>
           </div>
         )}
-        {collapsed && (
+        {isCollapsed && (
           <div className="py-4 flex flex-col items-center gap-2 border-t border-stone-100/50">
             <button
               onClick={openProfile}
@@ -1365,7 +1396,12 @@ function AdminPageContent() {
   const meta = PAGE_META[tab];
 
   return (
-    <div className="min-h-screen bg-[#f7f3ed]">
+    <div
+      className="min-h-screen bg-[#f7f3ed]"
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+    >
 
       {/* ── Top header ── */}
       <header className="sticky top-0 z-50 h-16 border-b border-stone-100/60 bg-white/80 backdrop-blur-sm flex items-center gap-3 px-4">
@@ -1412,6 +1448,22 @@ function AdminPageContent() {
         </button>
       </header>
 
+      {(pullDistance > 0 || pullRefreshing) && (
+        <div
+          className="flex items-center justify-center gap-2 text-sm text-stone-500 overflow-hidden"
+          style={{ height: pullRefreshing ? 44 : Math.round(pullDistance * (44 / PULL_THRESHOLD)) }}
+        >
+          {pullRefreshing ? (
+            <><span className="w-4 h-4 border-2 border-stone-300 border-t-amber-800 rounded-full animate-spin" /><span>Yenilənir...</span></>
+          ) : (
+            <>
+              <span style={{ display: 'inline-block', transform: `rotate(${pullDistance >= PULL_THRESHOLD ? 180 : 0}deg)`, transition: 'transform 0.2s' }}>↓</span>
+              <span>{pullDistance >= PULL_THRESHOLD ? 'Buraxın' : 'Yeniləmək üçün çəkin'}</span>
+            </>
+          )}
+        </div>
+      )}
+
       {/* ── Subscription warning banner ── */}
       {(() => {
         const exp = expiresAt;
@@ -1451,7 +1503,7 @@ function AdminPageContent() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <SidebarContent onNavigate={() => setMobileOpen(false)} />
+            <SidebarContent onNavigate={() => setMobileOpen(false)} forceExpanded />
           </div>
         </>
       )}
@@ -1464,7 +1516,7 @@ function AdminPageContent() {
         </aside>
 
         {/* ── Main ── */}
-        <main className="flex-1 min-w-0 bg-[#f7f3ed] rounded-tl-2xl border-l border-t border-stone-100/60 p-6 md:p-8 overflow-y-auto">
+        <main className="flex-1 min-w-0 bg-[#f7f3ed] rounded-tl-2xl border-l border-t border-stone-100/60 p-4 md:p-6 lg:p-8 overflow-y-auto">
           <div className="mb-6">
             <h1 className="text-xl font-bold text-stone-900">{meta.title}</h1>
             <p className="text-sm font-medium text-stone-600 mt-0.5">{meta.subtitle}</p>
@@ -1496,7 +1548,7 @@ function AdminPageContent() {
                     {dataLoading && <span className="w-3.5 h-3.5 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />}
                   </h3>
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5">
+                    <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5 overflow-x-auto max-w-full">
                       {([['bugün', 'Bu gün'], ['7g', '7 gün'], ['30g', '30 gün'], ['ay', 'Bu ay'], ['6ay', '6 ay'], ['1il', '1 il']] as [ChartPreset, string][]).map(([p, l]) => {
                         const [f, t] = presetRange(p, businessToday(bizSettings));
                         const active = customFrom === f && customTo === t;
@@ -1855,7 +1907,17 @@ function AdminPageContent() {
                           {new Date(order.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
                           {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
                         </span>
-                        <span className="text-sm font-semibold text-stone-800 flex-shrink-0 w-20 text-right">{orderTotal(order).toFixed(2)} ₼</span>
+                        <span className="text-sm font-semibold text-stone-800 flex-shrink-0 text-right">
+                          {(order.discountAmount ?? 0) > 0
+                            ? <><span className="text-xs text-stone-400 line-through mr-1">{orderTotal(order).toFixed(2)}</span>{(orderTotal(order) - order.discountAmount!).toFixed(2)}</>
+                            : orderTotal(order).toFixed(2)
+                          } ₼
+                        </span>
+                        {(order.discountAmount ?? 0) > 0 && (
+                          <span className="text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg px-1.5 py-0.5 flex-shrink-0 hidden sm:inline">
+                            🏷️ -{order.discountAmount!.toFixed(2)} ₼
+                          </span>
+                        )}
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 text-center ${STATUS_COLORS[order.status]}`}>{STATUS_LABELS[order.status]}</span>
                       </button>
 
@@ -1885,7 +1947,7 @@ function AdminPageContent() {
                               {order.cancelReason ? ` · Səbəb: ${order.cancelReason}` : ''}
                             </p>
                           )}
-                          <div className="flex items-center justify-between pt-2 border-t border-stone-200">
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-stone-200">
                             <div className="flex items-center gap-2">
                               {isOrderOpen(order) && (
                                 <select
@@ -2581,10 +2643,11 @@ function AdminPageContent() {
                       <span className="ml-2 text-xs text-green-600 font-medium transition-opacity">✓ Saxlanıldı</span>
                     )}
                   </div>
+                  <div className="overflow-auto">
                   <div
                     ref={canvasRef}
                     className="relative bg-[#f9f9f7] select-none"
-                    style={{ height: 480, backgroundImage: 'radial-gradient(circle, #e5e7eb 1px, transparent 1px)', backgroundSize: '24px 24px' }}
+                    style={{ height: 480, minWidth: 640, backgroundImage: 'radial-gradient(circle, #e5e7eb 1px, transparent 1px)', backgroundSize: '24px 24px' }}
                     onClick={() => setSelectedTableId(null)}
                   >
                     {alignGuides.map((g, i) => (
@@ -2638,6 +2701,7 @@ function AdminPageContent() {
                         </div>
                       );
                     })}
+                  </div>
                   </div>
                 </div>
               )}

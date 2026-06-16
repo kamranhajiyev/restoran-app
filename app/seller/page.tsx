@@ -16,6 +16,7 @@ import {
 } from '@/lib/store';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday } from '@/lib/business-day';
 import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, isOrderOpen } from '@/types';
+import InstallPWA from '@/components/InstallPWA';
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
@@ -226,6 +227,36 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
 
   const catScrollRef = useRef<HTMLDivElement>(null);
+  const touchStartY = useRef<number | null>(null);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const PULL_THRESHOLD = 72;
+
+  const refreshAll = useCallback(async () => {
+    setPullRefreshing(true);
+    try {
+      if (overrideCompanyId) {
+        const [m, o, c, tb] = await Promise.all([
+          fetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
+          fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
+          fetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
+          fetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.tables ?? []).catch(() => []),
+        ]);
+        setMenu(m); setOrders(o); setTables(tb);
+        setAvailableCategories(c.filter((cat: { available: boolean }) => cat.available));
+      } else {
+        const [m, o, c, st, s] = await Promise.all([
+          fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(),
+        ]);
+        setMenu(m); setOrders(o); setShift(s);
+        setAvailableCategories(c.filter(cat => cat.available));
+        setPinStaffList(st);
+      }
+    } catch { /* ignore */ } finally {
+      setPullRefreshing(false);
+    }
+  }, [overrideCompanyId]);
+
   const [refreshing, setRefreshing] = useState(false);
   const refreshOrders = useCallback(async () => {
     setRefreshing(true);
@@ -258,16 +289,16 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         setShiftChecked(true);
       });
       Promise.all([
-        fetchMenu(),
+        fetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
         fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
-        fetchCategories(),
-        fetchTables(),
+        fetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
+        fetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.tables ?? []).catch(() => []),
         fetchTablesEnabled(),
       ]).then(([m, o, c, tb, te]) => {
         setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te);
-        const available = c.filter(cat => cat.available);
+        const available = c.filter((cat: { available: boolean }) => cat.available);
         setAvailableCategories(available);
-        const cats = available.filter(a => m.some(i => i.category === a.name)).map(a => a.name);
+        const cats = available.filter((a: { name: string }) => m.some((i: { category: string }) => i.category === a.name)).map((a: { name: string }) => a.name);
         if (cats.length > 0) setActiveCategory(cats[0]);
       }).catch(() => setOnline(false));
       return;
@@ -289,9 +320,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     setCompanyContext(session.companyId);
     setSellerName(session.name);
     fetchCompanySettings(session.companyId ?? '').then(setBizSettings);
-    fetchOpenShift().then(s => { setShift(s); setShiftChecked(true); });
+    Promise.all([fetchOpenShift(), fetchStaff()]).then(([s, st]) => {
+      setShift(s); setPinStaffList(st); setShiftChecked(true);
+    });
     fetchOrdersCount().then(setTotalOrders);
-    fetchStaff().then(setPinStaffList);
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled()]).then(([m, o, c, tb, te]) => {
       setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te);
       const available = c.filter(cat => cat.available);
@@ -303,15 +335,21 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   }, [router, overrideCompanyId, overrideCompanyName]);
 
   useEffect(() => {
+    if (overrideCompanyId) return;
     async function sync() {
-      const [m, o, c, st] = await Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff()]);
-      setMenu(m); setOrders(o);
-      setAvailableCategories(c.filter(cat => cat.available));
-      setPinStaffList(st);
+      if (!getSession()) return;
+      try {
+        const [m, o, c, st, s] = await Promise.all([
+          fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(),
+        ]);
+        setMenu(m); setOrders(o); setShift(s);
+        setAvailableCategories(c.filter(cat => cat.available));
+        setPinStaffList(st);
+      } catch { /* ignore focus sync errors */ }
     }
     window.addEventListener('focus', sync);
     return () => window.removeEventListener('focus', sync);
-  }, []);
+  }, [overrideCompanyId]);
 
   // ── cart helpers ──────────────────────────────────────────────────────────
 
@@ -803,8 +841,28 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     );
   }
 
+  function onTouchStart(e: React.TouchEvent) {
+    touchStartY.current = e.touches[0].clientY;
+  }
+  function onTouchMove(e: React.TouchEvent) {
+    if (touchStartY.current === null) return;
+    const delta = e.touches[0].clientY - touchStartY.current;
+    if (delta > 5) setPullDistance(Math.min(delta * 0.5, PULL_THRESHOLD));
+    else setPullDistance(0);
+  }
+  function onTouchEnd() {
+    if (pullDistance >= PULL_THRESHOLD && !pullRefreshing) refreshAll();
+    setPullDistance(0);
+    touchStartY.current = null;
+  }
+
   return (
-    <div className="min-h-screen bg-[#f7f3ed]">
+    <div
+      className="min-h-screen bg-[#f7f3ed]"
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+    >
 
       {/* Header */}
       <header className="sticky top-0 z-50 h-14 border-b border-stone-100/60 bg-white/90 backdrop-blur-sm flex items-center gap-3 px-4">
@@ -831,7 +889,25 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
             <span className="hidden sm:inline">Dəyiş</span>
           </button>
         )}
+        <InstallPWA />
       </header>
+
+      {/* Pull-to-refresh indicator */}
+      {(pullDistance > 0 || pullRefreshing) && (
+        <div
+          className="flex items-center justify-center gap-2 text-sm text-stone-500 overflow-hidden"
+          style={{ height: pullRefreshing ? 44 : Math.round(pullDistance * (44 / PULL_THRESHOLD)) }}
+        >
+          {pullRefreshing ? (
+            <><span className="w-4 h-4 border-2 border-stone-300 border-t-amber-800 rounded-full animate-spin" /><span>Yenilənir...</span></>
+          ) : (
+            <>
+              <span style={{ display: 'inline-block', transform: `rotate(${pullDistance >= PULL_THRESHOLD ? 180 : 0}deg)`, transition: 'transform 0.2s' }}>↓</span>
+              <span>{pullDistance >= PULL_THRESHOLD ? 'Buraxın' : 'Yeniləmək üçün çəkin'}</span>
+            </>
+          )}
+        </div>
+      )}
 
       {/* ── Subscription warning banner ── */}
       {(() => {
@@ -869,7 +945,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         </aside>
 
         {/* Main — pb-16 reserves space for mobile bottom nav */}
-        <main className="flex-1 min-w-0 bg-[#f7f3ed] md:rounded-tl-2xl md:border-l md:border-t border-stone-100/60 overflow-hidden flex flex-col pb-16 md:pb-0">
+        <main className="flex-1 min-w-0 bg-[#f7f3ed] md:rounded-tl-2xl md:border-l md:border-t border-stone-100/60 overflow-hidden flex flex-col pb-16 lg:pb-0">
 
           {/* ── ORDERS ── */}
           {view === 'orders' && (
@@ -998,7 +1074,17 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                               {new Date(order.createdAt).toLocaleDateString('az-AZ', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
                               {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
                             </span>
-                            <span className="text-sm font-semibold text-stone-800 flex-shrink-0 w-16 sm:w-20 text-right">{orderTotal(order).toFixed(2)} ₼</span>
+                            <span className="text-sm font-semibold text-stone-800 flex-shrink-0 text-right">
+                              {(order.discountAmount ?? 0) > 0
+                                ? <><span className="text-xs text-stone-400 line-through mr-1">{orderTotal(order).toFixed(2)}</span>{(orderTotal(order) - order.discountAmount!).toFixed(2)}</>
+                                : orderTotal(order).toFixed(2)
+                              } ₼
+                            </span>
+                            {(order.discountAmount ?? 0) > 0 && (
+                              <span className="text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg px-1.5 py-0.5 flex-shrink-0 hidden sm:inline">
+                                🏷️ -{order.discountAmount!.toFixed(2)} ₼
+                              </span>
+                            )}
                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 text-center truncate ${STATUS_COLORS[order.status]}`}>{STATUS_LABELS[order.status]}</span>
                           </button>
 
@@ -1363,7 +1449,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                   {/* Cart icon — mobile only */}
                   <button
                     onClick={() => setMobileCartOpen(true)}
-                    className="md:hidden relative w-9 h-9 flex items-center justify-center rounded-xl text-stone-600 hover:bg-stone-100 active:scale-95"
+                    className="lg:hidden relative w-9 h-9 flex items-center justify-center rounded-xl text-stone-600 hover:bg-stone-100 active:scale-95"
                   >
                     <ShoppingCart className="w-5 h-5" />
                     {cartCount > 0 && (
@@ -1435,7 +1521,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
               </div>
 
               {/* Desktop cart sidebar */}
-              <div className="hidden md:flex w-72 bg-white border-l flex-col">
+              <div className="hidden lg:flex w-72 bg-white border-l flex-col">
                 <div className="px-4 py-3 border-b">
                   <h2 className="font-bold text-stone-800">Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}</h2>
                   <p className="text-xs text-stone-500">{!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
@@ -1470,7 +1556,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
 
               {/* Mobile floating cart bar */}
               {cartCount > 0 && (
-                <div className="md:hidden fixed bottom-16 inset-x-0 z-30 px-4 pb-2 pointer-events-none">
+                <div className="lg:hidden fixed bottom-16 inset-x-0 z-30 px-4 pb-2 pointer-events-none">
                   <button
                     onClick={() => setMobileCartOpen(true)}
                     className="pointer-events-auto w-full bg-amber-800 text-white rounded-2xl py-3.5 flex items-center justify-between px-5 shadow-lg active:scale-95 transition-transform"
@@ -1487,7 +1573,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       </div>
 
       {/* Mobile bottom navigation */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-stone-200 flex safe-area-inset-bottom">
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-stone-200 flex safe-area-inset-bottom">
         {[
           { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
           { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
@@ -1521,8 +1607,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       {/* Mobile cart bottom sheet */}
       {mobileCartOpen && (
         <>
-          <div className="fixed inset-0 bg-black/40 z-50 md:hidden" onClick={() => setMobileCartOpen(false)} />
-          <div className="fixed bottom-0 inset-x-0 z-[60] bg-white rounded-t-2xl shadow-2xl md:hidden flex flex-col max-h-[85vh]">
+          <div className="fixed inset-0 bg-black/40 z-50 lg:hidden" onClick={() => setMobileCartOpen(false)} />
+          <div className="fixed bottom-0 inset-x-0 z-[60] bg-white rounded-t-2xl shadow-2xl lg:hidden flex flex-col max-h-[85vh]">
             <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b shrink-0">
               <div>
                 <h2 className="font-bold text-stone-800">
@@ -1904,7 +1990,12 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[order.status]}`}>{STATUS_LABELS[order.status]}</span>
           </div>
         </div>
-        <p className="text-xs text-stone-600 truncate mb-3">{itemsPreview}</p>
+        <p className="text-xs text-stone-600 truncate mb-2">{itemsPreview}</p>
+        {(order.discountAmount ?? 0) > 0 && (
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg px-2 py-0.5 mb-2">
+            🏷️ -{order.discountAmount!.toFixed(2)} ₼ endirim
+          </span>
+        )}
         {isOrderOpen(order) && (
           <div className="flex gap-2">
             <button
@@ -1955,7 +2046,13 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
           )}
         </div>
         <div className="text-right">
-          <span className="font-bold text-stone-800">{total.toFixed(2)} ₼</span>
+          {(order.discountAmount ?? 0) > 0 && (
+            <p className="text-xs text-stone-400 line-through leading-tight">{total.toFixed(2)} ₼</p>
+          )}
+          <span className="font-bold text-stone-800">{(total - (order.discountAmount ?? 0)).toFixed(2)} ₼</span>
+          {(order.discountAmount ?? 0) > 0 && (
+            <p className="text-xs text-green-600 font-semibold leading-tight">-{order.discountAmount!.toFixed(2)} ₼</p>
+          )}
         </div>
       </div>
     </>
