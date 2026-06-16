@@ -869,7 +869,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         </aside>
 
         {/* Main — pb-16 reserves space for mobile bottom nav */}
-        <main className="flex-1 min-w-0 bg-[#f7f3ed] md:rounded-tl-2xl md:border-l md:border-t border-stone-100/60 overflow-hidden flex flex-col pb-16 md:pb-0">
+        <main className="flex-1 min-w-0 bg-[#f7f3ed] md:rounded-tl-2xl md:border-l md:border-t border-stone-100/60 overflow-hidden flex flex-col pb-16 lg:pb-0">
 
           {/* ── ORDERS ── */}
           {view === 'orders' && (
@@ -1363,7 +1363,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                   {/* Cart icon — mobile only */}
                   <button
                     onClick={() => setMobileCartOpen(true)}
-                    className="md:hidden relative w-9 h-9 flex items-center justify-center rounded-xl text-stone-600 hover:bg-stone-100 active:scale-95"
+                    className="lg:hidden relative w-9 h-9 flex items-center justify-center rounded-xl text-stone-600 hover:bg-stone-100 active:scale-95"
                   >
                     <ShoppingCart className="w-5 h-5" />
                     {cartCount > 0 && (
@@ -1435,7 +1435,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
               </div>
 
               {/* Desktop cart sidebar */}
-              <div className="hidden md:flex w-72 bg-white border-l flex-col">
+              <div className="hidden lg:flex w-72 bg-white border-l flex-col">
                 <div className="px-4 py-3 border-b">
                   <h2 className="font-bold text-stone-800">Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}</h2>
                   <p className="text-xs text-stone-500">{!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
@@ -1470,7 +1470,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
 
               {/* Mobile floating cart bar */}
               {cartCount > 0 && (
-                <div className="md:hidden fixed bottom-16 inset-x-0 z-30 px-4 pb-2 pointer-events-none">
+                <div className="lg:hidden fixed bottom-16 inset-x-0 z-30 px-4 pb-2 pointer-events-none">
                   <button
                     onClick={() => setMobileCartOpen(true)}
                     className="pointer-events-auto w-full bg-amber-800 text-white rounded-2xl py-3.5 flex items-center justify-between px-5 shadow-lg active:scale-95 transition-transform"
@@ -1487,7 +1487,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       </div>
 
       {/* Mobile bottom navigation */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-stone-200 flex safe-area-inset-bottom">
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-stone-200 flex safe-area-inset-bottom">
         {[
           { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
           { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
@@ -1521,8 +1521,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       {/* Mobile cart bottom sheet */}
       {mobileCartOpen && (
         <>
-          <div className="fixed inset-0 bg-black/40 z-50 md:hidden" onClick={() => setMobileCartOpen(false)} />
-          <div className="fixed bottom-0 inset-x-0 z-[60] bg-white rounded-t-2xl shadow-2xl md:hidden flex flex-col max-h-[85vh]">
+          <div className="fixed inset-0 bg-black/40 z-50 lg:hidden" onClick={() => setMobileCartOpen(false)} />
+          <div className="fixed bottom-0 inset-x-0 z-[60] bg-white rounded-t-2xl shadow-2xl lg:hidden flex flex-col max-h-[85vh]">
             <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b shrink-0">
               <div>
                 <h2 className="font-bold text-stone-800">

@@ -1464,7 +1464,7 @@ function AdminPageContent() {
         </aside>
 
         {/* ── Main ── */}
-        <main className="flex-1 min-w-0 bg-[#f7f3ed] rounded-tl-2xl border-l border-t border-stone-100/60 p-6 md:p-8 overflow-y-auto">
+        <main className="flex-1 min-w-0 bg-[#f7f3ed] rounded-tl-2xl border-l border-t border-stone-100/60 p-4 md:p-6 lg:p-8 overflow-y-auto">
           <div className="mb-6">
             <h1 className="text-xl font-bold text-stone-900">{meta.title}</h1>
             <p className="text-sm font-medium text-stone-600 mt-0.5">{meta.subtitle}</p>
@@ -1496,7 +1496,7 @@ function AdminPageContent() {
                     {dataLoading && <span className="w-3.5 h-3.5 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />}
                   </h3>
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5">
+                    <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5 overflow-x-auto max-w-full">
                       {([['bugün', 'Bu gün'], ['7g', '7 gün'], ['30g', '30 gün'], ['ay', 'Bu ay'], ['6ay', '6 ay'], ['1il', '1 il']] as [ChartPreset, string][]).map(([p, l]) => {
                         const [f, t] = presetRange(p, businessToday(bizSettings));
                         const active = customFrom === f && customTo === t;
@@ -1885,7 +1885,7 @@ function AdminPageContent() {
                               {order.cancelReason ? ` · Səbəb: ${order.cancelReason}` : ''}
                             </p>
                           )}
-                          <div className="flex items-center justify-between pt-2 border-t border-stone-200">
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-stone-200">
                             <div className="flex items-center gap-2">
                               {isOrderOpen(order) && (
                                 <select
@@ -2581,10 +2581,11 @@ function AdminPageContent() {
                       <span className="ml-2 text-xs text-green-600 font-medium transition-opacity">✓ Saxlanıldı</span>
                     )}
                   </div>
+                  <div className="overflow-auto">
                   <div
                     ref={canvasRef}
                     className="relative bg-[#f9f9f7] select-none"
-                    style={{ height: 480, backgroundImage: 'radial-gradient(circle, #e5e7eb 1px, transparent 1px)', backgroundSize: '24px 24px' }}
+                    style={{ height: 480, minWidth: 640, backgroundImage: 'radial-gradient(circle, #e5e7eb 1px, transparent 1px)', backgroundSize: '24px 24px' }}
                     onClick={() => setSelectedTableId(null)}
                   >
                     {alignGuides.map((g, i) => (
@@ -2638,6 +2639,7 @@ function AdminPageContent() {
                         </div>
                       );
                     })}
+                  </div>
                   </div>
                 </div>
               )}
