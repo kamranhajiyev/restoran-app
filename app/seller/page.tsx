@@ -16,6 +16,7 @@ import {
 } from '@/lib/store';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday } from '@/lib/business-day';
 import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, isOrderOpen } from '@/types';
+import InstallPWA from '@/components/InstallPWA';
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
@@ -831,6 +832,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
             <span className="hidden sm:inline">Dəyiş</span>
           </button>
         )}
+        <InstallPWA />
       </header>
 
       {/* ── Subscription warning banner ── */}
