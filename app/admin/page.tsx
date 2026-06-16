@@ -1254,11 +1254,12 @@ function AdminPageContent() {
   const maxWeekly = Math.max(...weeklyData.map(w => w.rev), 0.01);
 
   // ── sidebar ────────────────────────────────────────────────────────────────
-  function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+  function SidebarContent({ onNavigate, forceExpanded }: { onNavigate?: () => void; forceExpanded?: boolean }) {
+    const isCollapsed = forceExpanded ? false : collapsed;
     return (
       <div className="flex flex-col h-full bg-white min-h-[calc(100vh-4rem)]">
         {/* Logo row */}
-        <div className={`flex items-center h-16 border-b border-stone-100/50 ${collapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
+        <div className={`flex items-center h-16 border-b border-stone-100/50 ${isCollapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
           {!collapsed && (
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
@@ -1271,18 +1272,18 @@ function AdminPageContent() {
             onClick={() => setCollapsed(c => !c)}
             className="hidden md:flex w-8 h-8 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-stone-700 transition-colors"
           >
-            {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+            {isCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
           </button>
         </div>
 
         {/* Nav */}
-        <nav className={`flex flex-col gap-1 p-3 flex-1 ${collapsed ? 'items-center' : ''}`}>
+        <nav className={`flex flex-col gap-1 p-3 flex-1 ${isCollapsed ? 'items-center' : ''}`}>
           {NAV_ITEMS.map(n => {
             const Icon = n.icon;
             const isActive = tab === n.id;
             const badge = n.id === 'orders' && activeOrders.length > 0 ? activeOrders.length : null;
 
-            if (collapsed) {
+            if (isCollapsed) {
               return (
                 <button
                   key={n.id}
@@ -1323,7 +1324,7 @@ function AdminPageContent() {
         </nav>
 
         {/* User + logout */}
-        {!collapsed && (
+        {!isCollapsed && (
           <div className="px-4 py-4 border-t border-stone-100/50">
             <button
               onClick={openProfile}
@@ -1344,7 +1345,7 @@ function AdminPageContent() {
             </button>
           </div>
         )}
-        {collapsed && (
+        {isCollapsed && (
           <div className="py-4 flex flex-col items-center gap-2 border-t border-stone-100/50">
             <button
               onClick={openProfile}
@@ -1451,7 +1452,7 @@ function AdminPageContent() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <SidebarContent onNavigate={() => setMobileOpen(false)} />
+            <SidebarContent onNavigate={() => setMobileOpen(false)} forceExpanded />
           </div>
         </>
       )}
