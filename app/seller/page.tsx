@@ -1074,7 +1074,17 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                               {new Date(order.createdAt).toLocaleDateString('az-AZ', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
                               {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
                             </span>
-                            <span className="text-sm font-semibold text-stone-800 flex-shrink-0 w-16 sm:w-20 text-right">{orderTotal(order).toFixed(2)} ₼</span>
+                            <span className="text-sm font-semibold text-stone-800 flex-shrink-0 text-right">
+                              {(order.discountAmount ?? 0) > 0
+                                ? <><span className="text-xs text-stone-400 line-through mr-1">{orderTotal(order).toFixed(2)}</span>{(orderTotal(order) - order.discountAmount!).toFixed(2)}</>
+                                : orderTotal(order).toFixed(2)
+                              } ₼
+                            </span>
+                            {(order.discountAmount ?? 0) > 0 && (
+                              <span className="text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg px-1.5 py-0.5 flex-shrink-0 hidden sm:inline">
+                                🏷️ -{order.discountAmount!.toFixed(2)} ₼
+                              </span>
+                            )}
                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 text-center truncate ${STATUS_COLORS[order.status]}`}>{STATUS_LABELS[order.status]}</span>
                           </button>
 
