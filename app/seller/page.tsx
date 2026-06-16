@@ -1980,7 +1980,12 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[order.status]}`}>{STATUS_LABELS[order.status]}</span>
           </div>
         </div>
-        <p className="text-xs text-stone-600 truncate mb-3">{itemsPreview}</p>
+        <p className="text-xs text-stone-600 truncate mb-2">{itemsPreview}</p>
+        {(order.discountAmount ?? 0) > 0 && (
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg px-2 py-0.5 mb-2">
+            🏷️ -{order.discountAmount!.toFixed(2)} ₼ endirim
+          </span>
+        )}
         {isOrderOpen(order) && (
           <div className="flex gap-2">
             <button
@@ -2031,7 +2036,13 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
           )}
         </div>
         <div className="text-right">
-          <span className="font-bold text-stone-800">{total.toFixed(2)} ₼</span>
+          {(order.discountAmount ?? 0) > 0 && (
+            <p className="text-xs text-stone-400 line-through leading-tight">{total.toFixed(2)} ₼</p>
+          )}
+          <span className="font-bold text-stone-800">{(total - (order.discountAmount ?? 0)).toFixed(2)} ₼</span>
+          {(order.discountAmount ?? 0) > 0 && (
+            <p className="text-xs text-green-600 font-semibold leading-tight">-{order.discountAmount!.toFixed(2)} ₼</p>
+          )}
         </div>
       </div>
     </>
