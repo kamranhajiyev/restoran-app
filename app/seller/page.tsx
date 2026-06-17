@@ -537,9 +537,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   useEffect(() => {
     const id = setInterval(async () => {
       const open = overrideCompanyId
-        ? await fetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.shift ?? null).catch(() => null)
+        ? await fetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.shift ?? null).catch(() => undefined)
         : await fetchOpenShift();
-      if (!open && shift) { setShift(null); setView('orders'); }
+      if (open === null && shift) { setShift(null); setView('orders'); }
     }, 30_000);
     return () => clearInterval(id);
   }, [shift, overrideCompanyId]);
