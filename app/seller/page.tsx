@@ -523,16 +523,23 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   const expectedCash = shift ? shift.openingCash + shiftSales.cash + movementsTotal(shift) : 0;
 
   useEffect(() => {
-    if (view === 'kassa' && shift) fetchShiftSales(shift.openedAt).then(setShiftSales);
-  }, [view, shift]);
+    if (view === 'kassa' && shift) {
+      if (overrideCompanyId) {
+        fetch(`/api/public-shift-sales?companyId=${overrideCompanyId}&openedAt=${encodeURIComponent(shift.openedAt)}`)
+          .then(r => r.json()).then(setShiftSales).catch(() => {});
+      } else {
+        fetchShiftSales(shift.openedAt).then(setShiftSales);
+      }
+    }
+  }, [view, shift, overrideCompanyId]);
 
   // Detect when admin closes the shift externally
   useEffect(() => {
     const id = setInterval(async () => {
       const open = overrideCompanyId
-        ? await fetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.shift ?? null).catch(() => null)
+        ? await fetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.shift ?? null).catch(() => undefined)
         : await fetchOpenShift();
-      if (!open && shift) { setShift(null); setView('orders'); }
+      if (open === null && shift) { setShift(null); setView('orders'); }
     }, 30_000);
     return () => clearInterval(id);
   }, [shift, overrideCompanyId]);
@@ -575,7 +582,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     const fresh = overrideCompanyId
       ? await fetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.shift ?? shift).catch(() => shift)
       : (await fetchOpenShift()) ?? shift;
-    const sales = await fetchShiftSales(fresh.openedAt);
+    const sales = overrideCompanyId
+      ? await fetch(`/api/public-shift-sales?companyId=${overrideCompanyId}&openedAt=${encodeURIComponent(fresh.openedAt)}`).then(r => r.json()).catch(() => ({ cash: 0, card: 0 }))
+      : await fetchShiftSales(fresh.openedAt);
     const expected = fresh.openingCash + sales.cash + movementsTotal(fresh);
     if (overrideCompanyId) {
       await fetch('/api/close-shift', {
