@@ -95,7 +95,8 @@ const AZ_MON_SHORT = ['Yan','Fev','Mar','Apr','May','İyn','İyl','Avq','Sen','O
 const AZ_MON_LONG  = ['Yanvar','Fevral','Mart','Aprel','May','İyun','İyul','Avqust','Sentyabr','Oktyabr','Noyabr','Dekabr'];
 
 function orderTotal(order: Order) {
-  return order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
+  const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
+  return gross - (order.discountAmount ?? 0);
 }
 
 // Ranges are expressed in *business days* (company timezone + working-hours
@@ -1919,7 +1920,7 @@ function AdminPageContent() {
                         </span>
                         <span className="text-sm font-semibold text-stone-800 flex-shrink-0 text-right">
                           {(order.discountAmount ?? 0) > 0
-                            ? <><span className="text-xs text-stone-400 line-through mr-1">{orderTotal(order).toFixed(2)}</span>{(orderTotal(order) - order.discountAmount!).toFixed(2)}</>
+                            ? <><span className="text-xs text-stone-400 line-through mr-1">{(orderTotal(order) + order.discountAmount!).toFixed(2)}</span>{orderTotal(order).toFixed(2)}</>
                             : orderTotal(order).toFixed(2)
                           } ₼
                         </span>

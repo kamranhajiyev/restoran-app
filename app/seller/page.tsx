@@ -66,7 +66,8 @@ function elapsed(iso: string): string {
 }
 
 function orderTotal(order: Order): number {
-  return order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
+  const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
+  return gross - (order.discountAmount ?? 0);
 }
 
 // Overpayment splits into tip + change. Change can only come from cash —
@@ -1157,7 +1158,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                             </span>
                             <span className="text-sm font-semibold text-stone-800 flex-shrink-0 text-right">
                               {(order.discountAmount ?? 0) > 0
-                                ? <><span className="text-xs text-stone-400 line-through mr-1">{orderTotal(order).toFixed(2)}</span>{(orderTotal(order) - order.discountAmount!).toFixed(2)}</>
+                                ? <><span className="text-xs text-stone-400 line-through mr-1">{(orderTotal(order) + order.discountAmount!).toFixed(2)}</span>{orderTotal(order).toFixed(2)}</>
                                 : orderTotal(order).toFixed(2)
                               } ₼
                             </span>
@@ -1235,8 +1236,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                                   )}
                                 </div>
                                 <div className="text-right">
-                                  {(order.discountAmount ?? 0) > 0 && <p className="text-xs text-stone-400 line-through">{orderTotal(order).toFixed(2)} ₼</p>}
-                                  <span className="font-bold text-amber-900">{(orderTotal(order) - (order.discountAmount ?? 0)).toFixed(2)} ₼</span>
+                                  {(order.discountAmount ?? 0) > 0 && <p className="text-xs text-stone-400 line-through">{(orderTotal(order) + order.discountAmount!).toFixed(2)} ₼</p>}
+                                  <span className="font-bold text-amber-900">{orderTotal(order).toFixed(2)} ₼</span>
                                 </div>
                               </div>
                             </div>
