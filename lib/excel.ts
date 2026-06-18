@@ -55,7 +55,7 @@ export function exportOrdersExcel(orders: Order[], timezone: string): void {
       'Endirim (₼)': o.discountAmount ?? 0,
       'Nağd (₼)': o.cashAmount ?? 0,
       'Kart (₼)': o.cardAmount ?? 0,
-      'Cəmi (₼)': Math.round(total * 100) / 100,
+      'Cəmi (₼)': o.status === 'ləğv edildi' ? '-' : Math.round(total * 100) / 100,
     };
   });
   const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ 'Sifariş №': '', 'Satıcı': '', 'Tarix': '', 'Status': '', 'Məhsullar': '', 'Endirim (₼)': '', 'Nağd (₼)': '', 'Kart (₼)': '', 'Cəmi (₼)': '' }]);
