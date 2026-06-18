@@ -555,8 +555,12 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     const from = businessDayStartUtc(todayStr, bizSettings).toISOString();
     const to = new Date().toISOString();
     setHistoryLoading(true);
-    fetchOrders({ from, to, limit: 500 }).then(setHistoryOrders).finally(() => setHistoryLoading(false));
-  }, [view, bizSettings]);
+    const load = overrideCompanyId
+      ? fetch(`/api/public-orders?companyId=${overrideCompanyId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=500`)
+          .then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
+      : fetchOrders({ from, to, limit: 500 });
+    load.then(setHistoryOrders).finally(() => setHistoryLoading(false));
+  }, [view, bizSettings, overrideCompanyId]);
 
   async function handleOpenShift() {
     const cash = parseFloat(openCashInput) || 0;
@@ -1048,7 +1052,11 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                     const from = businessDayStartUtc(todayStr, bizSettings).toISOString();
                     const to = new Date().toISOString();
                     setHistoryLoading(true);
-                    fetchOrders({ from, to, limit: 500 }).then(setHistoryOrders).finally(() => setHistoryLoading(false));
+                    const load = overrideCompanyId
+                      ? fetch(`/api/public-orders?companyId=${overrideCompanyId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=500`)
+                          .then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
+                      : fetchOrders({ from, to, limit: 500 });
+                    load.then(setHistoryOrders).finally(() => setHistoryLoading(false));
                   }}
                   disabled={historyLoading}
                   className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"

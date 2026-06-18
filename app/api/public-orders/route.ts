@@ -9,17 +9,18 @@ export async function GET(req: NextRequest) {
   const limit = parseInt(req.nextUrl.searchParams.get('limit') ?? '200');
   const offset = parseInt(req.nextUrl.searchParams.get('offset') ?? '0');
 
-  const { count: totalCount } = await db
-    .from('orders')
-    .select('*', { count: 'exact', head: true })
-    .eq('company_id', companyId);
+  const from = req.nextUrl.searchParams.get('from');
+  const to = req.nextUrl.searchParams.get('to');
 
-  const { data, error } = await db
-    .from('orders')
-    .select('*, order_items(*)')
-    .eq('company_id', companyId)
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
+  let countQ = db.from('orders').select('*', { count: 'exact', head: true }).eq('company_id', companyId);
+  if (from) countQ = countQ.gte('created_at', from);
+  if (to) countQ = countQ.lte('created_at', to);
+  const { count: totalCount } = await countQ;
+
+  let q = db.from('orders').select('*, order_items(*)').eq('company_id', companyId).order('created_at', { ascending: false }).range(offset, offset + limit - 1);
+  if (from) q = q.gte('created_at', from);
+  if (to) q = q.lte('created_at', to);
+  const { data, error } = await q;
 
   if (error) return Response.json({ orders: [] }, { status: 500 });
 
