@@ -40,7 +40,7 @@ import { CashShift, Category, MenuItem, MenuItemVariant, Order, OrderStatus, Res
 import AppDialog, { DialogState } from '@/components/AppDialog';
 import PasswordField from '@/components/PasswordField';
 import { validatePassword } from '@/lib/password';
-import { exportMenuExcel, parseMenuFile, ImportPreview } from '@/lib/excel';
+import { exportMenuExcel, exportOrdersExcel, parseMenuFile, ImportPreview } from '@/lib/excel';
 import QRCode from 'react-qr-code';
 import InstallPWA from '@/components/InstallPWA';
 
@@ -345,6 +345,7 @@ function AdminPageContent() {
   // orders tab
   const [totalOrders, setTotalOrders] = useState(0);
   const [orderSearch, setOrderSearch] = useState('');
+  const [ordersPreset, setOrdersPreset] = useState<'all' | 'bugün' | 'bu həftə'>('all');
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const touchStartY = useRef<number | null>(null);
@@ -1125,9 +1126,16 @@ function AdminPageContent() {
   const menuMatchCount = menuQuery
     ? menu.filter(m => categories.some(c => c.name === m.category) && azNormalize(m.name).includes(menuQuery)).length
     : 0;
-  const visibleOrders = orderQuery
-    ? orders.filter(o => String(o.orderNumber).includes(orderQuery) || (o.sellerName ?? '').toLowerCase().includes(orderQuery))
+  const todayStr = businessToday(bizSettings);
+  const weekStart = (() => { const d = dayToDate(todayStr); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
+  const ordersDateFiltered = ordersPreset === 'bugün'
+    ? orders.filter(o => businessDay(o.createdAt, bizSettings) === todayStr)
+    : ordersPreset === 'bu həftə'
+    ? orders.filter(o => businessDay(o.createdAt, bizSettings) >= weekStart)
     : orders;
+  const visibleOrders = orderQuery
+    ? ordersDateFiltered.filter(o => String(o.orderNumber).includes(orderQuery) || (o.sellerName ?? '').toLowerCase().includes(orderQuery))
+    : ordersDateFiltered;
 
   const menuCostMap: Record<string, number> = {};
   menu.forEach(m => {
@@ -1829,14 +1837,36 @@ function AdminPageContent() {
                 <p className="text-sm text-stone-500">
                   {totalOrders > orders.length ? `${totalOrders} sifariş · son ${orders.length}` : `${orders.length} sifariş`} · {activeOrders.length} aktiv
                 </p>
-                <button
-                  onClick={refresh}
-                  disabled={refreshing}
-                  className="flex items-center gap-1.5 text-xs font-medium text-amber-800 hover:text-amber-950 px-3 py-1.5 rounded-lg hover:bg-amber-50 transition-colors disabled:opacity-60"
-                >
-                  {refreshing && <span className="w-3 h-3 border-2 border-amber-200 border-t-amber-800 rounded-full animate-spin" />}
-                  Yenilə
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => exportOrdersExcel(visibleOrders, bizSettings.timezone)}
+                    title="Excel-ə ixrac et"
+                    className="flex items-center gap-1.5 text-xs font-medium text-stone-500 hover:text-stone-700 px-3 py-1.5 rounded-lg hover:bg-stone-100 transition-colors"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    İxrac
+                  </button>
+                  <button
+                    onClick={refresh}
+                    disabled={refreshing}
+                    className="flex items-center gap-1.5 text-xs font-medium text-amber-800 hover:text-amber-950 px-3 py-1.5 rounded-lg hover:bg-amber-50 transition-colors disabled:opacity-60"
+                  >
+                    {refreshing && <span className="w-3 h-3 border-2 border-amber-200 border-t-amber-800 rounded-full animate-spin" />}
+                    Yenilə
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                {(['all', 'bugün', 'bu həftə'] as const).map(p => (
+                  <button
+                    key={p}
+                    onClick={() => setOrdersPreset(p)}
+                    className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${ordersPreset === p ? 'bg-amber-800 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}
+                  >
+                    {p === 'all' ? 'Hamısı' : p === 'bugün' ? 'Bugün' : 'Bu həftə'}
+                  </button>
+                ))}
               </div>
 
               <div className="relative">
