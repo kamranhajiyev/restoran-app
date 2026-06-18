@@ -1202,6 +1202,11 @@ function AdminPageContent() {
     const d = orderBizDay(o);
     return d >= rangeFrom && d <= rangeTo;
   });
+  const allClosedOrders = (dataLoading ? [] : statsOrders).filter(o => o.status === 'ödənilib' || o.status === 'ləğv edildi');
+  const chartAllOrders = allClosedOrders.filter(o => {
+    const d = orderBizDay(o);
+    return d >= rangeFrom && d <= rangeTo;
+  });
   const chartRevenue = chartPaid.reduce((s, o) => s + orderTotal(o), 0);
   const chartCost = chartPaid.reduce((s, o) => s + o.items.reduce((os, oi) => os + (menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity, 0), 0);
   const chartProfit = chartRevenue - chartCost;
@@ -1593,7 +1598,7 @@ function AdminPageContent() {
                     { label: 'Mənfəət',     value: `${chartProfit.toFixed(2)} ₼`,   icon: TrendingUp,color: chartProfit >= 0 ? 'text-green-600' : 'text-red-500' },
                     { label: 'Mənfəət %',   value: `${chartMarginPct.toFixed(1)}%`, icon: Percent,   color: chartMarginPct >= 0 ? 'text-green-600' : 'text-red-500' },
                     { label: 'Orta çek',    value: `${chartAvg.toFixed(2)} ₼`,      icon: Receipt,   color: 'text-stone-800' },
-                    { label: 'Sifarişlər',  value: String(chartPaid.length),         icon: Coffee,    color: 'text-stone-800' },
+                    { label: 'Sifarişlər',  value: String(chartAllOrders.length),    icon: Coffee,    color: 'text-stone-800' },
                   ].map((kpi, i, arr) => {
                     const Icon = kpi.icon;
                     return (
