@@ -228,7 +228,6 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
       createdAt: o.created_at,
       cashAmount: o.cash_amount ? Number(o.cash_amount) : undefined,
       cardAmount: o.card_amount ? Number(o.card_amount) : undefined,
-      tipAmount: o.tip_amount ? Number(o.tip_amount) : undefined,
       changeAmount: o.change_amount ? Number(o.change_amount) : undefined,
       discountAmount: o.discount_amount ? Number(o.discount_amount) : undefined,
       discountType: (o.discount_type as '%' | '₼') ?? undefined,
@@ -288,18 +287,16 @@ export async function updateOrderStatus(
   status: Order['status'],
   cashAmount?: number,
   cardAmount?: number,
-  tipAmount?: number,
   changeAmount?: number,
   discountAmount?: number,
   discountType?: '%' | '₼',
 ): Promise<boolean> {
   const updates: Record<string, unknown> = { status };
   // Plain status changes must not touch payment data
-  const hasAmounts = cashAmount !== undefined || cardAmount !== undefined || tipAmount !== undefined || changeAmount !== undefined;
+  const hasAmounts = cashAmount !== undefined || cardAmount !== undefined || changeAmount !== undefined;
   if (hasAmounts) {
     updates.cash_amount = cashAmount ?? 0;
     updates.card_amount = cardAmount ?? 0;
-    updates.tip_amount = tipAmount ?? 0;
     updates.change_amount = changeAmount ?? 0;
     updates.discount_amount = discountAmount ?? 0;
     updates.discount_type = discountType ?? '₼';
@@ -805,7 +802,7 @@ export async function closeShift(
 
 // Cash/card taken since the shift opened (paid orders only, by payment time —
 // an order created yesterday but paid during this shift counts). cash_amount is
-// net of change and includes tips — i.e. exactly what went into the drawer.
+// net of change — i.e. exactly what went into the drawer.
 export async function fetchShiftSales(openedAt: string): Promise<{ cash: number; card: number }> {
   try {
     const { data, error } = await supabase

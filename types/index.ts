@@ -98,7 +98,6 @@ export interface Order {
   note?: string;
   cashAmount?: number;   // money kept in the till (net of change given back)
   cardAmount?: number;
-  tipAmount?: number;
   changeAmount?: number; // returned to the customer — display only, never revenue
   discountAmount?: number;
   discountType?: '%' | '₼';

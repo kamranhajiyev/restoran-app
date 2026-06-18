@@ -70,20 +70,6 @@ function orderTotal(order: Order): number {
   return gross - (order.discountAmount ?? 0);
 }
 
-// Overpayment splits into tip + change. Change can only come from cash —
-// a card terminal can't give money back, so card excess is always tip.
-function paymentBreakdown(total: number, cash: number, card: number, isTip: boolean, tipInput: string) {
-  const overpay = Math.max(0, cash + card - total);
-  const maxChange = Math.min(overpay, cash);
-  const forcedTip = overpay - maxChange;
-  const tip = maxChange === 0
-    ? overpay
-    : isTip
-      ? Math.min(overpay, Math.max(forcedTip, parseFloat(tipInput) || 0))
-      : forcedTip;
-  return { overpay, maxChange, forcedTip, tip, change: overpay - tip };
-}
-
 function tableHasActive(n: number, orders: Order[]): boolean {
   return orders.some(o => o.tableNumber === n && isOrderOpen(o));
 }
@@ -197,8 +183,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   const [payingOrder, setPayingOrder] = useState<Order | null>(null);
   const [cashInput, setCashInput]     = useState('');
   const [cardInput, setCardInput]     = useState('');
-  const [isTip, setIsTip]             = useState(false);
-  const [tipInput, setTipInput]       = useState('');
   const [discountInput, setDiscountInput] = useState('');
   const [discountType, setDiscountType]   = useState<'%' | '₼'>('₼');
 
@@ -472,8 +456,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     setPayingOrder(order);
     setCashInput(orderTotal(order).toFixed(2));
     setCardInput('');
-    setIsTip(false);
-    setTipInput('');
     setDiscountInput('');
     setDiscountType('₼');
   }
@@ -491,17 +473,17 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     const fullTotal = orderTotal(payingOrder);
     const discountAmt = calcDiscount(fullTotal);
     const total = fullTotal - discountAmt;
-    const { tip, change } = paymentBreakdown(total, cash, card, isTip, tipInput);
+    const overpay = Math.max(0, cash + card - total);
+    const change = Math.min(overpay, cash);
     const cashKept = cash - change;
     setPayingOrder(null);
-    setIsTip(false);
     // The DB update is conditional — a no-op if someone else already paid this order
     const paid = overrideCompanyId
-      ? await fetch('/api/update-order-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: payingOrder.id, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, tipAmount: tip, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
-      : await updateOrderStatus(payingOrder.id, 'ödənilib', cashKept, card, tip, change, discountAmt || undefined, discountAmt ? discountType : undefined);
+      ? await fetch('/api/update-order-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: payingOrder.id, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      : await updateOrderStatus(payingOrder.id, 'ödənilib', cashKept, card, change, discountAmt || undefined, discountAmt ? discountType : undefined);
     if (paid) {
       setOrders(prev => prev.map(o => o.id === payingOrder.id
-        ? { ...o, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, tipAmount: tip, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined }
+        ? { ...o, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined }
         : o));
     } else {
       refreshOrders();
@@ -668,7 +650,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   const isToday     = (iso: string) => businessDay(iso, bizSettings) === bizToday;
   const todayOrders = active.filter(o => isToday(o.createdAt));
   const prevOrders  = active.filter(o => !isToday(o.createdAt));
-  const myTodayTips = orders.filter(o => o.sellerName === effectiveSeller && isToday(o.createdAt) && (o.tipAmount ?? 0) > 0).reduce((s, o) => s + (o.tipAmount ?? 0), 0);
   const historyQuery = historySearch.trim().toLowerCase();
   const filteredHistoryOrders = historyQuery
     ? historyOrders.filter(o =>
@@ -1016,11 +997,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                   <span className="text-stone-600">Cəmi <span className="font-semibold text-stone-800">{active.length}</span></span>
                   <span className="text-stone-600">Gözləyir <span className="font-semibold text-amber-700">{orders.filter(o => o.status === 'gözləyir').length}</span></span>
                   <span className="text-stone-600">Hazır <span className="font-semibold text-green-600">{orders.filter(o => o.status === 'hazırdır').length}</span></span>
-                  {myTodayTips > 0 && (
-                    <span className="flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-2 py-0.5 font-semibold">
-                      ⭐ Bəxşiş: {myTodayTips.toFixed(2)} ₼
-                    </span>
-                  )}
                 </div>
               </div>
 
@@ -1224,11 +1200,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                                       🏷️ endirim -{order.discountAmount!.toFixed(2)} ₼{order.discountType === '%' ? ` (${order.discountType})` : ''}
                                     </span>
                                   )}
-                                  {(order.tipAmount ?? 0) > 0 && (
-                                    <span className="text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
-                                      ⭐ bəxşiş {order.tipAmount!.toFixed(2)} ₼
-                                    </span>
-                                  )}
                                   {(order.changeAmount ?? 0) > 0 && (
                                     <span className="text-xs text-stone-500">
                                       💸 {((order.cashAmount ?? 0) + order.changeAmount!).toFixed(2)} alındı · {order.changeAmount!.toFixed(2)} qaytarıldı
@@ -1269,7 +1240,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                     <span>Başlanğıc məbləğ</span><span className="font-semibold">{shift.openingCash.toFixed(2)} ₼</span>
                   </div>
                   <div className="flex justify-between text-sm text-stone-600">
-                    <span>Nağd satış (bəxşiş daxil)</span><span className="font-semibold">{shiftSales.cash.toFixed(2)} ₼</span>
+                    <span>Nağd satış</span><span className="font-semibold">{shiftSales.cash.toFixed(2)} ₼</span>
                   </div>
                   {movementsTotal(shift) !== 0 && (
                     <div className="flex justify-between text-sm text-stone-600">
@@ -1778,7 +1749,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         const paid = cash + card;
         const missing = total - paid;
         const canPay = paid >= total;
-        const { overpay, maxChange, forcedTip, tip, change } = paymentBreakdown(total, cash, card, isTip, tipInput);
+        const overpay = Math.max(0, cash + card - total);
+        const change = Math.min(overpay, cash);
         return (
           <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
             <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
@@ -1870,54 +1842,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                   <span>{missing.toFixed(2)} ₼</span>
                 </div>
               )}
-              {paid > 0 && overpay > 0 && (
-                <div className="mb-4 space-y-2">
-                  {maxChange > 0 && (
-                    <div className="rounded-xl overflow-hidden border border-stone-200 flex">
-                      <button
-                        onClick={() => setIsTip(false)}
-                        className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${!isTip ? 'bg-green-500 text-white' : 'bg-white text-stone-600 hover:bg-stone-50'}`}
-                      >
-                        💸 Qaytar {maxChange.toFixed(2)} ₼
-                      </button>
-                      <button
-                        onClick={() => { setIsTip(true); setTipInput(overpay.toFixed(2)); }}
-                        className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${isTip ? 'bg-amber-500 text-white' : 'bg-white text-stone-600 hover:bg-stone-50'}`}
-                      >
-                        ⭐ Bəxşiş
-                      </button>
-                    </div>
-                  )}
-                  {maxChange === 0 ? (
-                    <div className="flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base bg-amber-50 text-amber-700">
-                      <span>⭐ Bəxşiş (kartla)</span>
-                      <span>{overpay.toFixed(2)} ₼</span>
-                    </div>
-                  ) : isTip ? (
-                    <>
-                      <div className="flex justify-between items-center gap-3 px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200">
-                        <span className="text-sm font-semibold text-amber-700">⭐ Bəxşiş (₼)</span>
-                        <input
-                          type="number" min={forcedTip} max={overpay} step="0.1"
-                          value={tipInput}
-                          onChange={e => setTipInput(e.target.value)}
-                          onFocus={e => e.target.select()}
-                          className="w-24 border border-amber-200 rounded-lg px-2 py-1.5 text-base font-semibold text-amber-800 text-right bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                        />
-                      </div>
-                      {change > 0 && (
-                        <div className="flex justify-between items-center px-4 py-2.5 rounded-xl font-semibold text-sm bg-green-50 text-green-700">
-                          <span>💸 Qaytarılacaq</span>
-                          <span>{change.toFixed(2)} ₼</span>
-                        </div>
-                      )}
-                    </>
-                  ) : forcedTip > 0 ? (
-                    <div className="flex justify-between items-center px-4 py-2.5 rounded-xl font-semibold text-sm bg-amber-50 text-amber-700">
-                      <span>⭐ Bəxşiş (kartla)</span>
-                      <span>{forcedTip.toFixed(2)} ₼</span>
-                    </div>
-                  ) : null}
+              {paid > 0 && change > 0 && (
+                <div className="flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base mb-4 bg-green-50 text-green-700">
+                  <span>💸 Qaytarılacaq</span>
+                  <span>{change.toFixed(2)} ₼</span>
                 </div>
               )}
               {paid > 0 && missing === 0 && overpay === 0 && (

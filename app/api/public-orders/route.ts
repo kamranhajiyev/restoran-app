@@ -35,7 +35,6 @@ export async function GET(req: NextRequest) {
     createdAt: o.created_at,
     cashAmount: o.cash_amount ? Number(o.cash_amount) : undefined,
     cardAmount: o.card_amount ? Number(o.card_amount) : undefined,
-    tipAmount: o.tip_amount ? Number(o.tip_amount) : undefined,
     changeAmount: o.change_amount ? Number(o.change_amount) : undefined,
     discountAmount: o.discount_amount ? Number(o.discount_amount) : undefined,
     discountType: o.discount_type ?? undefined,

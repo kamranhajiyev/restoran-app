@@ -1214,10 +1214,8 @@ function AdminPageContent() {
   const chartMarginPct = chartRevenue > 0 ? (chartProfit / chartRevenue) * 100 : 0;
   const chartAvg = chartPaid.length > 0 ? chartRevenue / chartPaid.length : 0;
 
-  // Per-method revenue counts only the goods price: tips are excluded (shown
-  // separately) and excess beyond the order total is attributed card-first,
-  // since card overpayment is always a tip. Orders saved before payment
-  // tracking (no amounts) contribute nothing, as before.
+  // Per-method revenue: excess beyond the order total is attributed card-first.
+  // Orders saved before payment tracking (no amounts) contribute nothing.
   const methodRev = chartPaid.reduce((acc, o) => {
     const t = orderTotal(o);
     const cashPaid = o.cashAmount ?? 0;
@@ -1231,17 +1229,14 @@ function AdminPageContent() {
   const cashRev = methodRev.cash;
   const cardRev = methodRev.card;
   const totalPayRev = cashRev + cardRev;
-  const totalTips = chartPaid.reduce((s, o) => s + (o.tipAmount ?? 0), 0);
-
-  const sellerTipMap: Record<string, { tips: number; orders: number; rev: number }> = {};
+  const sellerRevMap: Record<string, { orders: number; rev: number }> = {};
   chartPaid.forEach(o => {
     const name = o.sellerName || 'Naməlum';
-    if (!sellerTipMap[name]) sellerTipMap[name] = { tips: 0, orders: 0, rev: 0 };
-    sellerTipMap[name].tips += o.tipAmount ?? 0;
-    sellerTipMap[name].orders += 1;
-    sellerTipMap[name].rev += orderTotal(o);
+    if (!sellerRevMap[name]) sellerRevMap[name] = { orders: 0, rev: 0 };
+    sellerRevMap[name].orders += 1;
+    sellerRevMap[name].rev += orderTotal(o);
   });
-  const sellerStats = Object.entries(sellerTipMap)
+  const sellerStats = Object.entries(sellerRevMap)
     .map(([name, s]) => ({ name, ...s }))
     .sort((a, b) => b.rev - a.rev);
 
@@ -1790,7 +1785,7 @@ function AdminPageContent() {
                 </div>
               )}
 
-              {/* Seller stats + Tips */}
+              {/* Seller stats */}
               <div className="grid md:grid-cols-2 gap-5">
                 <div className="bg-white rounded-xl border border-stone-100 card p-5">
                   <h3 className="font-semibold text-stone-800 text-sm mb-4">Satıcı statistikası</h3>
@@ -1809,11 +1804,6 @@ function AdminPageContent() {
                           <div className="flex items-center gap-3 shrink-0 text-sm">
                             <span className="text-stone-500">{s.orders} sif.</span>
                             <span className="font-semibold text-stone-800">{s.rev.toFixed(2)} ₼</span>
-                            {s.tips > 0 && (
-                              <span className="bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-2 py-0.5 text-xs font-semibold">
-                                ⭐ bəxşiş {s.tips.toFixed(2)} ₼
-                              </span>
-                            )}
                           </div>
                         </div>
                       ))}
@@ -1821,35 +1811,6 @@ function AdminPageContent() {
                   )}
                 </div>
 
-                <div className="bg-white rounded-xl border border-stone-100 card p-5">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold text-stone-800 text-sm">Bəxşiş gəliri</h3>
-                    {totalTips > 0 && <span className="text-lg font-bold text-amber-600">⭐ {totalTips.toFixed(2)} ₼</span>}
-                  </div>
-                  {totalTips === 0 ? (
-                    <p className="text-sm text-stone-400 text-center py-4">Bəxşiş yoxdur</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {sellerStats.filter(s => s.tips > 0).map((s, i) => {
-                        const pct = totalTips > 0 ? (s.tips / totalTips) * 100 : 0;
-                        return (
-                          <div key={`${s.name}-tip-${i}`}>
-                            <div className="flex justify-between items-center mb-1.5">
-                              <span className="text-sm text-stone-600">{s.name}</span>
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-stone-500">{pct.toFixed(0)}%</span>
-                                <span className="font-semibold text-amber-700 text-sm">{s.tips.toFixed(2)} ₼</span>
-                              </div>
-                            </div>
-                            <div className="h-1.5 bg-stone-100 rounded-full overflow-hidden">
-                              <div className="h-full bg-amber-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
               </div>
 
               {paidOrders.length === 0 && (
@@ -1982,11 +1943,6 @@ function AdminPageContent() {
                                   {[order.cashAmount ? `💵 ${order.cashAmount.toFixed(2)}` : '', order.cardAmount ? `💳 ${order.cardAmount.toFixed(2)}` : ''].filter(Boolean).join(' · ')}
                                 </span>
                               )}
-                              {(order.tipAmount ?? 0) > 0 && (
-                                <span className="text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
-                                  ⭐ bəxşiş {order.tipAmount!.toFixed(2)} ₼
-                                </span>
-                              )}
                               {(order.changeAmount ?? 0) > 0 && (
                                 <span className="text-xs text-stone-500">
                                   💸 {((order.cashAmount ?? 0) + order.changeAmount!).toFixed(2)} alındı · {order.changeAmount!.toFixed(2)} qaytarıldı
@@ -2081,7 +2037,7 @@ function AdminPageContent() {
                           <span>Başlanğıc məbləğ</span><span className="font-semibold">{open.openingCash.toFixed(2)} ₼</span>
                         </div>
                         <div className="flex justify-between text-sm text-stone-600">
-                          <span>Nağd satış (bəxşiş daxil)</span><span className="font-semibold">{openShiftSales.cash.toFixed(2)} ₼</span>
+                          <span>Nağd satış</span><span className="font-semibold">{openShiftSales.cash.toFixed(2)} ₼</span>
                         </div>
                         {movTotal(open) !== 0 && (
                           <div className="flex justify-between text-sm text-stone-600">
