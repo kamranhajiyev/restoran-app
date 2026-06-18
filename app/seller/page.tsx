@@ -1193,7 +1193,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
           )}
 
           {/* ── KASSA ── */}
-          {view === 'kassa' && (
+          {view === 'kassa' && shift && (
             <div className="flex-1 p-4 md:p-8 overflow-y-auto">
               <div className="max-w-md space-y-4">
                 <div>
