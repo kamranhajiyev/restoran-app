@@ -252,7 +252,7 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
   }
 }
 
-export async function addOrder(order: Order): Promise<void> {
+export async function addOrder(order: Order): Promise<boolean> {
   try {
     const { error: orderError } = await supabase.from('orders').insert({
       id: order.id,
@@ -264,8 +264,8 @@ export async function addOrder(order: Order): Promise<void> {
       created_at: order.createdAt,
       company_id: _companyId,
     });
-    if (orderError) { console.error('[addOrder orders]', orderError); return; }
-    if (order.items.length === 0) return;
+    if (orderError) { console.error('[addOrder orders]', orderError); return false; }
+    if (order.items.length === 0) return true;
     const rows = order.items.map(oi => ({
       order_id: order.id,
       menu_item_id: String(oi.menuItem.id),
@@ -275,9 +275,11 @@ export async function addOrder(order: Order): Promise<void> {
       modifiers: oi.modifiers ?? null,
     }));
     const { error: itemsError } = await supabase.from('order_items').insert(rows);
-    if (itemsError) console.error('[addOrder items]', itemsError);
+    if (itemsError) { console.error('[addOrder items]', itemsError); return false; }
+    return true;
   } catch (e) {
     console.error('[addOrder]', e);
+    return false;
   }
 }
 

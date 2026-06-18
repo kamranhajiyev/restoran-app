@@ -449,8 +449,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     setCart([]); setNote(''); setSelectedTable(null); setOrderType(null);
     setMobileCartOpen(false);
     setView('orders');
-    await addOrder(order);
+    const saved = await addOrder(order);
     setSubmitting(false);
+    if (!saved) {
+      alert('Sifariş yadda saxlanılmadı — internet bağlantısını yoxlayın və yenidən cəhd edin.');
+      setOrders(prev => prev.filter(o => o.id !== order.id));
+      return;
+    }
     openPayment(order);
   }
 
@@ -587,7 +592,11 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     const mv: ShiftMovement = { at: new Date().toISOString(), amount: movOut ? -raw : raw, reason: movReason.trim(), by: effectiveSeller };
     setShift({ ...shift, movements: [...shift.movements, mv] });
     setShowMovForm(false); setMovAmount(''); setMovReason('');
-    await addShiftMovement(shift.id, mv);
+    if (overrideCompanyId) {
+      await fetch('/api/add-shift-movement', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shiftId: shift.id, movement: mv }) });
+    } else {
+      await addShiftMovement(shift.id, mv);
+    }
   }
 
   async function handleCloseShift() {
