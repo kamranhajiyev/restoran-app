@@ -1,0 +1,19 @@
+{
+  "name": "Luna Café",
+
+  "sheet": 0,
+
+  "headerRows": 2,
+
+  "columns": {
+    "name": 3,
+    "category": 4,
+    "price": 7
+  },
+
+  "variantDetection": "byEmptyCategory",
+
+  "categoryFallthrough": true,
+
+  "skipIfNoPrice": false
+}
