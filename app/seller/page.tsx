@@ -445,10 +445,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       staffId: activeStaff?.id,
       note: note.trim() || undefined,
     };
-    setOrders(prev => [order, ...prev]);
-    setCart([]); setNote(''); setSelectedTable(null); setOrderType(null);
-    setMobileCartOpen(false);
-    setView('orders');
     const saveError = await addOrder(order);
     setSubmitting(false);
     if (saveError) {
@@ -460,9 +456,12 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         ? 'İcazə xətası.'
         : saveError;
       alert(`Sifariş yadda saxlanılmadı.\n\nSəbəb: ${reason}\n\nYenidən cəhd edin.`);
-      setOrders(prev => prev.filter(o => o.id !== order.id));
       return;
     }
+    setOrders(prev => [order, ...prev]);
+    setCart([]); setNote(''); setSelectedTable(null); setOrderType(null);
+    setMobileCartOpen(false);
+    setView('orders');
     openPayment(order);
   }
 
@@ -1619,9 +1618,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                   <button
                     onClick={submitOrder}
                     disabled={cart.length === 0 || submitting}
-                    className="w-full bg-amber-800 hover:bg-amber-900 disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors"
+                    className="w-full bg-amber-800 hover:bg-amber-900 disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
                   >
-                    Sifariş ver
+                    {submitting && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                    {submitting ? 'Göndərilir...' : 'Sifariş ver'}
                   </button>
                 </div>
               </div>
@@ -1713,9 +1713,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
               <button
                 onClick={submitOrder}
                 disabled={cart.length === 0 || submitting}
-                className="w-full bg-amber-800 hover:bg-amber-900 disabled:bg-stone-300 text-white font-semibold py-4 rounded-2xl transition-colors text-base active:scale-95"
+                className="w-full bg-amber-800 hover:bg-amber-900 disabled:bg-stone-300 text-white font-semibold py-4 rounded-2xl transition-colors text-base active:scale-95 flex items-center justify-center gap-2"
               >
-                Sifariş ver
+                {submitting && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                {submitting ? 'Göndərilir...' : 'Sifariş ver'}
               </button>
             </div>
           </div>
