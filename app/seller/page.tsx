@@ -14,7 +14,7 @@ import {
   fetchTablesEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, fetchStaff, verifyStaffPin,
 } from '@/lib/store';
-import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday } from '@/lib/business-day';
+import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
 import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
 
@@ -182,6 +182,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   const [historySearch, setHistorySearch]   = useState('');
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [totalOrders, setTotalOrders]       = useState(0);
+  const [historyOrders, setHistoryOrders]   = useState<Order[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [loadingMore, setLoadingMore]       = useState(false);
 
   // cancel modal — preset reason required, free text only for "Digər"
@@ -547,6 +549,15 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     return () => clearInterval(id);
   }, [shift, overrideCompanyId]);
 
+  useEffect(() => {
+    if (view !== 'history' || !bizSettings.timezone) return;
+    const todayStr = businessToday(bizSettings);
+    const from = businessDayStartUtc(todayStr, bizSettings).toISOString();
+    const to = new Date().toISOString();
+    setHistoryLoading(true);
+    fetchOrders({ from, to, limit: 500 }).then(setHistoryOrders).finally(() => setHistoryLoading(false));
+  }, [view, bizSettings]);
+
   async function handleOpenShift() {
     const cash = parseFloat(openCashInput) || 0;
     setShiftBusy(true);
@@ -639,12 +650,15 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   const prevOrders  = active.filter(o => !isToday(o.createdAt));
   const myTodayTips = orders.filter(o => o.sellerName === effectiveSeller && isToday(o.createdAt) && (o.tipAmount ?? 0) > 0).reduce((s, o) => s + (o.tipAmount ?? 0), 0);
   const historyQuery = historySearch.trim().toLowerCase();
-  const historyOrders = historyQuery
-    ? orders.filter(o =>
+  const filteredHistoryOrders = historyQuery
+    ? historyOrders.filter(o =>
         String(o.orderNumber).includes(historyQuery) ||
         (o.sellerName ?? '').toLowerCase().includes(historyQuery) ||
         tableName(o.tableNumber).toLowerCase().includes(historyQuery))
-    : orders;
+    : historyOrders;
+  const paidHistoryOrders = historyOrders.filter(o => o.status === 'ödənilib');
+  const historyNagd = paidHistoryOrders.reduce((s, o) => s + (o.cashAmount ?? 0), 0);
+  const historyKart = paidHistoryOrders.reduce((s, o) => s + (o.cardAmount ?? 0), 0);
 
   // ── sidebar (desktop only) ────────────────────────────────────────────────
 
@@ -1023,22 +1037,48 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
             <div className="flex-1 flex flex-col overflow-hidden">
               <div className="px-4 md:px-6 pt-5 pb-2 flex items-end justify-between gap-3">
                 <div>
-                  <h1 className="text-lg font-semibold text-stone-900">Tarixçə</h1>
+                  <h1 className="text-lg font-semibold text-stone-900">Bu günün sifarişləri</h1>
                   <p className="text-sm text-stone-600 mt-0.5">
-                    {totalOrders > orders.length ? `${totalOrders} sifariş · son ${orders.length}` : `${orders.length} sifariş`}
+                    {historyLoading ? 'Yüklənir...' : `${historyOrders.length} sifariş`}
                   </p>
                 </div>
                 <button
-                  onClick={refreshOrders}
-                  disabled={refreshing}
+                  onClick={() => {
+                    const todayStr = businessToday(bizSettings);
+                    const from = businessDayStartUtc(todayStr, bizSettings).toISOString();
+                    const to = new Date().toISOString();
+                    setHistoryLoading(true);
+                    fetchOrders({ from, to, limit: 500 }).then(setHistoryOrders).finally(() => setHistoryLoading(false));
+                  }}
+                  disabled={historyLoading}
                   className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
                 >
-                  {refreshing
+                  {historyLoading
                     ? <span className="w-3.5 h-3.5 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
                     : <span>↻</span>}
                   Yenilə
                 </button>
               </div>
+
+              {/* Nağd / Kart summary */}
+              {!historyLoading && historyOrders.length > 0 && (
+                <div className="px-4 md:px-6 pb-2">
+                  <div className="flex gap-3">
+                    <div className="flex-1 bg-white rounded-xl border border-stone-100 px-4 py-3">
+                      <p className="text-xs text-stone-500 mb-0.5">Nağd</p>
+                      <p className="text-lg font-bold text-stone-800">{historyNagd.toFixed(2)} ₼</p>
+                    </div>
+                    <div className="flex-1 bg-white rounded-xl border border-stone-100 px-4 py-3">
+                      <p className="text-xs text-stone-500 mb-0.5">Kart</p>
+                      <p className="text-lg font-bold text-stone-800">{historyKart.toFixed(2)} ₼</p>
+                    </div>
+                    <div className="flex-1 bg-amber-50 rounded-xl border border-amber-100 px-4 py-3">
+                      <p className="text-xs text-amber-700 mb-0.5">Cəmi</p>
+                      <p className="text-lg font-bold text-amber-800">{(historyNagd + historyKart).toFixed(2)} ₼</p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="px-4 md:px-6 py-2">
                 <div className="relative max-w-md">
@@ -1053,26 +1093,32 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
               </div>
 
               <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-4">
-                {orders.length === 0 && (
+                {historyLoading && (
+                  <div className="flex justify-center py-20">
+                    <span className="w-7 h-7 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
+                  </div>
+                )}
+
+                {!historyLoading && historyOrders.length === 0 && (
                   <div className="text-center py-20 text-stone-500">
                     <div className="text-5xl mb-3">🕐</div>
-                    <p>Hələlik sifariş yoxdur</p>
+                    <p>Bu gün hələlik sifariş yoxdur</p>
                   </div>
                 )}
 
-                {orders.length > 0 && historyOrders.length === 0 && (
+                {!historyLoading && historyOrders.length > 0 && filteredHistoryOrders.length === 0 && (
                   <div className="bg-white rounded-xl border border-stone-100 p-10 text-center">
-                    <p className="text-sm text-stone-500">Axtarışa uyğun sifariş tapılmadı (yüklənmiş {orders.length} sifariş arasında)</p>
+                    <p className="text-sm text-stone-500">Axtarışa uyğun sifariş tapılmadı</p>
                   </div>
                 )}
 
-                {historyOrders.length > 0 && (
+                {!historyLoading && filteredHistoryOrders.length > 0 && (
                   <div className="bg-white rounded-xl border border-stone-100 overflow-hidden">
-                    {historyOrders.map((order, i) => {
+                    {filteredHistoryOrders.map((order, i) => {
                       const isExpanded = expandedOrderId === order.id;
                       const tLabel = tableName(order.tableNumber);
                       return (
-                        <div key={order.id} className={i < historyOrders.length - 1 ? 'border-b border-stone-50' : ''}>
+                        <div key={order.id} className={i < filteredHistoryOrders.length - 1 ? 'border-b border-stone-50' : ''}>
                           <button
                             onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
                             className="w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 hover:bg-stone-50 transition-colors text-left"
@@ -1178,16 +1224,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                   </div>
                 )}
 
-                {!historyQuery && orders.length < totalOrders && (
-                  <button
-                    onClick={loadMoreOrders}
-                    disabled={loadingMore}
-                    className="w-full mt-3 flex items-center justify-center gap-2 bg-white border border-stone-200 rounded-xl py-2.5 text-sm font-medium text-amber-800 hover:bg-amber-50 transition-colors disabled:opacity-60"
-                  >
-                    {loadingMore && <span className="w-3.5 h-3.5 border-2 border-amber-200 border-t-amber-800 rounded-full animate-spin" />}
-                    Daha çox göstər ({totalOrders - orders.length} qalıb)
-                  </button>
-                )}
               </div>
             </div>
           )}
