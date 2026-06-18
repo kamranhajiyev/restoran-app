@@ -1127,7 +1127,7 @@ function AdminPageContent() {
     ? menu.filter(m => categories.some(c => c.name === m.category) && azNormalize(m.name).includes(menuQuery)).length
     : 0;
   const todayStr = businessToday(bizSettings);
-  const weekStart = (() => { const d = dayToDate(todayStr); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
+  const weekStart = addDays(todayStr, -((dayOfWeek(todayStr) + 6) % 7));
   const ordersDateFiltered = ordersPreset === 'bugün'
     ? orders.filter(o => businessDay(o.createdAt, bizSettings) === todayStr)
     : ordersPreset === 'bu həftə'
