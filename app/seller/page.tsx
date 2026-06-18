@@ -11,7 +11,7 @@ import { getSession, logout, validateSession, clearLocalSession } from '@/lib/au
 import { supabase } from '@/lib/supabase';
 import {
   fetchMenu, addOrder, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
-  fetchTablesEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
+  fetchTablesEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, fetchStaff, verifyStaffPin,
 } from '@/lib/store';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday } from '@/lib/business-day';
@@ -102,6 +102,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   // Tables off (takeaway-only company): the Masa/Takeaway screen is skipped and
   // "Yeni sifariş" opens the product menu directly
   const [tablesOn, setTablesOn]             = useState(true);
+  const [kassaOn, setKassaOn]               = useState(true);
   const [orderType, setOrderType]           = useState<OrderType | null>(null);
   const [selectedTable, setSelectedTable]   = useState<number | null>(null);
   const [cart, setCart]                     = useState<OrderItem[]>([]);
@@ -294,8 +295,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         fetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
         fetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.tables ?? []).catch(() => []),
         fetchTablesEnabled(),
-      ]).then(([m, o, c, tb, te]) => {
-        setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te);
+        fetchKassaEnabled(),
+      ]).then(([m, o, c, tb, te, ke]) => {
+        setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te); setKassaOn(ke as boolean);
         const available = c.filter((cat: { available: boolean }) => cat.available);
         setAvailableCategories(available);
         const cats = available.filter((a: { name: string }) => m.some((i: { category: string }) => i.category === a.name)).map((a: { name: string }) => a.name);
@@ -324,8 +326,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       setShift(s); setPinStaffList(st); setShiftChecked(true);
     });
     fetchOrdersCount().then(setTotalOrders);
-    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled()]).then(([m, o, c, tb, te]) => {
-      setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te);
+    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled(), fetchKassaEnabled()]).then(([m, o, c, tb, te, ke]) => {
+      setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te); setKassaOn(ke);
       const available = c.filter(cat => cat.available);
       setAvailableCategories(available);
       const cats = available.filter(a => m.some(i => i.category === a.name)).map(a => a.name);
@@ -407,6 +409,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   }
 
   function handleNav(id: View) {
+    if (id === 'kassa' && !kassaOn) return;
     if (id === 'new-order') {
       if (!tablesOn) { startNewOrder('takeaway'); return; }
       setOrderType(null); setCart([]);
@@ -669,7 +672,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
           {[
             { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
             { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
-            { id: 'kassa' as View,     label: 'Kassa',        icon: Wallet },
+            ...(kassaOn ? [{ id: 'kassa' as View, label: 'Kassa', icon: Wallet }] : []),
             { id: 'history' as View,   label: 'Tarixçə',      icon: History },
           ].map(n => {
             const Icon = n.icon;
@@ -1586,7 +1589,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         {[
           { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
           { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
-          { id: 'kassa' as View,     label: 'Kassa',        icon: Wallet },
+          ...(kassaOn ? [{ id: 'kassa' as View, label: 'Kassa', icon: Wallet }] : []),
           { id: 'history' as View,   label: 'Tarixçə',      icon: History },
         ].map(n => {
           const Icon = n.icon;

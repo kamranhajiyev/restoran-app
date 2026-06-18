@@ -432,6 +432,25 @@ export async function setTablesEnabled(enabled: boolean): Promise<void> {
   if (error) console.error('[setTablesEnabled]', error);
 }
 
+export async function fetchKassaEnabled(): Promise<boolean> {
+  try {
+    if (!_companyId) return true;
+    const { data, error } = await supabase.from('companies').select('kassa_enabled').eq('id', _companyId).single();
+    if (error || !data) return true;
+    return data.kassa_enabled !== false;
+  } catch { return true; }
+}
+
+export async function setKassaEnabled(enabled: boolean): Promise<{ error?: string }> {
+  if (!enabled) {
+    const { data } = await supabase.from('cash_shifts').select('id').eq('company_id', _companyId).is('closed_at', null).maybeSingle();
+    if (data) return { error: 'Açıq növbə var — əvvəlcə növbəni bağlayın.' };
+  }
+  const { error } = await supabase.rpc('set_kassa_enabled', { enabled });
+  if (error) console.error('[setKassaEnabled]', error);
+  return {};
+}
+
 export async function fetchTables(): Promise<RestaurantTable[]> {
   try {
     const { data, error } = await supabase.from('restaurant_tables').select('id, name, capacity, x, y, w, h, shape').order('id');

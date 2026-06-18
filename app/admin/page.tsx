@@ -24,6 +24,7 @@ import {
   setCompanyContext, updateUser,
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, fetchCompanySlug,
   fetchTablesEnabled, setTablesEnabled,
+  fetchKassaEnabled, setKassaEnabled,
   fetchCompanyProfile, updateMyCompanyProfile, verifyPassword,
   fetchCompanySettings, updateCompanyHours,
   fetchLoginEvents, LoginEvent,
@@ -377,6 +378,9 @@ function AdminPageContent() {
   const [tableSavedToast, setTableSavedToast] = useState(false);
   const [tablesOn, setTablesOn] = useState(true);
   const [tablesToggleBusy, setTablesToggleBusy] = useState(false);
+  const [kassaOn, setKassaOn] = useState(true);
+  const [kassaToggleBusy, setKassaToggleBusy] = useState(false);
+  const [kassaToggleError, setKassaToggleError] = useState<string | null>(null);
   const [alignGuides, setAlignGuides] = useState<{ type: 'h' | 'v'; pos: number }[]>([]);
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -497,7 +501,7 @@ function AdminPageContent() {
     });
     fetchStaff().then(setPinStaff);
     fetchSellerToken(session.companyId ?? '').then(setSellerToken);
-    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchTables(), fetchCompanySlug(session.companyId ?? ''), fetchTablesEnabled()]).then(([m, o, c, t, tb, slug, te]) => {
+    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchTables(), fetchCompanySlug(session.companyId ?? ''), fetchTablesEnabled(), fetchKassaEnabled()]).then(([m, o, c, t, tb, slug, te, ke]) => {
       setMenu(m);
       setOrders(o);
       setCategories(c);
@@ -506,6 +510,7 @@ function AdminPageContent() {
       setTables(tb);
       setCompanySlug(slug);
       setTablesOn(te);
+      setKassaOn(ke);
     });
     return () => authSub.subscription.unsubscribe();
   }, [router]);
@@ -2007,6 +2012,35 @@ function AdminPageContent() {
           {/* ── KASSA ──────────────────────────────────────────────────── */}
           {tab === 'kassa' && (
             <div className="max-w-3xl space-y-4">
+              {/* Kassa enable/disable toggle */}
+              <div className="bg-white rounded-xl border border-stone-100 card p-4 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-stone-800">Kassa</p>
+                  <p className="text-xs text-stone-500 mt-0.5">
+                    {kassaOn ? 'Satıcılar növbə aça və bağlaya bilər' : 'Deaktivdir — satıcılar kassa tabını görə bilməz'}
+                  </p>
+                  {kassaToggleError && <p className="text-xs text-red-500 mt-1 font-semibold">{kassaToggleError}</p>}
+                </div>
+                <button
+                  onClick={async () => {
+                    const next = !kassaOn;
+                    setKassaToggleBusy(true);
+                    setKassaToggleError(null);
+                    const result = await setKassaEnabled(next);
+                    if (result.error) {
+                      setKassaToggleError(result.error);
+                    } else {
+                      setKassaOn(next);
+                    }
+                    setKassaToggleBusy(false);
+                  }}
+                  disabled={kassaToggleBusy}
+                  className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${kassaOn ? 'bg-amber-800' : 'bg-stone-300'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${kassaOn ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+
               {shiftsLoading ? (
                 <div className="flex justify-center py-16">
                   <span className="w-7 h-7 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
