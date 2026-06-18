@@ -658,8 +658,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         tableName(o.tableNumber).toLowerCase().includes(historyQuery))
     : historyOrders;
   const paidHistoryOrders = historyOrders.filter(o => o.status === 'ödənilib');
-  const historyNagd = paidHistoryOrders.reduce((s, o) => s + (o.cashAmount ?? 0), 0);
-  const historyKart = paidHistoryOrders.reduce((s, o) => s + (o.cardAmount ?? 0), 0);
+  const { historyNagd, historyKart } = paidHistoryOrders.reduce((acc, o) => {
+    const t = orderTotal(o);
+    const cardPart = Math.min(o.cardAmount ?? 0, t);
+    acc.historyKart += cardPart;
+    acc.historyNagd += Math.min(o.cashAmount ?? 0, t - cardPart);
+    return acc;
+  }, { historyNagd: 0, historyKart: 0 });
   const historyRevenue = paidHistoryOrders.reduce((s, o) => s + orderTotal(o), 0);
 
   // ── sidebar (desktop only) ────────────────────────────────────────────────
