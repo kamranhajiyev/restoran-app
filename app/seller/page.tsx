@@ -89,7 +89,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   // Tables off (takeaway-only company): the Masa/Takeaway screen is skipped and
   // "Yeni sifariş" opens the product menu directly
   const [tablesOn, setTablesOn]             = useState(true);
-  const [kassaOn, setKassaOn]               = useState(true);
+  const [kassaOn, setKassaOn]               = useState(false);
   const [orderType, setOrderType]           = useState<OrderType | null>(null);
   const [selectedTable, setSelectedTable]   = useState<number | null>(null);
   const [cart, setCart]                     = useState<OrderItem[]>([]);
