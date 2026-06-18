@@ -811,7 +811,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     );
   }
 
-  if (!shift) {
+  if (!shift && kassaOn) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f7f3ed] px-4">
         <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm">
