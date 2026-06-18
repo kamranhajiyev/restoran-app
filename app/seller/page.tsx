@@ -660,6 +660,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   const paidHistoryOrders = historyOrders.filter(o => o.status === 'ödənilib');
   const historyNagd = paidHistoryOrders.reduce((s, o) => s + (o.cashAmount ?? 0), 0);
   const historyKart = paidHistoryOrders.reduce((s, o) => s + (o.cardAmount ?? 0), 0);
+  const historyRevenue = paidHistoryOrders.reduce((s, o) => s + orderTotal(o), 0);
 
   // ── sidebar (desktop only) ────────────────────────────────────────────────
 
@@ -1074,7 +1075,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                     </div>
                     <div className="flex-1 bg-amber-50 rounded-xl border border-amber-100 px-4 py-3">
                       <p className="text-xs text-amber-700 mb-0.5">Cəmi</p>
-                      <p className="text-lg font-bold text-amber-800">{(historyNagd + historyKart).toFixed(2)} ₼</p>
+                      <p className="text-lg font-bold text-amber-800">{historyRevenue.toFixed(2)} ₼</p>
                     </div>
                   </div>
                 </div>
