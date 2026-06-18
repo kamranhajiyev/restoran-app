@@ -449,10 +449,17 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     setCart([]); setNote(''); setSelectedTable(null); setOrderType(null);
     setMobileCartOpen(false);
     setView('orders');
-    const saved = await addOrder(order);
+    const saveError = await addOrder(order);
     setSubmitting(false);
-    if (!saved) {
-      alert('Sifariş yadda saxlanılmadı — internet bağlantısını yoxlayın və yenidən cəhd edin.');
+    if (saveError) {
+      const reason = /fetch|network|failed to fetch/i.test(saveError)
+        ? 'İnternet bağlantısı yoxdur.'
+        : /jwt|auth/i.test(saveError)
+        ? 'Sessiya başa çatıb, səhifəni yeniləyin.'
+        : /policy|permission/i.test(saveError)
+        ? 'İcazə xətası.'
+        : saveError;
+      alert(`Sifariş yadda saxlanılmadı.\n\nSəbəb: ${reason}\n\nYenidən cəhd edin.`);
       setOrders(prev => prev.filter(o => o.id !== order.id));
       return;
     }

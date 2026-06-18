@@ -252,7 +252,7 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
   }
 }
 
-export async function addOrder(order: Order): Promise<boolean> {
+export async function addOrder(order: Order): Promise<string | null> {
   try {
     const { error: orderError } = await supabase.from('orders').insert({
       id: order.id,
@@ -264,8 +264,8 @@ export async function addOrder(order: Order): Promise<boolean> {
       created_at: order.createdAt,
       company_id: _companyId,
     });
-    if (orderError) { console.error('[addOrder orders]', orderError); return false; }
-    if (order.items.length === 0) return true;
+    if (orderError) { console.error('[addOrder orders]', orderError); return orderError.message; }
+    if (order.items.length === 0) return null;
     const rows = order.items.map(oi => ({
       order_id: order.id,
       menu_item_id: String(oi.menuItem.id),
@@ -275,11 +275,11 @@ export async function addOrder(order: Order): Promise<boolean> {
       modifiers: oi.modifiers ?? null,
     }));
     const { error: itemsError } = await supabase.from('order_items').insert(rows);
-    if (itemsError) { console.error('[addOrder items]', itemsError); return false; }
-    return true;
+    if (itemsError) { console.error('[addOrder items]', itemsError); return itemsError.message; }
+    return null;
   } catch (e) {
     console.error('[addOrder]', e);
-    return false;
+    return e instanceof Error ? e.message : 'Bilinməyən xəta';
   }
 }
 
