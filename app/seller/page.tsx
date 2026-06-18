@@ -452,7 +452,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     const saveError = await addOrder(order);
     setSubmitting(false);
     if (saveError) {
-      const reason = /fetch|network|failed to fetch/i.test(saveError)
+      const reason = /fetch|network|failed to fetch|load failed/i.test(saveError)
         ? 'İnternet bağlantısı yoxdur.'
         : /jwt|auth/i.test(saveError)
         ? 'Sessiya başa çatıb, səhifəni yeniləyin.'
