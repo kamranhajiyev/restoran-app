@@ -73,6 +73,14 @@ export async function incrementAttempts(id: string): Promise<void> {
   await db.put(STORE, { ...item, attempts: item.attempts + 1 });
 }
 
+export async function updateQueuedOrder(id: string, orderPatch: Partial<Order>): Promise<void> {
+  const db = await getDB();
+  if (!db) return;
+  const item = await db.get(STORE, id);
+  if (!item) return;
+  await db.put(STORE, { ...item, order: { ...item.order, ...orderPatch } });
+}
+
 export async function queueSize(): Promise<number> {
   const db = await getDB();
   if (!db) return 0;

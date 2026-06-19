@@ -1,4 +1,4 @@
-import { addOrder } from "@/lib/store";
+import { addOrder, updateOrderStatus } from "@/lib/store";
 import { getAllQueued, dequeueOrder, incrementAttempts, queueSize } from "@/lib/offline-queue";
 
 export type SyncResult = { synced: number; failed: number; stillQueued: number };
@@ -19,12 +19,32 @@ export async function flushOrderQueue(currentCompanyId: string | null): Promise<
       const error = await addOrder(item.order);
 
       if (error === null) {
+        if (item.order.status === 'ödənilib') {
+          await updateOrderStatus(
+            item.order.id, 'ödənilib',
+            item.order.cashAmount ?? 0,
+            item.order.cardAmount ?? 0,
+            item.order.changeAmount ?? 0,
+            item.order.discountAmount,
+            item.order.discountType as '%' | '₼' | undefined,
+          );
+        }
         await dequeueOrder(item.id);
         synced++;
         continue;
       }
 
       if (/duplicate key|unique constraint|already exists/i.test(error)) {
+        if (item.order.status === 'ödənilib') {
+          await updateOrderStatus(
+            item.order.id, 'ödənilib',
+            item.order.cashAmount ?? 0,
+            item.order.cardAmount ?? 0,
+            item.order.changeAmount ?? 0,
+            item.order.discountAmount,
+            item.order.discountType as '%' | '₼' | undefined,
+          );
+        }
         await dequeueOrder(item.id);
         synced++;
         continue;

@@ -18,8 +18,8 @@ import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, business
 import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
 import SellerSWRegister from '@/app/seller/SellerSWRegister';
-import { enqueueOrder, queueSize } from '@/lib/offline-queue';
-import { flushOrderQueue } from '@/lib/sync';
+import { enqueueOrder, queueSize, getAllQueued, updateQueuedOrder, dequeueOrder } from '@/lib/offline-queue';
+import type { QueuedOrder } from '@/lib/offline-queue';
 import { isNetworkError } from '@/lib/store';
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
@@ -88,6 +88,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   const [online, setOnline]         = useState(true);
   const [collapsed, setCollapsed]   = useState(false);
   const [queueCount, setQueueCount] = useState(0);
+  const [offlineOrders, setOfflineOrders] = useState<QueuedOrder[]>([]);
+  const [syncingOffline, setSyncingOffline] = useState(false);
+  const [historyReloadKey, setHistoryReloadKey] = useState(0);
   const companyIdRef = useRef<string | null>(null);
 
   // new order
@@ -296,7 +299,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         setAvailableCategories(available);
         const cats = available.filter((a: { name: string }) => m.some((i: { category: string }) => i.category === a.name)).map((a: { name: string }) => a.name);
         if (cats.length > 0) setActiveCategory(cats[0]);
-        queueSize().then(setQueueCount);
+        queueSize().then(setQueueCount); refreshOfflineOrders();
       }).catch(() => setOnline(false));
       return;
     }
@@ -328,7 +331,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       setAvailableCategories(available);
       const cats = available.filter(a => m.some(i => i.category === a.name)).map(a => a.name);
       if (cats.length > 0) setActiveCategory(cats[0]);
-      queueSize().then(setQueueCount);
+      queueSize().then(setQueueCount); refreshOfflineOrders();
     }).catch(() => setOnline(false));
     return () => authSub.subscription.unsubscribe();
   }, [router, overrideCompanyId, overrideCompanyName]);
@@ -437,6 +440,11 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     setView('menu');
   }
 
+  async function refreshOfflineOrders() {
+    const all = await getAllQueued();
+    setOfflineOrders(all.filter(q => !companyIdRef.current || q.companyId === companyIdRef.current));
+  }
+
   async function submitOrder() {
     if (cart.length === 0 || submitting) return;
     if (orderType === 'masa' && !selectedTable) return;
@@ -458,11 +466,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       if (isNetworkError(saveError) && !navigator.onLine && companyIdRef.current) {
         await enqueueOrder(order, companyIdRef.current);
         setQueueCount(await queueSize());
-        setOrders(prev => [order, ...prev]);
+        await refreshOfflineOrders();
         setCart([]); setNote(''); setSelectedTable(null); setOrderType(null);
         setMobileCartOpen(false);
-        setView('orders');
-        openPayment(order);
+        setView('history');
         return;
       }
       const reason = /fetch|network|failed to fetch|load failed/i.test(saveError)
@@ -508,6 +515,24 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     const overpay = Math.max(0, cash + card - total);
     const change = Math.min(overpay, cash);
     const cashKept = cash - change;
+
+    // Offline order — update in IndexedDB only; will sync when reconnected
+    const isOfflineOrder = offlineOrders.some(q => q.id === payingOrder.id);
+    if (isOfflineOrder) {
+      await updateQueuedOrder(payingOrder.id, {
+        status: 'ödənilib',
+        cashAmount: cashKept,
+        cardAmount: card,
+        changeAmount: change,
+        discountAmount: discountAmt || undefined,
+        discountType: discountAmt ? discountType : undefined,
+      });
+      setQueueCount(await queueSize());
+      await refreshOfflineOrders();
+      setPayingOrder(null);
+      return;
+    }
+
     setPayingOrder(null);
     // The DB update is conditional — a no-op if someone else already paid this order
     const paid = overrideCompanyId
@@ -529,7 +554,19 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   }
 
   async function confirmCancel() {
-    if (!cancellingOrder || !cancelReason || cancelBusy) return;
+    if (!cancellingOrder || cancelBusy) return;
+
+    // Offline order — just remove from IndexedDB queue, no DB call needed
+    const isOfflineOrder = offlineOrders.some(q => q.id === cancellingOrder.id);
+    if (isOfflineOrder) {
+      await dequeueOrder(cancellingOrder.id);
+      await refreshOfflineOrders();
+      setQueueCount(await queueSize());
+      setCancellingOrder(null);
+      return;
+    }
+
+    if (!cancelReason) return;
     const reason = cancelReason === 'Digər' ? cancelOtherText.trim() : cancelReason;
     if (!reason) return;
     setCancelBusy(true);
@@ -586,7 +623,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
           .then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
       : fetchOrders({ from, to, limit: 500 });
     load.then(setHistoryOrders).finally(() => setHistoryLoading(false));
-  }, [view, bizSettings, overrideCompanyId]);
+  }, [view, bizSettings, overrideCompanyId, historyReloadKey]);
 
   async function handleOpenShift() {
     const cash = parseFloat(openCashInput) || 0;
@@ -964,7 +1001,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         <InstallPWA />
         <SellerSWRegister
           companyId={companyIdRef.current}
-          onQueueChange={setQueueCount}
+          onSyncStart={() => setSyncingOffline(true)}
+          onQueueChange={async (count) => {
+            setQueueCount(count);
+            setSyncingOffline(false);
+            await refreshOfflineOrders();
+            setHistoryReloadKey(k => k + 1);
+          }}
         />
       </header>
 
@@ -1148,7 +1191,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                   </div>
                 )}
 
-                {!historyLoading && historyOrders.length === 0 && (
+                {!historyLoading && historyOrders.length === 0 && offlineOrders.length === 0 && (
                   <div className="text-center py-20 text-stone-500">
                     <div className="text-5xl mb-3">🕐</div>
                     <p>Bu gün hələlik sifariş yoxdur</p>
@@ -1158,6 +1201,78 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                 {!historyLoading && historyOrders.length > 0 && filteredHistoryOrders.length === 0 && (
                   <div className="bg-white rounded-xl border border-stone-100 p-10 text-center">
                     <p className="text-sm text-stone-500">Axtarışa uyğun sifariş tapılmadı</p>
+                  </div>
+                )}
+
+                {/* Offline pending orders — shown at the top, always visible regardless of search */}
+                {offlineOrders.length > 0 && (
+                  <div className="bg-white rounded-xl border border-amber-200 overflow-hidden mb-3">
+                    {offlineOrders.map((q, i) => {
+                      const order = q.order;
+                      const isPaid = order.status === 'ödənilib';
+                      const isExpanded = expandedOrderId === order.id;
+                      const tLabel = tableName(order.tableNumber);
+                      return (
+                        <div key={order.id} className={i < offlineOrders.length - 1 ? 'border-b border-amber-100' : ''}>
+                          <button
+                            onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
+                            className="w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 hover:bg-amber-50 transition-colors text-left bg-amber-50/30"
+                          >
+                            <ChevronDown className={`w-4 h-4 text-stone-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                            <span className="w-12 text-xs font-bold text-amber-900 flex-shrink-0">№{order.orderNumber}</span>
+                            <span className="flex-1 text-sm text-stone-700 truncate">
+                              {[tLabel, order.sellerName].filter(Boolean).join(' · ')}
+                            </span>
+                            <span className="text-sm font-semibold text-stone-800 flex-shrink-0">
+                              {orderTotal(order).toFixed(2)} ₼
+                            </span>
+                            {syncingOffline
+                              ? <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium flex-shrink-0 whitespace-nowrap">Yüklənir…</span>
+                              : <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium flex-shrink-0 whitespace-nowrap">
+                                  {isPaid ? '✓ Yüklənməyib' : 'Sinxron gözləyir'}
+                                </span>
+                            }
+                          </button>
+                          {isExpanded && (
+                            <div className="px-4 pb-4 pt-1 space-y-1.5 bg-amber-50/20">
+                              {order.items.map((item, idx) => (
+                                <div key={idx} className="flex justify-between text-sm text-stone-700">
+                                  <span>{item.quantity}× {item.menuItem.name}</span>
+                                  <span>{(item.menuItem.price * item.quantity).toFixed(2)} ₼</span>
+                                </div>
+                              ))}
+                              {order.note && (
+                                <p className="text-xs text-stone-500 pt-0.5">Not: {order.note}</p>
+                              )}
+                              {!isPaid && (
+                                <div className="flex gap-2 pt-2">
+                                  <button
+                                    onClick={() => openPayment(order)}
+                                    className="flex-1 bg-stone-800 text-white text-sm py-2 rounded-xl font-medium"
+                                  >
+                                    Ödənilib
+                                  </button>
+                                  <button
+                                    onClick={() => openCancel(order)}
+                                    className="px-4 bg-red-50 text-red-600 text-sm py-2 rounded-xl font-medium border border-red-200"
+                                  >
+                                    Ləğv et
+                                  </button>
+                                </div>
+                              )}
+                              {isPaid && (
+                                <div className="text-stone-500 text-xs pt-1 space-y-0.5">
+                                  {(order.cashAmount ?? 0) > 0 && <div>💵 Nağd: {order.cashAmount!.toFixed(2)} ₼</div>}
+                                  {(order.cardAmount ?? 0) > 0 && <div>💳 Kart: {order.cardAmount!.toFixed(2)} ₼</div>}
+                                  {(order.changeAmount ?? 0) > 0 && <div>↩ Üstü: {order.changeAmount!.toFixed(2)} ₼</div>}
+                                  <div className="font-semibold text-stone-700">Cəmi: {orderTotal(order).toFixed(2)} ₼</div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
