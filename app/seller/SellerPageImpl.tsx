@@ -300,7 +300,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         const cats = available.filter((a: { name: string }) => m.some((i: { category: string }) => i.category === a.name)).map((a: { name: string }) => a.name);
         if (cats.length > 0) setActiveCategory(cats[0]);
         queueSize().then(setQueueCount); refreshOfflineOrders();
-      }).catch(() => setOnline(false));
+      }).catch(() => { setOnline(false); queueSize().then(setQueueCount); refreshOfflineOrders(); });
       return;
     }
 
@@ -332,7 +332,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       const cats = available.filter(a => m.some(i => i.category === a.name)).map(a => a.name);
       if (cats.length > 0) setActiveCategory(cats[0]);
       queueSize().then(setQueueCount); refreshOfflineOrders();
-    }).catch(() => setOnline(false));
+    }).catch(() => { setOnline(false); queueSize().then(setQueueCount); refreshOfflineOrders(); });
     return () => authSub.subscription.unsubscribe();
   }, [router, overrideCompanyId, overrideCompanyName]);
 
@@ -627,6 +627,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
 
   useEffect(() => {
     if (view !== 'history' || !bizSettings.timezone) return;
+    getAllQueued().then(all => {
+      setOfflineOrders(all.filter(q => !companyIdRef.current || q.companyId === companyIdRef.current));
+    });
     const todayStr = businessToday(bizSettings);
     const from = businessDayStartUtc(todayStr, bizSettings).toISOString();
     const to = new Date().toISOString();
