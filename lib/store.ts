@@ -817,3 +817,7 @@ export async function fetchShiftSales(openedAt: string): Promise<{ cash: number;
     };
   } catch { return { cash: 0, card: 0 }; }
 }
+
+export function isNetworkError(err: string): boolean {
+  return /fetch|network|failed to fetch|load failed|timeout|econnrefused/i.test(err);
+}

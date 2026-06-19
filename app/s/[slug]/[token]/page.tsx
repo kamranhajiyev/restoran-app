@@ -1,6 +1,6 @@
 'use client';
 import { use, useEffect, useState } from 'react';
-import SellerPage from '@/app/seller/page';
+import SellerPage from '@/app/seller/SellerPageImpl';
 
 export default function PublicSellerPage({ params }: { params: Promise<{ slug: string; token: string }> }) {
   const { slug, token } = use(params);
