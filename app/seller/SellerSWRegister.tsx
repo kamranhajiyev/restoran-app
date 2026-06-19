@@ -6,7 +6,7 @@ import { queueSize } from '@/lib/offline-queue';
 
 interface Props {
   companyId: string | null;
-  onQueueChange?: (count: number) => void;
+  onQueueChange?: (count: number) => void | Promise<void>;
   onSyncStart?: () => void;
 }
 
@@ -26,7 +26,7 @@ export default function SellerSWRegister({ companyId, onQueueChange, onSyncStart
         if (result.synced > 0) {
           console.info(`[sync] ${result.synced} offline order(s) synced on mount`);
         }
-        if (onQueueChange) onQueueChange(await queueSize());
+        if (onQueueChange) await onQueueChange(await queueSize());
       } catch (e) {
         console.error('[sync] Mount sync failed:', e);
       }
@@ -42,7 +42,7 @@ export default function SellerSWRegister({ companyId, onQueueChange, onSyncStart
         if (result.synced > 0) {
           console.info(`[sync] ${result.synced} offline order(s) synced after reconnect`);
         }
-        if (onQueueChange) onQueueChange(await queueSize());
+        if (onQueueChange) await onQueueChange(await queueSize());
       } catch (e) {
         console.error('[sync] Online event sync failed:', e);
       }

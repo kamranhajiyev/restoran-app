@@ -460,10 +460,23 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       staffId: activeStaff?.id,
       note: note.trim() || undefined,
     };
+    // Fast offline path: skip the network call entirely to avoid a long hang on iOS
+    if (!navigator.onLine && companyIdRef.current) {
+      setSubmitting(false);
+      await enqueueOrder(order, companyIdRef.current);
+      setQueueCount(await queueSize());
+      await refreshOfflineOrders();
+      setCart([]); setNote(''); setSelectedTable(null); setOrderType(null);
+      setMobileCartOpen(false);
+      setView('history');
+      return;
+    }
+
     const saveError = await addOrder(order);
     setSubmitting(false);
     if (saveError) {
-      if (isNetworkError(saveError) && !navigator.onLine && companyIdRef.current) {
+      // Remove !navigator.onLine: on iOS it can stay true even when offline
+      if (isNetworkError(saveError) && companyIdRef.current) {
         await enqueueOrder(order, companyIdRef.current);
         setQueueCount(await queueSize());
         await refreshOfflineOrders();
