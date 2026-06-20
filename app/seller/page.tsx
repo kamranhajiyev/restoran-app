@@ -5,7 +5,7 @@ import {
   PanelLeftClose, PanelLeftOpen, LogOut, X,
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
   ShoppingCart, ChevronLeft, ChevronRight, ChevronDown, Minus, Plus, Wallet,
-  History, Search, Delete, KeyRound,
+  History, Search, Delete, KeyRound, Trash2,
 } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
@@ -204,6 +204,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
 
   const [menuSearch, setMenuSearch] = useState('');
   const [logoutConfirm, setLogoutConfirm] = useState(false);
+  const [clearConfirm, setClearConfirm] = useState(false);
 
   // modifier / variant modal
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
@@ -1574,8 +1575,25 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
               {/* Desktop cart sidebar */}
               <div className="hidden lg:flex w-72 bg-white border-l flex-col">
                 <div className="px-4 py-3 border-b">
-                  <h2 className="font-bold text-stone-800">Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}</h2>
-                  <p className="text-xs text-stone-500">{!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                  {clearConfirm ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-stone-700 flex-1">Səbəti təmizlə?</span>
+                      <button onClick={() => { setCart([]); setNote(''); setClearConfirm(false); }} className="text-xs font-semibold text-white bg-red-500 hover:bg-red-600 px-2.5 py-1 rounded-lg transition-colors">Bəli</button>
+                      <button onClick={() => setClearConfirm(false)} className="text-xs font-semibold text-stone-600 border border-stone-200 hover:bg-stone-50 px-2.5 py-1 rounded-lg transition-colors">Xeyr</button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h2 className="font-bold text-stone-800">Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}</h2>
+                        <p className="text-xs text-stone-500">{!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                      </div>
+                      {cart.length > 0 && (
+                        <button onClick={() => setClearConfirm(true)} className="w-7 h-7 flex items-center justify-center rounded-lg text-stone-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex-1 overflow-y-auto px-4 py-3">
                   {cart.length === 0
@@ -1661,16 +1679,33 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         <>
           <div className="fixed inset-0 bg-black/40 z-50 lg:hidden" onClick={() => setMobileCartOpen(false)} />
           <div className="fixed bottom-0 inset-x-0 z-[60] bg-white rounded-t-2xl shadow-2xl lg:hidden flex flex-col max-h-[85vh]">
-            <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b shrink-0">
-              <div>
-                <h2 className="font-bold text-stone-800">
-                  Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}
-                </h2>
-                <p className="text-xs text-stone-500">{!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
-              </div>
-              <button onClick={() => setMobileCartOpen(false)} className="w-8 h-8 flex items-center justify-center rounded-xl bg-stone-100 text-stone-600">
-                <X className="w-4 h-4" />
-              </button>
+            <div className="px-4 pt-4 pb-3 border-b shrink-0">
+              {clearConfirm ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-stone-700 flex-1">Səbəti təmizlə?</span>
+                  <button onClick={() => { setCart([]); setNote(''); setClearConfirm(false); }} className="text-xs font-semibold text-white bg-red-500 hover:bg-red-600 px-2.5 py-1 rounded-lg transition-colors">Bəli</button>
+                  <button onClick={() => setClearConfirm(false)} className="text-xs font-semibold text-stone-600 border border-stone-200 hover:bg-stone-50 px-2.5 py-1 rounded-lg transition-colors">Xeyr</button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="font-bold text-stone-800">
+                      Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}
+                    </h2>
+                    <p className="text-xs text-stone-500">{!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {cart.length > 0 && (
+                      <button onClick={() => setClearConfirm(true)} className="w-8 h-8 flex items-center justify-center rounded-xl text-stone-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                    <button onClick={() => { setMobileCartOpen(false); setClearConfirm(false); }} className="w-8 h-8 flex items-center justify-center rounded-xl bg-stone-100 text-stone-600">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-3">
               {cart.length === 0
