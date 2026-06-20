@@ -451,6 +451,20 @@ export async function setTablesEnabled(enabled: boolean): Promise<void> {
   if (error) console.error('[setTablesEnabled]', error);
 }
 
+export async function fetchQrEnabled(): Promise<boolean> {
+  try {
+    if (!_companyId) return true;
+    const { data, error } = await supabase.from('companies').select('qr_enabled').eq('id', _companyId).single();
+    if (error || !data) return true;
+    return data.qr_enabled !== false;
+  } catch { return true; }
+}
+
+export async function setQrEnabled(enabled: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_qr_enabled', { enabled });
+  if (error) console.error('[setQrEnabled]', error);
+}
+
 export async function fetchKassaEnabled(): Promise<boolean> {
   try {
     if (!_companyId) return true;

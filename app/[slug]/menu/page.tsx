@@ -1,7 +1,7 @@
 'use client';
 import { use, useEffect, useState } from 'react';
 import { ShoppingCart, X, Plus, Minus, Coffee } from 'lucide-react';
-import { fetchCompanyBySlug, setCompanyContext, addOrder } from '@/lib/store';
+import { fetchCompanyBySlug, setCompanyContext, addOrder, fetchTablesEnabled, fetchQrEnabled } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { MenuItem, MenuItemVariant, RestaurantTable } from '@/types';
 
@@ -46,11 +46,19 @@ export default function CustomerMenuPage({
       if (!company) { setError('Restoran tapılmadı.'); setLoading(false); return; }
       setCompanyName(company.name);
       setCompanyContext(company.id);
-      const [menuRes, catRes, tableRes] = await Promise.all([
+      const [menuRes, catRes, tableRes, tablesEnabled, qrEnabled] = await Promise.all([
         supabase.rpc('get_public_menu_items', { p_company_id: company.id }),
         supabase.rpc('get_public_categories', { p_company_id: company.id }),
         tableId ? supabase.rpc('get_public_table', { p_company_id: company.id, p_table_id: tableId }) : Promise.resolve({ data: [], error: null }),
+        fetchTablesEnabled(),
+        fetchQrEnabled(),
       ]);
+
+      if (!qrEnabled || (tableId && !tablesEnabled)) {
+        setError('QR sifariş hal-hazırda aktiv deyil.');
+        setLoading(false);
+        return;
+      }
 
       const m = (menuRes.data ?? []).map((r: Record<string, unknown>) => ({
         id: r.id as string,
@@ -144,7 +152,7 @@ export default function CustomerMenuPage({
       id: crypto.randomUUID(),
       orderNumber: 0,
       tableNumber: table?.id ?? 0,
-      sellerName: table ? table.name : 'Müştəri',
+      sellerName: 'Müştəri',
       status: 'gözləyir',
       createdAt: new Date().toISOString(),
       items: cart.map(c => ({

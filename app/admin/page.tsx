@@ -24,6 +24,7 @@ import {
   setCompanyContext, updateUser,
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, fetchCompanySlug,
   fetchTablesEnabled, setTablesEnabled,
+  fetchQrEnabled, setQrEnabled,
   fetchKassaEnabled, setKassaEnabled,
   fetchCompanyProfile, updateMyCompanyProfile, verifyPassword,
   fetchCompanySettings, updateCompanyHours,
@@ -388,6 +389,8 @@ function AdminPageContent() {
   const [tableSavedToast, setTableSavedToast] = useState(false);
   const [tablesOn, setTablesOn] = useState(true);
   const [tablesToggleBusy, setTablesToggleBusy] = useState(false);
+  const [qrOn, setQrOn] = useState(true);
+  const [qrToggleBusy, setQrToggleBusy] = useState(false);
   const [kassaOn, setKassaOn] = useState(true);
   const [kassaToggleBusy, setKassaToggleBusy] = useState(false);
   const [kassaToggleError, setKassaToggleError] = useState<string | null>(null);
@@ -511,7 +514,7 @@ function AdminPageContent() {
     });
     fetchStaff().then(setPinStaff);
     fetchSellerToken(session.companyId ?? '').then(setSellerToken);
-    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchTables(), fetchCompanySlug(session.companyId ?? ''), fetchTablesEnabled(), fetchKassaEnabled()]).then(([m, o, c, t, tb, slug, te, ke]) => {
+    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchTables(), fetchCompanySlug(session.companyId ?? ''), fetchTablesEnabled(), fetchQrEnabled(), fetchKassaEnabled()]).then(([m, o, c, t, tb, slug, te, qre, ke]) => {
       setMenu(m);
       setOrders(o);
       setCategories(c);
@@ -520,6 +523,7 @@ function AdminPageContent() {
       setTables(tb);
       setCompanySlug(slug);
       setTablesOn(te);
+      setQrOn(qre as boolean);
       setKassaOn(ke);
     });
     return () => authSub.subscription.unsubscribe();
@@ -2674,6 +2678,32 @@ function AdminPageContent() {
                 <div className="bg-white rounded-xl border border-stone-100 p-12 text-center">
                   <LayoutDashboard className="w-10 h-10 mx-auto mb-3 text-stone-200" />
                   <p className="text-sm text-stone-500">Masalar deaktivdir. Satıcı panelində sifarişlər masa seçilmədən yaradılır.</p>
+                </div>
+              )}
+
+              {tablesOn && (
+                <div className="bg-white rounded-xl border border-stone-100 p-4 flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-stone-800">QR sifariş</p>
+                    <p className="text-xs text-stone-500">
+                      {qrOn
+                        ? 'Müştərilər QR kod ilə sifariş verə bilir'
+                        : 'Deaktivdir — QR kodlar işləmir'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const next = !qrOn;
+                      setQrToggleBusy(true);
+                      setQrOn(next);
+                      await setQrEnabled(next);
+                      setQrToggleBusy(false);
+                    }}
+                    disabled={qrToggleBusy}
+                    className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${qrOn ? 'bg-amber-800' : 'bg-stone-300'}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${qrOn ? 'translate-x-5' : ''}`} />
+                  </button>
                 </div>
               )}
 
