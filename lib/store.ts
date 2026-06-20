@@ -330,6 +330,26 @@ export async function cancelOrder(orderId: string, reason: string, by: string): 
   return (data?.length ?? 0) > 0;
 }
 
+export async function deleteOrder(orderId: string): Promise<boolean> {
+  const { error } = await supabase.from('orders').update({ status: 'silinib' }).eq('id', orderId);
+  if (error) { console.error('[deleteOrder]', error.message); return false; }
+  return true;
+}
+
+export async function restoreOrder(orderId: string, status: 'ödənilib' | 'ləğv edildi'): Promise<boolean> {
+  const { error } = await supabase.from('orders').update({ status }).eq('id', orderId);
+  if (error) { console.error('[restoreOrder]', error.message); return false; }
+  return true;
+}
+
+export async function editOrderPayment(orderId: string, cashAmount: number, cardAmount: number): Promise<boolean> {
+  const { error } = await supabase.from('orders')
+    .update({ cash_amount: cashAmount, card_amount: cardAmount, change_amount: 0 })
+    .eq('id', orderId);
+  if (error) { console.error('[editOrderPayment]', error.message); return false; }
+  return true;
+}
+
 // ─── Staff (Poster-style PIN sellers) ────────────────────────────────────────
 // Staff are not auth users: the terminal stays logged in and people identify
 // themselves with a 4-digit PIN. All writes go through owner-only RPCs; the

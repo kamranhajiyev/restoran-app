@@ -17,7 +17,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } 
 import { CSS } from '@dnd-kit/utilities';
 import { getSession, logout, validateSession, clearLocalSession } from '@/lib/auth';
 import {
-  fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder,
+  fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, editOrderPayment, deleteOrder, restoreOrder,
   fetchShifts, fetchShiftSales, closeShift, fetchOpenShift,
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash, emptyTrash,
@@ -72,6 +72,7 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
   'hazırdır':  'bg-green-100 text-green-700',
   'ödənilib':  'bg-stone-100 text-stone-600',
   'ləğv edildi': 'bg-red-100 text-red-600',
+  'silinib':   'bg-red-100 text-red-600',
 };
 const STATUS_LABELS: Record<OrderStatus, string> = {
   'gözləyir':   'gözləyir',
@@ -79,6 +80,7 @@ const STATUS_LABELS: Record<OrderStatus, string> = {
   'hazırdır':   'hazırdır',
   'ödənilib':   'ödənilib',
   'ləğv edildi':'ödənişsiz bağlandı',
+  'silinib':    'silinib',
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
 
@@ -300,6 +302,12 @@ function AdminPageContent() {
   const [cancelReason, setCancelReason] = useState<string | null>(null);
   const [cancelOtherText, setCancelOtherText] = useState('');
   const [cancelBusy, setCancelBusy] = useState(false);
+
+  // edit payment modal
+  const [editingPaymentOrder, setEditingPaymentOrder] = useState<Order | null>(null);
+  const [editPaymentCash, setEditPaymentCash] = useState('');
+  const [editPaymentCard, setEditPaymentCard] = useState('');
+  const [editPaymentBusy, setEditPaymentBusy] = useState(false);
 
   // categories form
   const [newCat, setNewCat] = useState('');
@@ -1968,6 +1976,41 @@ function AdminPageContent() {
                                   Ödənişsiz bağla
                                 </button>
                               )}
+                              {order.status === 'ödənilib' && (
+                                <button
+                                  onClick={() => {
+                                    setEditingPaymentOrder(order);
+                                    setEditPaymentCash((order.cashAmount ?? 0).toFixed(2));
+                                    setEditPaymentCard((order.cardAmount ?? 0).toFixed(2));
+                                  }}
+                                  className="text-xs font-semibold text-blue-500 border border-blue-200 hover:bg-blue-50 rounded-lg px-2.5 py-1 transition-colors"
+                                >
+                                  Düzəlt
+                                </button>
+                              )}
+                              {order.status !== 'silinib' && (
+                                <button
+                                  onClick={() => setDialog({ title: 'Sifarişi sil?', message: <>№{order.orderNumber} silinib statusuna keçəcək. Bərpa edə bilərsiniz.</>, onConfirm: async () => {
+                                    const ok = await deleteOrder(order.id);
+                                    if (ok) setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'silinib' as OrderStatus } : o));
+                                  }})}
+                                  className="text-xs font-semibold text-red-400 border border-red-200 hover:bg-red-50 rounded-lg px-2.5 py-1 transition-colors"
+                                >
+                                  Sil
+                                </button>
+                              )}
+                              {order.status === 'silinib' && (
+                                <button
+                                  onClick={async () => {
+                                    const prev = (order.cashAmount || order.cardAmount) ? 'ödənilib' : 'ləğv edildi';
+                                    const ok = await restoreOrder(order.id, prev);
+                                    if (ok) setOrders(prev2 => prev2.map(o => o.id === order.id ? { ...o, status: prev as OrderStatus } : o));
+                                  }}
+                                  className="text-xs font-semibold text-green-600 border border-green-200 hover:bg-green-50 rounded-lg px-2.5 py-1 transition-colors"
+                                >
+                                  Bərpa et
+                                </button>
+                              )}
                               {(order.cashAmount || order.cardAmount) && (
                                 <span className="text-xs text-stone-500">
                                   {[order.cashAmount ? `💵 ${order.cashAmount.toFixed(2)}` : '', order.cardAmount ? `💳 ${order.cardAmount.toFixed(2)}` : ''].filter(Boolean).join(' · ')}
@@ -2784,6 +2827,70 @@ function AdminPageContent() {
 
         </main>
       </div>
+
+      {/* ── Edit payment modal ──────────────────────────────────────────── */}
+      {editingPaymentOrder && (
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
+            <h3 className="font-bold text-lg text-stone-800 mb-1">Ödənişi düzəlt</h3>
+            <p className="text-sm text-stone-600 mb-4">
+              №{editingPaymentOrder.orderNumber} · {editingPaymentOrder.sellerName} · {orderTotal(editingPaymentOrder).toFixed(2)} ₼
+            </p>
+            <div className="space-y-3 mb-5">
+              <div>
+                <label className="text-xs font-semibold text-stone-600 uppercase tracking-wide block mb-1">Nağd ödəniş</label>
+                <div className="flex items-center border border-stone-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-amber-300">
+                  <input
+                    type="number" min="0" step="0.01"
+                    value={editPaymentCash}
+                    onChange={e => setEditPaymentCash(e.target.value)}
+                    className="flex-1 px-3 py-2.5 text-sm focus:outline-none"
+                    autoFocus
+                  />
+                  <span className="px-3 text-stone-400 text-sm">₼</span>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-stone-600 uppercase tracking-wide block mb-1">Kartla ödəniş</label>
+                <div className="flex items-center border border-stone-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-amber-300">
+                  <input
+                    type="number" min="0" step="0.01"
+                    value={editPaymentCard}
+                    onChange={e => setEditPaymentCard(e.target.value)}
+                    className="flex-1 px-3 py-2.5 text-sm focus:outline-none"
+                  />
+                  <span className="px-3 text-stone-400 text-sm">₼</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setEditingPaymentOrder(null)} className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">Ləğv et</button>
+              <button
+                disabled={editPaymentBusy}
+                onClick={async () => {
+                  if (!editingPaymentOrder || editPaymentBusy) return;
+                  setEditPaymentBusy(true);
+                  const cash = parseFloat(editPaymentCash) || 0;
+                  const card = parseFloat(editPaymentCard) || 0;
+                  const ok = await editOrderPayment(editingPaymentOrder.id, cash, card);
+                  if (ok) {
+                    setOrders(prev => prev.map(o => o.id === editingPaymentOrder.id
+                      ? { ...o, cashAmount: cash, cardAmount: card, changeAmount: 0 }
+                      : o
+                    ));
+                    setEditingPaymentOrder(null);
+                  }
+                  setEditPaymentBusy(false);
+                }}
+                className="flex-1 py-3 rounded-xl bg-amber-800 hover:bg-amber-900 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2"
+              >
+                {editPaymentBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                Tətbiq et
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Cancel order modal ──────────────────────────────────────────── */}
       {cancellingOrder && (

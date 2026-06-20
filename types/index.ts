@@ -48,12 +48,12 @@ export interface OrderItem {
   modifiers?: string;
 }
 
-export type OrderStatus = 'gözləyir' | 'hazırlanır' | 'hazırdır' | 'ödənilib' | 'ləğv edildi';
+export type OrderStatus = 'gözləyir' | 'hazırlanır' | 'hazırdır' | 'ödənilib' | 'ləğv edildi' | 'silinib';
 
 // Paid and cancelled orders are both closed: they free the table and leave
 // every "active" list. Only paid ones count as revenue.
 export function isOrderOpen(o: { status: OrderStatus }): boolean {
-  return o.status !== 'ödənilib' && o.status !== 'ləğv edildi';
+  return o.status !== 'ödənilib' && o.status !== 'ləğv edildi' && o.status !== 'silinib';
 }
 
 export interface ShiftMovement {
