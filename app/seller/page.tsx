@@ -50,6 +50,7 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
   'hazırdır':  'bg-green-100 text-green-700',
   'ödənilib':  'bg-stone-100 text-stone-600',
   'ləğv edildi': 'bg-red-100 text-red-600',
+  'silinib':   'bg-red-100 text-red-600',
 };
 const STATUS_LABELS: Record<OrderStatus, string> = {
   'gözləyir':   'gözləyir',
@@ -57,6 +58,7 @@ const STATUS_LABELS: Record<OrderStatus, string> = {
   'hazırdır':   'hazırdır',
   'ödənilib':   'ödənilib',
   'ləğv edildi':'ödənişsiz bağlandı',
+  'silinib':    'silinib',
 };
 
 function elapsed(iso: string): string {
