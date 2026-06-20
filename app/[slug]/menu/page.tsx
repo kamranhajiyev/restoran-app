@@ -1,8 +1,9 @@
 'use client';
 import { use, useEffect, useState } from 'react';
 import { ShoppingCart, X, Plus, Minus, Coffee } from 'lucide-react';
-import { fetchCompanyBySlug, fetchMenu, fetchCategories, setCompanyContext, addOrder, fetchTables } from '@/lib/store';
-import { Category, MenuItem, MenuItemVariant, RestaurantTable } from '@/types';
+import { fetchCompanyBySlug, addOrder } from '@/lib/store';
+import { supabase } from '@/lib/supabase';
+import { MenuItem, MenuItemVariant, RestaurantTable } from '@/types';
 
 type Screen = 'menu' | 'confirm';
 
@@ -29,7 +30,7 @@ export default function CustomerMenuPage({
   const [companyName, setCompanyName] = useState('');
   const [table, setTable] = useState<RestaurantTable | null>(null);
   const [menu, setMenu] = useState<MenuItem[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [categories, setCategories] = useState<{ name: string; available: boolean }[]>([]);
   const [activeCategory, setActiveCategory] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
@@ -44,17 +45,45 @@ export default function CustomerMenuPage({
       const company = await fetchCompanyBySlug(slug);
       if (!company) { setError('Restoran tapılmadı.'); setLoading(false); return; }
       setCompanyName(company.name);
-      setCompanyContext(company.id);
+      const [menuRes, catRes, tableRes] = await Promise.all([
+        supabase.rpc('get_public_menu_items', { p_company_id: company.id }),
+        supabase.rpc('get_public_categories', { p_company_id: company.id }),
+        tableId ? supabase.rpc('get_public_table', { p_company_id: company.id, p_table_id: tableId }) : Promise.resolve({ data: [], error: null }),
+      ]);
 
-      const [m, c, tables] = await Promise.all([fetchMenu(), fetchCategories(), fetchTables()]);
-      const availableCats = c.filter(cat => cat.available);
-      const t = tableId ? tables.find(x => x.id === tableId) ?? null : null;
-      if (tableId && !t) { setError('Masa tapılmadı.'); setLoading(false); return; }
+      const m = (menuRes.data ?? []).map((r: Record<string, unknown>) => ({
+        id: r.id as string,
+        name: r.name as string,
+        price: Number(r.price),
+        category: r.category as string,
+        available: r.available as boolean,
+        variants: (r.variants as MenuItem['variants']) ?? undefined,
+        costPrice: r.cost_price ? Number(r.cost_price) : undefined,
+        image: (r.image as string) ?? undefined,
+        cookingStation: (r.cooking_station as string) ?? undefined,
+      }));
+      const c: { name: string; available: boolean }[] = (catRes.data ?? []).map((r: Record<string, unknown>) => ({
+        name: r.name as string,
+        available: r.available as boolean,
+      }));
+      const availableCats = c.filter((cat: { name: string; available: boolean }) => cat.available);
+      const tableRow = tableId ? ((tableRes.data ?? []) as Record<string, unknown>[])[0] ?? null : null;
+      if (tableId && !tableRow) { setError('Masa tapılmadı.'); setLoading(false); return; }
+      const t: RestaurantTable | null = tableRow ? {
+        id: tableRow.id as number,
+        name: (tableRow.name as string) ?? `Masa ${tableRow.id}`,
+        capacity: (tableRow.capacity as number) ?? 4,
+        x: tableRow.x as number | undefined,
+        y: tableRow.y as number | undefined,
+        w: (tableRow.w as number) ?? 100,
+        h: (tableRow.h as number) ?? 70,
+        shape: ((tableRow.shape as string) ?? 'rect') as RestaurantTable['shape'],
+      } : null;
 
       setTable(t);
-      setMenu(m.filter(item => item.available));
+      setMenu(m.filter((item: MenuItem) => item.available));
       setCategories(availableCats);
-      const firstCat = availableCats.find(cat => m.some(i => i.category === cat.name));
+      const firstCat = availableCats.find((cat: { name: string }) => m.some((i: MenuItem) => i.category === cat.name));
       if (firstCat) setActiveCategory(firstCat.name);
       setLoading(false);
     }
