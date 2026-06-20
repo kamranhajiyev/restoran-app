@@ -1,7 +1,7 @@
 'use client';
 import { use, useEffect, useState } from 'react';
 import { ShoppingCart, X, Plus, Minus, Coffee } from 'lucide-react';
-import { fetchCompanyBySlug, addOrder } from '@/lib/store';
+import { fetchCompanyBySlug, setCompanyContext, addOrder } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { MenuItem, MenuItemVariant, RestaurantTable } from '@/types';
 
@@ -45,6 +45,7 @@ export default function CustomerMenuPage({
       const company = await fetchCompanyBySlug(slug);
       if (!company) { setError('Restoran tapılmadı.'); setLoading(false); return; }
       setCompanyName(company.name);
+      setCompanyContext(company.id);
       const [menuRes, catRes, tableRes] = await Promise.all([
         supabase.rpc('get_public_menu_items', { p_company_id: company.id }),
         supabase.rpc('get_public_categories', { p_company_id: company.id }),
