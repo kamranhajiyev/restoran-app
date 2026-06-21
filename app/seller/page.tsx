@@ -350,6 +350,30 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     return () => window.removeEventListener('focus', sync);
   }, [overrideCompanyId]);
 
+  useEffect(() => {
+    const channel = supabase
+      .channel('seller-orders')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+        refreshOrders();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [refreshOrders]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('seller-data')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => refreshAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => refreshAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_tables' }, () => refreshAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'companies' }, async () => {
+        const [te, ke] = await Promise.all([fetchTablesEnabled(), fetchKassaEnabled()]);
+        setTablesOn(te); setKassaOn(ke);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [refreshAll]);
+
   // ── cart helpers ──────────────────────────────────────────────────────────
 
   function addToCart(item: MenuItem, mods?: string) {

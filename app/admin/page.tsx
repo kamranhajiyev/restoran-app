@@ -629,6 +629,26 @@ function AdminPageContent() {
     } catch { /* ignore */ } finally { setPullRefreshing(false); }
   }
 
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin-orders')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+        refresh();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin-data')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => refreshAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => refreshAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_tables' }, () => refreshAll())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
   function onTouchStart(e: React.TouchEvent) {
     touchStartY.current = e.touches[0].clientY;
   }
