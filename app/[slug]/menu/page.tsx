@@ -35,6 +35,8 @@ export default function CustomerMenuPage({
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [orderNote, setOrderNote] = useState('');
+  const [noteOpen, setNoteOpen]   = useState(false);
   const [menuOnly, setMenuOnly] = useState(false);
 
   // Variant picker state
@@ -158,6 +160,7 @@ export default function CustomerMenuPage({
       sellerName: 'Müştəri',
       status: 'gözləyir',
       createdAt: new Date().toISOString(),
+      note: orderNote.trim() || undefined,
       items: cart.map(c => ({
         menuItem: c.menuItem,
         quantity: c.quantity,
@@ -167,6 +170,8 @@ export default function CustomerMenuPage({
     setSubmitting(false);
     setCart([]);
     setCartOpen(false);
+    setOrderNote('');
+    setNoteOpen(false);
     setScreen('confirm');
   }
 
@@ -360,6 +365,23 @@ export default function CustomerMenuPage({
                 <span className="text-sm text-gray-500">Cəmi</span>
                 <span className="font-bold text-gray-800">{cartTotal.toFixed(2)} ₼</span>
               </div>
+              {!noteOpen ? (
+                <button
+                  onClick={() => setNoteOpen(true)}
+                  className="text-xs text-stone-400 hover:text-stone-600 flex items-center gap-1 py-1"
+                >
+                  <span>+</span> Qeyd əlavə et
+                </button>
+              ) : (
+                <textarea
+                  autoFocus
+                  value={orderNote}
+                  onChange={e => setOrderNote(e.target.value)}
+                  placeholder="Xüsusi istək və ya qeyd"
+                  rows={3}
+                  className="w-full text-sm rounded-xl border border-stone-200 px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400 placeholder:text-stone-300"
+                />
+              )}
               <button
                 onClick={placeOrder}
                 disabled={submitting}
