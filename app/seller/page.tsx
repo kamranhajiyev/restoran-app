@@ -17,7 +17,7 @@ import {
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
 import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
-import { connectPrinter, printReceipt, openCashDrawer } from '@/lib/printer';
+import { connectPrinter, disconnectPrinter, printReceipt, openCashDrawer } from '@/lib/printer';
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
@@ -151,7 +151,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
 
   // Hardware keyboard on the lock screen (desktop terminals)
   useEffect(() => { setExpiresAt(getSession()?.expiresAt ?? null); }, []);
-  useEffect(() => { connectPrinter().then(setPrinterConnected); }, []);
+  useEffect(() => {
+    connectPrinter().then(setPrinterConnected);
+    return () => { disconnectPrinter(); };
+  }, []);
 
   useEffect(() => {
     if (!pinLocked) return;

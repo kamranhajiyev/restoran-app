@@ -89,10 +89,10 @@ export async function printReceipt(order: Order, companyName: string): Promise<b
 
     if ((order.discountAmount ?? 0) > 0) {
       lines.push(`Cəmi:           ${total.toFixed(2).padStart(7)}₼\n`);
-      const discStr = order.discountType === '%'
-        ? `-${order.discountAmount?.toFixed(2)}₼ endirim\n`
-        : `-${order.discountAmount?.toFixed(2)}₼ endirim\n`;
-      lines.push(discStr);
+      const discLabel = order.discountType === '%'
+        ? `Endirim (${order.discountAmount?.toFixed(2)}₼)`
+        : 'Endirim';
+      lines.push(`${discLabel.padEnd(20)} -${(order.discountAmount ?? 0).toFixed(2).padStart(7)}₼\n`);
     }
 
     lines.push('\x1B\x21\x10');  // double height
@@ -109,7 +109,7 @@ export async function printReceipt(order: Order, companyName: string): Promise<b
     lines.push('\n\n\n');
     lines.push('\x1D\x56\x41\x00');  // cut paper
 
-    const config = q.configs.create(printer);
+    const config = q.configs.create(printer, { encoding: 'UTF-8' });
     await q.print(config, lines);
     return true;
   } catch {
@@ -123,7 +123,7 @@ export async function openCashDrawer(): Promise<boolean> {
     if (!q.websocket.isActive()) return false;
     const printer = getSavedPrinter();
     if (!printer) return false;
-    const config = q.configs.create(printer);
+    const config = q.configs.create(printer, { encoding: 'UTF-8' });
     await q.print(config, ['\x1B\x70\x00\x19\xFF']);
     return true;
   } catch {

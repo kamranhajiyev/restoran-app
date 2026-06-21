@@ -44,7 +44,7 @@ import { validatePassword } from '@/lib/password';
 import { exportMenuExcel, exportOrdersExcel, parseMenuFile, ImportPreview } from '@/lib/excel';
 import QRCode from 'react-qr-code';
 import InstallPWA from '@/components/InstallPWA';
-import { connectPrinter, getPrinterList, getSavedPrinter, savePrinter, printReceipt, openCashDrawer } from '@/lib/printer';
+import { connectPrinter, disconnectPrinter, getPrinterList, getSavedPrinter, savePrinter, printReceipt, openCashDrawer } from '@/lib/printer';
 
 const COOKING_STATIONS = ['Mətbəx', 'Bar', 'Soyuq mətbəx', 'Pizza', 'Mangal'];
 // RPC raise messages are machine codes — translated here for display
@@ -456,6 +456,7 @@ function AdminPageContent() {
     setProfClose(bizSettings.workClose);
     setProfMsg('');
     setPwCurrent(''); setPwNew(''); setPwConfirm(''); setPwMsg('');
+    setPrinterSaved(false);
     setShowProfile(true);
   }
 
@@ -504,6 +505,7 @@ function AdminPageContent() {
         });
       }
     });
+    return () => { disconnectPrinter(); };
   }, []);
 
   useEffect(() => {
@@ -1491,11 +1493,11 @@ function AdminPageContent() {
         {printerConnected && (
           <button
             onClick={openCashDrawer}
-            title="Pul cəcməsini aç"
+            title="Pul çəkməcəsini aç"
             className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl hover:border-emerald-300 hover:bg-emerald-50 transition-colors mr-2"
           >
             <Printer className="w-4 h-4 text-emerald-600" />
-            <span className="hidden sm:inline text-xs font-semibold text-emerald-700">Pul cəcməsi</span>
+            <span className="hidden sm:inline text-xs font-semibold text-emerald-700">Pul çəkməcəsi</span>
           </button>
         )}
 
