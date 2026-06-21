@@ -17,6 +17,7 @@ import {
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
 import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
+import { connectPrinter, printReceipt, openCashDrawer } from '@/lib/printer';
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
@@ -150,6 +151,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
 
   // Hardware keyboard on the lock screen (desktop terminals)
   useEffect(() => { setExpiresAt(getSession()?.expiresAt ?? null); }, []);
+  useEffect(() => { connectPrinter().then(setPrinterConnected); }, []);
 
   useEffect(() => {
     if (!pinLocked) return;
@@ -205,6 +207,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   const [menuSearch, setMenuSearch] = useState('');
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [clearConfirm, setClearConfirm] = useState(false);
+  const [printerConnected, setPrinterConnected] = useState(false);
 
   // modifier / variant modal
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
@@ -485,9 +488,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       ? await fetch('/api/update-order-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: payingOrder.id, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
       : await updateOrderStatus(payingOrder.id, 'ödənilib', cashKept, card, change, discountAmt || undefined, discountAmt ? discountType : undefined);
     if (paid) {
-      setOrders(prev => prev.map(o => o.id === payingOrder.id
-        ? { ...o, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined }
-        : o));
+      const paidOrder = { ...payingOrder, status: 'ödənilib' as const, cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined };
+      setOrders(prev => prev.map(o => o.id === payingOrder.id ? paidOrder : o));
+      if (printerConnected) {
+        const cName = getSession()?.companyName ?? '';
+        printReceipt(paidOrder, cName);
+        if (cashKept > 0) openCashDrawer();
+      }
     } else {
       refreshOrders();
     }
