@@ -12,7 +12,7 @@ import { supabase } from '@/lib/supabase';
 import {
   fetchMenu, addOrder, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
   fetchTablesEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
-  fetchCompanySettings, fetchStaff, verifyStaffPin,
+  fetchCompanySettings, fetchStaff, verifyStaffPin, fetchPrintReceipt, setPrintReceiptEnabled,
 } from '@/lib/store';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
 import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, isOrderOpen } from '@/types';
@@ -211,6 +211,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [clearConfirm, setClearConfirm] = useState(false);
   const [printerConnected, setPrinterConnected] = useState(false);
+  const [shouldPrintReceipt, setShouldPrintReceipt] = useState(true);
 
   // modifier / variant modal
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
@@ -322,8 +323,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       setShift(s); setPinStaffList(st); setShiftChecked(true);
     });
     fetchOrdersCount().then(setTotalOrders);
-    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled(), fetchKassaEnabled()]).then(([m, o, c, tb, te, ke]) => {
-      setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te); setKassaOn(ke);
+    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled(), fetchKassaEnabled(), fetchPrintReceipt()]).then(([m, o, c, tb, te, ke, pr]) => {
+      setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te); setKassaOn(ke); setShouldPrintReceipt(pr);
       const available = c.filter(cat => cat.available);
       setAvailableCategories(available);
       const cats = available.filter(a => m.some(i => i.category === a.name)).map(a => a.name);
@@ -495,7 +496,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       setOrders(prev => prev.map(o => o.id === payingOrder.id ? paidOrder : o));
       if (printerConnected) {
         const cName = getSession()?.companyName ?? '';
-        printReceipt(paidOrder, cName);
+        if (shouldPrintReceipt) printReceipt(paidOrder, cName);
         if (cashKept > 0) openCashDrawer();
       }
     } else {
@@ -1906,6 +1907,15 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                   <span>Dəqiq ödəniş</span>
                   <span>✓</span>
                 </div>
+              )}
+              {printerConnected && (
+                <button
+                  onClick={() => { const next = !shouldPrintReceipt; setShouldPrintReceipt(next); setPrintReceiptEnabled(next); }}
+                  className={`w-full flex items-center justify-between px-4 py-3 rounded-xl mb-3 text-sm font-semibold transition-colors ${shouldPrintReceipt ? 'bg-green-50 text-green-700' : 'bg-stone-100 text-stone-500'}`}
+                >
+                  <span>🖨️ Çek çap et</span>
+                  <span>{shouldPrintReceipt ? '✓' : '—'}</span>
+                </button>
               )}
               <div className="flex gap-2">
                 <button onClick={() => setPayingOrder(null)} className="py-3 px-5 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">Ləğv et</button>

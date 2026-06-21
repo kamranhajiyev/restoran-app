@@ -479,6 +479,20 @@ export async function setMenuOnly(enabled: boolean): Promise<void> {
   if (error) console.error('[setMenuOnly]', error);
 }
 
+export async function fetchPrintReceipt(): Promise<boolean> {
+  try {
+    if (!_companyId) return true;
+    const { data, error } = await supabase.from('companies').select('print_receipt').eq('id', _companyId).single();
+    if (error || !data) return true;
+    return data.print_receipt !== false;
+  } catch { return true; }
+}
+
+export async function setPrintReceiptEnabled(enabled: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_print_receipt', { enabled });
+  if (error) console.error('[setPrintReceiptEnabled]', error);
+}
+
 export async function fetchKassaEnabled(): Promise<boolean> {
   try {
     if (!_companyId) return true;
