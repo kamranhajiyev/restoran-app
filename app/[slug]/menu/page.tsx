@@ -58,7 +58,7 @@ export default function CustomerMenuPage({
         fetchMenuOnly(),
       ]);
 
-      if (!qrEnabled || (tableId && !tablesEnabled)) {
+      if (!qrEnabled && !menuOnlyVal || (tableId && !tablesEnabled)) {
         setError('QR sifariş hal-hazırda aktiv deyil.');
         setLoading(false);
         return;
@@ -278,7 +278,7 @@ export default function CustomerMenuPage({
                       ? `${Math.min(...item.variants!.map(v => v.price)).toFixed(2)} ₼ →`
                       : `${item.price.toFixed(2)} ₼`}
                   </p>
-                  {!menuOnly && (
+                  {(hasVariants || !menuOnly) && (
                     <div className="mt-2">
                       {hasVariants ? (
                         <button
@@ -286,7 +286,7 @@ export default function CustomerMenuPage({
                           className="w-full py-1.5 rounded-lg bg-amber-800 text-white text-xs font-semibold transition-colors hover:bg-amber-900 flex items-center justify-center gap-1"
                         >
                           {totalInCart > 0 && <span className="bg-white/25 px-1.5 rounded-md">{totalInCart}</span>}
-                          Seç
+                          {menuOnly ? 'Növlər' : 'Seç'}
                         </button>
                       ) : totalInCart > 0 ? (
                         <div className="flex items-center justify-between">
@@ -421,12 +421,14 @@ export default function CustomerMenuPage({
                 </button>
               ))}
             </div>
-            <button
-              onClick={confirmVariant}
-              className="w-full bg-amber-800 hover:bg-amber-900 text-white font-semibold py-3.5 rounded-xl text-sm transition-colors"
-            >
-              Əlavə et · {selectedVariant?.price.toFixed(2)} ₼
-            </button>
+            {!menuOnly && (
+              <button
+                onClick={confirmVariant}
+                className="w-full bg-amber-800 hover:bg-amber-900 text-white font-semibold py-3.5 rounded-xl text-sm transition-colors"
+              >
+                Əlavə et · {selectedVariant?.price.toFixed(2)} ₼
+              </button>
+            )}
           </div>
         </>
       )}

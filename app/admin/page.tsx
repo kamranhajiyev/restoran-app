@@ -2742,6 +2742,10 @@ function AdminPageContent() {
                       setQrToggleBusy(true);
                       setQrOn(next);
                       await setQrEnabled(next);
+                      if (next && menuOnly) {
+                        setMenuOnlyState(false);
+                        await setMenuOnly(false);
+                      }
                       setQrToggleBusy(false);
                     }}
                     disabled={qrToggleBusy}
@@ -2752,7 +2756,7 @@ function AdminPageContent() {
                 </div>
               )}
 
-              {tablesOn && qrOn && (
+              {tablesOn && (
                 <div className="bg-white rounded-xl border border-stone-100 p-4 flex items-center justify-between gap-4">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-stone-800">Yalnız menyu baxışı</p>
@@ -2768,6 +2772,10 @@ function AdminPageContent() {
                       setMenuOnlyBusy(true);
                       setMenuOnlyState(next);
                       await setMenuOnly(next);
+                      if (next && qrOn) {
+                        setQrOn(false);
+                        await setQrEnabled(false);
+                      }
                       setMenuOnlyBusy(false);
                     }}
                     disabled={menuOnlyBusy}
