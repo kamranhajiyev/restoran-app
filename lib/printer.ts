@@ -114,7 +114,7 @@ export async function printReceipt(order: Order, companyName: string): Promise<b
     lines.push('\x1D\x56\x41\x00');  // cut paper
 
     const config = q.configs.create(printer, { encoding: 'UTF-8' });
-    await q.print(config, lines);
+    await q.print(config, [{ type: 'raw', format: 'plain', flavor: 'plain', data: lines.join('') }]);
     return true;
   } catch (err) {
     console.error('[Printer] Çap alınmadı:', err);
@@ -129,7 +129,7 @@ export async function openCashDrawer(): Promise<boolean> {
     const printer = getSavedPrinter();
     if (!printer) return false;
     const config = q.configs.create(printer, { encoding: 'UTF-8' });
-    await q.print(config, ['\x1B\x70\x00\x19\xFF']);
+    await q.print(config, [{ type: 'raw', format: 'plain', flavor: 'plain', data: '\x1B\x70\x00\x19\xFF' }]);
     return true;
   } catch (err) {
     console.error('[Printer] Pul çəkməcəsi açılmadı:', err);
