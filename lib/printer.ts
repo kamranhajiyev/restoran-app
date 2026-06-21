@@ -43,7 +43,7 @@ async function sendRaw(data: string): Promise<boolean> {
   const bytes = stringToBytes(data);
   const base64 = btoa(String.fromCharCode(...bytes));
   const config = q.configs.create(printer);
-  await q.print(config, [{ type: 'raw', format: 'plain', flavor: 'base64', data: base64 }]);
+  await q.print(config, [{ type: 'raw', flavor: 'base64', data: base64 }]);
   return true;
 }
 
