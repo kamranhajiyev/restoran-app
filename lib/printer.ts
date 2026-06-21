@@ -37,14 +37,22 @@ function stringToBytes(str: string): number[] {
 
 async function sendRaw(data: string): Promise<boolean> {
   const q = await getQZ();
-  if (!q.websocket.isActive()) return false;
-  const printer = getSavedPrinter();
-  if (!printer) return false;
+  if (!q.websocket.isActive()) {
+    console.error('[Printer] QZ Tray bağlı deyil');
+    return false;
+  }
+  const device = { vendorId: USB_VID, productId: USB_PID };
   const bytes = stringToBytes(data);
-  const base64 = btoa(String.fromCharCode(...bytes));
-  const config = q.configs.create(printer);
-  await q.print(config, [{ type: 'raw', flavor: 'base64', data: base64 }]);
-  return true;
+  try {
+    await q.usb.claimDevice(device);
+    await q.usb.sendData(device, bytes, { endpoint: 0x01 });
+    await q.usb.releaseDevice(device);
+    return true;
+  } catch (err) {
+    console.error('[Printer] USB göndərmə xətası:', err);
+    try { await q.usb.releaseDevice(device); } catch { /* ignore */ }
+    return false;
+  }
 }
 
 export async function connectPrinter(): Promise<boolean> {
