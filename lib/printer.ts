@@ -35,17 +35,16 @@ function stringToBytes(str: string): number[] {
   return bytes;
 }
 
-async function sendRawUSB(data: string): Promise<boolean> {
+async function sendRaw(data: string): Promise<boolean> {
   const q = await getQZ();
   if (!q.websocket.isActive()) return false;
-  const device = { vendorId: USB_VID, productId: USB_PID };
-  await q.usb.claimDevice(device);
-  try {
-    await q.usb.sendData(device, stringToBytes(data), { endpoint: 0x01 });
-    return true;
-  } finally {
-    await q.usb.releaseDevice(device);
-  }
+  const printer = getSavedPrinter();
+  if (!printer) return false;
+  const bytes = stringToBytes(data);
+  const base64 = btoa(String.fromCharCode(...bytes));
+  const config = q.configs.create(printer);
+  await q.print(config, [{ type: 'raw', format: 'plain', flavor: 'base64', data: base64 }]);
+  return true;
 }
 
 export async function connectPrinter(): Promise<boolean> {
@@ -144,7 +143,7 @@ export async function printReceipt(order: Order, companyName: string): Promise<b
     lines.push('\n\n\n');
     lines.push('\x1D\x56\x41\x00');  // cut paper
 
-    return await sendRawUSB(lines.join(''));
+    return await sendRaw(lines.join(''));
   } catch (err) {
     console.error('[Printer] Cap alinmadi:', err);
     return false;
@@ -153,7 +152,7 @@ export async function printReceipt(order: Order, companyName: string): Promise<b
 
 export async function openCashDrawer(): Promise<boolean> {
   try {
-    return await sendRawUSB('\x1B\x70\x00\x19\xFF');
+    return await sendRaw('\x1B\x70\x00\x19\xFF');
   } catch (err) {
     console.error('[Printer] Pul cekmeceyi acilmadi:', err);
     return false;
