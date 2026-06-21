@@ -1,7 +1,7 @@
 'use client';
 import { use, useEffect, useState } from 'react';
 import { ShoppingCart, X, Plus, Minus, Coffee } from 'lucide-react';
-import { fetchCompanyBySlug, setCompanyContext, addOrder, fetchTablesEnabled, fetchQrEnabled } from '@/lib/store';
+import { fetchCompanyBySlug, setCompanyContext, addOrder, fetchTablesEnabled, fetchQrEnabled, fetchMenuOnly } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { MenuItem, MenuItemVariant, RestaurantTable } from '@/types';
 
@@ -35,6 +35,7 @@ export default function CustomerMenuPage({
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [menuOnly, setMenuOnly] = useState(false);
 
   // Variant picker state
   const [variantItem, setVariantItem] = useState<MenuItem | null>(null);
@@ -46,12 +47,13 @@ export default function CustomerMenuPage({
       if (!company) { setError('Restoran tapılmadı.'); setLoading(false); return; }
       setCompanyName(company.name);
       setCompanyContext(company.id);
-      const [menuRes, catRes, tableRes, tablesEnabled, qrEnabled] = await Promise.all([
+      const [menuRes, catRes, tableRes, tablesEnabled, qrEnabled, menuOnlyVal] = await Promise.all([
         supabase.rpc('get_public_menu_items', { p_company_id: company.id }),
         supabase.rpc('get_public_categories', { p_company_id: company.id }),
         tableId ? supabase.rpc('get_public_table', { p_company_id: company.id, p_table_id: tableId }) : Promise.resolve({ data: [], error: null }),
         fetchTablesEnabled(),
         fetchQrEnabled(),
+        fetchMenuOnly(),
       ]);
 
       if (!qrEnabled || (tableId && !tablesEnabled)) {
@@ -94,6 +96,7 @@ export default function CustomerMenuPage({
       setCategories(availableCats);
       const firstCat = availableCats.find((cat: { name: string }) => m.some((i: MenuItem) => i.category === cat.name));
       if (firstCat) setActiveCategory(firstCat.name);
+      setMenuOnly(menuOnlyVal);
       setLoading(false);
     }
     load();
@@ -216,17 +219,19 @@ export default function CustomerMenuPage({
           <p className="font-semibold text-gray-800 text-sm">{companyName}</p>
           {table && <p className="text-xs text-gray-400">{table.name}</p>}
         </div>
-        <button
-          onClick={() => setCartOpen(true)}
-          className="relative w-10 h-10 flex items-center justify-center rounded-xl bg-amber-800 text-white"
-        >
-          <ShoppingCart className="w-5 h-5" />
-          {cartCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-              {cartCount}
-            </span>
-          )}
-        </button>
+        {!menuOnly && (
+          <button
+            onClick={() => setCartOpen(true)}
+            className="relative w-10 h-10 flex items-center justify-center rounded-xl bg-amber-800 text-white"
+          >
+            <ShoppingCart className="w-5 h-5" />
+            {cartCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                {cartCount}
+              </span>
+            )}
+          </button>
+        )}
       </header>
 
       {/* Category tabs */}
@@ -268,34 +273,36 @@ export default function CustomerMenuPage({
                       ? `${Math.min(...item.variants!.map(v => v.price)).toFixed(2)} ₼ →`
                       : `${item.price.toFixed(2)} ₼`}
                   </p>
-                  <div className="mt-2">
-                    {hasVariants ? (
-                      <button
-                        onClick={() => handleTapItem(item)}
-                        className="w-full py-1.5 rounded-lg bg-amber-800 text-white text-xs font-semibold transition-colors hover:bg-amber-900 flex items-center justify-center gap-1"
-                      >
-                        {totalInCart > 0 && <span className="bg-white/25 px-1.5 rounded-md">{totalInCart}</span>}
-                        Seç
-                      </button>
-                    ) : totalInCart > 0 ? (
-                      <div className="flex items-center justify-between">
-                        <button onClick={() => removeFromCart(item.id)} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center">
-                          <Minus className="w-3.5 h-3.5" />
+                  {!menuOnly && (
+                    <div className="mt-2">
+                      {hasVariants ? (
+                        <button
+                          onClick={() => handleTapItem(item)}
+                          className="w-full py-1.5 rounded-lg bg-amber-800 text-white text-xs font-semibold transition-colors hover:bg-amber-900 flex items-center justify-center gap-1"
+                        >
+                          {totalInCart > 0 && <span className="bg-white/25 px-1.5 rounded-md">{totalInCart}</span>}
+                          Seç
                         </button>
-                        <span className="text-sm font-semibold">{totalInCart}</span>
-                        <button onClick={() => addToCart(item)} className="w-7 h-7 rounded-lg bg-amber-800 text-white flex items-center justify-center">
-                          <Plus className="w-3.5 h-3.5" />
+                      ) : totalInCart > 0 ? (
+                        <div className="flex items-center justify-between">
+                          <button onClick={() => removeFromCart(item.id)} className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center">
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          <span className="text-sm font-semibold">{totalInCart}</span>
+                          <button onClick={() => addToCart(item)} className="w-7 h-7 rounded-lg bg-amber-800 text-white flex items-center justify-center">
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handleTapItem(item)}
+                          className="w-full py-1.5 rounded-lg bg-amber-800 text-white text-xs font-semibold transition-colors hover:bg-amber-900"
+                        >
+                          Əlavə et
                         </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => handleTapItem(item)}
-                        className="w-full py-1.5 rounded-lg bg-amber-800 text-white text-xs font-semibold transition-colors hover:bg-amber-900"
-                      >
-                        Əlavə et
-                      </button>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -304,7 +311,7 @@ export default function CustomerMenuPage({
       </main>
 
       {/* Bottom order bar */}
-      {cartCount > 0 && !cartOpen && (
+      {!menuOnly && cartCount > 0 && !cartOpen && (
         <div className="sticky bottom-0 p-4 bg-white border-t border-gray-100">
           <button
             onClick={() => setCartOpen(true)}
@@ -318,7 +325,7 @@ export default function CustomerMenuPage({
       )}
 
       {/* Cart drawer */}
-      {cartOpen && (
+      {!menuOnly && cartOpen && (
         <>
           <div className="fixed inset-0 bg-black/40 z-50" onClick={() => setCartOpen(false)} />
           <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-2xl shadow-xl max-h-[80vh] flex flex-col">

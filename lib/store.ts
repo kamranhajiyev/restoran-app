@@ -465,6 +465,20 @@ export async function setQrEnabled(enabled: boolean): Promise<void> {
   if (error) console.error('[setQrEnabled]', error);
 }
 
+export async function fetchMenuOnly(): Promise<boolean> {
+  try {
+    if (!_companyId) return false;
+    const { data, error } = await supabase.from('companies').select('menu_only').eq('id', _companyId).single();
+    if (error || !data) return false;
+    return data.menu_only === true;
+  } catch { return false; }
+}
+
+export async function setMenuOnly(enabled: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_menu_only', { enabled });
+  if (error) console.error('[setMenuOnly]', error);
+}
+
 export async function fetchKassaEnabled(): Promise<boolean> {
   try {
     if (!_companyId) return true;
