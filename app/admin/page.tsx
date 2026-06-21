@@ -816,10 +816,18 @@ function AdminPageContent() {
   function handlePrintQr() {
     const svg = qrRef.current?.querySelector('svg')?.outerHTML;
     if (!svg || !qrTable) return;
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(`<!DOCTYPE html><html><head><title>${qrTable.name} QR</title><style>body{margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif}p{margin:0 0 16px;font-size:16px;font-weight:600;color:#333}svg{width:220px;height:220px}</style></head><body><p>${qrTable.name}</p>${svg}<script>window.onload=function(){window.print();window.close();}<\/script></body></html>`);
-    w.document.close();
+    const style = document.createElement('style');
+    style.id = '__qr-print-style';
+    style.textContent = `@media print { body > * { display: none !important; } #__qr-print-area { display: flex !important; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: sans-serif; } #__qr-print-area p { margin: 0 0 16px; font-size: 16px; font-weight: 600; } #__qr-print-area svg { width: 220px; height: 220px; } }`;
+    document.head.appendChild(style);
+    const area = document.createElement('div');
+    area.id = '__qr-print-area';
+    area.style.display = 'none';
+    area.innerHTML = `<p>${qrTable.name}</p>${svg}`;
+    document.body.appendChild(area);
+    window.print();
+    document.head.removeChild(style);
+    document.body.removeChild(area);
   }
 
   async function confirmCancelOrder() {
