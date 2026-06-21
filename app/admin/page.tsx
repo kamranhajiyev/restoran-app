@@ -7,7 +7,7 @@ import {
   TrendingUp, Receipt, Star, ChevronDown, Percent,
   Coffee, BarChart2, Package, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
-  GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link,
+  GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link, Printer,
 } from 'lucide-react';
 import {
   DndContext, DragEndEvent, PointerSensor, useSensor, useSensors,
@@ -309,6 +309,7 @@ function AdminPageContent() {
   const [editPaymentCash, setEditPaymentCash] = useState('');
   const [editPaymentCard, setEditPaymentCard] = useState('');
   const [editPaymentBusy, setEditPaymentBusy] = useState(false);
+  const [editPaymentError, setEditPaymentError] = useState('');
 
   // categories form
   const [newCat, setNewCat] = useState('');
@@ -382,6 +383,7 @@ function AdminPageContent() {
   const [tCapacity, setTCapacity] = useState('4');
   const [tSaving, setTSaving] = useState(false);
   const [qrTable, setQrTable] = useState<RestaurantTable | null>(null);
+  const qrRef = useRef<HTMLDivElement>(null);
   const [tableView, setTableView] = useState<'list' | 'floor'>('floor');
   const [tShape, setTShape] = useState<'rect' | 'round' | 'rect-v'>('rect');
   const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
@@ -809,6 +811,15 @@ function AdminPageContent() {
     if (!ok && prevStatus) {
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: prevStatus } : o));
     }
+  }
+
+  function handlePrintQr() {
+    const svg = qrRef.current?.querySelector('svg')?.outerHTML;
+    if (!svg || !qrTable) return;
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.write(`<!DOCTYPE html><html><head><title>${qrTable.name} QR</title><style>body{margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif}p{margin:0 0 16px;font-size:16px;font-weight:600;color:#333}svg{width:220px;height:220px}</style></head><body><p>${qrTable.name}</p>${svg}<script>window.onload=function(){window.print();window.close();}<\/script></body></html>`);
+    w.document.close();
   }
 
   async function confirmCancelOrder() {
@@ -2873,7 +2884,15 @@ function AdminPageContent() {
                   <input
                     type="number" min="0" step="0.01"
                     value={editPaymentCash}
-                    onChange={e => setEditPaymentCash(e.target.value)}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setEditPaymentCash(val);
+                      setEditPaymentError('');
+                      const cash = parseFloat(val) || 0;
+                      const total = orderTotal(editingPaymentOrder);
+                      const remaining = Math.max(0, total - cash);
+                      setEditPaymentCard(remaining % 1 === 0 ? String(remaining) : remaining.toFixed(2));
+                    }}
                     className="flex-1 px-3 py-2.5 text-sm focus:outline-none"
                     autoFocus
                   />
@@ -2886,22 +2905,39 @@ function AdminPageContent() {
                   <input
                     type="number" min="0" step="0.01"
                     value={editPaymentCard}
-                    onChange={e => setEditPaymentCard(e.target.value)}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setEditPaymentCard(val);
+                      setEditPaymentError('');
+                      const card = parseFloat(val) || 0;
+                      const total = orderTotal(editingPaymentOrder);
+                      const remaining = Math.max(0, total - card);
+                      setEditPaymentCash(remaining % 1 === 0 ? String(remaining) : remaining.toFixed(2));
+                    }}
                     className="flex-1 px-3 py-2.5 text-sm focus:outline-none"
                   />
                   <span className="px-3 text-stone-400 text-sm">₼</span>
                 </div>
               </div>
             </div>
+            {editPaymentError && (
+              <p className="text-red-500 text-sm mb-4">{editPaymentError}</p>
+            )}
             <div className="flex gap-2">
-              <button onClick={() => setEditingPaymentOrder(null)} className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">Ləğv et</button>
+              <button onClick={() => { setEditingPaymentOrder(null); setEditPaymentError(''); }} className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">Ləğv et</button>
               <button
                 disabled={editPaymentBusy}
                 onClick={async () => {
                   if (!editingPaymentOrder || editPaymentBusy) return;
-                  setEditPaymentBusy(true);
                   const cash = parseFloat(editPaymentCash) || 0;
                   const card = parseFloat(editPaymentCard) || 0;
+                  const total = orderTotal(editingPaymentOrder);
+                  if (cash + card > total) {
+                    setEditPaymentError(`Nəğd + kart (${(cash + card).toFixed(2)} ₼) sifarişin məbləğindən (${total.toFixed(2)} ₼) çox ola bilməz.`);
+                    return;
+                  }
+                  setEditPaymentError('');
+                  setEditPaymentBusy(true);
                   const ok = await editOrderPayment(editingPaymentOrder.id, cash, card);
                   if (ok) {
                     setOrders(prev => prev.map(o => o.id === editingPaymentOrder.id
@@ -2909,6 +2945,7 @@ function AdminPageContent() {
                       : o
                     ));
                     setEditingPaymentOrder(null);
+                    setEditPaymentError('');
                   }
                   setEditPaymentBusy(false);
                 }}
@@ -3054,11 +3091,16 @@ function AdminPageContent() {
           <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-xl text-center">
             <div className="flex items-center justify-between mb-5">
               <h3 className="font-bold text-stone-800">{qrTable.name} — QR Kod</h3>
-              <button onClick={() => setQrTable(null)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100">
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={handlePrintQr} title="Çap et" className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100 hover:bg-amber-100 hover:text-amber-800 transition-colors">
+                  <Printer className="w-4 h-4" />
+                </button>
+                <button onClick={() => setQrTable(null)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
-            <div className="flex justify-center p-4 bg-white rounded-xl border border-stone-100">
+            <div ref={qrRef} className="flex justify-center p-4 bg-white rounded-xl border border-stone-100">
               <QRCode value={`${typeof window !== 'undefined' ? window.location.origin : ''}/${companySlug}/menu?table=${qrTable.id}`} size={180} />
             </div>
             <p className="text-xs text-stone-500 mt-3">/{companySlug}/menu?table={qrTable.id}</p>
