@@ -44,7 +44,7 @@ import { validatePassword } from '@/lib/password';
 import { exportMenuExcel, exportOrdersExcel, parseMenuFile, ImportPreview } from '@/lib/excel';
 import QRCode from 'react-qr-code';
 import InstallPWA from '@/components/InstallPWA';
-import { connectPrinter, disconnectPrinter, getPrinterList, getSavedPrinter, savePrinter, printReceipt, openCashDrawer } from '@/lib/printer';
+import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt, openCashDrawer } from '@/lib/printer';
 
 const COOKING_STATIONS = ['Mətbəx', 'Bar', 'Soyuq mətbəx', 'Pizza', 'Mangal'];
 // RPC raise messages are machine codes — translated here for display
@@ -314,9 +314,7 @@ function AdminPageContent() {
 
   // printer
   const [printerConnected, setPrinterConnected] = useState(false);
-  const [printerList, setPrinterList] = useState<string[]>([]);
-  const [selectedPrinter, setSelectedPrinter] = useState<string>('');
-  const [printerSaved, setPrinterSaved] = useState(false);
+  const [printerError, setPrinterError] = useState<string | null>(null);
 
   // categories form
   const [newCat, setNewCat] = useState('');
@@ -456,7 +454,6 @@ function AdminPageContent() {
     setProfClose(bizSettings.workClose);
     setProfMsg('');
     setPwCurrent(''); setPwNew(''); setPwConfirm(''); setPwMsg('');
-    setPrinterSaved(false);
     setShowProfile(true);
   }
 
@@ -494,17 +491,7 @@ function AdminPageContent() {
   useEffect(() => {
     if (window.innerWidth < 768) setTableView('list');
     setExpiresAt(getSession()?.expiresAt ?? null);
-    connectPrinter().then(connected => {
-      setPrinterConnected(connected);
-      if (connected) {
-        getPrinterList().then(list => {
-          setPrinterList(list);
-          const saved = getSavedPrinter();
-          if (saved) setSelectedPrinter(saved);
-          else if (list.length > 0) setSelectedPrinter(list[0]);
-        });
-      }
-    });
+    connectPrinter().then(setPrinterConnected);
     return () => { disconnectPrinter(); };
   }, []);
 
@@ -2047,7 +2034,10 @@ function AdminPageContent() {
                               )}
                               {order.status === 'ödənilib' && printerConnected && (
                                 <button
-                                  onClick={() => printReceipt(order, companyName)}
+                                  onClick={async () => {
+                                    const ok = await printReceipt(order, companyName);
+                                    if (!ok) setPrinterError('Çap alınmadı — yazıcı bağlantısını yoxlayın');
+                                  }}
                                   className="text-xs font-semibold text-emerald-600 border border-emerald-200 hover:bg-emerald-50 rounded-lg px-2.5 py-1 transition-colors flex items-center gap-1"
                                 >
                                   <Printer className="w-3 h-3" />Çap et
@@ -3636,31 +3626,20 @@ function AdminPageContent() {
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
                     <div className={`w-2 h-2 rounded-full ${printerConnected ? 'bg-green-500' : 'bg-stone-300'}`} />
-                    <span className="text-xs text-stone-600">{printerConnected ? 'QZ Tray bağlı' : 'QZ Tray tapılmadı — qz.io saytından yükləyin'}</span>
+                    <span className="text-xs text-stone-600">{printerConnected ? 'Yazıcı bağlı' : 'Yazıcı tapılmadı'}</span>
                   </div>
-                  {printerConnected && printerList.length > 0 && (
-                    <>
-                      <div>
-                        <label className="text-xs font-medium text-stone-600 block mb-1">Printer seç</label>
-                        <select
-                          value={selectedPrinter}
-                          onChange={e => { setSelectedPrinter(e.target.value); setPrinterSaved(false); }}
-                          className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
-                        >
-                          {printerList.map(p => <option key={p} value={p}>{p}</option>)}
-                        </select>
-                      </div>
-                      <div className="flex items-center gap-3 pt-1">
-                        <button
-                          onClick={() => { savePrinter(selectedPrinter); setPrinterSaved(true); }}
-                          className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors"
-                        >
-                          Printeri saxla
-                        </button>
-                        {printerSaved && <span className="text-xs text-green-600 font-medium">Yadda saxlandı</span>}
-                      </div>
-                    </>
-                  )}
+                  <button
+                    onClick={async () => {
+                      setPrinterError(null);
+                      const ok = await selectPrinter();
+                      setPrinterConnected(ok);
+                      if (!ok) setPrinterError('Yazıcı seçilmədi və ya bağlantı alınmadı');
+                    }}
+                    className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors"
+                  >
+                    Yazıcı seç
+                  </button>
+                  {printerError && <p className="text-xs text-red-500">{printerError}</p>}
                 </div>
               </div>
             </div>

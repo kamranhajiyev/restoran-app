@@ -1,17 +1,13 @@
 import type { Order } from '@/types';
 
-const PRINTER_KEY = 'pos_printer_name';
-const USB_VID = '0x1FC9';
-const USB_PID = '0x2016';
+const USB_VID = 0x1FC9;
+const USB_PID = 0x2016;
+const USB_ENDPOINT = 1;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let qz: any = null;
+let device: USBDevice | null = null;
 
-async function getQZ() {
-  if (qz) return qz;
-  const mod = await import('qz-tray');
-  qz = mod.default ?? mod;
-  return qz;
+function isWebUSBAvailable(): boolean {
+  return typeof navigator !== 'undefined' && 'usb' in navigator;
 }
 
 function stringToBytes(str: string): number[] {
@@ -35,67 +31,79 @@ function stringToBytes(str: string): number[] {
   return bytes;
 }
 
+async function openDevice(d: USBDevice): Promise<void> {
+  await d.open();
+  if (d.configuration === null) await d.selectConfiguration(1);
+  await d.claimInterface(0);
+}
+
 async function sendRaw(data: string): Promise<boolean> {
-  const q = await getQZ();
-  if (!q.websocket.isActive()) {
-    console.error('[Printer] QZ Tray bağlı deyil');
+  if (!device) {
+    console.error('[Printer] Yazıcı qoşulu deyil');
     return false;
   }
-  const device = { vendorId: USB_VID, productId: USB_PID };
-  const bytes = stringToBytes(data);
   try {
-    await q.usb.claimDevice(device);
-    await q.usb.sendData(device, bytes, { endpoint: 0x01 });
-    await q.usb.releaseDevice(device);
+    const bytes = new Uint8Array(stringToBytes(data));
+    await device.transferOut(USB_ENDPOINT, bytes);
     return true;
   } catch (err) {
-    console.error('[Printer] USB göndərmə xətası:', err);
-    try { await q.usb.releaseDevice(device); } catch { /* ignore */ }
+    console.error('[Printer] Göndərmə xətası:', err);
+    device = null;
     return false;
   }
 }
 
 export async function connectPrinter(): Promise<boolean> {
+  if (!isWebUSBAvailable()) return false;
   try {
-    const q = await getQZ();
-    if (q.websocket.isActive()) return true;
-    await q.websocket.connect({ retries: 0, delay: 0 });
+    const devices = await navigator.usb.getDevices();
+    const found = devices.find(d => d.vendorId === USB_VID && d.productId === USB_PID);
+    if (!found) return false;
+    await openDevice(found);
+    device = found;
     return true;
   } catch (err) {
-    console.error('[Printer] QZ Tray bağlantısı alınmadı:', err);
+    console.error('[Printer] Avtomatik bağlantı xətası:', err);
+    return false;
+  }
+}
+
+export async function selectPrinter(): Promise<boolean> {
+  if (!isWebUSBAvailable()) return false;
+  try {
+    const d = await navigator.usb.requestDevice({ filters: [{ vendorId: USB_VID, productId: USB_PID }] });
+    await openDevice(d);
+    device = d;
+    return true;
+  } catch (err) {
+    console.error('[Printer] Yazıcı seçimi xətası:', err);
     return false;
   }
 }
 
 export async function disconnectPrinter(): Promise<void> {
+  if (!device) return;
   try {
-    const q = await getQZ();
-    if (q.websocket.isActive()) await q.websocket.disconnect();
-  } catch (err) {
-    console.error('[Printer] Bağlantı kəsilmədi:', err);
-  }
+    await device.releaseInterface(0);
+    await device.close();
+  } catch { /* ignore */ }
+  device = null;
 }
 
 export async function getPrinterList(): Promise<string[]> {
-  try {
-    const q = await getQZ();
-    if (!q.websocket.isActive()) return [];
-    const list = await q.printers.find();
-    return Array.isArray(list) ? list : [list];
-  } catch (err) {
-    console.error('[Printer] Printer siyahısı alınmadı:', err);
-    return [];
-  }
+  if (!isWebUSBAvailable()) return [];
+  const devices = await navigator.usb.getDevices();
+  const found = devices.find(d => d.vendorId === USB_VID && d.productId === USB_PID);
+  return found ? ['Xprinter XP-Q806K'] : [];
 }
 
 export function getSavedPrinter(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem(PRINTER_KEY);
+  return device ? 'Xprinter XP-Q806K' : null;
 }
 
-export function savePrinter(name: string): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(PRINTER_KEY, name);
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function savePrinter(_name: string): void {
+  // WebUSB persists authorization via browser — no manual save needed
 }
 
 export async function printReceipt(order: Order, companyName: string): Promise<boolean> {
