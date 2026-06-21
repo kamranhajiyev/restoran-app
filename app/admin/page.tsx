@@ -2671,35 +2671,29 @@ function AdminPageContent() {
           {/* ── TABLES ─────────────────────────────────────────────────── */}
           {tab === 'tables' && (
             <div className="max-w-3xl space-y-4">
-              {/* Tables on/off — takeaway-only companies work without tables */}
-              <div className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-stone-800">Masa rejimi</p>
-                  <p className="text-xs text-stone-500">
-                    {tablesOn
-                      ? 'Satıcılar sifariş üçün masa seçir'
-                      : 'Deaktivdir — satıcılar masa seçmədən birbaşa məhsul seçir'}
-                  </p>
-                </div>
-                <button
-                  onClick={async () => {
-                    const next = !tablesOn;
-                    setTablesToggleBusy(true);
-                    setTablesOn(next);
-                    await setTablesEnabled(next);
-                    setTablesToggleBusy(false);
-                  }}
-                  disabled={tablesToggleBusy}
-                  className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${tablesOn ? 'bg-amber-800' : 'bg-stone-300'}`}
-                >
-                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${tablesOn ? 'translate-x-5' : ''}`} />
-                </button>
-              </div>
+              {/* ── QR & Onlayn ── */}
+              <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider px-1">QR &amp; Onlayn</p>
 
-              {!tablesOn && (
-                <div className="bg-white rounded-xl border border-stone-100 p-12 text-center">
-                  <LayoutDashboard className="w-10 h-10 mx-auto mb-3 text-stone-200" />
-                  <p className="text-sm text-stone-500">Masalar deaktivdir. Satıcı panelində sifarişlər masa seçilmədən yaradılır.</p>
+              {companySlug && (
+                <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 flex items-center gap-3">
+                  <Globe className="w-4 h-4 text-amber-700 shrink-0" />
+                  <p className="text-xs text-amber-800 font-medium truncate flex-1">{typeof window !== 'undefined' ? window.location.origin : ''}/{companySlug}/menu</p>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(`${window.location.origin}/${companySlug}/menu`)}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-amber-200 text-amber-700 transition-colors shrink-0"
+                    title="Kopyala"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                  <a
+                    href={`/${companySlug}/menu`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-amber-200 text-amber-700 transition-colors shrink-0"
+                    title="Aç"
+                  >
+                    <Link className="w-3.5 h-3.5" />
+                  </a>
                 </div>
               )}
 
@@ -2752,6 +2746,40 @@ function AdminPageContent() {
                   >
                     <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${menuOnly ? 'translate-x-5' : ''}`} />
                   </button>
+                </div>
+              )}
+
+              {/* ── Masalar ── */}
+              <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider px-1 mt-2">Masalar</p>
+
+              <div className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-stone-800">Masa rejimi</p>
+                  <p className="text-xs text-stone-500">
+                    {tablesOn
+                      ? 'Satıcılar sifariş üçün masa seçir'
+                      : 'Deaktivdir — satıcılar masa seçmədən birbaşa məhsul seçir'}
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    const next = !tablesOn;
+                    setTablesToggleBusy(true);
+                    setTablesOn(next);
+                    await setTablesEnabled(next);
+                    setTablesToggleBusy(false);
+                  }}
+                  disabled={tablesToggleBusy}
+                  className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${tablesOn ? 'bg-amber-800' : 'bg-stone-300'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${tablesOn ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+
+              {!tablesOn && (
+                <div className="bg-white rounded-xl border border-stone-100 p-12 text-center">
+                  <LayoutDashboard className="w-10 h-10 mx-auto mb-3 text-stone-200" />
+                  <p className="text-sm text-stone-500">Masalar deaktivdir. Satıcı panelində sifarişlər masa seçilmədən yaradılır.</p>
                 </div>
               )}
 
