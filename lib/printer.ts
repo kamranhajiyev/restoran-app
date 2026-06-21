@@ -18,7 +18,8 @@ export async function connectPrinter(): Promise<boolean> {
     if (q.websocket.isActive()) return true;
     await q.websocket.connect({ retries: 0, delay: 0 });
     return true;
-  } catch {
+  } catch (err) {
+    console.error('[Printer] QZ Tray bağlantısı alınmadı:', err);
     return false;
   }
 }
@@ -27,7 +28,9 @@ export async function disconnectPrinter(): Promise<void> {
   try {
     const q = await getQZ();
     if (q.websocket.isActive()) await q.websocket.disconnect();
-  } catch { /* ignore */ }
+  } catch (err) {
+    console.error('[Printer] Bağlantı kəsilmədi:', err);
+  }
 }
 
 export async function getPrinterList(): Promise<string[]> {
@@ -36,7 +39,8 @@ export async function getPrinterList(): Promise<string[]> {
     if (!q.websocket.isActive()) return [];
     const list = await q.printers.find();
     return Array.isArray(list) ? list : [list];
-  } catch {
+  } catch (err) {
+    console.error('[Printer] Printer siyahısı alınmadı:', err);
     return [];
   }
 }
@@ -112,7 +116,8 @@ export async function printReceipt(order: Order, companyName: string): Promise<b
     const config = q.configs.create(printer, { encoding: 'UTF-8' });
     await q.print(config, lines);
     return true;
-  } catch {
+  } catch (err) {
+    console.error('[Printer] Çap alınmadı:', err);
     return false;
   }
 }
@@ -126,7 +131,8 @@ export async function openCashDrawer(): Promise<boolean> {
     const config = q.configs.create(printer, { encoding: 'UTF-8' });
     await q.print(config, ['\x1B\x70\x00\x19\xFF']);
     return true;
-  } catch {
+  } catch (err) {
+    console.error('[Printer] Pul çəkməcəsi açılmadı:', err);
     return false;
   }
 }
