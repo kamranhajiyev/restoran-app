@@ -195,11 +195,6 @@ export async function fetchOrdersCount(): Promise<number> {
 
 export async function fetchOrders(opts?: { from?: string; to?: string; limit?: number; offset?: number }): Promise<Order[]> {
   try {
-    let countQ = supabase.from('orders').select('*', { count: 'exact', head: true });
-    if (opts?.from) countQ = countQ.gte('created_at', opts.from);
-    if (opts?.to) countQ = countQ.lte('created_at', opts.to);
-    const { count: totalCount } = await countQ;
-
     const PAGE = 1000;
     const offset = opts?.offset ?? 0;
     const all: Awaited<ReturnType<typeof runPage>> = [];
@@ -217,9 +212,9 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
       all.push(...page);
       if (page.length < end - start + 1 || (opts?.limit && all.length >= opts.limit)) break;
     }
-    return all.map((o, i) => ({
+    return all.map((o) => ({
       id: o.id,
-      orderNumber: (totalCount ?? all.length) - offset - i,
+      orderNumber: o.order_number ?? 0,
       tableNumber: o.table_id ?? 0,
       sellerName: o.waiter_name,
       staffId: o.staff_id ?? undefined,
