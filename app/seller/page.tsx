@@ -276,7 +276,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       setCompanyContext(overrideCompanyId);
       setSellerName(overrideCompanyName ?? 'Satıcı');
       fetchCompanySettings(overrideCompanyId).then(setBizSettings);
-      fetchOrdersCount().then(setTotalOrders);
+      fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=1`)
+        .then(r => r.json()).then(d => setTotalOrders(d.total ?? 0)).catch(() => {});
       // Fetch staff and shift together via server-side routes (bypass RLS — no auth session).
       Promise.all([
         fetch(`/api/public-staff?companyId=${overrideCompanyId}`).then(r => r.json()).catch(() => ({ staff: [] })),
@@ -502,9 +503,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
 
   async function confirmPayment() {
     if (!payingOrder) return;
+    const order = payingOrder;
     const cash = parseFloat(cashInput) || 0;
     const card = parseFloat(cardInput) || 0;
-    const fullTotal = orderTotal(payingOrder);
+    const fullTotal = orderTotal(order);
     const discountAmt = calcDiscount(fullTotal);
     const total = fullTotal - discountAmt;
     const overpay = Math.max(0, cash + card - total);
@@ -513,11 +515,11 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     setPayingOrder(null);
     // The DB update is conditional — a no-op if someone else already paid this order
     const paid = overrideCompanyId
-      ? await fetch('/api/update-order-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: payingOrder.id, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
-      : await updateOrderStatus(payingOrder.id, 'ödənilib', cashKept, card, change, discountAmt || undefined, discountAmt ? discountType : undefined);
+      ? await fetch('/api/update-order-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: order.id, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      : await updateOrderStatus(order.id, 'ödənilib', cashKept, card, change, discountAmt || undefined, discountAmt ? discountType : undefined);
     if (paid) {
-      const paidOrder = { ...payingOrder, status: 'ödənilib' as const, cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined };
-      setOrders(prev => prev.map(o => o.id === payingOrder.id ? paidOrder : o));
+      const paidOrder = { ...order, status: 'ödənilib' as const, cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined };
+      setOrders(prev => prev.map(o => o.id === order.id ? paidOrder : o));
       if (printerConnected) {
         const cName = getSession()?.companyName ?? '';
         if (shouldPrintReceipt) printReceipt(paidOrder, cName);
@@ -536,17 +538,18 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
 
   async function confirmCancel() {
     if (!cancellingOrder || !cancelReason || cancelBusy) return;
+    const cancelling = cancellingOrder;
     const reason = cancelReason === 'Digər' ? cancelOtherText.trim() : cancelReason;
     if (!reason) return;
     setCancelBusy(true);
     // Conditional in the DB — a no-op if the order got paid in the meantime
     const ok = overrideCompanyId
-      ? await fetch('/api/cancel-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: cancellingOrder.id, reason, by: effectiveSeller }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
-      : await cancelOrder(cancellingOrder.id, reason, effectiveSeller);
+      ? await fetch('/api/cancel-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: cancelling.id, reason, by: effectiveSeller }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      : await cancelOrder(cancelling.id, reason, effectiveSeller);
     setCancelBusy(false);
     setCancellingOrder(null);
     if (ok) {
-      setOrders(prev => prev.map(o => o.id === cancellingOrder.id
+      setOrders(prev => prev.map(o => o.id === cancelling.id
         ? { ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: effectiveSeller, cancelledAt: new Date().toISOString() }
         : o));
     } else {
@@ -617,12 +620,19 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     const raw = parseFloat(movAmount) || 0;
     if (raw <= 0 || !movReason.trim()) return;
     const mv: ShiftMovement = { at: new Date().toISOString(), amount: movOut ? -raw : raw, reason: movReason.trim(), by: effectiveSeller };
+    const prevShift = shift;
     setShift({ ...shift, movements: [...shift.movements, mv] });
     setShowMovForm(false); setMovAmount(''); setMovReason('');
-    if (overrideCompanyId) {
-      await fetch('/api/add-shift-movement', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shiftId: shift.id, movement: mv }) });
-    } else {
-      await addShiftMovement(shift.id, mv);
+    try {
+      if (overrideCompanyId) {
+        const res = await fetch('/api/add-shift-movement', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shiftId: shift.id, movement: mv }) }).then(r => r.json());
+        if (!res.ok) throw new Error('failed');
+      } else {
+        await addShiftMovement(shift.id, mv);
+      }
+    } catch {
+      setShift(prevShift);
+      alert('Hərəkət yadda saxlanılmadı. Yenidən cəhd edin.');
     }
   }
 
@@ -2166,9 +2176,9 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
           </div>
           <div className="text-right">
             {(order.discountAmount ?? 0) > 0 && (
-              <p className="text-xs text-stone-400 line-through leading-tight">{total.toFixed(2)} ₼</p>
+              <p className="text-xs text-stone-400 line-through leading-tight">{(total + order.discountAmount!).toFixed(2)} ₼</p>
             )}
-            <span className="font-bold text-stone-800">{(total - (order.discountAmount ?? 0)).toFixed(2)} ₼</span>
+            <span className="font-bold text-stone-800">{total.toFixed(2)} ₼</span>
             {(order.discountAmount ?? 0) > 0 && (
               <p className="text-xs text-green-600 font-semibold leading-tight">-{order.discountAmount!.toFixed(2)} ₼</p>
             )}
