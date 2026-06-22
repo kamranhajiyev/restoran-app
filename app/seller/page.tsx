@@ -2130,8 +2130,8 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
 
       {/* Desktop table row */}
       <div className="hidden md:block border-b bg-white hover:bg-stone-50">
-        <button
-          className="w-full grid grid-cols-[120px_1fr_140px_200px_110px] gap-4 px-6 py-4 items-center text-left"
+        <div
+          className="w-full grid grid-cols-[120px_1fr_140px_200px_110px] gap-4 px-6 py-4 items-center cursor-pointer"
           onClick={() => setExpanded(e => !e)}
         >
           <div>
@@ -2173,7 +2173,7 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
               <p className="text-xs text-green-600 font-semibold leading-tight">-{order.discountAmount!.toFixed(2)} ₼</p>
             )}
           </div>
-        </button>
+        </div>
 
         {expanded && (
           <div className="px-6 pb-4 bg-stone-50 border-t border-stone-100">
