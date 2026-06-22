@@ -377,6 +377,8 @@ function AdminPageContent() {
   const [dataLoading, setDataLoading] = useState(true);
   const [statsLoaded, setStatsLoaded] = useState(false);
   const statsCache = useRef<Map<string, { at: number; data: Order[] }>>(new Map());
+  const refreshRef = useRef<() => void>(() => {});
+  const refreshAllRef = useRef<() => void>(() => {});
   const [sessionReady, setSessionReady] = useState(false);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
 
@@ -599,7 +601,12 @@ function AdminPageContent() {
     if (adminCountedInput === '') return;
     setClosingShift(true);
     try {
-      const fresh = (await fetchOpenShift()) ?? open;
+      const fresh = await fetchOpenShift();
+      if (!fresh) {
+        await refreshKassa();
+        setClosingShift(false);
+        return;
+      }
       const sales = await fetchShiftSales(fresh.openedAt);
       const expected = fresh.openingCash + sales.cash + fresh.movements.reduce((t, m) => t + m.amount, 0);
       const countedCard = adminTerminalInput === '' ? undefined : parseFloat(adminTerminalInput) || 0;
@@ -629,11 +636,14 @@ function AdminPageContent() {
     } catch { /* ignore */ } finally { setPullRefreshing(false); }
   }
 
+  refreshRef.current = refresh;
+  refreshAllRef.current = refreshAll;
+
   useEffect(() => {
     const channel = supabase
       .channel('admin-orders')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-        refresh();
+        refreshRef.current();
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -642,9 +652,10 @@ function AdminPageContent() {
   useEffect(() => {
     const channel = supabase
       .channel('admin-data')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => refreshAll())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => refreshAll())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_tables' }, () => refreshAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => refreshAllRef.current())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => refreshAllRef.current())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_tables' }, () => refreshAllRef.current())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cash_shifts' }, () => refreshKassa())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, []);
@@ -862,15 +873,16 @@ function AdminPageContent() {
 
   async function confirmCancelOrder() {
     if (!cancellingOrder || !cancelReason || cancelBusy) return;
+    const cancelling = cancellingOrder;
     const reason = cancelReason === 'Digər' ? cancelOtherText.trim() : cancelReason;
     if (!reason) return;
     setCancelBusy(true);
     // Conditional in the DB — a no-op if the order got paid in the meantime
-    const ok = await cancelOrder(cancellingOrder.id, reason, adminName);
+    const ok = await cancelOrder(cancelling.id, reason, adminName);
     setCancelBusy(false);
     setCancellingOrder(null);
     if (ok) {
-      setOrders(prev => prev.map(o => o.id === cancellingOrder.id
+      setOrders(prev => prev.map(o => o.id === cancelling.id
         ? { ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: adminName, cancelledAt: new Date().toISOString() }
         : o));
     } else {
@@ -1310,26 +1322,34 @@ function AdminPageContent() {
     .sort((a, b) => b.rev - a.rev);
 
   const repCatMap: Record<string, { rev: number; cost: number }> = {};
-  chartPaid.forEach(o => o.items.forEach(oi => {
-    const menuItem = menu.find(m => m.id === oi.menuItem.id);
-    const cat = menuItem?.category || oi.menuItem.category || 'Digər';
-    if (!repCatMap[cat]) repCatMap[cat] = { rev: 0, cost: 0 };
-    repCatMap[cat].rev += oi.menuItem.price * oi.quantity;
-    repCatMap[cat].cost += (menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity;
-  }));
+  chartPaid.forEach(o => {
+    const gross = o.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
+    const ratio = gross > 0 ? orderTotal(o) / gross : 1;
+    o.items.forEach(oi => {
+      const menuItem = menu.find(m => m.id === oi.menuItem.id);
+      const cat = menuItem?.category || oi.menuItem.category || 'Digər';
+      if (!repCatMap[cat]) repCatMap[cat] = { rev: 0, cost: 0 };
+      repCatMap[cat].rev += oi.menuItem.price * oi.quantity * ratio;
+      repCatMap[cat].cost += (menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity;
+    });
+  });
   const repCategories = Object.entries(repCatMap)
     .map(([cat, { rev, cost }]) => ({ cat, rev, cost, profit: rev - cost }))
     .sort((a, b) => b.profit - a.profit);
   const maxRepCatProfit = Math.max(...repCategories.map(c => Math.abs(c.profit)), 0.01);
 
   const itemMap: Record<string, { name: string; qty: number; rev: number; cost: number }> = {};
-  chartPaid.forEach(o => o.items.forEach(oi => {
-    const k = oi.menuItem.id;
-    if (!itemMap[k]) itemMap[k] = { name: oi.menuItem.name, qty: 0, rev: 0, cost: 0 };
-    itemMap[k].qty += oi.quantity;
-    itemMap[k].rev += oi.menuItem.price * oi.quantity;
-    itemMap[k].cost += (menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity;
-  }));
+  chartPaid.forEach(o => {
+    const gross = o.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
+    const ratio = gross > 0 ? orderTotal(o) / gross : 1;
+    o.items.forEach(oi => {
+      const k = oi.menuItem.id;
+      if (!itemMap[k]) itemMap[k] = { name: oi.menuItem.name, qty: 0, rev: 0, cost: 0 };
+      itemMap[k].qty += oi.quantity;
+      itemMap[k].rev += oi.menuItem.price * oi.quantity * ratio;
+      itemMap[k].cost += (menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity;
+    });
+  });
   const topItemsSorted = Object.values(itemMap).sort((a, b) => {
     if (topSort === 'profit') return (b.rev - b.cost) - (a.rev - a.cost);
     if (topSort === 'qty') return b.qty - a.qty;
@@ -2927,7 +2947,7 @@ function AdminPageContent() {
                           {busy && activeOrder && (
                             <>
                               <span className={`text-[9px] font-semibold text-white px-1.5 py-0.5 rounded-full mt-0.5 ${statusColor}`}>{activeOrder.status}</span>
-                              <span className="text-[10px] font-bold text-red-500 mt-0.5">{activeOrder.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0).toFixed(2)} ₼</span>
+                              <span className="text-[10px] font-bold text-red-500 mt-0.5">{orderTotal(activeOrder).toFixed(2)} ₼</span>
                             </>
                           )}
                         </div>
