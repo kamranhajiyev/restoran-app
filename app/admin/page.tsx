@@ -616,12 +616,22 @@ function AdminPageContent() {
     } finally { setClosingShift(false); }
   }
 
+  function invalidateTodayStatsCache() {
+    const bizT = businessToday(bizSettings);
+    const [f, t] = presetRange('bugün', bizT);
+    const from = businessDayStartUtc(f, bizSettings).toISOString();
+    const to = new Date(businessDayStartUtc(addDays(t, 1), bizSettings).getTime() - 1).toISOString();
+    statsCache.current.delete(`${from}|${to}`);
+    setStatsLoaded(false);
+  }
+
   async function refresh() {
     setRefreshing(true);
     try {
       const [o, total] = await Promise.all([fetchOrders({ limit: 200 }), fetchOrdersCount()]);
       setOrders(o);
       setTotalOrders(total);
+      invalidateTodayStatsCache();
     } finally { setRefreshing(false); }
   }
 
@@ -633,6 +643,7 @@ function AdminPageContent() {
         fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchOrdersCount(),
       ]);
       setMenu(m); setOrders(o); setCategories(c); setTables(tb); setTotalOrders(total);
+      invalidateTodayStatsCache();
     } catch { /* ignore */ } finally { setPullRefreshing(false); }
   }
 
