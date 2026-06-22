@@ -1223,7 +1223,12 @@ function AdminPageContent() {
 
   const menuCostMap: Record<string, number> = {};
   menu.forEach(m => {
-    if (m.costPrice) menuCostMap[m.id] = m.costPrice;
+    if (m.costPrice) {
+      menuCostMap[m.id] = m.costPrice;
+    } else if (m.variants?.length) {
+      const varCosts = m.variants.filter(v => v.costPrice).map(v => v.costPrice!);
+      if (varCosts.length > 0) menuCostMap[m.id] = varCosts.reduce((s, c) => s + c, 0) / varCosts.length;
+    }
     m.variants?.forEach(v => { if (v.costPrice) menuCostMap[v.id] = v.costPrice; });
   });
 
@@ -1364,14 +1369,14 @@ function AdminPageContent() {
   const topItemsSorted = Object.values(itemMap).sort((a, b) => {
     if (topSort === 'profit') return (b.rev - b.cost) - (a.rev - a.cost);
     if (topSort === 'qty') return b.qty - a.qty;
-    if (topSort === 'margin') return (b.cost > 0 ? (b.rev - b.cost) / b.rev : 1) - (a.cost > 0 ? (a.rev - a.cost) / a.rev : 1);
+    if (topSort === 'margin') return (b.cost > 0 ? (b.rev - b.cost) / b.rev : -1) - (a.cost > 0 ? (a.rev - a.cost) / a.rev : -1);
     return b.rev - a.rev;
   }).slice(0, 8);
   const topItems = topItemsSorted;
   const topMetricVal = (item: typeof topItems[0]) => {
     if (topSort === 'profit') return item.rev - item.cost;
     if (topSort === 'qty') return item.qty;
-    if (topSort === 'margin') return item.cost > 0 ? (item.rev - item.cost) / item.rev : 1;
+    if (topSort === 'margin') return item.cost > 0 ? (item.rev - item.cost) / item.rev : 0;
     return item.rev;
   };
   const maxItemMetric = Math.max(...topItems.map(topMetricVal), 0.01);
@@ -1705,7 +1710,7 @@ function AdminPageContent() {
                     { label: 'Mənfəət',     value: `${chartProfit.toFixed(2)} ₼`,   icon: TrendingUp,color: chartProfit >= 0 ? 'text-green-600' : 'text-red-500' },
                     { label: 'Mənfəət %',   value: `${chartMarginPct.toFixed(1)}%`, icon: Percent,   color: chartMarginPct >= 0 ? 'text-green-600' : 'text-red-500' },
                     { label: 'Orta çek',    value: `${chartAvg.toFixed(2)} ₼`,      icon: Receipt,   color: 'text-stone-800' },
-                    { label: 'Sifarişlər',  value: String(chartAllOrders.length),    icon: Coffee,    color: 'text-stone-800' },
+                    { label: 'Sifarişlər',  value: String(chartPaid.length),         icon: Coffee,    color: 'text-stone-800' },
                   ].map((kpi, i, arr) => {
                     const Icon = kpi.icon;
                     return (
