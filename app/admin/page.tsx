@@ -376,6 +376,7 @@ function AdminPageContent() {
   const [statsOrders, setStatsOrders] = useState<Order[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [statsLoaded, setStatsLoaded] = useState(false);
+  const [statsRefreshKey, setStatsRefreshKey] = useState(0);
   const statsCache = useRef<Map<string, { at: number; data: Order[] }>>(new Map());
   const refreshRef = useRef<() => void>(() => {});
   const refreshAllRef = useRef<() => void>(() => {});
@@ -573,7 +574,7 @@ function AdminPageContent() {
       statsCache.current.set(key, { at: Date.now(), data: o });
       setStatsOrders(o);
     }).finally(() => { setDataLoading(false); setStatsLoaded(true); });
-  }, [sessionReady, customFrom, customTo, bizSettings]);
+  }, [sessionReady, customFrom, customTo, bizSettings, statsRefreshKey]);
 
   useEffect(() => {
     if (!sessionReady || tab !== 'kassa') return;
@@ -622,7 +623,7 @@ function AdminPageContent() {
     const from = businessDayStartUtc(f, bizSettings).toISOString();
     const to = new Date(businessDayStartUtc(addDays(t, 1), bizSettings).getTime() - 1).toISOString();
     statsCache.current.delete(`${from}|${to}`);
-    setStatsLoaded(false);
+    setStatsRefreshKey(k => k + 1);
   }
 
   async function refresh() {
