@@ -662,6 +662,14 @@ function AdminPageContent() {
   }, []);
 
   useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === 'visible') refreshAllRef.current();
+    }
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
+
+  useEffect(() => {
     const channel = supabase
       .channel('admin-data')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => refreshAllRef.current())

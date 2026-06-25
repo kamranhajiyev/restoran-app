@@ -349,8 +349,15 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         setPinStaffList(st);
       } catch { /* ignore focus sync errors */ }
     }
+    function onVisible() {
+      if (document.visibilityState === 'visible') sync();
+    }
     window.addEventListener('focus', sync);
-    return () => window.removeEventListener('focus', sync);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', sync);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [overrideCompanyId]);
 
   useEffect(() => {
