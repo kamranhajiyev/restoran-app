@@ -277,19 +277,31 @@ export async function addOrder(order: Order): Promise<string | null> {
   }
 }
 
-export async function addItemsToOrder(orderId: string, items: OrderItem[]): Promise<string | null> {
-  if (items.length === 0) return null;
+export async function addItemsToOrder(orderId: string, items: OrderItem[], note?: string | null): Promise<string | null> {
   try {
-    const rows = items.map(oi => ({
-      order_id: orderId,
-      menu_item_id: String(oi.menuItem.id),
-      menu_item_name: String(oi.menuItem.name),
-      menu_item_price: Number(oi.menuItem.price),
-      quantity: Number(oi.quantity),
-      modifiers: oi.modifiers ?? null,
-    }));
-    const { error } = await supabase.from('order_items').insert(rows);
-    if (error) { console.error('[addItemsToOrder]', error); return error.message; }
+    // Refuse to append to an order that's already closed (paid/cancelled/deleted) —
+    // matches the public API route and the conditional pay/cancel flows.
+    const { data: ord, error: ordError } = await supabase
+      .from('orders').select('status').eq('id', orderId).eq('company_id', _companyId).single();
+    if (ordError || !ord) { console.error('[addItemsToOrder order]', ordError); return ordError?.message ?? 'closed'; }
+    if (['ödənilib', 'ləğv edildi', 'silinib'].includes(ord.status)) return 'closed';
+
+    if (items.length > 0) {
+      const rows = items.map(oi => ({
+        order_id: orderId,
+        menu_item_id: String(oi.menuItem.id),
+        menu_item_name: String(oi.menuItem.name),
+        menu_item_price: Number(oi.menuItem.price),
+        quantity: Number(oi.quantity),
+        modifiers: oi.modifiers ?? null,
+      }));
+      const { error } = await supabase.from('order_items').insert(rows);
+      if (error) { console.error('[addItemsToOrder]', error); return error.message; }
+    }
+    if (note !== undefined) {
+      const { error: noteError } = await supabase.from('orders').update({ note: note || null }).eq('id', orderId).eq('company_id', _companyId);
+      if (noteError) { console.error('[addItemsToOrder note]', noteError); return noteError.message; }
+    }
     return null;
   } catch (e) {
     console.error('[addItemsToOrder]', e);

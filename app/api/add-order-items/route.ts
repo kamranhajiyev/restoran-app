@@ -8,10 +8,11 @@ interface IncomingItem {
 }
 
 export async function POST(req: NextRequest) {
-  const { orderId, items, companyId } = (await req.json()) as {
+  const { orderId, items, companyId, note } = (await req.json()) as {
     orderId?: string;
     items?: IncomingItem[];
     companyId?: string;
+    note?: string;
   };
   if (!orderId || !companyId || !Array.isArray(items) || items.length === 0) {
     return Response.json({ ok: false }, { status: 400 });
@@ -42,5 +43,10 @@ export async function POST(req: NextRequest) {
 
   const { error } = await db.from('order_items').insert(rows);
   if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
+
+  if (note !== undefined) {
+    const { error: noteError } = await db.from('orders').update({ note: note || null }).eq('id', orderId).eq('company_id', companyId);
+    if (noteError) return Response.json({ ok: false, error: noteError.message }, { status: 500 });
+  }
   return Response.json({ ok: true });
 }

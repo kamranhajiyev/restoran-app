@@ -468,7 +468,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   function startAppend(order: Order) {
     setAppendOrderId(order.id);
     setCart([]);
-    setNote('');
+    setNote(order.note ?? '');
     setMenuSearch('');
     const cats = availableCategories.filter(a => menu.some(i => i.category === a.name)).map(a => a.name);
     if (cats.length > 0) setActiveCategory(cats[0]);
@@ -486,11 +486,12 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     if (cart.length === 0 || submitting || !appendOrderId) return;
     const orderId = appendOrderId;
     const newItems = cart;
+    const newNote = note.trim();
     setSubmitting(true);
     const saveError = overrideCompanyId
-      ? await fetch('/api/add-order-items', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId, items: newItems, companyId: overrideCompanyId }) })
+      ? await fetch('/api/add-order-items', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId, items: newItems, companyId: overrideCompanyId, note: newNote }) })
           .then(r => r.json()).then(d => d.ok ? null : (d.error || 'failed')).catch(() => 'failed')
-      : await addItemsToOrder(orderId, newItems);
+      : await addItemsToOrder(orderId, newItems, newNote);
     setSubmitting(false);
     if (saveError) {
       const reason = /fetch|network|failed to fetch|load failed|failed/i.test(saveError)
@@ -502,7 +503,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       return;
     }
     // Optimistically merge the new items into the order (status stays the same).
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, items: [...o.items, ...newItems] } : o));
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, items: [...o.items, ...newItems], note: newNote || undefined } : o));
     setExpandedOrderId(orderId);
     setAppendOrderId(null);
     setCart([]); setNote(''); setMenuSearch('');
