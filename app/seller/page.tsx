@@ -10,7 +10,7 @@ import {
 import { getSession, logout, validateSession, clearLocalSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
-  fetchMenu, addOrder, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
+  fetchMenu, addOrder, addItemsToOrder, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
   fetchTablesEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, fetchStaff, verifyStaffPin, fetchPrintReceipt, setPrintReceiptEnabled,
 } from '@/lib/store';
@@ -175,6 +175,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   // order history
   const [historySearch, setHistorySearch]   = useState('');
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  // when set, the menu view appends items to this existing order instead of creating a new one
+  const [appendOrderId, setAppendOrderId]   = useState<string | null>(null);
   const [totalOrders, setTotalOrders]       = useState(0);
   const [historyOrders, setHistoryOrders]   = useState<Order[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -357,6 +359,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
         refreshOrders();
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, () => {
+        refreshOrders();
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [refreshOrders]);
@@ -432,6 +437,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
 
   function handleNav(id: View) {
     if (id === 'kassa' && !kassaOn) return;
+    setAppendOrderId(null);
     if (id === 'new-order') {
       if (!tablesOn) { startNewOrder('takeaway'); return; }
       setOrderType(null); setCart([]);
@@ -440,6 +446,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   }
 
   function startNewOrder(type: OrderType, tableNum?: number) {
+    setAppendOrderId(null);
     setOrderType(type);
     setSelectedTable(tableNum ?? null);
     setCart([]);
@@ -450,7 +457,54 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     setView('menu');
   }
 
+  // Open the menu in "append to existing order" mode (reuses the same cart UI).
+  function startAppend(order: Order) {
+    setAppendOrderId(order.id);
+    setCart([]);
+    setNote('');
+    setMenuSearch('');
+    const cats = availableCategories.filter(a => menu.some(i => i.category === a.name)).map(a => a.name);
+    if (cats.length > 0) setActiveCategory(cats[0]);
+    setView('menu');
+  }
+
+  function cancelAppend() {
+    setAppendOrderId(null);
+    setCart([]);
+    setMenuSearch('');
+    setView('orders');
+  }
+
+  async function submitAppend() {
+    if (cart.length === 0 || submitting || !appendOrderId) return;
+    const orderId = appendOrderId;
+    const newItems = cart;
+    setSubmitting(true);
+    const saveError = overrideCompanyId
+      ? await fetch('/api/add-order-items', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId, items: newItems, companyId: overrideCompanyId }) })
+          .then(r => r.json()).then(d => d.ok ? null : (d.error || 'failed')).catch(() => 'failed')
+      : await addItemsToOrder(orderId, newItems);
+    setSubmitting(false);
+    if (saveError) {
+      const reason = /fetch|network|failed to fetch|load failed|failed/i.test(saveError)
+        ? 'İnternet bağlantısı yoxdur.'
+        : /closed|409/i.test(saveError)
+        ? 'Sifariş artıq bağlanıb.'
+        : saveError;
+      alert(`Məhsullar əlavə edilmədi.\n\nSəbəb: ${reason}\n\nYenidən cəhd edin.`);
+      return;
+    }
+    // Optimistically merge the new items into the order (status stays the same).
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, items: [...o.items, ...newItems] } : o));
+    setExpandedOrderId(orderId);
+    setAppendOrderId(null);
+    setCart([]); setNote(''); setMenuSearch('');
+    setMobileCartOpen(false);
+    setView('orders');
+  }
+
   async function submitOrder() {
+    if (appendOrderId) { submitAppend(); return; }
     if (cart.length === 0 || submitting) return;
     if (orderType === 'masa' && !selectedTable) return;
     setSubmitting(true);
@@ -687,6 +741,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
 
   const cartTotal   = cart.reduce((s, ci) => s + ci.menuItem.price * ci.quantity, 0);
   const cartCount   = cart.reduce((s, ci) => s + ci.quantity, 0);
+  const appendOrder = appendOrderId ? orders.find(o => o.id === appendOrderId) ?? null : null;
   // Category tab order follows the admin's saved category order
   const categories  = [...new Set(availableCategories.filter(a => menu.some(i => i.category === a.name)).map(a => a.name))];
   const menuQuery   = azNormalize(menuSearch.trim());
@@ -1069,13 +1124,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                 {prevOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
-                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onStatusChange={handleStatusChange} />)}
+                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
-                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onStatusChange={handleStatusChange} />)}
+                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
               </div>
@@ -1524,7 +1579,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                 {/* Menu toolbar */}
                 <div className="px-3 py-2.5 border-b bg-white flex items-center gap-2 shrink-0">
                   <button
-                    onClick={() => { setView(tablesOn ? 'new-order' : 'orders'); setOrderType(tablesOn ? 'masa' : null); setCart([]); setMenuSearch(''); }}
+                    onClick={() => { if (appendOrderId) { cancelAppend(); return; } setView(tablesOn ? 'new-order' : 'orders'); setOrderType(tablesOn ? 'masa' : null); setCart([]); setMenuSearch(''); }}
                     className="w-9 h-9 flex items-center justify-center rounded-xl text-amber-700 hover:bg-amber-50 active:scale-95 transition-all"
                   >
                     <ChevronLeft className="w-5 h-5" />
@@ -1629,8 +1684,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                   ) : (
                     <div className="flex items-center justify-between">
                       <div>
-                        <h2 className="font-bold text-stone-800">Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}</h2>
-                        <p className="text-xs text-stone-500">{!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                        <h2 className="font-bold text-stone-800">{appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}</h2>
+                        <p className="text-xs text-stone-500">{appendOrder ? `№${appendOrder.orderNumber}-ə əlavə` : !tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
                       </div>
                       {cart.length > 0 && (
                         <button onClick={() => setClearConfirm(true)} className="w-7 h-7 flex items-center justify-center rounded-lg text-stone-400 hover:text-red-500 hover:bg-red-50 transition-colors">
@@ -1641,7 +1696,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                   )}
                 </div>
                 <div className="flex-1 overflow-y-auto px-4 py-3">
-                  {cart.length === 0
+                  {appendOrder
+                    ? <CartItems cart={cart} existingItems={appendOrder.items} addToCart={addToCart} removeFromCart={removeFromCart} />
+                    : cart.length === 0
                     ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
                     : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
                   }
@@ -1664,7 +1721,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                     className="w-full bg-amber-800 hover:bg-amber-900 disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
                   >
                     {submitting && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                    {submitting ? 'Göndərilir...' : 'Sifariş ver'}
+                    {submitting ? 'Göndərilir...' : appendOrder ? 'Əlavə et' : 'Sifariş ver'}
                   </button>
                 </div>
               </div>
@@ -1735,9 +1792,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="font-bold text-stone-800">
-                      Sifariş {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}
+                      {appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}
                     </h2>
-                    <p className="text-xs text-stone-500">{!tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                    <p className="text-xs text-stone-500">{appendOrder ? `№${appendOrder.orderNumber}-ə əlavə` : !tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
                   </div>
                   <div className="flex items-center gap-1">
                     {cart.length > 0 && (
@@ -1753,7 +1810,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
               )}
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-3">
-              {cart.length === 0
+              {appendOrder
+                ? <CartItems cart={cart} existingItems={appendOrder.items} addToCart={addToCart} removeFromCart={removeFromCart} />
+                : cart.length === 0
                 ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
                 : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
               }
@@ -1776,7 +1835,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                 className="w-full bg-amber-800 hover:bg-amber-900 disabled:bg-stone-300 text-white font-semibold py-4 rounded-2xl transition-colors text-base active:scale-95 flex items-center justify-center gap-2"
               >
                 {submitting && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                {submitting ? 'Göndərilir...' : 'Sifariş ver'}
+                {submitting ? 'Göndərilir...' : appendOrder ? 'Əlavə et' : 'Sifariş ver'}
               </button>
             </div>
           </div>
@@ -2020,12 +2079,38 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
 
 // ── CartItems — shared between desktop sidebar and mobile sheet ───────────
 
-function CartItems({ cart, addToCart, removeFromCart }: {
+function CartItems({ cart, existingItems, addToCart, removeFromCart }: {
   cart: OrderItem[];
+  existingItems?: OrderItem[];
   addToCart: (item: MenuItem, mods?: string) => void;
   removeFromCart: (itemId: string, mods?: string) => void;
 }) {
+  const existingTotal = (existingItems ?? []).reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
   return (
+    <div className="space-y-3">
+      {existingItems && existingItems.length > 0 && (
+        <div className="pb-3 mb-1 border-b border-stone-200">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide">Mövcud</p>
+            <p className="text-xs font-semibold text-stone-500">{existingTotal.toFixed(2)} ₼</p>
+          </div>
+          <ul className="space-y-1.5">
+            {existingItems.map((oi, j) => (
+              <li key={'ex' + j} className="flex items-center justify-between gap-2 text-sm text-stone-500">
+                <span className="flex-1 min-w-0 truncate">
+                  {oi.menuItem.name}
+                  {oi.modifiers && <span className="text-xs text-amber-600 ml-1">({oi.modifiers})</span>}
+                </span>
+                <span className="shrink-0 text-xs">{oi.quantity} əd</span>
+                <span className="shrink-0 w-14 text-right">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {existingItems && cart.length === 0 && (
+        <p className="text-center text-stone-400 text-xs py-2">Əlavə etmək üçün məhsul seçin</p>
+      )}
     <ul className="space-y-3">
       {cart.map(ci => (
         <li key={ci.menuItem.id + (ci.modifiers ?? '')} className="flex items-center gap-3">
@@ -2052,17 +2137,19 @@ function CartItems({ cart, addToCart, removeFromCart }: {
         </li>
       ))}
     </ul>
+    </div>
   );
 }
 
 // ── OrderRow — mobile card + desktop table row ────────────────────────────
 
-function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
+function OrderRow({ order, tableLabel, tz, onPay, onCancel, onAppend, onStatusChange }: {
   order: Order;
   tableLabel: string;
   tz: string;
   onPay: () => void;
   onCancel: () => void;
+  onAppend: () => void;
   onStatusChange: (id: string, s: OrderStatus) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -2125,6 +2212,12 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
                   className="px-4 py-2.5 rounded-xl border border-red-200 text-red-500 hover:bg-red-50 active:scale-95 text-sm font-semibold transition-all"
                 >
                   Ödənişsiz bağla
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); onAppend(); }}
+                  className="px-4 py-2.5 rounded-xl border border-amber-300 text-amber-800 hover:bg-amber-50 active:scale-95 text-sm font-semibold transition-all"
+                >
+                  + Əlavə et
                 </button>
                 <button
                   onClick={e => { e.stopPropagation(); onPay(); }}
@@ -2200,6 +2293,16 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onStatusChange }: {
               ))}
             </div>
             {order.note && <p className="text-xs text-stone-500 italic">Qeyd: {order.note}</p>}
+            {isOrderOpen(order) && (
+              <div className="flex pt-3 mt-1 border-t border-stone-200">
+                <button
+                  onClick={e => { e.stopPropagation(); onAppend(); }}
+                  className="text-xs font-semibold text-amber-800 border border-amber-300 hover:bg-amber-50 rounded-lg px-3 py-1.5 transition-colors"
+                >
+                  + Əlavə et
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

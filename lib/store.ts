@@ -1,4 +1,4 @@
-import { CashShift, Category, MenuItem, Order, RestaurantTable, ShiftMovement, Staff, TrashItem } from '@/types';
+import { CashShift, Category, MenuItem, Order, OrderItem, RestaurantTable, ShiftMovement, Staff, TrashItem } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { supabase } from './supabase';
 
@@ -273,6 +273,26 @@ export async function addOrder(order: Order): Promise<string | null> {
     return null;
   } catch (e) {
     console.error('[addOrder]', e);
+    return e instanceof Error ? e.message : 'Bilinməyən xəta';
+  }
+}
+
+export async function addItemsToOrder(orderId: string, items: OrderItem[]): Promise<string | null> {
+  if (items.length === 0) return null;
+  try {
+    const rows = items.map(oi => ({
+      order_id: orderId,
+      menu_item_id: String(oi.menuItem.id),
+      menu_item_name: String(oi.menuItem.name),
+      menu_item_price: Number(oi.menuItem.price),
+      quantity: Number(oi.quantity),
+      modifiers: oi.modifiers ?? null,
+    }));
+    const { error } = await supabase.from('order_items').insert(rows);
+    if (error) { console.error('[addItemsToOrder]', error); return error.message; }
+    return null;
+  } catch (e) {
+    console.error('[addItemsToOrder]', e);
     return e instanceof Error ? e.message : 'Bilinməyən xəta';
   }
 }
