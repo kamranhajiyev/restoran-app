@@ -150,6 +150,19 @@ export interface ReceiptLine {
   unitCost?: number;
 }
 
+// One ingredient of a recipe (how much of a stock item a menu item consumes).
+export interface RecipeIngredient {
+  stockItemId: string;
+  qty: number;
+}
+
+// A flat recipe row as stored in recipe_lines.
+export interface RecipeLineRow {
+  menuItemId: string;
+  stockItemId: string;
+  qty: number;
+}
+
 export interface Order {
   id: string;
   orderNumber: number;

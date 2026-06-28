@@ -1,4 +1,4 @@
-import { CashShift, Category, MenuItem, Order, OrderItem, ReceiptLine, RestaurantTable, ShiftMovement, Staff, StockBalance, StockItem, StockMovement, StockReceipt, Supplier, TrashItem, Warehouse } from '@/types';
+import { CashShift, Category, MenuItem, Order, OrderItem, ReceiptLine, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftMovement, Staff, StockBalance, StockItem, StockMovement, StockReceipt, Supplier, TrashItem, Warehouse } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { supabase } from './supabase';
 
@@ -597,6 +597,61 @@ export async function recordCount(warehouseId: string, stockItemId: string, coun
     p_warehouse_id: warehouseId, p_stock_item_id: stockItemId, p_counted_qty: countedQty,
   });
   if (error) { console.error('[recordCount]', error); return error.message; }
+  return null;
+}
+
+// ─── Anbar Phase 2: recipes + sales warehouse ─────────────────────────────────
+// A menu item "has a recipe" when it has >=1 recipe_lines row. Selling a paid
+// order deducts each ingredient × quantity from the company's sales warehouse
+// (handled by a DB trigger, not here).
+
+export async function fetchRecipeLines(): Promise<RecipeLineRow[]> {
+  try {
+    const { data, error } = await supabase.from('recipe_lines').select('menu_item_id, stock_item_id, qty');
+    if (error || !data) return [];
+    return data.map(r => ({ menuItemId: r.menu_item_id, stockItemId: r.stock_item_id, qty: Number(r.qty) }));
+  } catch { return []; }
+}
+
+// Replace one menu item's recipe with `lines`. Upsert-then-prune so a failed
+// write never wipes the existing recipe (same safety as saveMenu).
+export async function saveRecipe(menuItemId: string, lines: RecipeIngredient[]): Promise<string | null> {
+  if (!_companyId) return 'Şirkət konteksti yoxdur';
+  try {
+    const seen = new Set<string>();
+    const rows: { company_id: string; menu_item_id: string; stock_item_id: string; qty: number }[] = [];
+    for (const l of lines) {
+      if (!l.stockItemId || !(l.qty > 0) || seen.has(l.stockItemId)) continue;
+      seen.add(l.stockItemId);
+      rows.push({ company_id: _companyId, menu_item_id: menuItemId, stock_item_id: l.stockItemId, qty: l.qty });
+    }
+    if (rows.length > 0) {
+      const { error } = await supabase.from('recipe_lines').upsert(rows, { onConflict: 'menu_item_id,stock_item_id' });
+      if (error) { console.error('[saveRecipe upsert]', error); return error.message; }
+    }
+    let del = supabase.from('recipe_lines').delete().eq('menu_item_id', menuItemId).eq('company_id', _companyId);
+    if (rows.length > 0) del = del.not('stock_item_id', 'in', `(${rows.map(r => `"${r.stock_item_id}"`).join(',')})`);
+    const { error: delError } = await del;
+    if (delError) { console.error('[saveRecipe prune]', delError); return delError.message; }
+    return null;
+  } catch (e) {
+    console.error('[saveRecipe]', e);
+    return 'Şəbəkə xətası — resept yadda saxlanmadı';
+  }
+}
+
+export async function fetchSalesWarehouse(): Promise<string | null> {
+  try {
+    if (!_companyId) return null;
+    const { data, error } = await supabase.from('companies').select('sales_warehouse_id').eq('id', _companyId).single();
+    if (error || !data) return null;
+    return data.sales_warehouse_id ?? null;
+  } catch { return null; }
+}
+
+export async function setSalesWarehouse(id: string | null): Promise<string | null> {
+  const { error } = await supabase.rpc('set_sales_warehouse', { p_id: id });
+  if (error) { console.error('[setSalesWarehouse]', error); return error.message; }
   return null;
 }
 
