@@ -1,4 +1,4 @@
-import { CashShift, Category, MenuItem, Order, OrderItem, RestaurantTable, ShiftMovement, Staff, TrashItem } from '@/types';
+import { CashShift, Category, MenuItem, Order, OrderItem, ReceiptLine, RestaurantTable, ShiftMovement, Staff, StockBalance, StockItem, StockMovement, StockReceipt, Supplier, TrashItem, Warehouse } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { supabase } from './supabase';
 
@@ -432,6 +432,172 @@ export async function verifyStaffPin(pin: string): Promise<PinResult> {
     if (data.error === 'wrong') return { ok: false, error: 'wrong', attemptsLeft: data.attempts_left ?? 0 };
     return { ok: false, error: 'no_company' };
   } catch { return { ok: false, error: 'network' }; }
+}
+
+// ─── Anbar (warehouse / inventory) ────────────────────────────────────────────
+// Catalog tables (warehouses/suppliers/stock_items) are CRUD'd directly under
+// RLS. Stock changes (receipt/write-off/recount) go through SECURITY DEFINER
+// RPCs so the ledger and cached balances stay atomic — same pattern as staff.
+
+export async function fetchWarehouses(): Promise<Warehouse[]> {
+  try {
+    const { data, error } = await supabase.from('warehouses')
+      .select('id, name, active, created_at').order('created_at');
+    if (error || !data) return [];
+    return data.map(w => ({ id: w.id, name: w.name, active: w.active, createdAt: w.created_at }));
+  } catch { return []; }
+}
+
+export async function createWarehouse(name: string): Promise<string | null> {
+  const { error } = await supabase.from('warehouses').insert({ name, company_id: _companyId });
+  if (error) { console.error('[createWarehouse]', error); return error.message; }
+  return null;
+}
+
+export async function updateWarehouse(id: string, name: string, active: boolean): Promise<string | null> {
+  const { error } = await supabase.from('warehouses').update({ name, active }).eq('id', id);
+  if (error) { console.error('[updateWarehouse]', error); return error.message; }
+  return null;
+}
+
+export async function deleteWarehouse(id: string): Promise<string | null> {
+  const { error } = await supabase.from('warehouses').delete().eq('id', id);
+  if (error) { console.error('[deleteWarehouse]', error); return error.message; }
+  return null;
+}
+
+export async function fetchSuppliers(): Promise<Supplier[]> {
+  try {
+    const { data, error } = await supabase.from('suppliers')
+      .select('id, name, address, phone, note, active, created_at').order('created_at');
+    if (error || !data) return [];
+    return data.map(s => ({
+      id: s.id, name: s.name, address: s.address ?? undefined, phone: s.phone ?? undefined,
+      note: s.note ?? undefined, active: s.active, createdAt: s.created_at,
+    }));
+  } catch { return []; }
+}
+
+export async function createSupplier(name: string, address: string, phone: string, note: string): Promise<string | null> {
+  const { error } = await supabase.from('suppliers').insert({
+    name, address: address || null, phone: phone || null, note: note || null, company_id: _companyId,
+  });
+  if (error) { console.error('[createSupplier]', error); return error.message; }
+  return null;
+}
+
+export async function updateSupplier(id: string, name: string, address: string, phone: string, note: string, active: boolean): Promise<string | null> {
+  const { error } = await supabase.from('suppliers')
+    .update({ name, address: address || null, phone: phone || null, note: note || null, active }).eq('id', id);
+  if (error) { console.error('[updateSupplier]', error); return error.message; }
+  return null;
+}
+
+export async function deleteSupplier(id: string): Promise<string | null> {
+  const { error } = await supabase.from('suppliers').delete().eq('id', id);
+  if (error) { console.error('[deleteSupplier]', error); return error.message; }
+  return null;
+}
+
+export async function fetchStockItems(): Promise<StockItem[]> {
+  try {
+    const { data, error } = await supabase.from('stock_items')
+      .select('id, name, unit, created_at').order('name');
+    if (error || !data) return [];
+    return data.map(s => ({ id: s.id, name: s.name, unit: s.unit, createdAt: s.created_at }));
+  } catch { return []; }
+}
+
+export async function createStockItem(name: string, unit: string): Promise<string | null> {
+  const { error } = await supabase.from('stock_items').insert({ name, unit, company_id: _companyId });
+  if (error) { console.error('[createStockItem]', error); return error.message; }
+  return null;
+}
+
+export async function updateStockItem(id: string, name: string, unit: string): Promise<string | null> {
+  const { error } = await supabase.from('stock_items').update({ name, unit }).eq('id', id);
+  if (error) { console.error('[updateStockItem]', error); return error.message; }
+  return null;
+}
+
+export async function deleteStockItem(id: string): Promise<string | null> {
+  const { error } = await supabase.from('stock_items').delete().eq('id', id);
+  if (error) { console.error('[deleteStockItem]', error); return error.message; }
+  return null;
+}
+
+// Qalıqlar: current balances joined with item name/unit. Optionally one warehouse.
+export async function fetchBalances(warehouseId?: string): Promise<StockBalance[]> {
+  try {
+    let q = supabase.from('stock_balances').select('warehouse_id, stock_item_id, qty, stock_items(name, unit)');
+    if (warehouseId) q = q.eq('warehouse_id', warehouseId);
+    const { data, error } = await q;
+    if (error || !data) return [];
+    return data.map((b: Record<string, unknown>) => {
+      const si = (b.stock_items ?? {}) as { name?: string; unit?: string };
+      return {
+        warehouseId: b.warehouse_id as string,
+        stockItemId: b.stock_item_id as string,
+        name: si.name ?? '',
+        unit: si.unit ?? '',
+        qty: Number(b.qty ?? 0),
+      };
+    });
+  } catch { return []; }
+}
+
+export async function fetchReceipts(): Promise<StockReceipt[]> {
+  try {
+    const { data, error } = await supabase.from('stock_receipts')
+      .select('id, warehouse_id, supplier_id, total, note, created_by, created_at')
+      .order('created_at', { ascending: false }).limit(200);
+    if (error || !data) return [];
+    return data.map(r => ({
+      id: r.id, warehouseId: r.warehouse_id, supplierId: r.supplier_id ?? undefined,
+      total: Number(r.total), note: r.note ?? undefined, createdBy: r.created_by ?? undefined, createdAt: r.created_at,
+    }));
+  } catch { return []; }
+}
+
+export async function fetchMovements(stockItemId: string): Promise<StockMovement[]> {
+  try {
+    const { data, error } = await supabase.from('stock_movements')
+      .select('id, warehouse_id, stock_item_id, qty, reason, unit_cost, receipt_id, created_by, created_at')
+      .eq('stock_item_id', stockItemId).order('created_at', { ascending: false }).limit(200);
+    if (error || !data) return [];
+    return data.map(m => ({
+      id: m.id, warehouseId: m.warehouse_id, stockItemId: m.stock_item_id, qty: Number(m.qty),
+      reason: m.reason as StockMovement['reason'], unitCost: m.unit_cost !== null ? Number(m.unit_cost) : undefined,
+      receiptId: m.receipt_id ?? undefined, createdBy: m.created_by ?? undefined, createdAt: m.created_at,
+    }));
+  } catch { return []; }
+}
+
+export async function recordReceipt(warehouseId: string, supplierId: string | null, lines: ReceiptLine[], note: string): Promise<string | null> {
+  const { error } = await supabase.rpc('record_receipt', {
+    p_warehouse_id: warehouseId,
+    p_supplier_id: supplierId,
+    p_lines: lines.map(l => ({ stock_item_id: l.stockItemId, qty: l.qty, unit_cost: l.unitCost ?? null })),
+    p_note: note || null,
+  });
+  if (error) { console.error('[recordReceipt]', error); return error.message; }
+  return null;
+}
+
+export async function recordWriteoff(warehouseId: string, stockItemId: string, qty: number, reason: string): Promise<string | null> {
+  const { error } = await supabase.rpc('record_writeoff', {
+    p_warehouse_id: warehouseId, p_stock_item_id: stockItemId, p_qty: qty, p_reason: reason || null,
+  });
+  if (error) { console.error('[recordWriteoff]', error); return error.message; }
+  return null;
+}
+
+export async function recordCount(warehouseId: string, stockItemId: string, countedQty: number): Promise<string | null> {
+  const { error } = await supabase.rpc('record_count', {
+    p_warehouse_id: warehouseId, p_stock_item_id: stockItemId, p_counted_qty: countedQty,
+  });
+  if (error) { console.error('[recordCount]', error); return error.message; }
+  return null;
 }
 
 // ─── Public: company by slug ──────────────────────────────────────────────────

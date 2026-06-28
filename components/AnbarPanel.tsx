@@ -1,0 +1,508 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { Plus, Pencil, Trash2, Warehouse, Boxes, Truck, ShoppingCart, X } from 'lucide-react';
+import {
+  fetchWarehouses, createWarehouse, updateWarehouse, deleteWarehouse,
+  fetchSuppliers, createSupplier, updateSupplier, deleteSupplier,
+  fetchStockItems, createStockItem, updateStockItem, deleteStockItem,
+  fetchBalances, fetchReceipts, recordReceipt, recordWriteoff,
+} from '@/lib/store';
+import { Warehouse as Wh, Supplier, StockItem, StockBalance, StockReceipt, ReceiptLine } from '@/types';
+import { DialogState } from '@/components/AppDialog';
+
+type Sub = 'warehouses' | 'balances' | 'suppliers' | 'receipts';
+
+const SUBS: { id: Sub; label: string; icon: React.ElementType }[] = [
+  { id: 'warehouses', label: 'Anbarlar', icon: Warehouse },
+  { id: 'balances', label: 'Qalıqlar', icon: Boxes },
+  { id: 'suppliers', label: 'Tədarükçülər', icon: Truck },
+  { id: 'receipts', label: 'Bazarlıqlar', icon: ShoppingCart },
+];
+
+const UNITS = ['ədəd', 'kq', 'q', 'litr', 'ml', 'paket'];
+
+const inputCls = 'w-full px-3 py-2 text-sm rounded-lg border border-stone-200 focus:outline-none focus:ring-2 focus:ring-stone-300';
+const btnPrimary = 'inline-flex items-center gap-1.5 px-3.5 py-2 text-sm rounded-lg bg-stone-800 hover:bg-stone-700 text-white font-medium transition-colors disabled:opacity-50';
+const btnGhost = 'inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors';
+
+export default function AnbarPanel({ setDialog }: { setDialog: (d: DialogState | null) => void }) {
+  const [sub, setSub] = useState<Sub>('warehouses');
+  const [warehouses, setWarehouses] = useState<Wh[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [items, setItems] = useState<StockItem[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  function flash(msg: string) { setToast(msg); setTimeout(() => setToast(null), 2200); }
+  function fail(msg: string | null) { if (msg) setDialog({ title: 'Xəta', message: msg }); }
+
+  async function reloadCatalog() {
+    const [w, s, i] = await Promise.all([fetchWarehouses(), fetchSuppliers(), fetchStockItems()]);
+    setWarehouses(w); setSuppliers(s); setItems(i); setLoaded(true);
+  }
+  useEffect(() => { reloadCatalog(); }, []);
+
+  return (
+    <div className="space-y-4">
+      {/* sub-tabs */}
+      <div className="flex flex-wrap gap-1.5">
+        {SUBS.map(s => {
+          const Icon = s.icon;
+          const on = sub === s.id;
+          return (
+            <button key={s.id} onClick={() => setSub(s.id)}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-sm rounded-lg font-medium transition-colors ${on ? 'bg-stone-800 text-white' : 'border border-stone-200 text-stone-600 hover:bg-stone-50'}`}>
+              <Icon className="w-4 h-4" /> {s.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {!loaded ? (
+        <div className="text-sm text-stone-400 py-10 text-center">Yüklənir…</div>
+      ) : (
+        <>
+          {sub === 'warehouses' && (
+            <WarehousesTab warehouses={warehouses} reload={reloadCatalog} flash={flash} fail={fail} setDialog={setDialog} />
+          )}
+          {sub === 'suppliers' && (
+            <SuppliersTab suppliers={suppliers} reload={reloadCatalog} flash={flash} fail={fail} setDialog={setDialog} />
+          )}
+          {sub === 'balances' && (
+            <BalancesTab warehouses={warehouses} items={items} reloadItems={reloadCatalog} flash={flash} fail={fail} setDialog={setDialog} />
+          )}
+          {sub === 'receipts' && (
+            <ReceiptsTab warehouses={warehouses} suppliers={suppliers} items={items} flash={flash} fail={fail} />
+          )}
+        </>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] px-4 py-2 rounded-lg bg-stone-800 text-white text-sm shadow-lg">{toast}</div>
+      )}
+    </div>
+  );
+}
+
+// ─── Anbarlar ──────────────────────────────────────────────────────────────────
+
+function WarehousesTab({ warehouses, reload, flash, fail, setDialog }: {
+  warehouses: Wh[]; reload: () => Promise<void>; flash: (m: string) => void; fail: (m: string | null) => void; setDialog: (d: DialogState | null) => void;
+}) {
+  const [editing, setEditing] = useState<Wh | 'new' | null>(null);
+  const [name, setName] = useState('');
+  const [active, setActive] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  function open(w: Wh | 'new') {
+    setEditing(w); setName(w === 'new' ? '' : w.name); setActive(w === 'new' ? true : w.active);
+  }
+  async function save() {
+    if (!name.trim()) return;
+    setBusy(true);
+    const err = editing === 'new' ? await createWarehouse(name.trim()) : await updateWarehouse((editing as Wh).id, name.trim(), active);
+    setBusy(false);
+    if (err) { fail(err); return; }
+    setEditing(null); await reload(); flash('Yadda saxlanıldı');
+  }
+  function remove(w: Wh) {
+    setDialog({
+      title: 'Anbarı sil?', message: `«${w.name}» silinəcək.`, onConfirm: async () => {
+        const err = await deleteWarehouse(w.id);
+        if (err) fail(err.includes('foreign') || err.includes('violates') ? 'Bu anbarda hərəkət var — əvvəlcə qalıqları boşaldın.' : err);
+        else { await reload(); flash('Silindi'); }
+      },
+    });
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <button className={btnPrimary} onClick={() => open('new')}><Plus className="w-4 h-4" /> Yeni anbar</button>
+      </div>
+      <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
+        {warehouses.length === 0 && <p className="text-sm text-stone-400 p-6 text-center">Anbar yoxdur</p>}
+        {warehouses.map(w => (
+          <div key={w.id} className="flex items-center justify-between px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Warehouse className="w-4 h-4 text-stone-400" />
+              <span className="text-sm font-medium text-stone-800">{w.name}</span>
+              {!w.active && <span className="text-xs text-stone-400">(deaktiv)</span>}
+            </div>
+            <div className="flex gap-1">
+              <button className={btnGhost} onClick={() => open(w)}><Pencil className="w-3.5 h-3.5" /></button>
+              <button className={btnGhost} onClick={() => remove(w)}><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {editing && (
+        <Modal title={editing === 'new' ? 'Yeni anbar' : 'Anbarı düzəlt'} onClose={() => setEditing(null)}>
+          <label className="block text-xs text-stone-500 mb-1">Ad</label>
+          <input className={inputCls} value={name} onChange={e => setName(e.target.value)} placeholder="Mətbəx anbarı" autoFocus />
+          {editing !== 'new' && (
+            <label className="flex items-center gap-2 mt-3 text-sm text-stone-600">
+              <input type="checkbox" checked={active} onChange={e => setActive(e.target.checked)} /> Aktiv
+            </label>
+          )}
+          <div className="flex justify-end gap-2 mt-4">
+            <button className={btnGhost} onClick={() => setEditing(null)}>Ləğv et</button>
+            <button className={btnPrimary} onClick={save} disabled={busy || !name.trim()}>Yadda saxla</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── Tədarükçülər ───────────────────────────────────────────────────────────────
+
+function SuppliersTab({ suppliers, reload, flash, fail, setDialog }: {
+  suppliers: Supplier[]; reload: () => Promise<void>; flash: (m: string) => void; fail: (m: string | null) => void; setDialog: (d: DialogState | null) => void;
+}) {
+  const [editing, setEditing] = useState<Supplier | 'new' | null>(null);
+  const [f, setF] = useState({ name: '', address: '', phone: '', note: '', active: true });
+  const [busy, setBusy] = useState(false);
+
+  function open(s: Supplier | 'new') {
+    setEditing(s);
+    setF(s === 'new' ? { name: '', address: '', phone: '', note: '', active: true }
+      : { name: s.name, address: s.address ?? '', phone: s.phone ?? '', note: s.note ?? '', active: s.active });
+  }
+  async function save() {
+    if (!f.name.trim()) return;
+    setBusy(true);
+    const err = editing === 'new'
+      ? await createSupplier(f.name.trim(), f.address, f.phone, f.note)
+      : await updateSupplier((editing as Supplier).id, f.name.trim(), f.address, f.phone, f.note, f.active);
+    setBusy(false);
+    if (err) { fail(err); return; }
+    setEditing(null); await reload(); flash('Yadda saxlanıldı');
+  }
+  function remove(s: Supplier) {
+    setDialog({
+      title: 'Tədarükçünü sil?', message: `«${s.name}» silinəcək.`, onConfirm: async () => {
+        const err = await deleteSupplier(s.id);
+        if (err) fail(err.includes('foreign') || err.includes('violates') ? 'Bu tədarükçü ilə bazarlıq var — silinə bilməz.' : err);
+        else { await reload(); flash('Silindi'); }
+      },
+    });
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <button className={btnPrimary} onClick={() => open('new')}><Plus className="w-4 h-4" /> Yeni tədarükçü</button>
+      </div>
+      <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
+        {suppliers.length === 0 && <p className="text-sm text-stone-400 p-6 text-center">Tədarükçü yoxdur</p>}
+        {suppliers.map(s => (
+          <div key={s.id} className="flex items-center justify-between px-4 py-3">
+            <div>
+              <div className="text-sm font-medium text-stone-800">{s.name} {!s.active && <span className="text-xs text-stone-400">(deaktiv)</span>}</div>
+              <div className="text-xs text-stone-400">{[s.phone, s.address].filter(Boolean).join(' · ')}</div>
+            </div>
+            <div className="flex gap-1">
+              <button className={btnGhost} onClick={() => open(s)}><Pencil className="w-3.5 h-3.5" /></button>
+              <button className={btnGhost} onClick={() => remove(s)}><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {editing && (
+        <Modal title={editing === 'new' ? 'Yeni tədarükçü' : 'Tədarükçünü düzəlt'} onClose={() => setEditing(null)}>
+          <div className="space-y-3">
+            <div><label className="block text-xs text-stone-500 mb-1">Ad</label><input className={inputCls} value={f.name} onChange={e => setF({ ...f, name: e.target.value })} autoFocus /></div>
+            <div><label className="block text-xs text-stone-500 mb-1">Telefon</label><input className={inputCls} value={f.phone} onChange={e => setF({ ...f, phone: e.target.value })} /></div>
+            <div><label className="block text-xs text-stone-500 mb-1">Ünvan</label><input className={inputCls} value={f.address} onChange={e => setF({ ...f, address: e.target.value })} /></div>
+            <div><label className="block text-xs text-stone-500 mb-1">Qeyd</label><input className={inputCls} value={f.note} onChange={e => setF({ ...f, note: e.target.value })} /></div>
+            {editing !== 'new' && (
+              <label className="flex items-center gap-2 text-sm text-stone-600"><input type="checkbox" checked={f.active} onChange={e => setF({ ...f, active: e.target.checked })} /> Aktiv</label>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <button className={btnGhost} onClick={() => setEditing(null)}>Ləğv et</button>
+            <button className={btnPrimary} onClick={save} disabled={busy || !f.name.trim()}>Yadda saxla</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── Qalıqlar (+ stock item catalog & write-off) ───────────────────────────────
+
+function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }: {
+  warehouses: Wh[]; items: StockItem[]; reloadItems: () => Promise<void>; flash: (m: string) => void; fail: (m: string | null) => void; setDialog: (d: DialogState | null) => void;
+}) {
+  const activeWh = useMemo(() => warehouses.filter(w => w.active), [warehouses]);
+  const [whId, setWhId] = useState<string>('');
+  const [balances, setBalances] = useState<StockBalance[]>([]);
+  const [loadingBal, setLoadingBal] = useState(false);
+  const [itemModal, setItemModal] = useState<StockItem | 'new' | null>(null);
+  const [woItem, setWoItem] = useState<StockBalance | null>(null);
+
+  useEffect(() => { if (!whId && activeWh.length) setWhId(activeWh[0].id); }, [activeWh, whId]);
+  async function reloadBalances(id = whId) {
+    if (!id) { setBalances([]); return; }
+    setLoadingBal(true); setBalances(await fetchBalances(id)); setLoadingBal(false);
+  }
+  useEffect(() => { reloadBalances(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [whId]);
+
+  if (warehouses.length === 0) return <Empty msg="Əvvəlcə «Anbarlar» bölməsində bir anbar yaradın." />;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <select className={`${inputCls} w-auto`} value={whId} onChange={e => setWhId(e.target.value)}>
+          {activeWh.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+        </select>
+        <button className={btnGhost} onClick={() => setItemModal('new')}><Plus className="w-4 h-4" /> Yeni məhsul</button>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
+        {loadingBal ? <p className="text-sm text-stone-400 p-6 text-center">Yüklənir…</p>
+          : balances.length === 0 ? <p className="text-sm text-stone-400 p-6 text-center">Bu anbarda qalıq yoxdur</p>
+          : balances.map(b => (
+            <div key={b.stockItemId} className="flex items-center justify-between px-4 py-3">
+              <span className="text-sm text-stone-800">{b.name}</span>
+              <div className="flex items-center gap-3">
+                <span className={`text-sm font-semibold tabular-nums ${b.qty <= 0 ? 'text-red-500' : 'text-stone-800'}`}>{b.qty} {b.unit}</span>
+                <button className={btnGhost} onClick={() => setWoItem(b)}>Silinmə</button>
+              </div>
+            </div>
+          ))}
+      </div>
+
+      {/* full item catalog management */}
+      <details className="bg-white rounded-2xl border border-stone-100 p-4">
+        <summary className="text-sm font-medium text-stone-600 cursor-pointer">Bütün məhsullar ({items.length})</summary>
+        <div className="mt-3 divide-y divide-stone-100">
+          {items.map(it => (
+            <div key={it.id} className="flex items-center justify-between py-2">
+              <span className="text-sm text-stone-700">{it.name} <span className="text-xs text-stone-400">/ {it.unit}</span></span>
+              <div className="flex gap-1">
+                <button className={btnGhost} onClick={() => setItemModal(it)}><Pencil className="w-3.5 h-3.5" /></button>
+                <button className={btnGhost} onClick={() => setDialog({
+                  title: 'Məhsulu sil?', message: `«${it.name}» silinəcək.`, onConfirm: async () => {
+                    const err = await deleteStockItem(it.id);
+                    if (err) fail(err.includes('foreign') || err.includes('violates') ? 'Bu məhsulun hərəkəti var — silinə bilməz.' : err);
+                    else { await reloadItems(); await reloadBalances(); flash('Silindi'); }
+                  },
+                })}><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>
+              </div>
+            </div>
+          ))}
+          {items.length === 0 && <p className="text-sm text-stone-400 py-2">Məhsul yoxdur</p>}
+        </div>
+      </details>
+
+      {itemModal && (
+        <ItemModal item={itemModal} onClose={() => setItemModal(null)} onSaved={async () => { setItemModal(null); await reloadItems(); await reloadBalances(); flash('Yadda saxlanıldı'); }} fail={fail} />
+      )}
+      {woItem && (
+        <WriteoffModal balance={woItem} warehouseId={whId} onClose={() => setWoItem(null)} onDone={async () => { setWoItem(null); await reloadBalances(); flash('Silinmə qeydə alındı'); }} fail={fail} />
+      )}
+    </div>
+  );
+}
+
+function ItemModal({ item, onClose, onSaved, fail }: { item: StockItem | 'new'; onClose: () => void; onSaved: () => void; fail: (m: string | null) => void }) {
+  const [name, setName] = useState(item === 'new' ? '' : item.name);
+  const [unit, setUnit] = useState(item === 'new' ? 'ədəd' : item.unit);
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    if (!name.trim()) return;
+    setBusy(true);
+    const err = item === 'new' ? await createStockItem(name.trim(), unit) : await updateStockItem(item.id, name.trim(), unit);
+    setBusy(false);
+    if (err) { fail(err); return; }
+    onSaved();
+  }
+  return (
+    <Modal title={item === 'new' ? 'Yeni məhsul' : 'Məhsulu düzəlt'} onClose={onClose}>
+      <div className="space-y-3">
+        <div><label className="block text-xs text-stone-500 mb-1">Ad</label><input className={inputCls} value={name} onChange={e => setName(e.target.value)} placeholder="Kartof" autoFocus /></div>
+        <div>
+          <label className="block text-xs text-stone-500 mb-1">Ölçü vahidi</label>
+          <select className={inputCls} value={unit} onChange={e => setUnit(e.target.value)}>
+            {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="flex justify-end gap-2 mt-4">
+        <button className={btnGhost} onClick={onClose}>Ləğv et</button>
+        <button className={btnPrimary} onClick={save} disabled={busy || !name.trim()}>Yadda saxla</button>
+      </div>
+    </Modal>
+  );
+}
+
+function WriteoffModal({ balance, warehouseId, onClose, onDone, fail }: { balance: StockBalance; warehouseId: string; onClose: () => void; onDone: () => void; fail: (m: string | null) => void }) {
+  const [qty, setQty] = useState('');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    const n = parseFloat(qty);
+    if (!n || n <= 0) return;
+    setBusy(true);
+    const err = await recordWriteoff(warehouseId, balance.stockItemId, n, reason);
+    setBusy(false);
+    if (err) { fail(err); return; }
+    onDone();
+  }
+  return (
+    <Modal title={`Silinmə — ${balance.name}`} onClose={onClose}>
+      <p className="text-xs text-stone-500 mb-3">Hazırkı qalıq: {balance.qty} {balance.unit}</p>
+      <div className="space-y-3">
+        <div><label className="block text-xs text-stone-500 mb-1">Miqdar ({balance.unit})</label><input className={inputCls} type="number" value={qty} onChange={e => setQty(e.target.value)} autoFocus /></div>
+        <div><label className="block text-xs text-stone-500 mb-1">Səbəb</label><input className={inputCls} value={reason} onChange={e => setReason(e.target.value)} placeholder="xarab oldu" /></div>
+      </div>
+      <div className="flex justify-end gap-2 mt-4">
+        <button className={btnGhost} onClick={onClose}>Ləğv et</button>
+        <button className={btnPrimary} onClick={save} disabled={busy}>Təsdiqlə</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Bazarlıqlar ────────────────────────────────────────────────────────────────
+
+function ReceiptsTab({ warehouses, suppliers, items, flash, fail }: {
+  warehouses: Wh[]; suppliers: Supplier[]; items: StockItem[]; flash: (m: string) => void; fail: (m: string | null) => void;
+}) {
+  const activeWh = useMemo(() => warehouses.filter(w => w.active), [warehouses]);
+  const [receipts, setReceipts] = useState<StockReceipt[]>([]);
+  const [creating, setCreating] = useState(false);
+
+  async function reload() { setReceipts(await fetchReceipts()); }
+  useEffect(() => { reload(); }, []);
+
+  const whName = (id: string) => warehouses.find(w => w.id === id)?.name ?? '—';
+  const supName = (id?: string) => suppliers.find(s => s.id === id)?.name ?? '—';
+
+  if (warehouses.length === 0) return <Empty msg="Əvvəlcə «Anbarlar» bölməsində bir anbar yaradın." />;
+  if (items.length === 0) return <Empty msg="Əvvəlcə «Qalıqlar» bölməsində məhsul yaradın." />;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <button className={btnPrimary} onClick={() => setCreating(true)}><Plus className="w-4 h-4" /> Yeni bazarlıq</button>
+      </div>
+      <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
+        {receipts.length === 0 && <p className="text-sm text-stone-400 p-6 text-center">Bazarlıq yoxdur</p>}
+        {receipts.map(r => (
+          <div key={r.id} className="flex items-center justify-between px-4 py-3">
+            <div>
+              <div className="text-sm font-medium text-stone-800">{supName(r.supplierId)} → {whName(r.warehouseId)}</div>
+              <div className="text-xs text-stone-400">{new Date(r.createdAt).toLocaleString('az-AZ')}{r.note ? ` · ${r.note}` : ''}</div>
+            </div>
+            <span className="text-sm font-semibold tabular-nums text-stone-800">{r.total.toFixed(2)} ₼</span>
+          </div>
+        ))}
+      </div>
+
+      {creating && (
+        <NewReceipt activeWh={activeWh} suppliers={suppliers.filter(s => s.active)} items={items}
+          onClose={() => setCreating(false)}
+          onDone={async () => { setCreating(false); await reload(); flash('Bazarlıq əlavə olundu'); }} fail={fail} />
+      )}
+    </div>
+  );
+}
+
+function NewReceipt({ activeWh, suppliers, items, onClose, onDone, fail }: {
+  activeWh: Wh[]; suppliers: Supplier[]; items: StockItem[]; onClose: () => void; onDone: () => void; fail: (m: string | null) => void;
+}) {
+  const [whId, setWhId] = useState(activeWh[0]?.id ?? '');
+  const [supId, setSupId] = useState('');
+  const [note, setNote] = useState('');
+  const [lines, setLines] = useState<{ stockItemId: string; qty: string; unitCost: string }[]>([{ stockItemId: items[0]?.id ?? '', qty: '', unitCost: '' }]);
+  const [busy, setBusy] = useState(false);
+
+  const total = lines.reduce((s, l) => s + (parseFloat(l.qty) || 0) * (parseFloat(l.unitCost) || 0), 0);
+  function setLine(i: number, patch: Partial<{ stockItemId: string; qty: string; unitCost: string }>) {
+    setLines(prev => prev.map((l, idx) => idx === i ? { ...l, ...patch } : l));
+  }
+  const unitOf = (id: string) => items.find(it => it.id === id)?.unit ?? '';
+
+  async function save() {
+    const valid: ReceiptLine[] = lines
+      .filter(l => l.stockItemId && parseFloat(l.qty) > 0)
+      .map(l => ({ stockItemId: l.stockItemId, qty: parseFloat(l.qty), unitCost: l.unitCost ? parseFloat(l.unitCost) : undefined }));
+    if (!whId || valid.length === 0) { fail('Anbar və ən azı bir məhsul sətri lazımdır.'); return; }
+    setBusy(true);
+    const err = await recordReceipt(whId, supId || null, valid, note);
+    setBusy(false);
+    if (err) { fail(err); return; }
+    onDone();
+  }
+
+  return (
+    <Modal title="Yeni bazarlıq" onClose={onClose} wide>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs text-stone-500 mb-1">Anbar</label>
+          <select className={inputCls} value={whId} onChange={e => setWhId(e.target.value)}>
+            {activeWh.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-stone-500 mb-1">Tədarükçü</label>
+          <select className={inputCls} value={supId} onChange={e => setSupId(e.target.value)}>
+            <option value="">— seçilməyib —</option>
+            {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-stone-500">Məhsullar</span>
+          <button className={btnGhost} onClick={() => setLines([...lines, { stockItemId: items[0]?.id ?? '', qty: '', unitCost: '' }])}><Plus className="w-3.5 h-3.5" /> Sətir</button>
+        </div>
+        {lines.map((l, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <select className={`${inputCls} flex-1`} value={l.stockItemId} onChange={e => setLine(i, { stockItemId: e.target.value })}>
+              {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
+            </select>
+            <input className={`${inputCls} w-20`} type="number" placeholder="say" value={l.qty} onChange={e => setLine(i, { qty: e.target.value })} />
+            <span className="text-xs text-stone-400 w-8">{unitOf(l.stockItemId)}</span>
+            <input className={`${inputCls} w-24`} type="number" placeholder="qiymət" value={l.unitCost} onChange={e => setLine(i, { unitCost: e.target.value })} />
+            {lines.length > 1 && <button className="text-stone-400 hover:text-red-500" onClick={() => setLines(lines.filter((_, idx) => idx !== i))}><X className="w-4 h-4" /></button>}
+          </div>
+        ))}
+      </div>
+
+      <div><label className="block text-xs text-stone-500 mb-1 mt-3">Qeyd</label><input className={inputCls} value={note} onChange={e => setNote(e.target.value)} /></div>
+
+      <div className="flex items-center justify-between mt-4">
+        <span className="text-sm text-stone-600">Cəmi: <b className="tabular-nums">{total.toFixed(2)} ₼</b></span>
+        <div className="flex gap-2">
+          <button className={btnGhost} onClick={onClose}>Ləğv et</button>
+          <button className={btnPrimary} onClick={save} disabled={busy}>Yadda saxla</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── shared bits ────────────────────────────────────────────────────────────────
+
+function Modal({ title, children, onClose, wide }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className={`bg-white rounded-2xl shadow-xl p-6 w-full ${wide ? 'max-w-lg' : 'max-w-sm'}`} onClick={e => e.stopPropagation()}>
+        <h3 className="text-base font-semibold text-stone-800 mb-4">{title}</h3>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Empty({ msg }: { msg: string }) {
+  return <div className="bg-white rounded-2xl border border-stone-100 p-8 text-center text-sm text-stone-400">{msg}</div>;
+}

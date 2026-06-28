@@ -39,6 +39,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { CashShift, Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, Staff, TrashItem, isOrderOpen } from '@/types';
 import AppDialog, { DialogState } from '@/components/AppDialog';
+import AnbarPanel from '@/components/AnbarPanel';
 import PasswordField from '@/components/PasswordField';
 import { validatePassword } from '@/lib/password';
 import { exportMenuExcel, exportOrdersExcel, parseMenuFile, ImportPreview } from '@/lib/excel';
@@ -86,7 +87,7 @@ const STATUS_LABELS: Record<OrderStatus, string> = {
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
 
-type Tab = 'stats' | 'orders' | 'kassa' | 'menu' | 'users' | 'tables' | 'logins';
+type Tab = 'stats' | 'orders' | 'kassa' | 'menu' | 'users' | 'tables' | 'anbar' | 'logins';
 
 type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
@@ -149,6 +150,7 @@ const NAV_ITEMS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'menu',       label: 'Menyu',         icon: Coffee },
   { id: 'users',      label: 'Əməkdaşlar', icon: Users },
   { id: 'tables',     label: 'Masalar',     icon: LayoutDashboard },
+  { id: 'anbar',      label: 'Anbar',       icon: Package },
   { id: 'logins',     label: 'Girişlər',    icon: Globe },
 ];
 
@@ -159,6 +161,7 @@ const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
   menu:       { title: 'Menyu',                    subtitle: 'Kateqoriyalar və məhsullar' },
   users:      { title: 'Əməkdaşlar',              subtitle: 'Satıcıları idarə et' },
   tables:     { title: 'Masalar',                 subtitle: 'Restoran masalarını idarə et' },
+  anbar:      { title: 'Anbar',                   subtitle: 'Anbarlar, qalıqlar, tədarükçülər və bazarlıqlar' },
   logins:     { title: 'Girişlər',                subtitle: 'Sistemə kim, haradan daxil olub' },
 };
 
@@ -2694,6 +2697,13 @@ function AdminPageContent() {
                     </div>
                   </div>
                 ))}
+            </div>
+          )}
+
+          {/* ── ANBAR ──────────────────────────────────────────────────── */}
+          {tab === 'anbar' && (
+            <div className="max-w-3xl">
+              <AnbarPanel setDialog={setDialog} />
             </div>
           )}
 

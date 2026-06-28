@@ -86,6 +86,70 @@ export interface Staff {
   createdAt: string;
 }
 
+// ─── Anbar (warehouse / inventory) ────────────────────────────────────────────
+
+export interface Warehouse {
+  id: string;
+  name: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface Supplier {
+  id: string;
+  name: string;
+  address?: string;
+  phone?: string;
+  note?: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface StockItem {
+  id: string;
+  name: string;
+  unit: string;
+  createdAt: string;
+}
+
+// A row of the Qalıqlar view: an item's current quantity in one warehouse.
+export interface StockBalance {
+  warehouseId: string;
+  stockItemId: string;
+  name: string;
+  unit: string;
+  qty: number;
+}
+
+export interface StockMovement {
+  id: string;
+  warehouseId: string;
+  stockItemId: string;
+  qty: number;
+  reason: 'receipt' | 'writeoff' | 'recount';
+  unitCost?: number;
+  receiptId?: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+export interface StockReceipt {
+  id: string;
+  warehouseId: string;
+  supplierId?: string;
+  total: number;
+  note?: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+// One line of a goods receipt, as sent to record_receipt.
+export interface ReceiptLine {
+  stockItemId: string;
+  qty: number;
+  unitCost?: number;
+}
+
 export interface Order {
   id: string;
   orderNumber: number;
