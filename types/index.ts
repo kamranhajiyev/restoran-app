@@ -40,12 +40,14 @@ export interface MenuItem {
   costPrice?: number;
   image?: string;
   cookingStation?: string;
+  kind?: 'product' | 'meal';   // absent = treat as 'product'
 }
 
 export interface OrderItem {
   menuItem: MenuItem;
   quantity: number;
   modifiers?: string;
+  variantId?: string;   // which variant was chosen — drives per-variant stock deduction
 }
 
 export type OrderStatus = 'gözləyir' | 'hazırlanır' | 'hazırdır' | 'ödənilib' | 'ləğv edildi' | 'silinib';
@@ -109,6 +111,7 @@ export interface StockItem {
   id: string;
   name: string;
   unit: string;
+  type?: 'product' | 'ingredient';   // absent = treat as 'ingredient'
   createdAt: string;
 }
 

@@ -389,14 +389,14 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
 
   // ── cart helpers ──────────────────────────────────────────────────────────
 
-  function addToCart(item: MenuItem, mods?: string) {
+  function addToCart(item: MenuItem, mods?: string, variantId?: string) {
     setCart(prev => {
       const ex = prev.find(ci => ci.menuItem.id === item.id && (ci.modifiers ?? '') === (mods ?? ''));
       if (ex) return prev.map(ci =>
         ci.menuItem.id === item.id && (ci.modifiers ?? '') === (mods ?? '')
           ? { ...ci, quantity: ci.quantity + 1 } : ci
       );
-      return [...prev, { menuItem: item, quantity: 1, modifiers: mods }];
+      return [...prev, { menuItem: item, quantity: 1, modifiers: mods, variantId }];
     });
   }
 
@@ -432,7 +432,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     const modsStr = groups.map(g => selectedMods[g.label]).filter(Boolean).join(' · ');
     const itemToAdd = selectedVariant ? { ...modifierItem, price: selectedVariant.price } : modifierItem;
     const label = [selectedVariant?.name, modsStr].filter(Boolean).join(' · ');
-    addToCart(itemToAdd, label || undefined);
+    addToCart(itemToAdd, label || undefined, selectedVariant?.id);
     setModifierItem(null);
     setSelectedVariant(null);
   }

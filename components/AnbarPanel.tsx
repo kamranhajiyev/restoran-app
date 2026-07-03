@@ -269,6 +269,14 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
   const [loadingBal, setLoadingBal] = useState(false);
   const [itemModal, setItemModal] = useState<StockItem | 'new' | null>(null);
   const [woItem, setWoItem] = useState<StockBalance | null>(null);
+  const [typeFilter, setTypeFilter] = useState<'all' | 'product' | 'ingredient'>('all');
+
+  const typeOf = useMemo(() => {
+    const m = new Map(items.map(it => [it.id, it.type ?? 'ingredient']));
+    return (id: string) => m.get(id) ?? 'ingredient';
+  }, [items]);
+  const shownBalances = typeFilter === 'all' ? balances : balances.filter(b => typeOf(b.stockItemId) === typeFilter);
+  const shownItems = typeFilter === 'all' ? items : items.filter(it => (it.type ?? 'ingredient') === typeFilter);
 
   useEffect(() => { if (!whId && activeWh.length) setWhId(activeWh[0].id); }, [activeWh, whId]);
   async function reloadBalances(id = whId) {
@@ -288,10 +296,19 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
         <button className={btnGhost} onClick={() => setItemModal('new')}><Plus className="w-4 h-4" /> Yeni məhsul</button>
       </div>
 
+      <div className="flex items-center gap-2">
+        {([['all', 'Hamısı'], ['product', 'Məhsullar'], ['ingredient', 'İnqrediyentlər']] as const).map(([val, label]) => (
+          <button key={val} onClick={() => setTypeFilter(val)}
+            className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${typeFilter === val ? 'bg-amber-700 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
         {loadingBal ? <p className="text-sm text-stone-400 p-6 text-center">Yüklənir…</p>
-          : balances.length === 0 ? <p className="text-sm text-stone-400 p-6 text-center">Bu anbarda qalıq yoxdur</p>
-          : balances.map(b => (
+          : shownBalances.length === 0 ? <p className="text-sm text-stone-400 p-6 text-center">Bu anbarda qalıq yoxdur</p>
+          : shownBalances.map(b => (
             <div key={b.stockItemId} className="flex items-center justify-between px-4 py-3">
               <span className="text-sm text-stone-800">{b.name}</span>
               <div className="flex items-center gap-3">
@@ -304,11 +321,11 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
 
       {/* full item catalog management */}
       <details className="bg-white rounded-2xl border border-stone-100 p-4">
-        <summary className="text-sm font-medium text-stone-600 cursor-pointer">Bütün məhsullar ({items.length})</summary>
+        <summary className="text-sm font-medium text-stone-600 cursor-pointer">Bütün məhsullar ({shownItems.length})</summary>
         <div className="mt-3 divide-y divide-stone-100">
-          {items.map(it => (
+          {shownItems.map(it => (
             <div key={it.id} className="flex items-center justify-between py-2">
-              <span className="text-sm text-stone-700">{it.name} <span className="text-xs text-stone-400">/ {it.unit}</span></span>
+              <span className="text-sm text-stone-700">{it.name} <span className="text-xs text-stone-400">/ {it.unit} · {(it.type ?? 'ingredient') === 'product' ? 'Məhsul' : 'İnqrediyent'}</span></span>
               <div className="flex gap-1">
                 <button className={btnGhost} onClick={() => setItemModal(it)}><Pencil className="w-3.5 h-3.5" /></button>
                 <button className={btnGhost} onClick={() => setDialog({
@@ -321,7 +338,7 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
               </div>
             </div>
           ))}
-          {items.length === 0 && <p className="text-sm text-stone-400 py-2">Məhsul yoxdur</p>}
+          {shownItems.length === 0 && <p className="text-sm text-stone-400 py-2">Məhsul yoxdur</p>}
         </div>
       </details>
 
@@ -338,11 +355,12 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
 function ItemModal({ item, onClose, onSaved, fail }: { item: StockItem | 'new'; onClose: () => void; onSaved: () => void; fail: (m: string | null) => void }) {
   const [name, setName] = useState(item === 'new' ? '' : item.name);
   const [unit, setUnit] = useState(item === 'new' ? 'ədəd' : item.unit);
+  const [type, setType] = useState<'product' | 'ingredient'>(item === 'new' ? 'ingredient' : (item.type ?? 'ingredient'));
   const [busy, setBusy] = useState(false);
   async function save() {
     if (!name.trim()) return;
     setBusy(true);
-    const err = item === 'new' ? await createStockItem(name.trim(), unit) : await updateStockItem(item.id, name.trim(), unit);
+    const err = item === 'new' ? await createStockItem(name.trim(), unit, type) : await updateStockItem(item.id, name.trim(), unit, type);
     setBusy(false);
     if (err) { fail(err); return; }
     onSaved();
@@ -351,6 +369,17 @@ function ItemModal({ item, onClose, onSaved, fail }: { item: StockItem | 'new'; 
     <Modal title={item === 'new' ? 'Yeni məhsul' : 'Məhsulu düzəlt'} onClose={onClose}>
       <div className="space-y-3">
         <div><label className="block text-xs text-stone-500 mb-1">Ad</label><input className={inputCls} value={name} onChange={e => setName(e.target.value)} placeholder="Kartof" autoFocus /></div>
+        <div>
+          <label className="block text-xs text-stone-500 mb-1">Növ</label>
+          <div className="inline-flex rounded-lg border border-stone-200 overflow-hidden">
+            {([['ingredient', 'İnqrediyent'], ['product', 'Məhsul']] as const).map(([val, label]) => (
+              <button key={val} type="button" onClick={() => setType(val)}
+                className={`px-4 py-2 text-sm font-medium transition-colors ${type === val ? 'bg-amber-700 text-white' : 'bg-white text-stone-600 hover:bg-stone-50'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div>
           <label className="block text-xs text-stone-500 mb-1">Ölçü vahidi</label>
           <select className={inputCls} value={unit} onChange={e => setUnit(e.target.value)}>
@@ -527,7 +556,7 @@ function RecipesTab({ items, flash, fail }: {
 
   async function reload() {
     const [m, l] = await Promise.all([fetchMenu(), fetchRecipeLines()]);
-    setMenu(m); setLines(l); setLoaded(true);
+    setMenu(m.filter(mi => (mi.kind ?? 'product') === 'meal')); setLines(l); setLoaded(true);
   }
   useEffect(() => { reload(); }, []);
 
@@ -537,7 +566,7 @@ function RecipesTab({ items, flash, fail }: {
 
   if (items.length === 0) return <Empty msg="Əvvəlcə «Qalıqlar» bölməsində məhsul yaradın." />;
   if (!loaded) return <div className="text-sm text-stone-400 py-10 text-center">Yüklənir…</div>;
-  if (menu.length === 0) return <Empty msg="Menyu boşdur — əvvəlcə menyuya məhsul əlavə edin." />;
+  if (menu.length === 0) return <Empty msg="Menyuda yemək yoxdur — əvvəlcə menyuya yemək əlavə edin." />;
 
   return (
     <div className="space-y-3">

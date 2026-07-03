@@ -42,6 +42,7 @@ export async function fetchMenu(): Promise<MenuItem[]> {
       costPrice: r.cost_price ? Number(r.cost_price) : undefined,
       image: r.image ?? undefined,
       cookingStation: r.cooking_station ?? undefined,
+      kind: r.kind ?? 'product',
     }));
   } catch {
     return [];
@@ -74,6 +75,7 @@ export async function saveMenu(menu: MenuItem[]): Promise<string | null> {
         cost_price: m.costPrice ?? null,
         image: m.image ?? null,
         cooking_station: m.cookingStation ?? null,
+        kind: m.kind ?? 'product',
         position: rows.length,
         company_id: _companyId,
       });
@@ -229,7 +231,7 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
       cancelledAt: o.cancelled_at ?? undefined,
       cancelledBy: o.cancelled_by ?? undefined,
       cancelReason: o.cancel_reason ?? undefined,
-      items: (o.order_items ?? []).map((oi: { menu_item_id: string; menu_item_name: string; menu_item_price: number; quantity: number; modifiers?: string }) => ({
+      items: (o.order_items ?? []).map((oi: { menu_item_id: string; menu_item_name: string; menu_item_price: number; quantity: number; modifiers?: string; variant_id?: string }) => ({
         menuItem: {
           id: oi.menu_item_id,
           name: oi.menu_item_name,
@@ -239,6 +241,7 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
         },
         quantity: oi.quantity,
         modifiers: oi.modifiers ?? undefined,
+        variantId: oi.variant_id ?? undefined,
       })),
     }));
   } catch {
@@ -267,6 +270,7 @@ export async function addOrder(order: Order): Promise<string | null> {
       menu_item_price: Number(oi.menuItem.price),
       quantity: Number(oi.quantity),
       modifiers: oi.modifiers ?? null,
+      variant_id: oi.variantId ?? null,
     }));
     const { error: itemsError } = await supabase.from('order_items').insert(rows);
     if (itemsError) { console.error('[addOrder items]', itemsError); return itemsError.message; }
@@ -294,6 +298,7 @@ export async function addItemsToOrder(orderId: string, items: OrderItem[], note?
         menu_item_price: Number(oi.menuItem.price),
         quantity: Number(oi.quantity),
         modifiers: oi.modifiers ?? null,
+        variant_id: oi.variantId ?? null,
       }));
       const { error } = await supabase.from('order_items').insert(rows);
       if (error) { console.error('[addItemsToOrder]', error); return error.message; }
@@ -502,20 +507,22 @@ export async function deleteSupplier(id: string): Promise<string | null> {
 export async function fetchStockItems(): Promise<StockItem[]> {
   try {
     const { data, error } = await supabase.from('stock_items')
-      .select('id, name, unit, created_at').order('name');
+      .select('id, name, unit, type, created_at').order('name');
     if (error || !data) return [];
-    return data.map(s => ({ id: s.id, name: s.name, unit: s.unit, createdAt: s.created_at }));
+    return data.map(s => ({ id: s.id, name: s.name, unit: s.unit, type: s.type ?? 'ingredient', createdAt: s.created_at }));
   } catch { return []; }
 }
 
-export async function createStockItem(name: string, unit: string): Promise<string | null> {
-  const { error } = await supabase.from('stock_items').insert({ name, unit, company_id: _companyId });
+export async function createStockItem(name: string, unit: string, type: 'product' | 'ingredient' = 'ingredient'): Promise<string | null> {
+  const { error } = await supabase.from('stock_items').insert({ name, unit, type, company_id: _companyId });
   if (error) { console.error('[createStockItem]', error); return error.message; }
   return null;
 }
 
-export async function updateStockItem(id: string, name: string, unit: string): Promise<string | null> {
-  const { error } = await supabase.from('stock_items').update({ name, unit }).eq('id', id);
+export async function updateStockItem(id: string, name: string, unit: string, type?: 'product' | 'ingredient'): Promise<string | null> {
+  const patch: Record<string, unknown> = { name, unit };
+  if (type) patch.type = type;
+  const { error } = await supabase.from('stock_items').update(patch).eq('id', id);
   if (error) { console.error('[updateStockItem]', error); return error.message; }
   return null;
 }
@@ -638,6 +645,20 @@ export async function saveRecipe(menuItemId: string, lines: RecipeIngredient[]):
     console.error('[saveRecipe]', e);
     return 'Şəbəkə xətası — resept yadda saxlanmadı';
   }
+}
+
+// Back a menu product with its own stock item + qty-1 self recipe + a 0 balance
+// in the sales warehouse, so it shows in Qalıqlar and deducts itself on sale.
+// Idempotent: a menu item that already has a recipe is left untouched.
+export async function linkProductStock(menuItemId: string, unit = 'ədəd'): Promise<string | null> {
+  const { error } = await supabase.rpc('link_product_stock', { p_menu_item_id: menuItemId, p_unit: unit });
+  if (error) {
+    console.error('[linkProductStock]', error);
+    if (error.message.includes('no_sales_warehouse')) return 'Əvvəlcə satış anbarı seçin (Anbar → Anbarlar)';
+    if (error.message.includes('not_owner')) return 'Yalnız sahib məhsulu anbara əlavə edə bilər';
+    return error.message;
+  }
+  return null;
 }
 
 export async function fetchSalesWarehouse(): Promise<string | null> {

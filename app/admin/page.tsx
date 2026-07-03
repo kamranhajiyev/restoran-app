@@ -30,7 +30,7 @@ import {
   fetchCompanySettings, updateCompanyHours,
   fetchLoginEvents, LoginEvent,
   fetchStaff, createStaff, updateStaff, setStaffPin, deleteStaff,
-  fetchSellerToken,
+  fetchSellerToken, linkProductStock,
 } from '@/lib/store';
 import {
   CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc,
@@ -93,7 +93,7 @@ type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
 
 function emptyForm(cat: string) {
-  return { name: '', price: '', costPrice: '', category: cat, image: '', cookingStation: '', hasVariants: false, variants: [] as FormVariant[] };
+  return { name: '', price: '', costPrice: '', category: cat, image: '', cookingStation: '', kind: 'product' as 'product' | 'meal', hasVariants: false, variants: [] as FormVariant[] };
 }
 
 const AZ_MON_SHORT = ['Yan','Fev','Mar','Apr','May','İyn','İyl','Avq','Sen','Okt','Noy','Dek'];
@@ -347,6 +347,7 @@ function AdminPageContent() {
     });
   }
   const [menuSearch, setMenuSearch] = useState('');
+  const [kindFilter, setKindFilter] = useState<'all' | 'product' | 'meal'>('all');
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
   const [importing, setImporting] = useState(false);
   const importFileRef = useRef<HTMLInputElement>(null);
@@ -729,6 +730,7 @@ function AdminPageContent() {
       category: item.category,
       image: item.image ?? '',
       cookingStation: item.cookingStation ?? '',
+      kind: item.kind ?? 'product',
       hasVariants: !!item.variants?.length,
       variants: item.variants?.map(v => ({ id: v.id, name: v.name, price: String(v.price), costPrice: v.costPrice ? String(v.costPrice) : '' })) ?? [],
     });
@@ -754,11 +756,19 @@ function AdminPageContent() {
       costPrice: form.costPrice ? parseFloat(form.costPrice) : undefined,
       image: form.image || undefined,
       cookingStation: form.cookingStation || undefined,
+      kind: form.kind,
     };
     const updated = editingId ? menu.map(m => m.id === editingId ? item : m) : [...menu, item];
     setMenu(updated);
     setSaving(true);
     await persistMenu(updated);
+    // A product is stock-tracked: back it with its own stock item(s) + 0 balance so it
+    // shows in Qalıqlar. Idempotent — already-linked products/variants are left untouched.
+    // A product with variants links one stock item per variant.
+    if (item.kind === 'product') {
+      const err = await linkProductStock(item.id);
+      if (err) setDialog({ title: 'Diqqət', message: 'Məhsul anbara əlavə olunmadı: ' + err });
+    }
     setSaving(false);
     cancelForm();
   }
@@ -1130,6 +1140,22 @@ function AdminPageContent() {
             className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white">
             {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
           </select>
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-stone-600 mb-1.5 block">Növ</label>
+          <div className="inline-flex rounded-lg border border-stone-200 overflow-hidden">
+            {([['product', 'Məhsul'], ['meal', 'Yemək']] as const).map(([val, label]) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setForm(f => ({ ...f, kind: val }))}
+                className={`px-4 py-2 text-sm font-medium transition-colors ${form.kind === val ? 'bg-amber-700 text-white' : 'bg-white text-stone-600 hover:bg-stone-50'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div>
@@ -2408,6 +2434,18 @@ function AdminPageContent() {
                 </div>
               </div>
 
+              <div className="flex items-center gap-2 mb-3">
+                {([['all', 'Hamısı'], ['meal', 'Yeməklər'], ['product', 'Məhsullar']] as const).map(([val, label]) => (
+                  <button
+                    key={val}
+                    onClick={() => setKindFilter(val)}
+                    className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${kindFilter === val ? 'bg-amber-700 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
               <div className="relative mb-5">
                 <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
@@ -2427,9 +2465,11 @@ function AdminPageContent() {
               <SortableContext items={categories.map(c => `cat:${c.name}`)} strategy={verticalListSortingStrategy}>
               {categories.map(({ name: cat, available: catAvailable }) => {
                 const allItems = menu.filter(m => m.category === cat);
-                const items = menuQuery ? allItems.filter(m => azNormalize(m.name).includes(menuQuery)) : allItems;
-                if (menuQuery && items.length === 0) return null;
-                const isCollapsed = !menuQuery && collapsedCats.has(cat);
+                const items = allItems.filter(m =>
+                  (kindFilter === 'all' || (m.kind ?? 'product') === kindFilter) &&
+                  (!menuQuery || azNormalize(m.name).includes(menuQuery)));
+                if ((menuQuery || kindFilter !== 'all') && items.length === 0) return null;
+                const isCollapsed = !menuQuery && kindFilter === 'all' && collapsedCats.has(cat);
                 return (
                   <SortableRow key={cat} id={`cat:${cat}`} className="mb-5">
                   {catHandle => (<>

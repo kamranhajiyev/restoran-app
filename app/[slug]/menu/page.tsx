@@ -11,6 +11,7 @@ interface CartItem {
   menuItem: MenuItem;
   quantity: number;
   variantName?: string;
+  variantId?: string;
 }
 
 export default function CustomerMenuPage({
@@ -116,12 +117,12 @@ export default function CustomerMenuPage({
 
   function confirmVariant() {
     if (!variantItem || !selectedVariant) return;
-    addToCart({ ...variantItem, price: selectedVariant.price }, selectedVariant.name);
+    addToCart({ ...variantItem, price: selectedVariant.price }, selectedVariant.name, selectedVariant.id);
     setVariantItem(null);
     setSelectedVariant(null);
   }
 
-  function addToCart(item: MenuItem, variantName?: string) {
+  function addToCart(item: MenuItem, variantName?: string, variantId?: string) {
     const key = item.id + (variantName ?? '');
     setCart(prev => {
       const ex = prev.find(c => c.menuItem.id === item.id && (c.variantName ?? '') === (variantName ?? ''));
@@ -129,7 +130,7 @@ export default function CustomerMenuPage({
         c.menuItem.id === item.id && (c.variantName ?? '') === (variantName ?? '')
           ? { ...c, quantity: c.quantity + 1 } : c
       );
-      return [...prev, { menuItem: item, quantity: 1, variantName }];
+      return [...prev, { menuItem: item, quantity: 1, variantName, variantId }];
     });
     void key;
   }
@@ -165,6 +166,7 @@ export default function CustomerMenuPage({
         menuItem: c.menuItem,
         quantity: c.quantity,
         modifiers: c.variantName,
+        variantId: c.variantId,
       })),
     });
     setSubmitting(false);

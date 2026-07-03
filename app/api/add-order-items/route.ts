@@ -5,6 +5,7 @@ interface IncomingItem {
   menuItem: { id: string | number; name: string; price: number };
   quantity: number;
   modifiers?: string;
+  variantId?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -39,6 +40,7 @@ export async function POST(req: NextRequest) {
     menu_item_price: Number(oi.menuItem.price),
     quantity: Number(oi.quantity),
     modifiers: oi.modifiers ?? null,
+    variant_id: oi.variantId ?? null,
   }));
 
   const { error } = await db.from('order_items').insert(rows);
