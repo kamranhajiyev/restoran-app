@@ -1,4 +1,4 @@
-import { CashShift, Category, MenuItem, Order, OrderItem, ReceiptLine, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftMovement, Staff, StockBalance, StockItem, StockMovement, StockReceipt, Supplier, TrashItem, Warehouse } from '@/types';
+import { CashShift, Category, MenuItem, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftMovement, Staff, StockBalance, StockItem, StockMovement, StockReceipt, Supplier, SupplierLedger, TrashItem, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { supabase } from './supabase';
 
@@ -556,12 +556,14 @@ export async function fetchBalances(warehouseId?: string): Promise<StockBalance[
 export async function fetchReceipts(): Promise<StockReceipt[]> {
   try {
     const { data, error } = await supabase.from('stock_receipts')
-      .select('id, warehouse_id, supplier_id, total, note, created_by, created_at')
+      .select('id, warehouse_id, supplier_id, total, paid_amount, note, created_by, created_at, voided_at, voided_by')
       .order('created_at', { ascending: false }).limit(200);
     if (error || !data) return [];
     return data.map(r => ({
       id: r.id, warehouseId: r.warehouse_id, supplierId: r.supplier_id ?? undefined,
-      total: Number(r.total), note: r.note ?? undefined, createdBy: r.created_by ?? undefined, createdAt: r.created_at,
+      total: Number(r.total), paidAmount: Number(r.paid_amount ?? 0),
+      note: r.note ?? undefined, createdBy: r.created_by ?? undefined, createdAt: r.created_at,
+      voidedAt: r.voided_at ?? undefined, voidedBy: r.voided_by ?? undefined,
     }));
   } catch { return []; }
 }
@@ -580,15 +582,116 @@ export async function fetchMovements(stockItemId: string): Promise<StockMovement
   } catch { return []; }
 }
 
-export async function recordReceipt(warehouseId: string, supplierId: string | null, lines: ReceiptLine[], note: string): Promise<string | null> {
+export async function recordReceipt(warehouseId: string, supplierId: string | null, lines: ReceiptLine[], note: string, paidAmount = 0): Promise<string | null> {
   const { error } = await supabase.rpc('record_receipt', {
     p_warehouse_id: warehouseId,
     p_supplier_id: supplierId,
     p_lines: lines.map(l => ({ stock_item_id: l.stockItemId, qty: l.qty, unit_cost: l.unitCost ?? null })),
     p_note: note || null,
+    p_paid_amount: paidAmount || 0,
   });
   if (error) { console.error('[recordReceipt]', error); return error.message; }
   return null;
+}
+
+// Edit a purchase in place: reverses old lines and reinserts the new ones (same row id).
+export async function updateReceipt(receiptId: string, warehouseId: string, supplierId: string | null, lines: ReceiptLine[], note: string, paidAmount = 0): Promise<string | null> {
+  const { error } = await supabase.rpc('update_receipt', {
+    p_receipt_id: receiptId,
+    p_warehouse_id: warehouseId,
+    p_supplier_id: supplierId,
+    p_lines: lines.map(l => ({ stock_item_id: l.stockItemId, qty: l.qty, unit_cost: l.unitCost ?? null })),
+    p_note: note || null,
+    p_paid_amount: paidAmount || 0,
+  });
+  if (error) { console.error('[updateReceipt]', error); return error.message; }
+  return null;
+}
+
+// Soft-delete a purchase: reverses its stock, keeps the row (shown red). Idempotent.
+export async function voidReceipt(receiptId: string): Promise<string | null> {
+  const { error } = await supabase.rpc('void_receipt', { p_receipt_id: receiptId });
+  if (error) { console.error('[voidReceipt]', error); return error.message; }
+  return null;
+}
+
+// The lines of one existing purchase, reconstructed from its stock_movements.
+export async function fetchReceiptLines(receiptId: string): Promise<ReceiptLineDetail[]> {
+  try {
+    const { data, error } = await supabase.from('stock_movements')
+      .select('stock_item_id, qty, unit_cost, stock_items(name, unit)')
+      .eq('receipt_id', receiptId).eq('reason', 'receipt');
+    if (error || !data) return [];
+    return data.map((m: Record<string, unknown>) => {
+      const si = (m.stock_items ?? {}) as { name?: string; unit?: string };
+      return {
+        stockItemId: m.stock_item_id as string,
+        name: si.name ?? '',
+        unit: si.unit ?? '',
+        qty: Number(m.qty ?? 0),
+        unitCost: m.unit_cost !== null && m.unit_cost !== undefined ? Number(m.unit_cost) : undefined,
+      };
+    });
+  } catch { return []; }
+}
+
+// The Silinmələr log: every write-off, newest first, with item + warehouse names.
+export async function fetchWriteoffs(): Promise<WriteoffEntry[]> {
+  try {
+    const { data, error } = await supabase.from('stock_movements')
+      .select('id, warehouse_id, stock_item_id, qty, note, created_by, created_at, stock_items(name, unit), warehouses(name)')
+      .eq('reason', 'writeoff').order('created_at', { ascending: false }).limit(300);
+    if (error || !data) return [];
+    return data.map((m: Record<string, unknown>) => {
+      const si = (m.stock_items ?? {}) as { name?: string; unit?: string };
+      const wh = (m.warehouses ?? {}) as { name?: string };
+      return {
+        id: m.id as string,
+        warehouseId: m.warehouse_id as string,
+        warehouseName: wh.name ?? '—',
+        stockItemId: m.stock_item_id as string,
+        name: si.name ?? '',
+        unit: si.unit ?? '',
+        qty: Math.abs(Number(m.qty ?? 0)),
+        reason: (m.note as string | null) ?? undefined,
+        createdBy: (m.created_by as string | null) ?? undefined,
+        createdAt: m.created_at as string,
+      };
+    });
+  } catch { return []; }
+}
+
+// Standalone supplier payment (pay-later against accumulated debt).
+export async function addSupplierPayment(supplierId: string, amount: number, note: string): Promise<string | null> {
+  const { error } = await supabase.rpc('add_supplier_payment', {
+    p_supplier_id: supplierId, p_amount: amount, p_note: note || null,
+  });
+  if (error) { console.error('[addSupplierPayment]', error); return error.message; }
+  return null;
+}
+
+// Per-supplier money summary: total purchased (non-voided), paid, and outstanding debt.
+export async function fetchSupplierLedger(): Promise<Record<string, SupplierLedger>> {
+  const out: Record<string, SupplierLedger> = {};
+  const ensure = (id: string) => (out[id] ??= { total: 0, paid: 0, debt: 0 });
+  try {
+    const [receipts, payments] = await Promise.all([
+      supabase.from('stock_receipts').select('supplier_id, total, paid_amount, voided_at'),
+      supabase.from('supplier_payments').select('supplier_id, amount'),
+    ]);
+    for (const r of receipts.data ?? []) {
+      if (!r.supplier_id || r.voided_at) continue;
+      const l = ensure(r.supplier_id);
+      l.total += Number(r.total ?? 0);
+      l.paid += Number(r.paid_amount ?? 0);
+    }
+    for (const p of payments.data ?? []) {
+      if (!p.supplier_id) continue;
+      ensure(p.supplier_id).paid += Number(p.amount ?? 0);
+    }
+    for (const id of Object.keys(out)) out[id].debt = out[id].total - out[id].paid;
+    return out;
+  } catch { return out; }
 }
 
 export async function recordWriteoff(warehouseId: string, stockItemId: string, qty: number, reason: string): Promise<string | null> {

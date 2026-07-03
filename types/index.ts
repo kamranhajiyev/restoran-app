@@ -129,9 +129,10 @@ export interface StockMovement {
   warehouseId: string;
   stockItemId: string;
   qty: number;
-  reason: 'receipt' | 'writeoff' | 'recount';
+  reason: 'receipt' | 'writeoff' | 'recount' | 'sale' | 'sale_void' | 'void';
   unitCost?: number;
   receiptId?: string;
+  note?: string;
   createdBy?: string;
   createdAt: string;
 }
@@ -141,9 +142,42 @@ export interface StockReceipt {
   warehouseId: string;
   supplierId?: string;
   total: number;
+  paidAmount: number;
   note?: string;
   createdBy?: string;
   createdAt: string;
+  voidedAt?: string;
+  voidedBy?: string;
+}
+
+// One line of an existing goods receipt (reconstructed from stock_movements).
+export interface ReceiptLineDetail {
+  stockItemId: string;
+  name: string;
+  unit: string;
+  qty: number;
+  unitCost?: number;
+}
+
+// A write-off entry for the Silinmələr log.
+export interface WriteoffEntry {
+  id: string;
+  warehouseId: string;
+  warehouseName: string;
+  stockItemId: string;
+  name: string;
+  unit: string;
+  qty: number;          // positive magnitude removed
+  reason?: string;      // from stock_movements.note
+  createdBy?: string;
+  createdAt: string;
+}
+
+// Per-supplier money summary for the Tədarükçülər view.
+export interface SupplierLedger {
+  total: number;   // total purchased (non-voided receipts)
+  paid: number;    // paid on receipts + standalone payments
+  debt: number;    // total − paid
 }
 
 // One line of a goods receipt, as sent to record_receipt.
