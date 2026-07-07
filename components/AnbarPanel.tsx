@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Pencil, Trash2, Warehouse, Boxes, Truck, ShoppingCart, X, BookOpen, Eraser, ChevronDown, Wallet } from 'lucide-react';
 import {
   fetchWarehouses, createWarehouse, updateWarehouse, deleteWarehouse,
-  fetchSuppliers, createSupplier, updateSupplier, deleteSupplier, fetchSupplierLedger, addSupplierPayment,
+  fetchSuppliers, createSupplier, updateSupplier, deleteSupplier, fetchSupplierLedger, fetchSupplierPayments, addSupplierPayment,
   fetchStockItems, createStockItem, updateStockItem, deleteStockItem,
   fetchBalances, fetchReceipts, recordReceipt, updateReceipt, voidReceipt, recordWriteoff,
   fetchReceiptLines, fetchWriteoffs,
@@ -31,7 +32,20 @@ const btnPrimary = 'inline-flex items-center gap-1.5 px-3.5 py-2 text-sm rounded
 const btnGhost = 'inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors';
 
 export default function AnbarPanel({ setDialog }: { setDialog: (d: DialogState | null) => void }) {
-  const [sub, setSub] = useState<Sub>('warehouses');
+  // Persist the active sub-tab in the URL (?sub=…) so a refresh keeps you where you were instead of
+  // snapping back to the first sub-tab. Driven through Next's router (same as the main ?tab=…) so the
+  // router's URL and the address bar stay in sync — a plain history.replaceState would diverge from
+  // useSearchParams and reset on refresh.
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const subParam = searchParams.get('sub');
+  const sub: Sub = SUBS.some(x => x.id === subParam) ? (subParam as Sub) : 'warehouses';
+  function setSub(s: Sub) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', 'anbar');
+    params.set('sub', s);
+    router.replace(`/admin?${params.toString()}`);
+  }
   const [warehouses, setWarehouses] = useState<Wh[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [items, setItems] = useState<StockItem[]>([]);
@@ -287,7 +301,9 @@ function SuppliersTab({ suppliers, reload, flash, fail, setDialog }: {
 function PaySupplierModal({ supplier, debt, onClose, onDone, fail }: {
   supplier: Supplier; debt: number; onClose: () => void; onDone: () => void; fail: (m: string | null) => void;
 }) {
-  const [amount, setAmount] = useState(debt > 0 ? debt.toFixed(2) : '');
+  // Start empty so the user types the amount they're actually paying — the field no longer
+  // pre-fills the full debt (a blind confirm would otherwise close the whole debt). "tam" fills it.
+  const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   async function save() {
@@ -303,7 +319,13 @@ function PaySupplierModal({ supplier, debt, onClose, onDone, fail }: {
     <Modal title={`Ödəniş — ${supplier.name}`} onClose={onClose}>
       <p className="text-xs text-stone-500 mb-3">Cari borc: <b className="tabular-nums">{debt.toFixed(2)} ₼</b></p>
       <div className="space-y-3">
-        <div><label className="block text-xs text-stone-500 mb-1">Məbləğ (₼)</label><input className={inputCls} type="number" value={amount} onChange={e => setAmount(e.target.value)} autoFocus /></div>
+        <div>
+          <label className="block text-xs text-stone-500 mb-1">Məbləğ (₼)</label>
+          <div className="flex items-center gap-2">
+            <input className={inputCls} type="number" placeholder="0" value={amount} onChange={e => setAmount(e.target.value)} autoFocus />
+            {debt > 0 && <button type="button" className="text-xs text-stone-500 whitespace-nowrap hover:text-stone-800" onClick={() => setAmount(debt.toFixed(2))}>tam</button>}
+          </div>
+        </div>
         <div><label className="block text-xs text-stone-500 mb-1">Qeyd</label><input className={inputCls} value={note} onChange={e => setNote(e.target.value)} placeholder="nağd ödəniş" /></div>
       </div>
       <div className="flex justify-end gap-2 mt-4">
@@ -349,7 +371,7 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
         <select className={`${inputCls} w-auto`} value={whId} onChange={e => setWhId(e.target.value)}>
           {activeWh.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
         </select>
-        <button className={btnGhost} onClick={() => setItemModal('new')}><Plus className="w-4 h-4" /> Yeni məhsul</button>
+        <button className={btnGhost} onClick={() => setItemModal('new')}><Plus className="w-4 h-4" /> Yeni inqrediyent</button>
       </div>
 
       <div className="flex items-center gap-2">
@@ -411,7 +433,9 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
 function ItemModal({ item, onClose, onSaved, fail }: { item: StockItem | 'new'; onClose: () => void; onSaved: () => void; fail: (m: string | null) => void }) {
   const [name, setName] = useState(item === 'new' ? '' : item.name);
   const [unit, setUnit] = useState(item === 'new' ? 'ədəd' : item.unit);
-  const [type, setType] = useState<'product' | 'ingredient'>(item === 'new' ? 'ingredient' : (item.type ?? 'ingredient'));
+  // New stock items are always ingredients (products are created in the Menu tab and auto-linked to
+  // stock). Editing preserves the item's existing type — it's not reclassifiable here.
+  const type: 'product' | 'ingredient' = item === 'new' ? 'ingredient' : (item.type ?? 'ingredient');
   const [busy, setBusy] = useState(false);
   async function save() {
     if (!name.trim()) return;
@@ -422,20 +446,9 @@ function ItemModal({ item, onClose, onSaved, fail }: { item: StockItem | 'new'; 
     onSaved();
   }
   return (
-    <Modal title={item === 'new' ? 'Yeni məhsul' : 'Məhsulu düzəlt'} onClose={onClose}>
+    <Modal title={item === 'new' ? 'Yeni inqrediyent' : (type === 'product' ? 'Məhsulu düzəlt' : 'İnqrediyenti düzəlt')} onClose={onClose}>
       <div className="space-y-3">
         <div><label className="block text-xs text-stone-500 mb-1">Ad</label><input className={inputCls} value={name} onChange={e => setName(e.target.value)} placeholder="Kartof" autoFocus /></div>
-        <div>
-          <label className="block text-xs text-stone-500 mb-1">Növ</label>
-          <div className="inline-flex rounded-lg border border-stone-200 overflow-hidden">
-            {([['ingredient', 'İnqrediyent'], ['product', 'Məhsul']] as const).map(([val, label]) => (
-              <button key={val} type="button" onClick={() => setType(val)}
-                className={`px-4 py-2 text-sm font-medium transition-colors ${type === val ? 'bg-amber-700 text-white' : 'bg-white text-stone-600 hover:bg-stone-50'}`}>
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
         <div>
           <label className="block text-xs text-stone-500 mb-1">Ölçü vahidi</label>
           <select className={inputCls} value={unit} onChange={e => setUnit(e.target.value)}>
@@ -486,12 +499,37 @@ function ReceiptsTab({ warehouses, suppliers, items, flash, fail, setDialog }: {
 }) {
   const activeWh = useMemo(() => warehouses.filter(w => w.active), [warehouses]);
   const [receipts, setReceipts] = useState<StockReceipt[]>([]);
+  const [supPayments, setSupPayments] = useState<Record<string, number>>({});
   const [editingReceipt, setEditingReceipt] = useState<StockReceipt | 'new' | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [lineCache, setLineCache] = useState<Record<string, ReceiptLineDetail[]>>({});
 
-  async function reload() { setReceipts(await fetchReceipts()); }
+  async function reload() {
+    const [rs, pays] = await Promise.all([fetchReceipts(), fetchSupplierPayments()]);
+    setReceipts(rs); setSupPayments(pays);
+  }
   useEffect(() => { reload(); }, []);
+
+  // Standalone supplier payments (the Ödəniş box) aren't tied to a receipt. Allocate each
+  // supplier's payment pool across their non-voided receipts oldest-first, so paying a supplier
+  // clears the debt shown on their purchases too — matching the Tədarükçülər ledger.
+  const effectiveDebt = useMemo(() => {
+    const pool = { ...supPayments };
+    const map: Record<string, number> = {};
+    const ordered = [...receipts]
+      .filter(r => !r.voidedAt)
+      .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
+    for (const r of ordered) {
+      let d = r.total - r.paidAmount;
+      const sid = r.supplierId;
+      if (sid && (pool[sid] ?? 0) > 0 && d > 0) {
+        const applied = Math.min(pool[sid], d);
+        d -= applied; pool[sid] -= applied;
+      }
+      map[r.id] = d;
+    }
+    return map;
+  }, [receipts, supPayments]);
 
   const whName = (id: string) => warehouses.find(w => w.id === id)?.name ?? '—';
   const supName = (id?: string) => suppliers.find(s => s.id === id)?.name ?? '—';
@@ -529,7 +567,7 @@ function ReceiptsTab({ warehouses, suppliers, items, flash, fail, setDialog }: {
           const voided = !!r.voidedAt;
           const open = expandedId === r.id;
           const lines = lineCache[r.id];
-          const debt = r.total - r.paidAmount;
+          const debt = effectiveDebt[r.id] ?? (r.total - r.paidAmount);
           return (
             <div key={r.id}>
               <button className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-stone-50 transition-colors" onClick={() => toggle(r)}>
@@ -552,6 +590,12 @@ function ReceiptsTab({ warehouses, suppliers, items, flash, fail, setDialog }: {
               </button>
               {open && (
                 <div className="px-4 pb-3 bg-stone-50/60">
+                  {r.note && (
+                    <div className="py-2 text-sm">
+                      <span className="text-stone-500">Qeyd: </span>
+                      <span className="text-stone-700">{r.note}</span>
+                    </div>
+                  )}
                   {lines === undefined ? null : lines.length === 0 ? (
                     <p className="text-xs text-stone-400 py-2">Yüklənir…</p>
                   ) : (
@@ -570,7 +614,7 @@ function ReceiptsTab({ warehouses, suppliers, items, flash, fail, setDialog }: {
                       </div>
                       <div className="flex items-center justify-between py-1.5 text-xs">
                         <span className="text-stone-500">Ödənilib</span>
-                        <span className="tabular-nums text-stone-600">{r.paidAmount.toFixed(2)} ₼{debt > 0.005 ? ` · borc ${debt.toFixed(2)} ₼` : ''}</span>
+                        <span className="tabular-nums text-stone-600">{(r.total - debt).toFixed(2)} ₼{debt > 0.005 ? ` · borc ${debt.toFixed(2)} ₼` : ''}</span>
                       </div>
                     </div>
                   )}
@@ -681,14 +725,19 @@ function NewReceipt({ activeWh, suppliers, items, initial, initialLines, onClose
           <button className={btnGhost} onClick={() => setLines([...lines, { stockItemId: items[0]?.id ?? '', qty: '', unitCost: '' }])}><Plus className="w-3.5 h-3.5" /> Sətir</button>
         </div>
         {lines.map((l, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <select className={`${inputCls} flex-1`} value={l.stockItemId} onChange={e => setLine(i, { stockItemId: e.target.value })}>
-              {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
-            </select>
-            <input className={`${inputCls} w-20`} type="number" placeholder="say" value={l.qty} onChange={e => setLine(i, { qty: e.target.value })} />
-            <span className="text-xs text-stone-400 w-8">{unitOf(l.stockItemId)}</span>
-            <input className={`${inputCls} w-24`} type="number" placeholder="qiymət" value={l.unitCost} onChange={e => setLine(i, { unitCost: e.target.value })} />
-            {lines.length > 1 && <button className="text-stone-400 hover:text-red-500" onClick={() => setLines(lines.filter((_, idx) => idx !== i))}><X className="w-4 h-4" /></button>}
+          <div key={i} className="space-y-1.5 rounded-lg border border-stone-100 p-2">
+            {/* Product name on its own full-width row so long names are always fully visible. */}
+            <div className="flex items-center gap-2">
+              <select className={`${inputCls} flex-1 min-w-0`} value={l.stockItemId} onChange={e => setLine(i, { stockItemId: e.target.value })}>
+                {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
+              </select>
+              {lines.length > 1 && <button className="shrink-0 text-stone-400 hover:text-red-500" onClick={() => setLines(lines.filter((_, idx) => idx !== i))}><X className="w-4 h-4" /></button>}
+            </div>
+            <div className="flex items-center gap-2">
+              <input className={`${inputCls} flex-1 min-w-0`} type="number" placeholder="say" value={l.qty} onChange={e => setLine(i, { qty: e.target.value })} />
+              <span className="w-8 shrink-0 text-xs text-stone-400">{unitOf(l.stockItemId)}</span>
+              <input className={`${inputCls} flex-1 min-w-0`} type="number" placeholder="qiymət (₼)" value={l.unitCost} onChange={e => setLine(i, { unitCost: e.target.value })} />
+            </div>
           </div>
         ))}
       </div>

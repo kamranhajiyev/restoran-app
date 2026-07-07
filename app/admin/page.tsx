@@ -93,7 +93,7 @@ type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
 
 function emptyForm(cat: string) {
-  return { name: '', price: '', costPrice: '', category: cat, image: '', cookingStation: '', kind: 'product' as 'product' | 'meal', hasVariants: false, variants: [] as FormVariant[] };
+  return { name: '', price: '', costPrice: '', category: cat, image: '', cookingStation: '', kind: 'meal' as 'product' | 'meal', hasVariants: false, variants: [] as FormVariant[] };
 }
 
 const AZ_MON_SHORT = ['Yan','Fev','Mar','Apr','May','İyn','İyl','Avq','Sen','Okt','Noy','Dek'];
@@ -794,7 +794,8 @@ function AdminPageContent() {
     const name = quickAdd.name.trim();
     const price = parseFloat(quickAdd.price);
     if (!name || isNaN(price) || price < 0) return;
-    const item: MenuItem = { id: crypto.randomUUID(), name, price: Math.round(price * 100) / 100, category: cat, available: true };
+    // Follow the active filter tab: creating under "Məhsullar" makes a product, otherwise a meal.
+    const item: MenuItem = { id: crypto.randomUUID(), name, price: Math.round(price * 100) / 100, category: cat, available: true, kind: kindFilter === 'product' ? 'product' : 'meal' };
     const updated = [...menu, item];
     setMenu(updated);
     setQuickAdd({ cat, name: '', price: '' });
@@ -2552,7 +2553,7 @@ function AdminPageContent() {
                       {!menuQuery && (
                       <div className="flex items-center gap-2 px-4 py-2.5 border-t border-stone-100 bg-stone-50/60">
                         <input
-                          type="text" placeholder="Yeni məhsul adı…"
+                          type="text" placeholder={kindFilter === 'product' ? 'Yeni məhsul adı…' : 'Yeni yemək adı…'}
                           data-quickadd={cat}
                           value={quickAdd.cat === cat ? quickAdd.name : ''}
                           onChange={e => setQuickAdd({ cat, name: e.target.value, price: quickAdd.cat === cat ? quickAdd.price : '' })}

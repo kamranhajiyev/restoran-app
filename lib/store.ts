@@ -670,6 +670,20 @@ export async function addSupplierPayment(supplierId: string, amount: number, not
   return null;
 }
 
+// Per-supplier total of standalone payments (the Ödəniş box), summed by supplier.
+// Used to net these payments against individual receipts in the Bazarlıqlar view.
+export async function fetchSupplierPayments(): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  try {
+    const { data } = await supabase.from('supplier_payments').select('supplier_id, amount');
+    for (const p of data ?? []) {
+      if (!p.supplier_id) continue;
+      out[p.supplier_id] = (out[p.supplier_id] ?? 0) + Number(p.amount ?? 0);
+    }
+  } catch { /* ignore */ }
+  return out;
+}
+
 // Per-supplier money summary: total purchased (non-voided), paid, and outstanding debt.
 export async function fetchSupplierLedger(): Promise<Record<string, SupplierLedger>> {
   const out: Record<string, SupplierLedger> = {};
