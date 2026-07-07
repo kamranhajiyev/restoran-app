@@ -1,9 +1,10 @@
 import { NextRequest } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 
 export async function POST(req: NextRequest) {
-  const { orderId, reason, by } = await req.json();
+  const { orderId, reason, by, companyId, token } = await req.json();
   if (!orderId || !reason || !by) return Response.json({ ok: false }, { status: 400 });
+  if (!(await verifySellerToken(companyId, token))) return Response.json({ ok: false, error: 'revoked' }, { status: 403 });
 
   const db = createServerClient();
   const { data, error } = await db
@@ -15,6 +16,7 @@ export async function POST(req: NextRequest) {
       cancel_reason: reason,
     })
     .eq('id', orderId)
+    .eq('company_id', companyId)
     .neq('status', 'ödənilib')
     .neq('status', 'ləğv edildi')
     .select('id');

@@ -1,9 +1,10 @@
 import { NextRequest } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 
 export async function POST(req: NextRequest) {
-  const { shiftId, expectedCash, countedCash, closedBy, cardSales, countedCard } = await req.json();
+  const { shiftId, expectedCash, countedCash, closedBy, cardSales, countedCard, companyId, token } = await req.json();
   if (!shiftId || !closedBy) return Response.json({ ok: false }, { status: 400 });
+  if (!(await verifySellerToken(companyId, token))) return Response.json({ ok: false, error: 'revoked' }, { status: 403 });
 
   const db = createServerClient();
   const { error } = await db
@@ -16,7 +17,8 @@ export async function POST(req: NextRequest) {
       card_sales: cardSales ?? null,
       counted_card: countedCard ?? null,
     })
-    .eq('id', shiftId);
+    .eq('id', shiftId)
+    .eq('company_id', companyId);
 
   if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
   return Response.json({ ok: true });

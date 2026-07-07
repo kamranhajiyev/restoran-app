@@ -77,7 +77,7 @@ function tableHasActive(n: number, orders: Order[]): boolean {
   return orders.some(o => o.tableNumber === n && isOrderOpen(o));
 }
 
-export default function SellerPage({ overrideCompanyId, overrideCompanyName }: { overrideCompanyId?: string; overrideCompanyName?: string } = {}) {
+export default function SellerPage({ overrideCompanyId, overrideCompanyName, overrideToken }: { overrideCompanyId?: string; overrideCompanyName?: string; overrideToken?: string } = {}) {
   const router = useRouter();
   const [view, setView]             = useState<View>('orders');
   const [menu, setMenu]             = useState<MenuItem[]>([]);
@@ -129,7 +129,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       ? await fetch('/api/verify-pin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ companyId: overrideCompanyId, pin: next }),
+          body: JSON.stringify({ companyId: overrideCompanyId, pin: next, token: overrideToken }),
         }).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }))
       : await verifyStaffPin(next);
     setPinBusy(false);
@@ -171,6 +171,19 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   useEffect(() => {
     if (pinLocked) { setPinInput(''); setPinMsg(''); }
   }, [pinLocked]);
+
+  // Kick out an already-logged-in seller who gets deactivated (or deleted) while inside the app.
+  // The staff list is refreshed by the terminal poll / focus sync; if the active seller is no
+  // longer present-and-active there, clear the session so they drop to the PIN lock screen.
+  // Only act on a non-empty list so a transient failed fetch can't force a false logout.
+  useEffect(() => {
+    if (!activeStaff || pinStaffList.length === 0) return;
+    const stillValid = pinStaffList.some(s => s.id === activeStaff.id && s.active);
+    if (!stillValid) {
+      sessionStorage.removeItem('activeStaff');
+      setActiveStaff(null);
+    }
+  }, [pinStaffList, activeStaff]);
 
   // order history
   const [historySearch, setHistorySearch]   = useState('');
@@ -232,18 +245,20 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const PULL_THRESHOLD = 72;
 
-  const refreshAll = useCallback(async () => {
-    setPullRefreshing(true);
+  const refreshAll = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (!silent) setPullRefreshing(true);
     try {
       if (overrideCompanyId) {
-        const [m, o, c, tb] = await Promise.all([
+        const [m, o, c, tb, st] = await Promise.all([
           fetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
           fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
           fetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
           fetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.tables ?? []).catch(() => []),
+          fetch(`/api/public-staff?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.staff ?? []).catch(() => null),
         ]);
         setMenu(m); setOrders(o); setTables(tb);
         setAvailableCategories(c.filter((cat: { available: boolean }) => cat.available));
+        if (st) setPinStaffList(st);
       } else {
         const [m, o, c, st, s] = await Promise.all([
           fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(),
@@ -253,7 +268,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
         setPinStaffList(st);
       }
     } catch { /* ignore */ } finally {
-      setPullRefreshing(false);
+      if (!silent) setPullRefreshing(false);
     }
   }, [overrideCompanyId]);
 
@@ -359,6 +374,24 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [overrideCompanyId]);
+
+  // Public terminal: the anon supabase client can't receive realtime (no auth session, RLS),
+  // so poll the public endpoints on an interval and on tab-focus. This propagates admin-side
+  // changes (hidden menu items, deactivated sellers) to an open terminal without a manual refresh.
+  // (The wrapper page handles token revalidation / link revocation separately.)
+  useEffect(() => {
+    if (!overrideCompanyId) return;
+    const sync = () => { if (document.visibilityState !== 'hidden') refreshAll({ silent: true }); };
+    const id = setInterval(sync, 40000);
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshAll({ silent: true }); };
+    window.addEventListener('focus', sync);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('focus', sync);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [overrideCompanyId, refreshAll]);
 
   useEffect(() => {
     const channel = supabase
@@ -489,7 +522,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     const newNote = note.trim();
     setSubmitting(true);
     const saveError = overrideCompanyId
-      ? await fetch('/api/add-order-items', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId, items: newItems, companyId: overrideCompanyId, note: newNote }) })
+      ? await fetch('/api/add-order-items', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId, items: newItems, companyId: overrideCompanyId, note: newNote, token: overrideToken }) })
           .then(r => r.json()).then(d => d.ok ? null : (d.error || 'failed')).catch(() => 'failed')
       : await addItemsToOrder(orderId, newItems, newNote);
     setSubmitting(false);
@@ -577,7 +610,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     setPayingOrder(null);
     // The DB update is conditional — a no-op if someone else already paid this order
     const paid = overrideCompanyId
-      ? await fetch('/api/update-order-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: order.id, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      ? await fetch('/api/update-order-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: order.id, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined, companyId: overrideCompanyId, token: overrideToken }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
       : await updateOrderStatus(order.id, 'ödənilib', cashKept, card, change, discountAmt || undefined, discountAmt ? discountType : undefined);
     if (paid) {
       const paidOrder = { ...order, status: 'ödənilib' as const, cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined };
@@ -606,7 +639,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     setCancelBusy(true);
     // Conditional in the DB — a no-op if the order got paid in the meantime
     const ok = overrideCompanyId
-      ? await fetch('/api/cancel-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: cancelling.id, reason, by: effectiveSeller }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      ? await fetch('/api/cancel-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: cancelling.id, reason, by: effectiveSeller, companyId: overrideCompanyId, token: overrideToken }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
       : await cancelOrder(cancelling.id, reason, effectiveSeller);
     setCancelBusy(false);
     setCancellingOrder(null);
@@ -667,7 +700,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       const d = await fetch('/api/open-shift', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companyId: overrideCompanyId, openingCash: cash, openedBy: effectiveSeller }),
+        body: JSON.stringify({ companyId: overrideCompanyId, openingCash: cash, openedBy: effectiveSeller, token: overrideToken }),
       }).then(r => r.json()).catch(() => ({ shift: null }));
       if (d.shift) s = { id: d.shift.id, openedAt: d.shift.opened_at, openedBy: d.shift.opened_by, openingCash: Number(d.shift.opening_cash), closedAt: d.shift.closed_at ?? undefined, movements: Array.isArray(d.shift.movements) ? d.shift.movements : [] };
     } else {
@@ -687,7 +720,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     setShowMovForm(false); setMovAmount(''); setMovReason('');
     try {
       if (overrideCompanyId) {
-        const res = await fetch('/api/add-shift-movement', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shiftId: shift.id, movement: mv }) }).then(r => r.json());
+        const res = await fetch('/api/add-shift-movement', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shiftId: shift.id, movement: mv, companyId: overrideCompanyId, token: overrideToken }) }).then(r => r.json());
         if (!res.ok) throw new Error('failed');
       } else {
         await addShiftMovement(shift.id, mv);
@@ -716,7 +749,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
       await fetch('/api/close-shift', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shiftId: fresh.id, expectedCash: expected, countedCash: counted, closedBy: effectiveSeller, cardSales: sales.card, countedCard }),
+        body: JSON.stringify({ shiftId: fresh.id, expectedCash: expected, countedCash: counted, closedBy: effectiveSeller, cardSales: sales.card, countedCard, companyId: overrideCompanyId, token: overrideToken }),
       });
     } else {
       await closeShift(fresh.id, expected, counted, effectiveSeller, sales.card, countedCard);
@@ -740,7 +773,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
     const prevStatus = orders.find(o => o.id === id)?.status;
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
     const ok = overrideCompanyId
-      ? await fetch('/api/update-order-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: id, status }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      ? await fetch('/api/update-order-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: id, status, companyId: overrideCompanyId, token: overrideToken }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
       : await updateOrderStatus(id, status);
     if (!ok && prevStatus) {
       setOrders(prev => prev.map(o => o.id === id ? { ...o, status: prevStatus } : o));
@@ -1666,8 +1699,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName }: {
                             <span className="absolute top-2 right-2 z-10 bg-amber-800 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">{inCart}</span>
                           )}
                           {item.image
-                            ? <img src={item.image} alt={item.name} className="w-full h-24 object-cover" />
-                            : <div className="w-full h-24 bg-amber-50 flex items-center justify-center text-3xl">☕</div>
+                            ? <img src={item.image} alt={item.name} className="w-full aspect-[4/3] object-cover" />
+                            : <div className="w-full aspect-[4/3] bg-amber-50 flex items-center justify-center text-3xl">☕</div>
                           }
                           <div className="p-2.5">
                             <p className="text-sm font-medium text-stone-800 leading-tight">{item.name}</p>

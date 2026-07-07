@@ -21,6 +21,31 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
       .catch(() => setState({ status: 'invalid' }));
   }, [slug, token]);
 
+  // Re-validate the link while the terminal stays open so rotating it ("Linki yenilə")
+  // locks an already-open session — on an interval and whenever the tab regains focus —
+  // without the seller needing to refresh. A 404 means the token was revoked; network
+  // blips are ignored so a transient error doesn't lock a valid terminal.
+  useEffect(() => {
+    let cancelled = false;
+    const revalidate = async () => {
+      if (document.visibilityState === 'hidden') return;
+      try {
+        const r = await fetch(`/api/seller-token?slug=${encodeURIComponent(slug)}&token=${encodeURIComponent(token)}`);
+        if (!cancelled && r.status === 404) setState({ status: 'invalid' });
+      } catch { /* ignore transient network errors */ }
+    };
+    const id = setInterval(revalidate, 40000);
+    const onVisible = () => { if (document.visibilityState === 'visible') revalidate(); };
+    window.addEventListener('focus', revalidate);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      window.removeEventListener('focus', revalidate);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [slug, token]);
+
   if (state.status === 'loading') {
     return (
       <div className="min-h-screen bg-stone-50 flex items-center justify-center">
@@ -44,6 +69,7 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
     <SellerPage
       overrideCompanyId={state.companyId}
       overrideCompanyName={state.companyName}
+      overrideToken={token}
     />
   );
 }

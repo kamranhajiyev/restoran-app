@@ -270,8 +270,8 @@ export default function CustomerMenuPage({
             return (
               <div key={item.id} className="bg-white rounded-xl border border-gray-100 overflow-hidden flex flex-col">
                 {item.image
-                  ? <img src={item.image} alt={item.name} className="w-full h-28 object-cover" />
-                  : <div className="w-full h-28 bg-amber-50 flex items-center justify-center"><Coffee className="w-8 h-8 text-amber-200" /></div>
+                  ? <img src={item.image} alt={item.name} className="w-full aspect-[4/3] object-cover" />
+                  : <div className="w-full aspect-[4/3] bg-amber-50 flex items-center justify-center"><Coffee className="w-8 h-8 text-amber-200" /></div>
                 }
                 <div className="p-3 flex flex-col flex-1">
                   <p className="text-sm font-semibold text-gray-800 flex-1">{item.name}</p>

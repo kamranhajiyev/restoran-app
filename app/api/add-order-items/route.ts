@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 
 interface IncomingItem {
   menuItem: { id: string | number; name: string; price: number };
@@ -9,15 +9,17 @@ interface IncomingItem {
 }
 
 export async function POST(req: NextRequest) {
-  const { orderId, items, companyId, note } = (await req.json()) as {
+  const { orderId, items, companyId, note, token } = (await req.json()) as {
     orderId?: string;
     items?: IncomingItem[];
     companyId?: string;
     note?: string;
+    token?: string;
   };
   if (!orderId || !companyId || !Array.isArray(items) || items.length === 0) {
     return Response.json({ ok: false }, { status: 400 });
   }
+  if (!(await verifySellerToken(companyId, token ?? ''))) return Response.json({ ok: false, error: 'revoked' }, { status: 403 });
 
   const db = createServerClient();
 

@@ -47,6 +47,24 @@ export async function requireAuth(req: Request): Promise<{ id: string; role: str
   return { id: user.id, role: profile.role, companyId: profile.company_id ?? null };
 }
 
+// Public seller terminal auth: confirm the URL token still belongs to an active company.
+// Rotating the token in admin ("Linki yenilə") immediately invalidates old sessions here,
+// and prevents a leaked/forged companyId from being used against the public write endpoints.
+// Returns the resolved company id (so callers rely on the token, not a client-supplied id).
+export async function verifySellerToken(companyId: string, token: string): Promise<string | null> {
+  if (!companyId || !token) return null;
+  const db = createServerClient();
+  const { data } = await db
+    .from('companies')
+    .select('id')
+    .eq('id', companyId)
+    .eq('seller_token', token)
+    .eq('active', true)
+    .is('trashed_at', null)
+    .maybeSingle();
+  return data?.id ?? null;
+}
+
 // Owners may manage only seller accounts inside their own company.
 export async function ownerManages(callerCompanyId: string | null, targetId: string): Promise<boolean> {
   if (!callerCompanyId) return false;
