@@ -984,7 +984,7 @@ function RecipeModal({ menuItem, items, initial, onClose, onSaved, fail }: {
 function Modal({ title, children, onClose, wide }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className={`bg-white rounded-2xl shadow-xl p-6 w-full ${wide ? 'max-w-lg' : 'max-w-sm'}`} onClick={e => e.stopPropagation()}>
+      <div className={`bg-white rounded-2xl shadow-xl p-6 w-full max-h-[90vh] overflow-y-auto ${wide ? 'max-w-lg' : 'max-w-sm'}`} onClick={e => e.stopPropagation()}>
         <h3 className="text-base font-semibold text-stone-800 mb-4">{title}</h3>
         {children}
       </div>
