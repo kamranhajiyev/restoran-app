@@ -2,6 +2,7 @@
 import { use, useEffect, useState } from 'react';
 import { ShoppingCart, X, Plus, Minus, Coffee } from 'lucide-react';
 import { fetchCompanyBySlug, setCompanyContext, addOrder, fetchTablesEnabled, fetchQrEnabled, fetchMenuOnly } from '@/lib/store';
+import { applyBrand } from '@/lib/branding';
 import { supabase } from '@/lib/supabase';
 import { MenuItem, MenuItemVariant, RestaurantTable } from '@/types';
 
@@ -29,6 +30,7 @@ export default function CustomerMenuPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [companyName, setCompanyName] = useState('');
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [table, setTable] = useState<RestaurantTable | null>(null);
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<{ name: string; available: boolean }[]>([]);
@@ -49,6 +51,8 @@ export default function CustomerMenuPage({
       const company = await fetchCompanyBySlug(slug);
       if (!company) { setError('Restoran tapılmadı.'); setLoading(false); return; }
       setCompanyName(company.name);
+      setLogoUrl(company.logoUrl);
+      applyBrand(company.brandColor);
       setCompanyContext(company.id);
       const [menuRes, catRes, tableRes, tablesEnabled, qrEnabled, menuOnlyVal] = await Promise.all([
         supabase.rpc('get_public_menu_items', { p_company_id: company.id }),
@@ -180,7 +184,7 @@ export default function CustomerMenuPage({
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="w-8 h-8 border-2 border-amber-800 border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-2 border-primary-800 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -209,7 +213,7 @@ export default function CustomerMenuPage({
           </p>
           <button
             onClick={() => setScreen('menu')}
-            className="w-full bg-amber-800 hover:bg-amber-900 text-white font-semibold py-3 rounded-xl text-sm transition-colors"
+            className="w-full bg-primary-800 hover:bg-primary-900 text-white font-semibold py-3 rounded-xl text-sm transition-colors"
           >
             Yenidən sifariş ver
           </button>
@@ -222,14 +226,19 @@ export default function CustomerMenuPage({
     <div className="min-h-screen bg-gray-50 flex flex-col">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-white border-b border-gray-100 px-4 h-14 flex items-center justify-between">
-        <div>
-          <p className="font-semibold text-gray-800 text-sm">{companyName}</p>
-          {table && <p className="text-xs text-gray-400">{table.name}</p>}
+        <div className="flex items-center gap-2 min-w-0">
+          {logoUrl && (
+            <img src={logoUrl} alt="" className="w-8 h-8 rounded-lg object-cover border border-gray-100 shrink-0" />
+          )}
+          <div className="min-w-0">
+            <p className="font-semibold text-gray-800 text-sm truncate">{companyName}</p>
+            {table && <p className="text-xs text-gray-400 truncate">{table.name}</p>}
+          </div>
         </div>
         {!menuOnly && (
           <button
             onClick={() => setCartOpen(true)}
-            className="relative w-10 h-10 flex items-center justify-center rounded-xl bg-amber-800 text-white"
+            className="relative w-10 h-10 flex items-center justify-center rounded-xl bg-primary-800 text-white"
           >
             <ShoppingCart className="w-5 h-5" />
             {cartCount > 0 && (
@@ -250,7 +259,7 @@ export default function CustomerMenuPage({
               onClick={() => setActiveCategory(c.name)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
                 activeCategory === c.name
-                  ? 'bg-amber-800 text-white'
+                  ? 'bg-primary-800 text-white'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
@@ -271,11 +280,11 @@ export default function CustomerMenuPage({
               <div key={item.id} className="bg-white rounded-xl border border-gray-100 overflow-hidden flex flex-col">
                 {item.image
                   ? <img src={item.image} alt={item.name} className="w-full aspect-[4/3] object-cover" />
-                  : <div className="w-full aspect-[4/3] bg-amber-50 flex items-center justify-center"><Coffee className="w-8 h-8 text-amber-200" /></div>
+                  : <div className="w-full aspect-[4/3] bg-primary-50 flex items-center justify-center"><Coffee className="w-8 h-8 text-primary-200" /></div>
                 }
                 <div className="p-3 flex flex-col flex-1">
                   <p className="text-sm font-semibold text-gray-800 flex-1">{item.name}</p>
-                  <p className="text-xs text-amber-800 font-bold mt-1">
+                  <p className="text-xs text-primary-800 font-bold mt-1">
                     {hasVariants
                       ? `${Math.min(...item.variants!.map(v => v.price)).toFixed(2)} ₼ →`
                       : `${item.price.toFixed(2)} ₼`}
@@ -285,7 +294,7 @@ export default function CustomerMenuPage({
                       {hasVariants ? (
                         <button
                           onClick={() => handleTapItem(item)}
-                          className="w-full py-1.5 rounded-lg bg-amber-800 text-white text-xs font-semibold transition-colors hover:bg-amber-900 flex items-center justify-center gap-1"
+                          className="w-full py-1.5 rounded-lg bg-primary-800 text-white text-xs font-semibold transition-colors hover:bg-primary-900 flex items-center justify-center gap-1"
                         >
                           {totalInCart > 0 && <span className="bg-white/25 px-1.5 rounded-md">{totalInCart}</span>}
                           {menuOnly ? 'Növlər' : 'Seç'}
@@ -296,14 +305,14 @@ export default function CustomerMenuPage({
                             <Minus className="w-3.5 h-3.5" />
                           </button>
                           <span className="text-sm font-semibold">{totalInCart}</span>
-                          <button onClick={() => addToCart(item)} className="w-7 h-7 rounded-lg bg-amber-800 text-white flex items-center justify-center">
+                          <button onClick={() => addToCart(item)} className="w-7 h-7 rounded-lg bg-primary-800 text-white flex items-center justify-center">
                             <Plus className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       ) : (
                         <button
                           onClick={() => handleTapItem(item)}
-                          className="w-full py-1.5 rounded-lg bg-amber-800 text-white text-xs font-semibold transition-colors hover:bg-amber-900"
+                          className="w-full py-1.5 rounded-lg bg-primary-800 text-white text-xs font-semibold transition-colors hover:bg-primary-900"
                         >
                           Əlavə et
                         </button>
@@ -322,7 +331,7 @@ export default function CustomerMenuPage({
         <div className="sticky bottom-0 p-4 bg-white border-t border-gray-100">
           <button
             onClick={() => setCartOpen(true)}
-            className="w-full max-w-2xl mx-auto flex items-center justify-between bg-amber-800 hover:bg-amber-900 text-white px-5 py-3.5 rounded-xl font-semibold transition-colors"
+            className="w-full max-w-2xl mx-auto flex items-center justify-between bg-primary-800 hover:bg-primary-900 text-white px-5 py-3.5 rounded-xl font-semibold transition-colors"
           >
             <span className="bg-white/20 px-2 py-0.5 rounded-lg text-sm">{cartCount}</span>
             <span>Sifarişə bax</span>
@@ -350,7 +359,7 @@ export default function CustomerMenuPage({
                       <Minus className="w-3.5 h-3.5" />
                     </button>
                     <span className="w-5 text-center text-sm font-semibold">{c.quantity}</span>
-                    <button onClick={() => addToCart(c.menuItem, c.variantName)} className="w-7 h-7 rounded-lg bg-amber-800 text-white flex items-center justify-center">
+                    <button onClick={() => addToCart(c.menuItem, c.variantName)} className="w-7 h-7 rounded-lg bg-primary-800 text-white flex items-center justify-center">
                       <Plus className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -381,13 +390,13 @@ export default function CustomerMenuPage({
                   onChange={e => setOrderNote(e.target.value)}
                   placeholder="Xüsusi istək və ya qeyd"
                   rows={3}
-                  className="w-full text-sm rounded-xl border border-stone-200 px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400 placeholder:text-stone-300"
+                  className="w-full text-sm rounded-xl border border-stone-200 px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary-400 placeholder:text-stone-300"
                 />
               )}
               <button
                 onClick={placeOrder}
                 disabled={submitting}
-                className="w-full bg-amber-800 hover:bg-amber-900 disabled:opacity-60 text-white font-semibold py-3.5 rounded-xl text-sm transition-colors"
+                className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-60 text-white font-semibold py-3.5 rounded-xl text-sm transition-colors"
               >
                 {submitting ? 'Göndərilir...' : 'Sifariş ver'}
               </button>
@@ -414,7 +423,7 @@ export default function CustomerMenuPage({
                   onClick={() => setSelectedVariant(v)}
                   className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 text-sm font-medium transition-colors ${
                     selectedVariant?.id === v.id
-                      ? 'border-amber-800 bg-amber-50 text-amber-900'
+                      ? 'border-primary-800 bg-primary-50 text-primary-900'
                       : 'border-gray-200 text-gray-700'
                   }`}
                 >
@@ -426,7 +435,7 @@ export default function CustomerMenuPage({
             {!menuOnly && (
               <button
                 onClick={confirmVariant}
-                className="w-full bg-amber-800 hover:bg-amber-900 text-white font-semibold py-3.5 rounded-xl text-sm transition-colors"
+                className="w-full bg-primary-800 hover:bg-primary-900 text-white font-semibold py-3.5 rounded-xl text-sm transition-colors"
               >
                 Əlavə et · {selectedVariant?.price.toFixed(2)} ₼
               </button>

@@ -16,7 +16,7 @@ export default function PasswordField({
   onChange,
   placeholder,
   required,
-  focusClass = 'focus:ring-amber-500',
+  focusClass = 'focus:ring-primary-500',
 }: {
   value: string;
   onChange: (v: string) => void;

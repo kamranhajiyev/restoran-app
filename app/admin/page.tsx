@@ -7,7 +7,7 @@ import {
   TrendingUp, Receipt, Star, ChevronDown, Percent,
   Coffee, BarChart2, Package, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
-  GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link, Printer,
+  GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link, Printer, Check,
 } from 'lucide-react';
 import {
   DndContext, DragEndEvent, PointerSensor, useSensor, useSensors,
@@ -31,7 +31,9 @@ import {
   fetchLoginEvents, LoginEvent,
   fetchStaff, createStaff, updateStaff, setStaffPin, deleteStaff,
   fetchSellerToken, linkProductStock,
+  fetchBranding, setLogoUrl as saveLogoUrl, setBrandColor as saveBrandColor,
 } from '@/lib/store';
+import { applyBrand, BRAND_PRESETS, DEFAULT_BRAND } from '@/lib/branding';
 import {
   CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc,
   addDays, dayDiff, dayOfWeek, dayToDate, tzHour, cutoffMinutes,
@@ -70,7 +72,7 @@ const WEAK_PINS = new Set([
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
 const STATUS_COLORS: Record<OrderStatus, string> = {
-  'gözləyir':  'bg-amber-100 text-amber-700',
+  'gözləyir':  'bg-primary-100 text-primary-700',
   'hazırlanır':'bg-blue-100 text-blue-700',
   'hazırdır':  'bg-green-100 text-green-700',
   'ödənilib':  'bg-stone-100 text-stone-600',
@@ -271,7 +273,7 @@ function CategoryDropTarget({ cat, children }: { cat: string; children: React.Re
   const { setNodeRef, isOver, active } = useDroppable({ id: `into:${cat}` });
   const itemOver = isOver && active != null && String(active.id).startsWith('item:');
   return (
-    <div ref={setNodeRef} className={`rounded-lg transition-all ${itemOver ? 'ring-2 ring-amber-500 bg-amber-50' : ''}`}>
+    <div ref={setNodeRef} className={`rounded-lg transition-all ${itemOver ? 'ring-2 ring-primary-500 bg-primary-50' : ''}`}>
       {children}
     </div>
   );
@@ -410,6 +412,11 @@ function AdminPageContent() {
   const [kassaOn, setKassaOn] = useState(true);
   const [kassaToggleBusy, setKassaToggleBusy] = useState(false);
   const [kassaToggleError, setKassaToggleError] = useState<string | null>(null);
+  // branding
+  const [logoUrl, setLogoState] = useState<string | null>(null);
+  const [brandColor, setBrandColorState] = useState<string>(DEFAULT_BRAND);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
   const [alignGuides, setAlignGuides] = useState<{ type: 'h' | 'v'; pos: number }[]>([]);
   const canvasRef = useRef<HTMLDivElement>(null);
 
@@ -532,6 +539,7 @@ function AdminPageContent() {
     });
     fetchStaff().then(setPinStaff);
     fetchSellerToken(session.companyId ?? '').then(setSellerToken);
+    fetchBranding().then(({ logoUrl: l, brandColor: b }) => { setLogoState(l); setBrandColorState(b ?? DEFAULT_BRAND); applyBrand(b); });
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchTables(), fetchCompanySlug(session.companyId ?? ''), fetchTablesEnabled(), fetchQrEnabled(), fetchKassaEnabled(), fetchMenuOnly()]).then(([m, o, c, t, tb, slug, te, qre, ke, mo]) => {
       setMenu(m);
       setOrders(o);
@@ -718,6 +726,33 @@ function AdminPageContent() {
     if (error) { setDialog({ title: 'Xəta', message: 'Şəkil yüklənmədi: ' + error.message }); return; }
     const { data } = supabase.storage.from('menu-images').getPublicUrl(path);
     setForm(f => ({ ...f, image: data.publicUrl }));
+  }
+
+  // ── branding: logo + accent color ───────────────────────────────────────────
+  async function handleLogoFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLogoBusy(true);
+    const ext = file.name.split('.').pop();
+    const path = `logos/${companyId}-${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('menu-images').upload(path, file, { upsert: true });
+    if (error) { setLogoBusy(false); setDialog({ title: 'Xəta', message: 'Loqo yüklənmədi: ' + error.message }); return; }
+    const { data } = supabase.storage.from('menu-images').getPublicUrl(path);
+    setLogoState(data.publicUrl);
+    await saveLogoUrl(data.publicUrl);
+    setLogoBusy(false);
+    if (logoInputRef.current) logoInputRef.current.value = '';
+  }
+
+  async function removeLogo() {
+    setLogoState(null);
+    await saveLogoUrl(null);
+  }
+
+  async function pickBrandColor(color: string) {
+    setBrandColorState(color);
+    applyBrand(color);
+    await saveBrandColor(color);
   }
 
   // ── menu form ──────────────────────────────────────────────────────────────
@@ -1131,14 +1166,14 @@ function AdminPageContent() {
           <label className="text-xs font-medium text-stone-600 mb-1.5 block">Ad</label>
           <input type="text" placeholder="Məhsulun adı" value={form.name}
             onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-            className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+            className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
             required />
         </div>
 
         <div>
           <label className="text-xs font-medium text-stone-600 mb-1.5 block">Kateqoriya</label>
           <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-            className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white">
+            className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white">
             {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
           </select>
         </div>
@@ -1151,7 +1186,7 @@ function AdminPageContent() {
                 key={val}
                 type="button"
                 onClick={() => setForm(f => ({ ...f, kind: val }))}
-                className={`px-4 py-2 text-sm font-medium transition-colors ${form.kind === val ? 'bg-amber-700 text-white' : 'bg-white text-stone-600 hover:bg-stone-50'}`}
+                className={`px-4 py-2 text-sm font-medium transition-colors ${form.kind === val ? 'bg-primary-700 text-white' : 'bg-white text-stone-600 hover:bg-stone-50'}`}
               >
                 {label}
               </button>
@@ -1163,7 +1198,7 @@ function AdminPageContent() {
           <label className="text-xs font-medium text-stone-600 mb-1.5 block">Şəkil</label>
           <div className="flex gap-3 items-center">
             <button type="button" onClick={() => imgRef.current?.click()}
-              className="w-16 h-16 rounded-lg border-2 border-dashed border-stone-200 hover:border-amber-400 flex items-center justify-center text-stone-400 hover:text-amber-500 transition-colors shrink-0">
+              className="w-16 h-16 rounded-lg border-2 border-dashed border-stone-200 hover:border-primary-400 flex items-center justify-center text-stone-400 hover:text-primary-500 transition-colors shrink-0">
               <ImageIcon className="w-6 h-6" />
             </button>
             <input ref={imgRef} type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
@@ -1179,7 +1214,7 @@ function AdminPageContent() {
         <label className="flex items-center gap-2 cursor-pointer select-none">
           <input type="checkbox" checked={form.hasVariants}
             onChange={e => setForm(f => ({ ...f, hasVariants: e.target.checked, variants: e.target.checked && f.variants.length === 0 ? [{ id: Date.now().toString(), name: '', price: '', costPrice: '' }] : f.variants }))}
-            className="rounded accent-amber-800" />
+            className="rounded accent-primary-800" />
           <span className="text-sm text-stone-700">Variantlar var (ölçü, növ…)</span>
         </label>
 
@@ -1189,13 +1224,13 @@ function AdminPageContent() {
               <label className="text-xs font-medium text-stone-600 mb-1.5 block">Qiymət (₼)</label>
               <input type="number" placeholder="0.00" step="0.5" min="0" value={form.price}
                 onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
-                className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" required />
+                className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white" required />
             </div>
             <div>
               <label className="text-xs font-medium text-stone-600 mb-1.5 block">Maya dəyəri (₼)</label>
               <input type="number" placeholder="0.00" step="0.01" min="0" value={form.costPrice}
                 onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))}
-                className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white" />
+                className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white" />
             </div>
             <div className="pb-2 text-sm font-semibold text-green-600">
               {calcMargin(form.price, form.costPrice) && `Marja: ${calcMargin(form.price, form.costPrice)}`}
@@ -1211,13 +1246,13 @@ function AdminPageContent() {
             </div>
             {form.variants.map((v, i) => (
               <div key={v.id} className="grid grid-cols-9 gap-2 items-center">
-                <input className="col-span-3 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                <input className="col-span-3 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
                   placeholder={`Variant ${i + 1}`} value={v.name} onChange={e => updateVariant(i, 'name', e.target.value)} required />
                 <input type="number" placeholder="0.00" step="0.5" min="0"
-                  className="col-span-2 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                  className="col-span-2 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
                   value={v.price} onChange={e => updateVariant(i, 'price', e.target.value)} required />
                 <input type="number" placeholder="0.00" step="0.01" min="0"
-                  className="col-span-2 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                  className="col-span-2 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
                   value={v.costPrice} onChange={e => updateVariant(i, 'costPrice', e.target.value)} />
                 <div className="col-span-2 flex items-center gap-1">
                   <span className="text-xs text-green-600 font-medium flex-1">{calcMargin(v.price, v.costPrice)}</span>
@@ -1225,12 +1260,12 @@ function AdminPageContent() {
                 </div>
               </div>
             ))}
-            <button type="button" onClick={addVariant} className="text-sm text-amber-800 hover:text-amber-950 font-medium">+ Variant əlavə et</button>
+            <button type="button" onClick={addVariant} className="text-sm text-primary-800 hover:text-primary-950 font-medium">+ Variant əlavə et</button>
           </div>
         )}
 
         <div className="flex gap-2 pt-1">
-          <button type="submit" disabled={saving} className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 disabled:opacity-60 text-white text-sm font-medium px-5 py-2 rounded-lg shadow-sm transition-colors">
+          <button type="submit" disabled={saving} className="flex items-center gap-2 bg-primary-800 hover:bg-primary-900 disabled:opacity-60 text-white text-sm font-medium px-5 py-2 rounded-lg shadow-sm transition-colors">
             {saving && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
             {saving ? 'Saxlanır…' : editingId ? 'Yadda saxla' : 'Əlavə et'}
           </button>
@@ -1442,9 +1477,13 @@ function AdminPageContent() {
         <div className={`flex items-center h-16 border-b border-stone-100/50 ${isCollapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
           {!collapsed && (
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
-                <Coffee className="w-4 h-4 text-white" />
-              </div>
+              {logoUrl ? (
+                <img src={logoUrl} alt="" className="w-7 h-7 rounded-lg object-cover border border-stone-100" />
+              ) : (
+                <div className="w-7 h-7 rounded-lg bg-primary-800 flex items-center justify-center">
+                  <Coffee className="w-4 h-4 text-white" />
+                </div>
+              )}
               <span className="font-semibold text-stone-800 text-sm truncate max-w-[140px]">{companyName || 'Admin Paneli'}</span>
             </div>
           )}
@@ -1471,12 +1510,12 @@ function AdminPageContent() {
                   onClick={() => { navigate(n.id); onNavigate?.(); if (n.id === 'orders') refresh(); }}
                   className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
                     isActive
-                      ? 'bg-amber-800/10 text-amber-800 before:absolute before:left-[-9px] before:top-1/2 before:-translate-y-1/2 before:w-[3px] before:h-4 before:rounded-r-full before:bg-amber-800'
+                      ? 'bg-primary-100 text-primary-800 before:absolute before:left-[-9px] before:top-1/2 before:-translate-y-1/2 before:w-[3px] before:h-4 before:rounded-r-full before:bg-primary-800'
                       : 'text-stone-500 hover:bg-stone-100 hover:text-stone-700'
                   }`}
                 >
                   <Icon className="w-5 h-5" />
-                  {badge && <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-800 text-white text-[9px] rounded-full flex items-center justify-center font-bold">{badge}</span>}
+                  {badge && <span className="absolute -top-1 -right-1 w-4 h-4 bg-primary-800 text-white text-[9px] rounded-full flex items-center justify-center font-bold">{badge}</span>}
                 </button>
               );
             }
@@ -1487,14 +1526,14 @@ function AdminPageContent() {
                 onClick={() => { navigate(n.id); onNavigate?.(); if (n.id === 'orders') refresh(); }}
                 className={`flex items-center gap-3 h-10 px-3 rounded-lg text-[15px] font-semibold transition-colors w-full ${
                   isActive
-                    ? 'bg-amber-800 text-white shadow-sm'
-                    : 'text-stone-600 hover:bg-amber-50 hover:text-amber-900'
+                    ? 'bg-primary-800 text-white shadow-sm'
+                    : 'text-stone-600 hover:bg-primary-50 hover:text-primary-900'
                 }`}
               >
                 <Icon className="w-5 h-5 shrink-0" />
                 <span className="flex-1 text-left truncate">{n.label}</span>
                 {badge && (
-                  <span className={`text-xs rounded-full px-1.5 py-0.5 font-semibold ${isActive ? 'bg-white/20 text-white' : 'bg-amber-800 text-white'}`}>
+                  <span className={`text-xs rounded-full px-1.5 py-0.5 font-semibold ${isActive ? 'bg-white/20 text-white' : 'bg-primary-800 text-white'}`}>
                     {badge}
                   </span>
                 )}
@@ -1510,11 +1549,11 @@ function AdminPageContent() {
               onClick={openProfile}
               className="flex items-center gap-2 mb-3 w-full hover:opacity-80 transition-opacity text-left"
             >
-              <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold shrink-0">
+              <div className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold shrink-0">
                 {adminName[0]?.toUpperCase()}
               </div>
               <span className="text-sm font-medium text-stone-700 truncate">{adminName}</span>
-              {!online && <span className="ml-auto text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">Oflayn</span>}
+              {!online && <span className="ml-auto text-[10px] bg-primary-100 text-primary-700 px-1.5 py-0.5 rounded-full">Oflayn</span>}
             </button>
             <button
               onClick={() => { logout(); router.push('/login'); }}
@@ -1530,7 +1569,7 @@ function AdminPageContent() {
             <button
               onClick={openProfile}
               title="Profil"
-              className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold hover:opacity-80 transition-opacity"
+              className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold hover:opacity-80 transition-opacity"
             >
               {adminName[0]?.toUpperCase()}
             </button>
@@ -1564,9 +1603,13 @@ function AdminPageContent() {
         </button>
 
         <div className="flex items-center gap-2 md:hidden">
-          <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
-            <Coffee className="w-4 h-4 text-white" />
-          </div>
+          {logoUrl ? (
+            <img src={logoUrl} alt="" className="w-7 h-7 rounded-lg object-cover border border-stone-100" />
+          ) : (
+            <div className="w-7 h-7 rounded-lg bg-primary-800 flex items-center justify-center">
+              <Coffee className="w-4 h-4 text-white" />
+            </div>
+          )}
           <span className="font-semibold text-stone-800 text-sm truncate max-w-[160px]">{companyName || 'Kafe'}</span>
         </div>
 
@@ -1585,9 +1628,9 @@ function AdminPageContent() {
 
         <button
           onClick={openProfile}
-          className="flex items-center gap-2 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl hover:border-amber-300 hover:bg-amber-50 transition-colors"
+          className="flex items-center gap-2 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl hover:border-primary-300 hover:bg-primary-50 transition-colors"
         >
-          <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
+          <div className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold">
             {adminName[0]?.toUpperCase()}
           </div>
           <div className="hidden sm:flex flex-col leading-tight">
@@ -1615,7 +1658,7 @@ function AdminPageContent() {
           style={{ height: pullRefreshing ? 44 : Math.round(pullDistance * (44 / PULL_THRESHOLD)) }}
         >
           {pullRefreshing ? (
-            <><span className="w-4 h-4 border-2 border-stone-300 border-t-amber-800 rounded-full animate-spin" /><span>Yenilənir...</span></>
+            <><span className="w-4 h-4 border-2 border-stone-300 border-t-primary-800 rounded-full animate-spin" /><span>Yenilənir...</span></>
           ) : (
             <>
               <span style={{ display: 'inline-block', transform: `rotate(${pullDistance >= PULL_THRESHOLD ? 180 : 0}deg)`, transition: 'transform 0.2s' }}>↓</span>
@@ -1633,9 +1676,9 @@ function AdminPageContent() {
         if (days > 10) return null;
         const expired = days < 0;
         return (
-          <div className={`relative flex items-center justify-between gap-4 px-5 py-3 ${expired ? 'bg-red-600' : 'bg-amber-500'}`}>
+          <div className={`relative flex items-center justify-between gap-4 px-5 py-3 ${expired ? 'bg-red-600' : 'bg-primary-500'}`}>
             <div className="flex items-center gap-3">
-              <span className={`w-2 h-2 rounded-full animate-pulse shrink-0 ${expired ? 'bg-red-200' : 'bg-amber-200'}`} />
+              <span className={`w-2 h-2 rounded-full animate-pulse shrink-0 ${expired ? 'bg-red-200' : 'bg-primary-200'}`} />
               <p className="text-white text-sm font-medium">
                 {expired
                   ? 'Abunəliyinizin müddəti bitib. Sistemə giriş məhdudlaşdırıla bilər.'
@@ -1646,7 +1689,7 @@ function AdminPageContent() {
               href="https://wa.me/994998989876"
               target="_blank"
               rel="noopener noreferrer"
-              className={`shrink-0 text-xs font-bold px-4 py-1.5 rounded-lg transition-colors ${expired ? 'bg-white text-red-600 hover:bg-red-50' : 'bg-white text-amber-600 hover:bg-amber-50'}`}
+              className={`shrink-0 text-xs font-bold px-4 py-1.5 rounded-lg transition-colors ${expired ? 'bg-white text-red-600 hover:bg-red-50' : 'bg-white text-primary-600 hover:bg-primary-50'}`}
             >
               Ödəniş et
             </a>
@@ -1785,7 +1828,7 @@ function AdminPageContent() {
                               </div>
                             </div>
                             <div className="h-1.5 bg-stone-100 rounded-full overflow-hidden">
-                              <div className="h-full bg-amber-700 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                              <div className="h-full bg-primary-700 rounded-full transition-all" style={{ width: `${pct}%` }} />
                             </div>
                           </div>
                         );
@@ -1832,12 +1875,12 @@ function AdminPageContent() {
                       const isPeak = d.rev > 0 && d.rev === maxHourly;
                       return (
                         <div key={i}
-                          className={`relative flex-1 rounded-t-sm transition-colors cursor-default ${isPeak ? 'bg-amber-800' : 'bg-amber-600 hover:bg-amber-700'}`}
+                          className={`relative flex-1 rounded-t-sm transition-colors cursor-default ${isPeak ? 'bg-primary-800' : 'bg-primary-600 hover:bg-primary-700'}`}
                           style={{ height: `${Math.max((d.rev / maxHourly) * 100, d.rev > 0 ? 3 : 0)}%`, opacity: d.rev > 0 ? 1 : 0.12 }}
                           title={`${i}:00 — ${d.rev.toFixed(2)} ₼`}
                         >
                           {isPeak && (
-                            <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] text-amber-800 font-bold whitespace-nowrap">
+                            <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] text-primary-800 font-bold whitespace-nowrap">
                               {d.rev >= 1000 ? `${(d.rev / 1000).toFixed(1)}k` : `${d.rev.toFixed(0)}₼`}
                             </span>
                           )}
@@ -1861,12 +1904,12 @@ function AdminPageContent() {
                       const isPeak = d.rev > 0 && d.rev === maxWeekly;
                       return (
                         <div key={d.label}
-                          className={`relative flex-1 rounded-t-sm transition-colors cursor-default ${isPeak ? 'bg-amber-800' : 'bg-amber-600 hover:bg-amber-700'}`}
+                          className={`relative flex-1 rounded-t-sm transition-colors cursor-default ${isPeak ? 'bg-primary-800' : 'bg-primary-600 hover:bg-primary-700'}`}
                           style={{ height: `${Math.max((d.rev / maxWeekly) * 100, d.rev > 0 ? 3 : 0)}%`, opacity: d.rev > 0 ? 1 : 0.12 }}
                           title={`${d.label} — ${d.rev.toFixed(2)} ₼`}
                         >
                           {d.rev > 0 && (
-                            <span className={`absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] font-bold whitespace-nowrap ${isPeak ? 'text-amber-800' : 'text-stone-600'}`}>
+                            <span className={`absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] font-bold whitespace-nowrap ${isPeak ? 'text-primary-800' : 'text-stone-600'}`}>
                               {d.rev >= 1000 ? `${(d.rev / 1000).toFixed(1)}k` : `${d.rev.toFixed(0)}₼`}
                             </span>
                           )}
@@ -1887,7 +1930,7 @@ function AdminPageContent() {
                 <div className="bg-white rounded-xl border border-stone-100 card p-5">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
-                      <Star className="w-4 h-4 text-amber-700" />
+                      <Star className="w-4 h-4 text-primary-700" />
                       <h3 className="font-semibold text-stone-800 text-sm">Top məhsullar</h3>
                     </div>
                     <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5">
@@ -1919,7 +1962,7 @@ function AdminPageContent() {
                                 <span className="text-sm font-bold text-green-600">{profit.toFixed(2)} ₼</span>
                               )}
                               {topSort === 'qty' && (
-                                <span className="text-sm font-bold text-amber-700">{item.qty} ədəd</span>
+                                <span className="text-sm font-bold text-primary-700">{item.qty} ədəd</span>
                               )}
                               {topSort === 'rev' && (
                                 <span className="font-semibold text-stone-800 text-sm">{item.rev.toFixed(2)} ₼</span>
@@ -1931,7 +1974,7 @@ function AdminPageContent() {
                             </div>
                           </div>
                           <div className="h-1 bg-stone-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-amber-700 rounded-full transition-all" style={{ width: `${(metricVal / maxItemMetric) * 100}%` }} />
+                            <div className="h-full bg-primary-700 rounded-full transition-all" style={{ width: `${(metricVal / maxItemMetric) * 100}%` }} />
                           </div>
                         </div>
                       );
@@ -1951,7 +1994,7 @@ function AdminPageContent() {
                       {sellerStats.map((s, i) => (
                         <div key={`${s.name}-${i}`} className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 min-w-0">
-                            <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold shrink-0">
+                            <div className="w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold shrink-0">
                               {s.name[0]?.toUpperCase()}
                             </div>
                             <span className="text-sm text-stone-700 truncate">{s.name}</span>
@@ -1996,9 +2039,9 @@ function AdminPageContent() {
                   <button
                     onClick={refresh}
                     disabled={refreshing}
-                    className="flex items-center gap-1.5 text-xs font-medium text-amber-800 hover:text-amber-950 px-3 py-1.5 rounded-lg hover:bg-amber-50 transition-colors disabled:opacity-60"
+                    className="flex items-center gap-1.5 text-xs font-medium text-primary-800 hover:text-primary-950 px-3 py-1.5 rounded-lg hover:bg-primary-50 transition-colors disabled:opacity-60"
                   >
-                    {refreshing && <span className="w-3 h-3 border-2 border-amber-200 border-t-amber-800 rounded-full animate-spin" />}
+                    {refreshing && <span className="w-3 h-3 border-2 border-primary-200 border-t-primary-800 rounded-full animate-spin" />}
                     Yenilə
                   </button>
                 </div>
@@ -2009,7 +2052,7 @@ function AdminPageContent() {
                   <button
                     key={p}
                     onClick={() => setOrdersPreset(p)}
-                    className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${ordersPreset === p ? 'bg-amber-800 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}
+                    className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${ordersPreset === p ? 'bg-primary-800 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}
                   >
                     {p === 'all' ? 'Hamısı' : p === 'bugün' ? 'Bugün' : 'Bu həftə'}
                   </button>
@@ -2022,7 +2065,7 @@ function AdminPageContent() {
                   value={orderSearch}
                   onChange={e => setOrderSearch(e.target.value)}
                   placeholder="Sifariş № və ya satıcı adı ilə axtar"
-                  className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-3 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-amber-300"
+                  className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-3 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
                 />
               </div>
 
@@ -2050,7 +2093,7 @@ function AdminPageContent() {
                         className="w-full flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors text-left"
                       >
                         <ChevronDown className={`w-4 h-4 text-stone-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                        <span className="w-14 text-xs font-bold text-amber-900 flex-shrink-0">#{order.orderNumber}</span>
+                        <span className="w-14 text-xs font-bold text-primary-900 flex-shrink-0">#{order.orderNumber}</span>
                         <span className="flex-1 text-sm text-stone-700 truncate">{order.sellerName}</span>
                         <span className="text-xs text-stone-500 flex-shrink-0 hidden sm:block">
                           {new Date(order.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
@@ -2081,7 +2124,7 @@ function AdminPageContent() {
                               <div key={j} className="flex justify-between text-sm text-stone-700 py-0.5">
                                 <span className="flex-1">
                                   {oi.menuItem.name}
-                                  {oi.modifiers && <span className="text-xs text-amber-600 ml-1">({oi.modifiers})</span>}
+                                  {oi.modifiers && <span className="text-xs text-primary-600 ml-1">({oi.modifiers})</span>}
                                 </span>
                                 <span className="text-stone-500 mx-4">{oi.quantity} əd</span>
                                 <span className="font-medium">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
@@ -2102,7 +2145,7 @@ function AdminPageContent() {
                                 <select
                                   value={order.status}
                                   onChange={e => handleStatusChange(order.id, e.target.value as OrderStatus)}
-                                  className="text-xs border border-stone-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                                  className="text-xs border border-stone-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
                                 >
                                   {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                                 </select>
@@ -2172,7 +2215,7 @@ function AdminPageContent() {
                                 </span>
                               )}
                             </div>
-                            <span className="font-bold text-amber-900">{orderTotal(order).toFixed(2)} ₼</span>
+                            <span className="font-bold text-primary-900">{orderTotal(order).toFixed(2)} ₼</span>
                           </div>
                         </div>
                       )}
@@ -2185,9 +2228,9 @@ function AdminPageContent() {
                 <button
                   onClick={loadMoreOrders}
                   disabled={loadingMore}
-                  className="w-full flex items-center justify-center gap-2 bg-white border border-stone-200 rounded-xl py-2.5 text-sm font-medium text-amber-800 hover:bg-amber-50 transition-colors disabled:opacity-60"
+                  className="w-full flex items-center justify-center gap-2 bg-white border border-stone-200 rounded-xl py-2.5 text-sm font-medium text-primary-800 hover:bg-primary-50 transition-colors disabled:opacity-60"
                 >
-                  {loadingMore && <span className="w-3.5 h-3.5 border-2 border-amber-200 border-t-amber-800 rounded-full animate-spin" />}
+                  {loadingMore && <span className="w-3.5 h-3.5 border-2 border-primary-200 border-t-primary-800 rounded-full animate-spin" />}
                   Daha çox göstər ({totalOrders - orders.length} qalıb)
                 </button>
               )}
@@ -2220,7 +2263,7 @@ function AdminPageContent() {
                     setKassaToggleBusy(false);
                   }}
                   disabled={kassaToggleBusy}
-                  className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${kassaOn ? 'bg-amber-800' : 'bg-stone-300'}`}
+                  className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${kassaOn ? 'bg-primary-800' : 'bg-stone-300'}`}
                 >
                   <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${kassaOn ? 'translate-x-5' : ''}`} />
                 </button>
@@ -2271,10 +2314,10 @@ function AdminPageContent() {
                           </div>
                         )}
                         <div className="flex justify-between items-center border-t pt-2.5 font-bold">
-                          <span>Kassada olmalıdır</span><span className="text-amber-800 text-lg">{expected.toFixed(2)} ₼</span>
+                          <span>Kassada olmalıdır</span><span className="text-primary-800 text-lg">{expected.toFixed(2)} ₼</span>
                         </div>
                         <div className="flex justify-between items-center border-t pt-2.5 font-bold">
-                          <span>💳 Terminal (kart satışı)</span><span className="text-amber-800">{openShiftSales.card.toFixed(2)} ₼</span>
+                          <span>💳 Terminal (kart satışı)</span><span className="text-primary-800">{openShiftSales.card.toFixed(2)} ₼</span>
                         </div>
                         <p className="text-xs text-stone-500 -mt-1.5">Kassaya daxil deyil — bank terminalından keçir</p>
                         {open.movements.length > 0 && (
@@ -2299,13 +2342,13 @@ function AdminPageContent() {
                             type="number" min="0" step="0.5" placeholder="Sayılan nağd (₼)"
                             value={adminCountedInput}
                             onChange={e => setAdminCountedInput(e.target.value)}
-                            className="flex-1 min-w-0 border border-stone-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700"
+                            className="flex-1 min-w-0 border border-stone-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
                           />
                           <input
                             type="number" min="0" step="0.5" placeholder="Terminal (₼)"
                             value={adminTerminalInput}
                             onChange={e => setAdminTerminalInput(e.target.value)}
-                            className="flex-1 min-w-0 border border-stone-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700"
+                            className="flex-1 min-w-0 border border-stone-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
                           />
                           <button
                             onClick={() => handleAdminCloseShift(open)}
@@ -2319,7 +2362,7 @@ function AdminPageContent() {
                         {adminCountedInput !== '' && (
                           <p className={`text-xs font-semibold text-right ${
                             Math.abs((parseFloat(adminCountedInput) || 0) - expected) < 0.005 ? 'text-green-600'
-                            : (parseFloat(adminCountedInput) || 0) < expected ? 'text-red-500' : 'text-amber-600'
+                            : (parseFloat(adminCountedInput) || 0) < expected ? 'text-red-500' : 'text-primary-600'
                           }`}>
                             Nağd fərq: {((parseFloat(adminCountedInput) || 0) - expected).toFixed(2)} ₼
                           </p>
@@ -2327,7 +2370,7 @@ function AdminPageContent() {
                         {adminTerminalInput !== '' && (
                           <p className={`text-xs font-semibold text-right ${
                             Math.abs((parseFloat(adminTerminalInput) || 0) - openShiftSales.card) < 0.005 ? 'text-green-600'
-                            : (parseFloat(adminTerminalInput) || 0) < openShiftSales.card ? 'text-red-500' : 'text-amber-600'
+                            : (parseFloat(adminTerminalInput) || 0) < openShiftSales.card ? 'text-red-500' : 'text-primary-600'
                           }`}>
                             Terminal fərq: {((parseFloat(adminTerminalInput) || 0) - openShiftSales.card).toFixed(2)} ₼
                           </p>
@@ -2364,7 +2407,7 @@ function AdminPageContent() {
                                 <span className="text-sm font-semibold text-stone-700 shrink-0">{(s.countedCash ?? 0).toFixed(2)} ₼</span>
                                 <span className={`text-xs px-2 py-0.5 rounded-full font-semibold shrink-0 w-20 text-center ${
                                   Math.abs(diff) < 0.005 ? 'bg-green-50 text-green-600'
-                                  : diff < 0 ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
+                                  : diff < 0 ? 'bg-red-50 text-red-600' : 'bg-primary-50 text-primary-700'
                                 }`}>
                                   {Math.abs(diff) < 0.005 ? 'Dəqiq ✓' : `${diff > 0 ? '+' : ''}${diff.toFixed(2)} ₼`}
                                 </span>
@@ -2383,7 +2426,7 @@ function AdminPageContent() {
                                       <span>💳 Terminal (Z-hesabat)</span>
                                       <span className={
                                         Math.abs(s.countedCard - (s.cardSales ?? 0)) < 0.005 ? 'text-green-600'
-                                        : s.countedCard < (s.cardSales ?? 0) ? 'text-red-500' : 'text-amber-600'
+                                        : s.countedCard < (s.cardSales ?? 0) ? 'text-red-500' : 'text-primary-600'
                                       }>{s.countedCard.toFixed(2)} ₼</span>
                                     </div>
                                   )}
@@ -2429,7 +2472,7 @@ function AdminPageContent() {
                     <Trash2 className="w-4 h-4" />
                     {trash.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-400 text-white text-[10px] rounded-full flex items-center justify-center font-bold">{trash.length}</span>}
                   </button>
-                  <button onClick={() => { setNewCat(''); setShowCatDialog(true); }} className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-sm">
+                  <button onClick={() => { setNewCat(''); setShowCatDialog(true); }} className="flex items-center gap-2 bg-primary-800 hover:bg-primary-900 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-sm">
                     <Plus className="w-4 h-4" /> Kateqoriya əlavə et
                   </button>
                 </div>
@@ -2440,7 +2483,7 @@ function AdminPageContent() {
                   <button
                     key={val}
                     onClick={() => setKindFilter(val)}
-                    className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${kindFilter === val ? 'bg-amber-700 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}
+                    className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${kindFilter === val ? 'bg-primary-700 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}
                   >
                     {label}
                   </button>
@@ -2453,7 +2496,7 @@ function AdminPageContent() {
                   value={menuSearch}
                   onChange={e => setMenuSearch(e.target.value)}
                   placeholder="Məhsul adı ilə axtar"
-                  className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-9 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-amber-300"
+                  className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-9 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
                 />
                 {menuSearch && (
                   <button onClick={() => setMenuSearch('')} title="Axtarışı təmizlə" className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-lg text-stone-400 hover:text-stone-600 hover:bg-stone-100 transition-colors">
@@ -2493,7 +2536,7 @@ function AdminPageContent() {
                         <button onClick={() => toggleCategoryAvailable(cat)} title={catAvailable ? 'Kateqoriyanı satışda gizlət — satıcı və QR menyuda görünməyəcək' : 'Kateqoriyanı yenidən satışa aç'} className={`text-xs px-2 py-0.5 rounded-lg font-medium transition-colors ${catAvailable ? 'text-stone-500 hover:bg-stone-100' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
                           {catAvailable ? 'Gizlət' : 'Aç'}
                         </button>
-                        <button onClick={() => { setEditCatTarget(cat); setEditCatValue(cat); }} title="Kateqoriyanın adını dəyiş" className="text-xs text-amber-600 hover:text-amber-800 px-2 py-0.5 rounded-lg hover:bg-amber-50 transition-colors font-medium">Adını dəyiş</button>
+                        <button onClick={() => { setEditCatTarget(cat); setEditCatValue(cat); }} title="Kateqoriyanın adını dəyiş" className="text-xs text-primary-600 hover:text-primary-800 px-2 py-0.5 rounded-lg hover:bg-primary-50 transition-colors font-medium">Adını dəyiş</button>
                         <button onClick={() => setDialog({ title: 'Kateqoriyanı sil?', message: <><span className="font-medium text-stone-700">&ldquo;{cat}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.</>, onConfirm: () => deleteCategory(cat) })} title="Kateqoriyanı və içindəki məhsulları sil (zibil qutusuna gedir)" className="text-xs text-red-400 hover:text-red-600 px-2 py-0.5 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
                       </div>
                     </div>
@@ -2545,7 +2588,7 @@ function AdminPageContent() {
                         </div>
                         )}
                         </SortableRow>
-                        {editingId === item.id && renderItemForm(`border-t border-amber-100 bg-amber-50/20 px-5 py-4 space-y-4${i < items.length - 1 ? ' border-b border-stone-50' : ''}`)}
+                        {editingId === item.id && renderItemForm(`border-t border-primary-100 bg-primary-50 px-5 py-4 space-y-4${i < items.length - 1 ? ' border-b border-stone-50' : ''}`)}
                         </React.Fragment>
                       ))}
                       </SortableContext>
@@ -2560,7 +2603,7 @@ function AdminPageContent() {
                           onKeyDown={e => {
                             if (e.key === 'Enter') { e.preventDefault(); (e.currentTarget.nextElementSibling as HTMLInputElement)?.focus(); }
                           }}
-                          className="flex-1 min-w-0 bg-white border border-stone-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700"
+                          className="flex-1 min-w-0 bg-white border border-stone-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700"
                         />
                         <input
                           type="number" placeholder="₼" step="0.1" min="0"
@@ -2574,13 +2617,13 @@ function AdminPageContent() {
                               nameEl?.focus();
                             }
                           }}
-                          className="w-24 bg-white border border-stone-200 rounded-lg px-3 py-1.5 text-sm text-right focus:outline-none focus:ring-2 focus:ring-amber-700"
+                          className="w-24 bg-white border border-stone-200 rounded-lg px-3 py-1.5 text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary-700"
                         />
                         <button
                           onClick={() => submitQuickAdd(cat)}
                           disabled={!(quickAdd.cat === cat && quickAdd.name.trim() !== '' && quickAdd.price !== '' && parseFloat(quickAdd.price) >= 0)}
                           title="Əlavə et"
-                          className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-amber-800 hover:bg-amber-900 disabled:opacity-30 text-white transition-colors"
+                          className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-primary-800 hover:bg-primary-900 disabled:opacity-30 text-white transition-colors"
                         >
                           <Plus className="w-4 h-4" />
                         </button>
@@ -2622,7 +2665,7 @@ function AdminPageContent() {
                 return (
                   <div className="bg-white rounded-xl border border-stone-100 p-4 space-y-3">
                     <div className="flex items-center gap-2">
-                      <Link className="w-4 h-4 text-amber-700" />
+                      <Link className="w-4 h-4 text-primary-700" />
                       <p className="text-sm font-semibold text-stone-700">Satıcı terminal linki</p>
                     </div>
                     <p className="text-xs text-stone-500">Bu linki satıcılara verin. Açdıqda yalnız PIN daxil edirlər — başqa şey lazım deyil.</p>
@@ -2678,7 +2721,7 @@ function AdminPageContent() {
                   </div>
                   <button
                     onClick={() => { setEditingStaff(null); setSName(''); setSPin(''); setSError(''); setShowStaffForm(true); }}
-                    className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors shrink-0"
+                    className="flex items-center gap-2 bg-primary-800 hover:bg-primary-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors shrink-0"
                   >
                     <Plus className="w-4 h-4" /> PIN əməkdaşı
                   </button>
@@ -2708,7 +2751,7 @@ function AdminPageContent() {
                       <button
                         onClick={() => { setEditingStaff(s); setSName(s.name); setSPin(''); setSError(''); setShowStaffForm(true); }}
                         title="Düzəlt"
-                        className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-amber-700 transition-colors"
+                        className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-primary-700 transition-colors"
                       >
                         <Pencil className="w-4 h-4" />
                       </button>
@@ -2784,7 +2827,7 @@ function AdminPageContent() {
                             <tr key={e.id} className="border-b border-stone-50 last:border-0">
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2.5">
-                                  <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold shrink-0">
+                                  <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold shrink-0">
                                     {e.name[0]?.toUpperCase()}
                                   </div>
                                   <div className="min-w-0">
@@ -2816,16 +2859,72 @@ function AdminPageContent() {
           {/* ── TABLES ─────────────────────────────────────────────────── */}
           {tab === 'tables' && (
             <div className="max-w-3xl space-y-4">
+              {/* ── Brendinq ── */}
+              <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider px-1">Brendinq</p>
+
+              <div className="bg-white rounded-xl border border-stone-100 p-4 space-y-4">
+                {/* Logo */}
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-xl border border-stone-200 bg-stone-50 flex items-center justify-center overflow-hidden shrink-0">
+                    {logoUrl
+                      ? <img src={logoUrl} alt="" className="w-full h-full object-cover" />
+                      : <ImageIcon className="w-6 h-6 text-stone-300" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-stone-800">Loqo</p>
+                    <p className="text-xs text-stone-500">Satıcı, QR menyu və admin panelində görünür</p>
+                  </div>
+                  <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoFile} />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => logoInputRef.current?.click()}
+                      disabled={logoBusy}
+                      className="px-3 py-1.5 rounded-lg border border-stone-200 text-xs font-semibold text-stone-600 hover:bg-stone-50 transition-colors disabled:opacity-60"
+                    >
+                      {logoBusy ? 'Yüklənir…' : logoUrl ? 'Dəyiş' : 'Yüklə'}
+                    </button>
+                    {logoUrl && (
+                      <button
+                        onClick={removeLogo}
+                        disabled={logoBusy}
+                        className="px-3 py-1.5 rounded-lg border border-stone-200 text-xs font-semibold text-red-500 hover:bg-red-50 transition-colors disabled:opacity-60"
+                      >
+                        Sil
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Accent color */}
+                <div className="border-t border-stone-100 pt-4">
+                  <p className="text-sm font-semibold text-stone-800">Rəng</p>
+                  <p className="text-xs text-stone-500 mb-3">Tətbiqin əsas rəngi</p>
+                  <div className="flex flex-wrap gap-2.5">
+                    {BRAND_PRESETS.map(p => (
+                      <button
+                        key={p.key}
+                        onClick={() => pickBrandColor(p.key)}
+                        title={p.label}
+                        className={`w-9 h-9 rounded-full transition-transform hover:scale-105 ring-offset-2 ${brandColor === p.key ? 'ring-2 ring-stone-400' : 'ring-1 ring-stone-200'}`}
+                        style={{ backgroundColor: p.swatch }}
+                      >
+                        {brandColor === p.key && <Check className="w-4 h-4 text-white mx-auto" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
               {/* ── QR & Onlayn ── */}
-              <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider px-1">QR &amp; Onlayn</p>
+              <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider px-1 mt-2">QR &amp; Onlayn</p>
 
               {companySlug && (
-                <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 flex items-center gap-3">
-                  <Globe className="w-4 h-4 text-amber-700 shrink-0" />
-                  <p className="text-xs text-amber-800 font-medium truncate flex-1">{typeof window !== 'undefined' ? window.location.origin : ''}/{companySlug}/menu</p>
+                <div className="bg-primary-50 border border-primary-100 rounded-xl px-4 py-3 flex items-center gap-3">
+                  <Globe className="w-4 h-4 text-primary-700 shrink-0" />
+                  <p className="text-xs text-primary-800 font-medium truncate flex-1">{typeof window !== 'undefined' ? window.location.origin : ''}/{companySlug}/menu</p>
                   <button
                     onClick={() => navigator.clipboard.writeText(`${window.location.origin}/${companySlug}/menu`)}
-                    className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-amber-200 text-amber-700 transition-colors shrink-0"
+                    className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-primary-200 text-primary-700 transition-colors shrink-0"
                     title="Kopyala"
                   >
                     <Copy className="w-3.5 h-3.5" />
@@ -2834,7 +2933,7 @@ function AdminPageContent() {
                     href={`/${companySlug}/menu`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-amber-200 text-amber-700 transition-colors shrink-0"
+                    className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-primary-200 text-primary-700 transition-colors shrink-0"
                     title="Aç"
                   >
                     <Link className="w-3.5 h-3.5" />
@@ -2865,7 +2964,7 @@ function AdminPageContent() {
                       setQrToggleBusy(false);
                     }}
                     disabled={qrToggleBusy}
-                    className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${qrOn ? 'bg-amber-800' : 'bg-stone-300'}`}
+                    className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${qrOn ? 'bg-primary-800' : 'bg-stone-300'}`}
                   >
                     <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${qrOn ? 'translate-x-5' : ''}`} />
                   </button>
@@ -2895,7 +2994,7 @@ function AdminPageContent() {
                       setMenuOnlyBusy(false);
                     }}
                     disabled={menuOnlyBusy}
-                    className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${menuOnly ? 'bg-amber-800' : 'bg-stone-300'}`}
+                    className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${menuOnly ? 'bg-primary-800' : 'bg-stone-300'}`}
                   >
                     <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${menuOnly ? 'translate-x-5' : ''}`} />
                   </button>
@@ -2923,7 +3022,7 @@ function AdminPageContent() {
                     setTablesToggleBusy(false);
                   }}
                   disabled={tablesToggleBusy}
-                  className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${tablesOn ? 'bg-amber-800' : 'bg-stone-300'}`}
+                  className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${tablesOn ? 'bg-primary-800' : 'bg-stone-300'}`}
                 >
                   <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${tablesOn ? 'translate-x-5' : ''}`} />
                 </button>
@@ -2947,7 +3046,7 @@ function AdminPageContent() {
                 </div>
                 <button
                   onClick={() => { setEditingTable(null); setTName(''); setTCapacity('4'); setTShape('rect'); setShowTableForm(true); }}
-                  className="flex items-center gap-2 bg-amber-800 hover:bg-amber-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors"
+                  className="flex items-center gap-2 bg-primary-800 hover:bg-primary-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors"
                 >
                   <Plus className="w-4 h-4" /> Masa əlavə et
                 </button>
@@ -2997,7 +3096,7 @@ function AdminPageContent() {
                       const w = t.w ?? 100;
                       const h = isRound ? w : (t.h ?? 70);
                       const activeStatus = activeOrder?.status;
-                      const statusColor = activeStatus === 'gözləyir' ? 'bg-amber-400' : activeStatus === 'hazırlanır' ? 'bg-blue-400' : activeStatus === 'hazırdır' ? 'bg-green-500' : '';
+                      const statusColor = activeStatus === 'gözləyir' ? 'bg-primary-400' : activeStatus === 'hazırlanır' ? 'bg-blue-400' : activeStatus === 'hazırdır' ? 'bg-green-500' : '';
                       return (
                         <div
                           key={t.id}
@@ -3014,8 +3113,8 @@ function AdminPageContent() {
                         >
                           {isSelected && (
                             <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex gap-1 bg-white rounded-lg shadow border border-stone-100 px-1.5 py-1">
-                              <button onClick={e => { e.stopPropagation(); setQrTable(t); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-amber-700"><QrCode className="w-3 h-3" /></button>
-                              <button onClick={e => { e.stopPropagation(); setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-amber-700"><Pencil className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); setQrTable(t); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-primary-700"><QrCode className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-primary-700"><Pencil className="w-3 h-3" /></button>
                               <button onClick={e => { e.stopPropagation(); if (busy) { setDialog({ title: 'Silinmədi', message: 'Aktiv sifarişi olan masanı silmək olmaz.' }); return; } setDialog({ title: 'Masanı sil?', message: <><span className="font-medium text-stone-700">&ldquo;{t.name}&rdquo;</span> silinəcək.</>, onConfirm: () => deleteTable(t.id).then(err => { if (err) setDialog({ title: 'Silinmədi', message: err }); else setTables(prev => prev.filter(x => x.id !== t.id)); }) }); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
                             </div>
                           )}
@@ -3041,7 +3140,7 @@ function AdminPageContent() {
                     const busy = orders.some(o => o.tableNumber === t.id && isOrderOpen(o));
                     return (
                       <div key={t.id} className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-800 font-bold text-sm shrink-0">
+                        <div className="w-10 h-10 rounded-xl bg-primary-50 flex items-center justify-center text-primary-800 font-bold text-sm shrink-0">
                           {t.id}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -3052,10 +3151,10 @@ function AdminPageContent() {
                           {busy ? 'Dolu' : 'Boş'}
                         </span>
                         <div className="flex items-center gap-1 shrink-0">
-                          <button onClick={() => setQrTable(t)} title="QR kod" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-amber-700 transition-colors">
+                          <button onClick={() => setQrTable(t)} title="QR kod" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-primary-700 transition-colors">
                             <QrCode className="w-4 h-4" />
                           </button>
-                          <button onClick={() => { setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} title="Düzəlt" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-amber-700 transition-colors">
+                          <button onClick={() => { setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} title="Düzəlt" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-primary-700 transition-colors">
                             <Pencil className="w-4 h-4" />
                           </button>
                           <button
@@ -3098,7 +3197,7 @@ function AdminPageContent() {
             <div className="space-y-3 mb-5">
               <div>
                 <label className="text-xs font-semibold text-stone-600 uppercase tracking-wide block mb-1">Nağd ödəniş</label>
-                <div className="flex items-center border border-stone-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-amber-300">
+                <div className="flex items-center border border-stone-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-primary-300">
                   <input
                     type="number" min="0" step="0.01"
                     value={editPaymentCash}
@@ -3119,7 +3218,7 @@ function AdminPageContent() {
               </div>
               <div>
                 <label className="text-xs font-semibold text-stone-600 uppercase tracking-wide block mb-1">Kartla ödəniş</label>
-                <div className="flex items-center border border-stone-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-amber-300">
+                <div className="flex items-center border border-stone-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-primary-300">
                   <input
                     type="number" min="0" step="0.01"
                     value={editPaymentCard}
@@ -3167,7 +3266,7 @@ function AdminPageContent() {
                   }
                   setEditPaymentBusy(false);
                 }}
-                className="flex-1 py-3 rounded-xl bg-amber-800 hover:bg-amber-900 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2"
+                className="flex-1 py-3 rounded-xl bg-primary-800 hover:bg-primary-900 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2"
               >
                 {editPaymentBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
                 Tətbiq et
@@ -3258,7 +3357,7 @@ function AdminPageContent() {
                 <input
                   value={tName}
                   onChange={e => setTName(e.target.value)}
-                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                   placeholder="Masa 1"
                   required
                 />
@@ -3271,7 +3370,7 @@ function AdminPageContent() {
                   max={50}
                   value={tCapacity}
                   onChange={e => setTCapacity(e.target.value)}
-                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                   required
                 />
               </div>
@@ -3284,8 +3383,8 @@ function AdminPageContent() {
                     { value: 'round' as const,  label: 'Dairəvi', w: 'w-5', h: 'h-5', round: true },
                   ]).map(s => (
                     <button key={s.value} type="button" onClick={() => setTShape(s.value)}
-                      className={`flex-1 py-2 rounded-xl border-2 text-xs font-medium transition-colors flex flex-col items-center justify-center gap-1.5 ${tShape === s.value ? 'border-amber-600 bg-amber-50 text-amber-800' : 'border-stone-200 text-stone-500 hover:border-stone-300'}`}>
-                      <span className={`inline-block border-2 ${s.w} ${s.h} ${s.round ? 'rounded-full' : 'rounded-sm'} ${tShape === s.value ? 'border-amber-600' : 'border-stone-300'}`} />
+                      className={`flex-1 py-2 rounded-xl border-2 text-xs font-medium transition-colors flex flex-col items-center justify-center gap-1.5 ${tShape === s.value ? 'border-primary-600 bg-primary-50 text-primary-800' : 'border-stone-200 text-stone-500 hover:border-stone-300'}`}>
+                      <span className={`inline-block border-2 ${s.w} ${s.h} ${s.round ? 'rounded-full' : 'rounded-sm'} ${tShape === s.value ? 'border-primary-600' : 'border-stone-300'}`} />
                       {s.label}
                     </button>
                   ))}
@@ -3294,7 +3393,7 @@ function AdminPageContent() {
               <button
                 type="submit"
                 disabled={tSaving}
-                className="w-full bg-amber-800 hover:bg-amber-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors mt-2"
+                className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors mt-2"
               >
                 {tSaving ? 'Saxlanır...' : editingTable ? 'Yadda saxla' : 'Yarat'}
               </button>
@@ -3310,7 +3409,7 @@ function AdminPageContent() {
             <div className="flex items-center justify-between mb-5">
               <h3 className="font-bold text-stone-800">{qrTable.name} — QR Kod</h3>
               <div className="flex items-center gap-2">
-                <button onClick={handlePrintQr} title="Çap et" className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100 hover:bg-amber-100 hover:text-amber-800 transition-colors">
+                <button onClick={handlePrintQr} title="Çap et" className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100 hover:bg-primary-100 hover:text-primary-800 transition-colors">
                   <Printer className="w-4 h-4" />
                 </button>
                 <button onClick={() => setQrTable(null)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100">
@@ -3364,7 +3463,7 @@ function AdminPageContent() {
                 <input
                   value={sName}
                   onChange={e => setSName(e.target.value)}
-                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                   placeholder="Tam ad"
                   required
                 />
@@ -3377,7 +3476,7 @@ function AdminPageContent() {
                   value={sPin}
                   onChange={e => setSPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                   inputMode="numeric"
-                  className={`w-full border rounded-xl px-3 py-2.5 text-sm tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-amber-500 ${sPin.length === 4 && WEAK_PINS.has(sPin) ? 'border-red-400 bg-red-50' : 'border-stone-200'}`}
+                  className={`w-full border rounded-xl px-3 py-2.5 text-sm tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 ${sPin.length === 4 && WEAK_PINS.has(sPin) ? 'border-red-400 bg-red-50' : 'border-stone-200'}`}
                   placeholder={editingStaff ? 'Dəyişmək üçün daxil edin' : '4 rəqəm'}
                   required={!editingStaff}
                 />
@@ -3389,7 +3488,7 @@ function AdminPageContent() {
               <button
                 type="submit"
                 disabled={sSaving}
-                className="w-full bg-amber-800 hover:bg-amber-900 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+                className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
               >
                 {sSaving && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
                 {editingStaff ? 'Yadda saxla' : 'Əlavə et'}
@@ -3412,12 +3511,12 @@ function AdminPageContent() {
                 placeholder="Kateqoriya adı"
                 value={newCat}
                 onChange={e => setNewCat(e.target.value)}
-                className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+                className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
               />
               {dup && newCat.trim() !== '' && <p className="text-xs text-red-500">Bu adda kateqoriya artıq var</p>}
               <div className="flex gap-2 justify-end">
                 <button type="button" onClick={() => setShowCatDialog(false)} className="px-4 py-2 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors">Ləğv et</button>
-                <button type="submit" disabled={!newCat.trim() || dup} className="px-4 py-2 text-sm rounded-lg bg-amber-800 hover:bg-amber-900 disabled:opacity-40 text-white font-medium transition-colors">Əlavə et</button>
+                <button type="submit" disabled={!newCat.trim() || dup} className="px-4 py-2 text-sm rounded-lg bg-primary-800 hover:bg-primary-900 disabled:opacity-40 text-white font-medium transition-colors">Əlavə et</button>
               </div>
             </form>
           </div>
@@ -3441,9 +3540,9 @@ function AdminPageContent() {
                     <p className="text-xl font-bold text-green-700">{newItems.length}</p>
                     <p className="text-xs text-green-600">yeni məhsul</p>
                   </div>
-                  <div className="bg-amber-50 rounded-xl py-3">
-                    <p className="text-xl font-bold text-amber-700">{updatedItems.length}</p>
-                    <p className="text-xs text-amber-600">yenilənəcək</p>
+                  <div className="bg-primary-50 rounded-xl py-3">
+                    <p className="text-xl font-bold text-primary-700">{updatedItems.length}</p>
+                    <p className="text-xs text-primary-600">yenilənəcək</p>
                   </div>
                   <div className="bg-blue-50 rounded-xl py-3">
                     <p className="text-xl font-bold text-blue-700">{newCategories.length}</p>
@@ -3468,7 +3567,7 @@ function AdminPageContent() {
                 <button
                   onClick={applyImport}
                   disabled={importing || validCount === 0}
-                  className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-amber-800 hover:bg-amber-900 disabled:opacity-40 text-white font-medium transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-primary-800 hover:bg-primary-900 disabled:opacity-40 text-white font-medium transition-colors"
                 >
                   {importing && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
                   Tətbiq et ({validCount})
@@ -3579,11 +3678,11 @@ function AdminPageContent() {
               value={editCatValue}
               onChange={e => setEditCatValue(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') renameCategory(editCatTarget, editCatValue); }}
-              className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700 bg-white"
+              className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
             />
             <div className="flex gap-2 justify-end">
               <button onClick={() => setEditCatTarget(null)} className="px-4 py-2 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors">Ləğv et</button>
-              <button onClick={() => renameCategory(editCatTarget, editCatValue)} className="px-4 py-2 text-sm rounded-lg bg-amber-800 hover:bg-amber-900 text-white font-medium transition-colors">Yadda saxla</button>
+              <button onClick={() => renameCategory(editCatTarget, editCatValue)} className="px-4 py-2 text-sm rounded-lg bg-primary-800 hover:bg-primary-900 text-white font-medium transition-colors">Yadda saxla</button>
             </div>
           </div>
         </div>
@@ -3618,7 +3717,7 @@ function AdminPageContent() {
           <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-y-auto max-h-[90vh]">
             <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-stone-100">
               <div className="flex items-center gap-2">
-                <UserCircle className="w-5 h-5 text-amber-800" />
+                <UserCircle className="w-5 h-5 text-primary-800" />
                 <h3 className="font-bold text-stone-800">Profil</h3>
               </div>
               <button onClick={() => setShowProfile(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100 hover:bg-stone-200 transition-colors">
@@ -3636,7 +3735,7 @@ function AdminPageContent() {
                     <input
                       value={profOwner}
                       onChange={e => setProfOwner(e.target.value)}
-                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                       placeholder="Ad Soyad"
                     />
                   </div>
@@ -3645,7 +3744,7 @@ function AdminPageContent() {
                     <input
                       value={profAddress}
                       onChange={e => setProfAddress(e.target.value)}
-                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                       placeholder="Şəhər, küçə, ev"
                     />
                   </div>
@@ -3654,7 +3753,7 @@ function AdminPageContent() {
                     <input
                       value={profPhone}
                       onChange={e => setProfPhone(e.target.value)}
-                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                       placeholder="+994 50 000 00 00"
                     />
                   </div>
@@ -3665,14 +3764,14 @@ function AdminPageContent() {
                         type="time"
                         value={profOpen}
                         onChange={e => setProfOpen(e.target.value)}
-                        className="flex-1 border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        className="flex-1 border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                       />
                       <span className="text-stone-400 text-sm">—</span>
                       <input
                         type="time"
                         value={profClose}
                         onChange={e => setProfClose(e.target.value)}
-                        className="flex-1 border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        className="flex-1 border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                       />
                     </div>
                     <p className="text-xs text-stone-500 mt-1">
@@ -3685,7 +3784,7 @@ function AdminPageContent() {
                     <button
                       onClick={handleSaveProfile}
                       disabled={profSaving}
-                      className="flex-1 bg-amber-800 hover:bg-amber-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors"
+                      className="flex-1 bg-primary-800 hover:bg-primary-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors"
                     >
                       {profSaving ? 'Saxlanır...' : 'Yadda saxla'}
                     </button>
@@ -3707,7 +3806,7 @@ function AdminPageContent() {
                         type={pwShowCurrent ? 'text' : 'password'}
                         value={pwCurrent}
                         onChange={e => setPwCurrent(e.target.value)}
-                        className="w-full border border-stone-200 rounded-xl px-3 py-2.5 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                        className="w-full border border-stone-200 rounded-xl px-3 py-2.5 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                         placeholder="••••••••"
                       />
                       <button type="button" onClick={() => setPwShowCurrent(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-500">
@@ -3717,7 +3816,7 @@ function AdminPageContent() {
                   </div>
                   <div>
                     <label className="text-xs font-medium text-stone-600 block mb-1">Yeni şifrə</label>
-                    <PasswordField value={pwNew} onChange={setPwNew} focusClass="focus:ring-amber-400" />
+                    <PasswordField value={pwNew} onChange={setPwNew} focusClass="focus:ring-primary-400" />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-stone-600 block mb-1">Yeni şifrəni təsdiqlə</label>
@@ -3725,7 +3824,7 @@ function AdminPageContent() {
                       type="password"
                       value={pwConfirm}
                       onChange={e => setPwConfirm(e.target.value)}
-                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                       placeholder="••••••••"
                     />
                   </div>

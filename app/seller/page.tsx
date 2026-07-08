@@ -12,8 +12,9 @@ import { supabase } from '@/lib/supabase';
 import {
   fetchMenu, addOrder, addItemsToOrder, removeOrderItem, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
   fetchTablesEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
-  fetchCompanySettings, fetchStaff, verifyStaffPin, fetchPrintReceipt, setPrintReceiptEnabled,
+  fetchCompanySettings, fetchStaff, verifyStaffPin, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
 } from '@/lib/store';
+import { applyBrand } from '@/lib/branding';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
 import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
@@ -46,7 +47,7 @@ const MOD_GROUPS: Record<string, { label: string; options: string[] }[]> = {
 };
 
 const STATUS_COLORS: Record<OrderStatus, string> = {
-  'gözləyir':  'bg-amber-100 text-amber-700',
+  'gözləyir':  'bg-primary-100 text-primary-700',
   'hazırlanır':'bg-blue-100 text-blue-700',
   'hazırdır':  'bg-green-100 text-green-700',
   'ödənilib':  'bg-stone-100 text-stone-600',
@@ -77,8 +78,9 @@ function tableHasActive(n: number, orders: Order[]): boolean {
   return orders.some(o => o.tableNumber === n && isOrderOpen(o));
 }
 
-export default function SellerPage({ overrideCompanyId, overrideCompanyName, overrideToken }: { overrideCompanyId?: string; overrideCompanyName?: string; overrideToken?: string } = {}) {
+export default function SellerPage({ overrideCompanyId, overrideCompanyName, overrideToken, overrideLogoUrl, overrideBrandColor }: { overrideCompanyId?: string; overrideCompanyName?: string; overrideToken?: string; overrideLogoUrl?: string | null; overrideBrandColor?: string | null } = {}) {
   const router = useRouter();
+  const [logoUrl, setLogoUrl] = useState<string | null>(overrideLogoUrl ?? null);
   const [view, setView]             = useState<View>('orders');
   const [menu, setMenu]             = useState<MenuItem[]>([]);
   const [availableCategories, setAvailableCategories] = useState<Category[]>([]);
@@ -292,6 +294,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       // no Supabase auth session required.
       setCompanyContext(overrideCompanyId);
       setSellerName(overrideCompanyName ?? 'Satıcı');
+      applyBrand(overrideBrandColor);
       fetchCompanySettings(overrideCompanyId).then(setBizSettings);
       fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=1`)
         .then(r => r.json()).then(d => setTotalOrders(d.total ?? 0)).catch(() => {});
@@ -337,6 +340,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     setCompanyContext(session.companyId);
     setSellerName(session.name);
     fetchCompanySettings(session.companyId ?? '').then(setBizSettings);
+    fetchBranding().then(({ logoUrl: l, brandColor: b }) => { setLogoUrl(l); applyBrand(b); });
     Promise.all([fetchOpenShift(), fetchStaff()]).then(([s, st]) => {
       setShift(s); setPinStaffList(st); setShiftChecked(true);
     });
@@ -349,7 +353,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       if (cats.length > 0) setActiveCategory(cats[0]);
     }).catch(() => setOnline(false));
     return () => authSub.subscription.unsubscribe();
-  }, [router, overrideCompanyId, overrideCompanyName]);
+  }, [router, overrideCompanyId, overrideCompanyName, overrideBrandColor]);
 
   useEffect(() => {
     if (overrideCompanyId) return;
@@ -832,12 +836,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       <div className="flex flex-col h-full bg-white">
         <div className={`flex items-center h-14 border-b border-stone-100/50 ${collapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
           {!collapsed && (
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
-                <Coffee className="w-4 h-4 text-white" />
-              </div>
-              <span className="font-semibold text-stone-800 text-sm truncate max-w-[140px]">{getSession()?.companyName || 'Satıcı Paneli'}</span>
-            </div>
+            <span className="font-semibold text-stone-800 text-sm truncate max-w-[180px]">{overrideCompanyName || getSession()?.companyName || 'Satıcı Paneli'}</span>
           )}
           <button
             onClick={() => setCollapsed(c => !c)}
@@ -864,10 +863,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                   key={n.id}
                   title={n.label}
                   onClick={() => handleNav(n.id)}
-                  className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${isActive ? 'bg-amber-800/10 text-amber-800' : 'text-stone-500 hover:bg-stone-100 hover:text-stone-700'}`}
+                  className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${isActive ? 'bg-primary-100 text-primary-800' : 'text-stone-500 hover:bg-stone-100 hover:text-stone-700'}`}
                 >
                   <Icon className="w-4 h-4" />
-                  {badge && <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-800 text-white text-[9px] rounded-full flex items-center justify-center font-bold">{badge}</span>}
+                  {badge && <span className="absolute -top-1 -right-1 w-4 h-4 bg-primary-800 text-white text-[9px] rounded-full flex items-center justify-center font-bold">{badge}</span>}
                 </button>
               );
             }
@@ -876,12 +875,12 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
               <button
                 key={n.id}
                 onClick={() => handleNav(n.id)}
-                className={`flex items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium transition-colors w-full ${isActive ? 'bg-amber-800 text-white shadow-sm' : 'text-stone-600 hover:bg-amber-50 hover:text-amber-900'}`}
+                className={`flex items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium transition-colors w-full ${isActive ? 'bg-primary-800 text-white shadow-sm' : 'text-stone-600 hover:bg-primary-50 hover:text-primary-900'}`}
               >
                 <Icon className="w-4 h-4 shrink-0" />
                 <span className="flex-1 text-left truncate">{n.label}</span>
                 {badge && (
-                  <span className={`text-xs rounded-full px-1.5 py-0.5 font-semibold ${isActive ? 'bg-white/20 text-white' : 'bg-amber-800 text-white'}`}>
+                  <span className={`text-xs rounded-full px-1.5 py-0.5 font-semibold ${isActive ? 'bg-white/20 text-white' : 'bg-primary-800 text-white'}`}>
                     {badge}
                   </span>
                 )}
@@ -893,11 +892,11 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
         {!collapsed ? (
           <div className="px-4 py-4 border-t border-stone-100/50">
             <div className="flex items-center gap-2 mb-3">
-              <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
+              <div className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold">
                 {effectiveSeller[0]?.toUpperCase()}
               </div>
               <span className="text-xs text-stone-600 truncate">{effectiveSeller}</span>
-              {!online && <span className="ml-auto text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">Oflayn</span>}
+              {!online && <span className="ml-auto text-[10px] bg-primary-100 text-primary-700 px-1.5 py-0.5 rounded-full">Oflayn</span>}
             </div>
             {!overrideCompanyId && (
               <button onClick={() => { logout(); router.push('/login'); }} className="flex items-center gap-2 text-xs text-stone-500 hover:text-red-500 transition-colors">
@@ -907,7 +906,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
           </div>
         ) : (
           <div className="py-4 flex flex-col items-center gap-2 border-t border-stone-100/50">
-            <div className="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
+            <div className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold">
               {effectiveSeller[0]?.toUpperCase()}
             </div>
             {!overrideCompanyId && (
@@ -928,7 +927,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   if (pinLocked) {
     return (
       <div className="min-h-screen bg-[#f7f3ed] flex flex-col items-center justify-center p-6">
-        <div className="w-12 h-12 rounded-2xl bg-amber-800 flex items-center justify-center mb-4">
+        <div className="w-12 h-12 rounded-2xl bg-primary-800 flex items-center justify-center mb-4">
           <Coffee className="w-6 h-6 text-white" />
         </div>
         <h2 className="font-bold text-xl text-stone-800">{overrideCompanyName || getSession()?.companyName || 'Satıcı Paneli'}</h2>
@@ -936,7 +935,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
 
         <div className="flex gap-3 mb-3 h-4 items-center">
           {[0, 1, 2, 3].map(i => (
-            <span key={i} className={`rounded-full transition-all ${i < pinInput.length ? 'w-3.5 h-3.5 bg-amber-800' : 'w-3 h-3 bg-stone-300'}`} />
+            <span key={i} className={`rounded-full transition-all ${i < pinInput.length ? 'w-3.5 h-3.5 bg-primary-800' : 'w-3 h-3 bg-stone-300'}`} />
           ))}
         </div>
         <p className={`text-sm h-5 mb-4 ${pinMsg ? 'text-red-500' : 'text-transparent'}`}>{pinMsg || '·'}</p>
@@ -956,7 +955,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
           <button onClick={() => setPinInput(p => p.slice(0, -1))} disabled={pinBusy || pinInput.length === 0}
             className="w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center text-stone-500 hover:bg-stone-200/50 active:scale-95 transition-all disabled:opacity-30">
             {pinBusy
-              ? <span className="w-5 h-5 border-2 border-stone-300 border-t-amber-800 rounded-full animate-spin" />
+              ? <span className="w-5 h-5 border-2 border-stone-300 border-t-primary-800 rounded-full animate-spin" />
               : <Delete className="w-6 h-6" />}
           </button>
         </div>
@@ -985,7 +984,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   if (!shiftChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f7f3ed]">
-        <span className="w-8 h-8 border-2 border-stone-200 border-t-amber-800 rounded-full animate-spin" />
+        <span className="w-8 h-8 border-2 border-stone-200 border-t-primary-800 rounded-full animate-spin" />
       </div>
     );
   }
@@ -995,7 +994,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       <div className="min-h-screen flex items-center justify-center bg-[#f7f3ed] px-4">
         <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm">
           <div className="text-center mb-6">
-            <div className="w-12 h-12 rounded-2xl bg-amber-800 flex items-center justify-center mx-auto mb-3">
+            <div className="w-12 h-12 rounded-2xl bg-primary-800 flex items-center justify-center mx-auto mb-3">
               <Wallet className="w-6 h-6 text-white" />
             </div>
             <h1 className="text-xl font-bold text-stone-800">{justClosed ? 'Növbə bağlandı ✓' : 'Növbəni aç'}</h1>
@@ -1008,13 +1007,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
             type="number" min="0" step="0.5" placeholder="0.00"
             value={openCashInput}
             onChange={e => setOpenCashInput(e.target.value)}
-            className="w-full border border-stone-200 rounded-xl px-4 py-3 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-amber-700 mb-4"
+            className="w-full border border-stone-200 rounded-xl px-4 py-3 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-700 mb-4"
             autoFocus
           />
           <button
             onClick={handleOpenShift}
             disabled={shiftBusy || openCashInput === ''}
-            className="w-full bg-amber-800 hover:bg-amber-900 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+            className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
           >
             {shiftBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
             Növbəni aç
@@ -1058,14 +1057,18 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       {/* Header */}
       <header className="sticky top-0 z-50 h-14 border-b border-stone-100/60 bg-white/90 backdrop-blur-sm flex items-center gap-3 px-4">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-amber-800 flex items-center justify-center">
-            <Coffee className="w-4 h-4 text-white" />
-          </div>
-          <span className="font-semibold text-stone-800 text-sm md:hidden truncate max-w-[160px]">{getSession()?.companyName || 'Kafe'}</span>
+          {logoUrl ? (
+            <img src={logoUrl} alt="" className="w-7 h-7 rounded-lg object-cover border border-stone-100" />
+          ) : (
+            <div className="w-7 h-7 rounded-lg bg-primary-800 flex items-center justify-center">
+              <Coffee className="w-4 h-4 text-white" />
+            </div>
+          )}
+          <span className="font-semibold text-stone-800 text-sm md:hidden truncate max-w-[160px]">{overrideCompanyName || getSession()?.companyName || 'Kafe'}</span>
         </div>
         <div className="flex-1" />
         <div className="flex items-center gap-2 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl">
-          <div className="w-6 h-6 rounded-full bg-amber-100 flex items-center justify-center text-amber-900 text-xs font-bold">
+          <div className="w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold">
             {effectiveSeller[0]?.toUpperCase()}
           </div>
           <span className="text-sm font-medium text-stone-700 hidden sm:inline">{effectiveSeller}</span>
@@ -1090,7 +1093,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
           style={{ height: pullRefreshing ? 44 : Math.round(pullDistance * (44 / PULL_THRESHOLD)) }}
         >
           {pullRefreshing ? (
-            <><span className="w-4 h-4 border-2 border-stone-300 border-t-amber-800 rounded-full animate-spin" /><span>Yenilənir...</span></>
+            <><span className="w-4 h-4 border-2 border-stone-300 border-t-primary-800 rounded-full animate-spin" /><span>Yenilənir...</span></>
           ) : (
             <>
               <span style={{ display: 'inline-block', transform: `rotate(${pullDistance >= PULL_THRESHOLD ? 180 : 0}deg)`, transition: 'transform 0.2s' }}>↓</span>
@@ -1107,9 +1110,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
         if (days > 10) return null;
         const expired = days < 0;
         return (
-          <div className={`relative flex items-center justify-between gap-4 px-5 py-3 ${expired ? 'bg-red-600' : 'bg-amber-500'}`}>
+          <div className={`relative flex items-center justify-between gap-4 px-5 py-3 ${expired ? 'bg-red-600' : 'bg-primary-500'}`}>
             <div className="flex items-center gap-3">
-              <span className={`w-2 h-2 rounded-full animate-pulse shrink-0 ${expired ? 'bg-red-200' : 'bg-amber-200'}`} />
+              <span className={`w-2 h-2 rounded-full animate-pulse shrink-0 ${expired ? 'bg-red-200' : 'bg-primary-200'}`} />
               <p className="text-white text-sm font-medium">
                 {expired
                   ? 'Abunəliyinizin müddəti bitib. Sistemə giriş məhdudlaşdırıla bilər.'
@@ -1120,7 +1123,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
               href="https://wa.me/994998989876"
               target="_blank"
               rel="noopener noreferrer"
-              className={`shrink-0 text-xs font-bold px-4 py-1.5 rounded-lg transition-colors ${expired ? 'bg-white text-red-600 hover:bg-red-50' : 'bg-white text-amber-600 hover:bg-amber-50'}`}
+              className={`shrink-0 text-xs font-bold px-4 py-1.5 rounded-lg transition-colors ${expired ? 'bg-white text-red-600 hover:bg-red-50' : 'bg-white text-primary-600 hover:bg-primary-50'}`}
             >
               Ödəniş et
             </a>
@@ -1159,7 +1162,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 </button>
                 <div className="flex gap-3 text-sm flex-wrap">
                   <span className="text-stone-600">Cəmi <span className="font-semibold text-stone-800">{active.length}</span></span>
-                  <span className="text-stone-600">Gözləyir <span className="font-semibold text-amber-700">{orders.filter(o => o.status === 'gözləyir').length}</span></span>
+                  <span className="text-stone-600">Gözləyir <span className="font-semibold text-primary-700">{orders.filter(o => o.status === 'gözləyir').length}</span></span>
                   <span className="text-stone-600">Hazır <span className="font-semibold text-green-600">{orders.filter(o => o.status === 'hazırdır').length}</span></span>
                 </div>
               </div>
@@ -1236,9 +1239,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                       <p className="text-xs text-stone-500 mb-0.5">Kart</p>
                       <p className="text-lg font-bold text-stone-800">{historyKart.toFixed(2)} ₼</p>
                     </div>
-                    <div className="flex-1 bg-amber-50 rounded-xl border border-amber-100 px-4 py-3">
-                      <p className="text-xs text-amber-700 mb-0.5">Cəmi</p>
-                      <p className="text-lg font-bold text-amber-800">{historyRevenue.toFixed(2)} ₼</p>
+                    <div className="flex-1 bg-primary-50 rounded-xl border border-primary-100 px-4 py-3">
+                      <p className="text-xs text-primary-700 mb-0.5">Cəmi</p>
+                      <p className="text-lg font-bold text-primary-800">{historyRevenue.toFixed(2)} ₼</p>
                     </div>
                   </div>
                 </div>
@@ -1251,7 +1254,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                     value={historySearch}
                     onChange={e => setHistorySearch(e.target.value)}
                     placeholder="Sifariş №, masa və ya satıcı ilə axtar"
-                    className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-3 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-amber-300"
+                    className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-3 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
                   />
                 </div>
               </div>
@@ -1288,7 +1291,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                             className="w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 hover:bg-stone-50 transition-colors text-left"
                           >
                             <ChevronDown className={`w-4 h-4 text-stone-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                            <span className="w-12 text-xs font-bold text-amber-900 flex-shrink-0">№{order.orderNumber}</span>
+                            <span className="w-12 text-xs font-bold text-primary-900 flex-shrink-0">№{order.orderNumber}</span>
                             <span className="flex-1 text-sm text-stone-700 truncate">
                               {[tLabel, order.sellerName].filter(Boolean).join(' · ')}
                             </span>
@@ -1321,7 +1324,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                                   <div key={j} className="flex justify-between text-sm text-stone-700 py-0.5">
                                     <span className="flex-1">
                                       {oi.menuItem.name}
-                                      {oi.modifiers && <span className="text-xs text-amber-600 ml-1">({oi.modifiers})</span>}
+                                      {oi.modifiers && <span className="text-xs text-primary-600 ml-1">({oi.modifiers})</span>}
                                     </span>
                                     <span className="text-stone-500 mx-4">{oi.quantity} əd</span>
                                     <span className="font-medium">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
@@ -1342,7 +1345,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                                     <>
                                       <button
                                         onClick={() => openPayment(order)}
-                                        className="text-xs font-semibold text-white bg-amber-800 hover:bg-amber-900 rounded-lg px-2.5 py-1 transition-colors"
+                                        className="text-xs font-semibold text-white bg-primary-800 hover:bg-primary-900 rounded-lg px-2.5 py-1 transition-colors"
                                       >
                                         Ödəniş
                                       </button>
@@ -1372,7 +1375,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                                 </div>
                                 <div className="text-right">
                                   {(order.discountAmount ?? 0) > 0 && <p className="text-xs text-stone-400 line-through">{(orderTotal(order) + order.discountAmount!).toFixed(2)} ₼</p>}
-                                  <span className="font-bold text-amber-900">{orderTotal(order).toFixed(2)} ₼</span>
+                                  <span className="font-bold text-primary-900">{orderTotal(order).toFixed(2)} ₼</span>
                                 </div>
                               </div>
                             </div>
@@ -1415,7 +1418,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                     </div>
                   )}
                   <div className="flex justify-between items-center border-t pt-3 font-bold text-lg">
-                    <span>Kassada olmalıdır</span><span className="text-amber-700">{expectedCash.toFixed(2)} ₼</span>
+                    <span>Kassada olmalıdır</span><span className="text-primary-700">{expectedCash.toFixed(2)} ₼</span>
                   </div>
                 </div>
 
@@ -1423,7 +1426,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5">
                   <div className="flex justify-between items-center font-bold">
                     <span className="text-stone-800">💳 Terminal (kart satışı)</span>
-                    <span className="text-amber-700 text-lg">{shiftSales.card.toFixed(2)} ₼</span>
+                    <span className="text-primary-700 text-lg">{shiftSales.card.toFixed(2)} ₼</span>
                   </div>
                   <p className="text-xs text-stone-500 mt-1">Kassaya daxil deyil — bank terminalından keçir</p>
                 </div>
@@ -1434,7 +1437,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                     <h2 className="font-semibold text-stone-800 text-sm">Mədaxil / məxaric</h2>
                     <button
                       onClick={() => setShowMovForm(v => !v)}
-                      className="text-xs font-semibold text-amber-800 hover:text-amber-950 px-2.5 py-1 rounded-lg hover:bg-amber-50 transition-colors"
+                      className="text-xs font-semibold text-primary-800 hover:text-primary-950 px-2.5 py-1 rounded-lg hover:bg-primary-50 transition-colors"
                     >
                       {showMovForm ? 'Bağla' : '+ Əlavə et'}
                     </button>
@@ -1454,17 +1457,17 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                       <input
                         type="number" min="0" step="0.5" placeholder="Məbləğ (₼)"
                         value={movAmount} onChange={e => setMovAmount(e.target.value)}
-                        className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700"
+                        className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
                       />
                       <input
                         type="text" placeholder="Səbəb (məs. su kuryeri)"
                         value={movReason} onChange={e => setMovReason(e.target.value)}
-                        className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-700"
+                        className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700"
                       />
                       <button
                         onClick={handleAddMovement}
                         disabled={!(parseFloat(movAmount) > 0) || !movReason.trim()}
-                        className="w-full bg-amber-800 hover:bg-amber-900 disabled:opacity-40 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+                        className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-40 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
                       >Yadda saxla</button>
                     </div>
                   )}
@@ -1496,13 +1499,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                   <input
                     type="number" min="0" step="0.5" placeholder="0.00"
                     value={countedInput} onChange={e => setCountedInput(e.target.value)}
-                    className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-amber-700 mb-3"
+                    className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-700 mb-3"
                   />
                   {countedInput !== '' && (
                     <div className={`flex justify-between items-center px-4 py-2.5 rounded-xl font-semibold text-sm mb-3 ${
                       Math.abs((parseFloat(countedInput) || 0) - expectedCash) < 0.005
                         ? 'bg-green-50 text-green-700'
-                        : (parseFloat(countedInput) || 0) < expectedCash ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
+                        : (parseFloat(countedInput) || 0) < expectedCash ? 'bg-red-50 text-red-600' : 'bg-primary-50 text-primary-700'
                     }`}>
                       <span>
                         {Math.abs((parseFloat(countedInput) || 0) - expectedCash) < 0.005
@@ -1516,13 +1519,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                   <input
                     type="number" min="0" step="0.5" placeholder="0.00"
                     value={terminalInput} onChange={e => setTerminalInput(e.target.value)}
-                    className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-amber-700 mb-3"
+                    className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-700 mb-3"
                   />
                   {terminalInput !== '' && (
                     <div className={`flex justify-between items-center px-4 py-2.5 rounded-xl font-semibold text-sm mb-3 ${
                       Math.abs((parseFloat(terminalInput) || 0) - shiftSales.card) < 0.005
                         ? 'bg-green-50 text-green-700'
-                        : (parseFloat(terminalInput) || 0) < shiftSales.card ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'
+                        : (parseFloat(terminalInput) || 0) < shiftSales.card ? 'bg-red-50 text-red-600' : 'bg-primary-50 text-primary-700'
                     }`}>
                       <span>
                         {Math.abs((parseFloat(terminalInput) || 0) - shiftSales.card) < 0.005
@@ -1554,14 +1557,14 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
               <div className="grid grid-cols-2 gap-4 max-w-xs mb-8">
                 <button
                   onClick={() => setOrderType('masa')}
-                  className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 ${orderType === 'masa' ? 'border-amber-800 bg-amber-50' : 'border-stone-200 bg-white hover:border-amber-300'}`}
+                  className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 ${orderType === 'masa' ? 'border-primary-800 bg-primary-50' : 'border-stone-200 bg-white hover:border-primary-300'}`}
                 >
-                  <UtensilsCrossed className={`w-8 h-8 ${orderType === 'masa' ? 'text-amber-800' : 'text-stone-500'}`} />
-                  <span className={`font-semibold text-sm ${orderType === 'masa' ? 'text-amber-800' : 'text-stone-600'}`}>Masa</span>
+                  <UtensilsCrossed className={`w-8 h-8 ${orderType === 'masa' ? 'text-primary-800' : 'text-stone-500'}`} />
+                  <span className={`font-semibold text-sm ${orderType === 'masa' ? 'text-primary-800' : 'text-stone-600'}`}>Masa</span>
                 </button>
                 <button
                   onClick={() => startNewOrder('takeaway')}
-                  className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-stone-200 bg-white hover:border-amber-300 transition-all active:scale-95"
+                  className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-stone-200 bg-white hover:border-primary-300 transition-all active:scale-95"
                 >
                   <span className="text-4xl">🥡</span>
                   <span className="font-semibold text-sm text-stone-600">Takeaway</span>
@@ -1635,7 +1638,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 <div className="px-3 py-2.5 border-b bg-white flex items-center gap-2 shrink-0">
                   <button
                     onClick={() => { if (appendOrderId) { cancelAppend(); return; } setView(tablesOn ? 'new-order' : 'orders'); setOrderType(tablesOn ? 'masa' : null); setCart([]); setMenuSearch(''); }}
-                    className="w-9 h-9 flex items-center justify-center rounded-xl text-amber-700 hover:bg-amber-50 active:scale-95 transition-all"
+                    className="w-9 h-9 flex items-center justify-center rounded-xl text-primary-700 hover:bg-primary-50 active:scale-95 transition-all"
                   >
                     <ChevronLeft className="w-5 h-5" />
                   </button>
@@ -1645,7 +1648,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                       value={menuSearch}
                       onChange={e => setMenuSearch(e.target.value)}
                       placeholder="Məhsul axtar..."
-                      className="w-full bg-stone-50 border border-stone-200 rounded-xl pl-9 pr-8 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-amber-300"
+                      className="w-full bg-stone-50 border border-stone-200 rounded-xl pl-9 pr-8 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
                     />
                     {menuSearch && (
                       <button onClick={() => setMenuSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600">
@@ -1660,7 +1663,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                   >
                     <ShoppingCart className="w-5 h-5" />
                     {cartCount > 0 && (
-                      <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-amber-800 text-white text-[10px] rounded-full flex items-center justify-center font-bold">{cartCount}</span>
+                      <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-primary-800 text-white text-[10px] rounded-full flex items-center justify-center font-bold">{cartCount}</span>
                     )}
                   </button>
                 </div>
@@ -1680,10 +1683,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                         <button
                           key={cat}
                           onClick={() => setActiveCategory(cat)}
-                          className={`whitespace-nowrap text-sm px-3 py-1.5 rounded-full font-medium transition-colors shrink-0 flex items-center gap-1.5 ${activeCategory === cat ? 'bg-amber-800 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
+                          className={`whitespace-nowrap text-sm px-3 py-1.5 rounded-full font-medium transition-colors shrink-0 flex items-center gap-1.5 ${activeCategory === cat ? 'bg-primary-800 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}
                         >
                           {cat}
-                          <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${activeCategory === cat ? 'bg-amber-700 text-amber-100' : 'bg-stone-200 text-stone-600'}`}>{count}</span>
+                          <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${activeCategory === cat ? 'bg-primary-700 text-primary-100' : 'bg-stone-200 text-stone-600'}`}>{count}</span>
                         </button>
                       );
                     })}
@@ -1704,21 +1707,21 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                   {filtered.map(item => {
                     const inCart = cart.filter(ci => ci.menuItem.id === item.id).reduce((s, ci) => s + ci.quantity, 0);
                     return (
-                      <div key={item.id} className="bg-white rounded-2xl shadow-sm border border-transparent hover:border-amber-200 transition-all relative overflow-hidden">
+                      <div key={item.id} className="bg-white rounded-2xl shadow-sm border border-transparent hover:border-primary-200 transition-all relative overflow-hidden">
                         <button
                           onClick={() => handleMenuItemTap(item)}
                           className="w-full text-left active:scale-95"
                         >
                           {inCart > 0 && (
-                            <span className="absolute top-2 right-2 z-10 bg-amber-800 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">{inCart}</span>
+                            <span className="absolute top-2 right-2 z-10 bg-primary-800 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">{inCart}</span>
                           )}
                           {item.image
                             ? <img src={item.image} alt={item.name} className="w-full aspect-[4/3] object-cover" />
-                            : <div className="w-full aspect-[4/3] bg-amber-50 flex items-center justify-center text-3xl">☕</div>
+                            : <div className="w-full aspect-[4/3] bg-primary-50 flex items-center justify-center text-3xl">☕</div>
                           }
                           <div className="p-2.5">
                             <p className="text-sm font-medium text-stone-800 leading-tight">{item.name}</p>
-                            <p className="text-amber-700 font-bold text-sm mt-0.5">{item.price.toFixed(2)} ₼</p>
+                            <p className="text-primary-700 font-bold text-sm mt-0.5">{item.price.toFixed(2)} ₼</p>
                           </div>
                         </button>
                       </div>
@@ -1739,7 +1742,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                   ) : (
                     <div className="flex items-center justify-between">
                       <div>
-                        <h2 className="font-bold text-stone-800">{appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}</h2>
+                        <h2 className="font-bold text-stone-800">{appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className="text-primary-700">({cartCount})</span>}</h2>
                         <p className="text-xs text-stone-500">{appendOrder ? `№${appendOrder.orderNumber}-ə əlavə` : !tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
                       </div>
                       {cart.length > 0 && (
@@ -1764,16 +1767,16 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                     value={note}
                     onChange={e => setNote(e.target.value)}
                     rows={2}
-                    className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary-400"
                   />
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-stone-600">Cəmi:</span>
-                    <span className="font-bold text-lg text-amber-700">{cartTotal.toFixed(2)} ₼</span>
+                    <span className="font-bold text-lg text-primary-700">{cartTotal.toFixed(2)} ₼</span>
                   </div>
                   <button
                     onClick={submitOrder}
                     disabled={cart.length === 0 || submitting}
-                    className="w-full bg-amber-800 hover:bg-amber-900 disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+                    className="w-full bg-primary-800 hover:bg-primary-900 disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
                   >
                     {submitting && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                     {submitting ? 'Göndərilir...' : appendOrder ? 'Əlavə et' : 'Sifariş ver'}
@@ -1786,7 +1789,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 <div className="lg:hidden fixed bottom-16 inset-x-0 z-30 px-4 pb-2 pointer-events-none">
                   <button
                     onClick={() => setMobileCartOpen(true)}
-                    className="pointer-events-auto w-full bg-amber-800 text-white rounded-2xl py-3.5 flex items-center justify-between px-5 shadow-lg active:scale-95 transition-transform"
+                    className="pointer-events-auto w-full bg-primary-800 text-white rounded-2xl py-3.5 flex items-center justify-between px-5 shadow-lg active:scale-95 transition-transform"
                   >
                     <span className="bg-white/20 text-white text-xs font-bold px-2 py-0.5 rounded-full min-w-[1.5rem] text-center">{cartCount}</span>
                     <span className="font-semibold text-sm">Sifarişi gör</span>
@@ -1814,16 +1817,16 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
             <button
               key={n.id}
               onClick={() => handleNav(n.id)}
-              className={`flex-1 flex flex-col items-center gap-1 py-2.5 relative transition-colors active:opacity-70 ${isActive ? 'text-amber-800' : 'text-stone-500'}`}
+              className={`flex-1 flex flex-col items-center gap-1 py-2.5 relative transition-colors active:opacity-70 ${isActive ? 'text-primary-800' : 'text-stone-500'}`}
             >
               <div className="relative">
                 <Icon className="w-5 h-5" />
                 {badge && (
-                  <span className="absolute -top-1.5 -right-2 w-4 h-4 bg-amber-800 text-white text-[9px] rounded-full flex items-center justify-center font-bold">{badge}</span>
+                  <span className="absolute -top-1.5 -right-2 w-4 h-4 bg-primary-800 text-white text-[9px] rounded-full flex items-center justify-center font-bold">{badge}</span>
                 )}
               </div>
               <span className="text-[10px] font-medium">{n.label}</span>
-              {isActive && <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-amber-800 rounded-full" />}
+              {isActive && <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-primary-800 rounded-full" />}
             </button>
           );
         })}
@@ -1847,7 +1850,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="font-bold text-stone-800">
-                      {appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className="text-amber-700">({cartCount})</span>}
+                      {appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className="text-primary-700">({cartCount})</span>}
                     </h2>
                     <p className="text-xs text-stone-500">{appendOrder ? `№${appendOrder.orderNumber}-ə əlavə` : !tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
                   </div>
@@ -1878,16 +1881,16 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 value={note}
                 onChange={e => setNote(e.target.value)}
                 rows={2}
-                className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400"
+                className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary-400"
               />
               <div className="flex justify-between items-center">
                 <span className="text-sm text-stone-600">Cəmi:</span>
-                <span className="font-bold text-xl text-amber-700">{cartTotal.toFixed(2)} ₼</span>
+                <span className="font-bold text-xl text-primary-700">{cartTotal.toFixed(2)} ₼</span>
               </div>
               <button
                 onClick={submitOrder}
                 disabled={cart.length === 0 || submitting}
-                className="w-full bg-amber-800 hover:bg-amber-900 disabled:bg-stone-300 text-white font-semibold py-4 rounded-2xl transition-colors text-base active:scale-95 flex items-center justify-center gap-2"
+                className="w-full bg-primary-800 hover:bg-primary-900 disabled:bg-stone-300 text-white font-semibold py-4 rounded-2xl transition-colors text-base active:scale-95 flex items-center justify-center gap-2"
               >
                 {submitting && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                 {submitting ? 'Göndərilir...' : appendOrder ? 'Əlavə et' : 'Sifariş ver'}
@@ -1965,7 +1968,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                   <li key={i} className="flex justify-between text-stone-700">
                     <div>
                       <span>{oi.menuItem.name} × {oi.quantity}</span>
-                      {oi.modifiers && <p className="text-xs text-amber-600">{oi.modifiers}</p>}
+                      {oi.modifiers && <p className="text-xs text-primary-600">{oi.modifiers}</p>}
                     </div>
                     <span className="shrink-0 ml-2">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
                   </li>
@@ -1976,11 +1979,11 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 <div className="flex rounded-lg overflow-hidden border border-stone-200 shrink-0">
                   <button
                     onClick={() => setDiscountType('₼')}
-                    className={`px-3 py-1.5 text-sm font-semibold transition-colors ${discountType === '₼' ? 'bg-amber-800 text-white' : 'bg-white text-stone-600'}`}
+                    className={`px-3 py-1.5 text-sm font-semibold transition-colors ${discountType === '₼' ? 'bg-primary-800 text-white' : 'bg-white text-stone-600'}`}
                   >₼</button>
                   <button
                     onClick={() => setDiscountType('%')}
-                    className={`px-3 py-1.5 text-sm font-semibold transition-colors ${discountType === '%' ? 'bg-amber-800 text-white' : 'bg-white text-stone-600'}`}
+                    className={`px-3 py-1.5 text-sm font-semibold transition-colors ${discountType === '%' ? 'bg-primary-800 text-white' : 'bg-white text-stone-600'}`}
                   >%</button>
                 </div>
                 <input
@@ -1988,7 +1991,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                   value={discountInput}
                   onChange={e => setDiscountInput(e.target.value)}
                   onFocus={e => e.target.select()}
-                  className="flex-1 border border-stone-200 rounded-xl px-3 py-1.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700 text-center"
+                  className="flex-1 border border-stone-200 rounded-xl px-3 py-1.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700 text-center"
                 />
                 {discountAmt > 0 && (
                   <span className="text-sm font-bold text-green-600 shrink-0">-{discountAmt.toFixed(2)} ₼</span>
@@ -1998,7 +2001,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 <span>Cəmi</span>
                 <div className="text-right">
                   {discountAmt > 0 && <p className="text-xs text-stone-400 line-through font-normal">{fullTotal.toFixed(2)} ₼</p>}
-                  <span className="text-amber-700">{total.toFixed(2)} ₼</span>
+                  <span className="text-primary-700">{total.toFixed(2)} ₼</span>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3 mb-4">
@@ -2016,7 +2019,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                       }
                       requestAnimationFrame(() => el.select());
                     }}
-                    className="w-full border border-stone-200 rounded-xl px-3 py-3 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700 text-center"
+                    className="w-full border border-stone-200 rounded-xl px-3 py-3 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700 text-center"
                     autoFocus
                   />
                 </div>
@@ -2034,7 +2037,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                       }
                       requestAnimationFrame(() => el.select());
                     }}
-                    className="w-full border border-stone-200 rounded-xl px-3 py-3 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-amber-700 text-center"
+                    className="w-full border border-stone-200 rounded-xl px-3 py-3 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700 text-center"
                   />
                 </div>
               </div>
@@ -2095,7 +2098,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                       <button
                         key={v.id}
                         onClick={() => setSelectedVariant({ id: v.id, name: v.name, price: v.price })}
-                        className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${selectedVariant?.id === v.id ? 'border-amber-800 bg-amber-50 text-amber-800' : 'border-stone-200 text-stone-600 hover:border-stone-300'}`}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${selectedVariant?.id === v.id ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 text-stone-600 hover:border-stone-300'}`}
                       >
                         {v.name} — {v.price.toFixed(2)} ₼
                       </button>
@@ -2111,7 +2114,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                       <button
                         key={opt}
                         onClick={() => setSelectedMods(prev => ({ ...prev, [group.label]: opt }))}
-                        className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${selectedMods[group.label] === opt ? 'border-amber-800 bg-amber-50 text-amber-800' : 'border-stone-200 text-stone-600 hover:border-stone-300'}`}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${selectedMods[group.label] === opt ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 text-stone-600 hover:border-stone-300'}`}
                       >
                         {opt}
                       </button>
@@ -2122,7 +2125,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
             </div>
             <div className="flex gap-2 mt-6">
               <button onClick={() => setModifierItem(null)} className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">Ləğv et</button>
-              <button onClick={confirmModifiers} className="flex-1 py-3 rounded-xl bg-amber-800 hover:bg-amber-900 text-white font-semibold text-sm active:scale-95">Əlavə et</button>
+              <button onClick={confirmModifiers} className="flex-1 py-3 rounded-xl bg-primary-800 hover:bg-primary-900 text-white font-semibold text-sm active:scale-95">Əlavə et</button>
             </div>
           </div>
         </div>
@@ -2155,7 +2158,7 @@ function CartItems({ cart, existingItems, addToCart, removeFromCart, onRemoveExi
               <li key={'ex' + j} className="flex items-center justify-between gap-2 text-sm text-stone-500">
                 <span className="flex-1 min-w-0 truncate">
                   {oi.menuItem.name}
-                  {oi.modifiers && <span className="text-xs text-amber-600 ml-1">({oi.modifiers})</span>}
+                  {oi.modifiers && <span className="text-xs text-primary-600 ml-1">({oi.modifiers})</span>}
                 </span>
                 <span className="shrink-0 text-xs">{oi.quantity} əd</span>
                 <span className="shrink-0 w-14 text-right">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
@@ -2181,7 +2184,7 @@ function CartItems({ cart, existingItems, addToCart, removeFromCart, onRemoveExi
         <li key={ci.menuItem.id + (ci.modifiers ?? '')} className="flex items-center gap-3">
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-stone-800 truncate">{ci.menuItem.name}</p>
-            {ci.modifiers && <p className="text-xs text-amber-600 truncate">{ci.modifiers}</p>}
+            {ci.modifiers && <p className="text-xs text-primary-600 truncate">{ci.modifiers}</p>}
             <p className="text-xs text-stone-500">{ci.menuItem.price.toFixed(2)} ₼</p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -2194,7 +2197,7 @@ function CartItems({ cart, existingItems, addToCart, removeFromCart, onRemoveExi
             <span className="w-5 text-center text-sm font-semibold">{ci.quantity}</span>
             <button
               onClick={() => addToCart(ci.menuItem, ci.modifiers)}
-              className="w-7 h-7 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-700 flex items-center justify-center active:scale-90"
+              className="w-7 h-7 rounded-full bg-primary-100 hover:bg-primary-200 text-primary-700 flex items-center justify-center active:scale-90"
             >
               <Plus className="w-3 h-3" />
             </button>
@@ -2235,7 +2238,7 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onAppend, onStatusCh
             <div>
               <div className="flex items-center gap-2 mb-0.5">
                 <ChevronDown className={`w-3.5 h-3.5 text-stone-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-                <span className="text-amber-700 font-bold text-sm">№{order.orderNumber}</span>
+                <span className="text-primary-700 font-bold text-sm">№{order.orderNumber}</span>
                 {tableLabel && <span className="text-stone-800 font-semibold text-sm">{tableLabel}</span>}
               </div>
               <p className="text-xs text-stone-500 pl-5">
@@ -2257,7 +2260,7 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onAppend, onStatusCh
                 <div key={j} className="flex justify-between text-sm text-stone-700 py-0.5">
                   <span className="flex-1">
                     {oi.menuItem.name}
-                    {oi.modifiers && <span className="text-xs text-amber-600 ml-1">({oi.modifiers})</span>}
+                    {oi.modifiers && <span className="text-xs text-primary-600 ml-1">({oi.modifiers})</span>}
                   </span>
                   <span className="text-stone-500 mx-4">{oi.quantity} əd</span>
                   <span className="font-medium">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
@@ -2280,13 +2283,13 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onAppend, onStatusCh
                 </button>
                 <button
                   onClick={e => { e.stopPropagation(); onAppend(); }}
-                  className="px-4 py-2.5 rounded-xl border border-amber-300 text-amber-800 hover:bg-amber-50 active:scale-95 text-sm font-semibold transition-all"
+                  className="px-4 py-2.5 rounded-xl border border-primary-300 text-primary-800 hover:bg-primary-50 active:scale-95 text-sm font-semibold transition-all"
                 >
                   + Əlavə et
                 </button>
                 <button
                   onClick={e => { e.stopPropagation(); onPay(); }}
-                  className="flex-1 bg-amber-800 hover:bg-amber-900 active:scale-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-all"
+                  className="flex-1 bg-primary-800 hover:bg-primary-900 active:scale-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-all"
                 >
                   Ödəniş
                 </button>
@@ -2311,7 +2314,7 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onAppend, onStatusCh
           <div>
             <p className="text-sm font-medium text-stone-800 flex items-center gap-1">
               <ChevronDown className={`w-3.5 h-3.5 text-stone-400 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-              <span className="text-amber-700">№{order.orderNumber}</span>{tableLabel && <>{' › '}<span>{tableLabel}</span></>}
+              <span className="text-primary-700">№{order.orderNumber}</span>{tableLabel && <>{' › '}<span>{tableLabel}</span></>}
             </p>
             {!expanded && <p className="text-xs text-stone-500 truncate max-w-xs pl-5">{itemsPreview}</p>}
           </div>
@@ -2323,7 +2326,7 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onAppend, onStatusCh
           <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
             {isOrderOpen(order) && (
               <>
-                <button onClick={onPay} className="bg-amber-800 hover:bg-amber-900 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
+                <button onClick={onPay} className="bg-primary-800 hover:bg-primary-900 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
                   Ödəniş
                 </button>
                 <button onClick={onCancel} className="border border-red-200 text-red-500 hover:bg-red-50 text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
@@ -2350,7 +2353,7 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onAppend, onStatusCh
                 <div key={j} className="flex justify-between text-sm text-stone-700 py-0.5">
                   <span className="flex-1">
                     {oi.menuItem.name}
-                    {oi.modifiers && <span className="text-xs text-amber-600 ml-1">({oi.modifiers})</span>}
+                    {oi.modifiers && <span className="text-xs text-primary-600 ml-1">({oi.modifiers})</span>}
                   </span>
                   <span className="text-stone-500 mx-4">{oi.quantity} əd</span>
                   <span className="font-medium">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
@@ -2362,7 +2365,7 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onAppend, onStatusCh
               <div className="flex pt-3 mt-1 border-t border-stone-200">
                 <button
                   onClick={e => { e.stopPropagation(); onAppend(); }}
-                  className="text-xs font-semibold text-amber-800 border border-amber-300 hover:bg-amber-50 rounded-lg px-3 py-1.5 transition-colors"
+                  className="text-xs font-semibold text-primary-800 border border-primary-300 hover:bg-primary-50 rounded-lg px-3 py-1.5 transition-colors"
                 >
                   + Əlavə et
                 </button>

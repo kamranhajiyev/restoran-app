@@ -809,11 +809,11 @@ export async function setSalesWarehouse(id: string | null): Promise<string | nul
 
 // ─── Public: company by slug ──────────────────────────────────────────────────
 
-export async function fetchCompanyBySlug(slug: string): Promise<{ id: string; name: string } | null> {
+export async function fetchCompanyBySlug(slug: string): Promise<{ id: string; name: string; logoUrl: string | null; brandColor: string | null } | null> {
   try {
-    const { data, error } = await supabase.from('companies').select('id, name').eq('slug', slug).eq('active', true).single();
+    const { data, error } = await supabase.from('companies').select('id, name, logo_url, brand_color').eq('slug', slug).eq('active', true).single();
     if (error || !data) return null;
-    return { id: data.id, name: data.name };
+    return { id: data.id, name: data.name, logoUrl: data.logo_url ?? null, brandColor: data.brand_color ?? null };
   } catch { return null; }
 }
 
@@ -863,6 +863,27 @@ export async function fetchQrEnabled(): Promise<boolean> {
 export async function setQrEnabled(enabled: boolean): Promise<void> {
   const { error } = await supabase.rpc('set_qr_enabled', { enabled });
   if (error) console.error('[setQrEnabled]', error);
+}
+
+// ─── Branding (logo + accent color) ───────────────────────────────────────────
+
+export async function fetchBranding(): Promise<{ logoUrl: string | null; brandColor: string | null }> {
+  try {
+    if (!_companyId) return { logoUrl: null, brandColor: null };
+    const { data, error } = await supabase.from('companies').select('logo_url, brand_color').eq('id', _companyId).single();
+    if (error || !data) return { logoUrl: null, brandColor: null };
+    return { logoUrl: data.logo_url ?? null, brandColor: data.brand_color ?? null };
+  } catch { return { logoUrl: null, brandColor: null }; }
+}
+
+export async function setLogoUrl(url: string | null): Promise<void> {
+  const { error } = await supabase.rpc('set_logo_url', { url: url ?? '' });
+  if (error) console.error('[setLogoUrl]', error);
+}
+
+export async function setBrandColor(color: string): Promise<void> {
+  const { error } = await supabase.rpc('set_brand_color', { c: color });
+  if (error) console.error('[setBrandColor]', error);
 }
 
 export async function fetchMenuOnly(): Promise<boolean> {

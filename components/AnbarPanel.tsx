@@ -398,7 +398,7 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
       <div className="flex flex-wrap items-center gap-2">
         {([['all', 'Hamısı'], ['product', 'Məhsullar'], ['ingredient', 'İnqrediyentlər']] as const).map(([val, label]) => (
           <button key={val} onClick={() => setTypeFilter(val)}
-            className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${typeFilter === val ? 'bg-amber-700 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}>
+            className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${typeFilter === val ? 'bg-primary-700 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}>
             {label}
           </button>
         ))}

@@ -53,7 +53,7 @@ export default function InstallPWA() {
     <div ref={ref} className="relative">
       <button
         onClick={() => isIOS ? setOpen(o => !o) : handleInstall()}
-        className="w-9 h-9 flex items-center justify-center rounded-lg text-stone-500 hover:text-amber-700 hover:bg-amber-50 transition-colors"
+        className="w-9 h-9 flex items-center justify-center rounded-lg text-stone-500 hover:text-primary-700 hover:bg-primary-50 transition-colors"
         title="Tətbiqi quraşdır"
       >
         <MonitorSmartphone className="w-4 h-4" />
@@ -72,15 +72,15 @@ export default function InstallPWA() {
           </p>
           <ol className="mt-2 space-y-1.5 text-xs text-stone-600">
             <li className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold flex items-center justify-center shrink-0">1</span>
+              <span className="w-5 h-5 rounded-full bg-primary-100 text-primary-800 text-[10px] font-bold flex items-center justify-center shrink-0">1</span>
               Aşağıdakı <Share className="w-3 h-3 inline mx-0.5 text-blue-500" /> düyməsinə basın
             </li>
             <li className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold flex items-center justify-center shrink-0">2</span>
+              <span className="w-5 h-5 rounded-full bg-primary-100 text-primary-800 text-[10px] font-bold flex items-center justify-center shrink-0">2</span>
               <span><span className="font-medium">Ana ekrana əlavə et</span> seçin</span>
             </li>
             <li className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold flex items-center justify-center shrink-0">3</span>
+              <span className="w-5 h-5 rounded-full bg-primary-100 text-primary-800 text-[10px] font-bold flex items-center justify-center shrink-0">3</span>
               <span><span className="font-medium">Əlavə et</span> düyməsinə basın</span>
             </li>
           </ol>

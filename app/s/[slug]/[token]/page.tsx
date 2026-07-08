@@ -8,14 +8,14 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
   const [state, setState] = useState<
     | { status: 'loading' }
     | { status: 'invalid' }
-    | { status: 'ready'; companyId: string; companyName: string }
+    | { status: 'ready'; companyId: string; companyName: string; logoUrl: string | null; brandColor: string | null }
   >({ status: 'loading' });
 
   useEffect(() => {
     fetch(`/api/seller-token?slug=${encodeURIComponent(slug)}&token=${encodeURIComponent(token)}`)
       .then(r => r.json())
       .then(d => {
-        if (d.companyId) setState({ status: 'ready', companyId: d.companyId, companyName: d.companyName });
+        if (d.companyId) setState({ status: 'ready', companyId: d.companyId, companyName: d.companyName, logoUrl: d.logoUrl ?? null, brandColor: d.brandColor ?? null });
         else setState({ status: 'invalid' });
       })
       .catch(() => setState({ status: 'invalid' }));
@@ -70,6 +70,8 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
       overrideCompanyId={state.companyId}
       overrideCompanyName={state.companyName}
       overrideToken={token}
+      overrideLogoUrl={state.logoUrl}
+      overrideBrandColor={state.brandColor}
     />
   );
 }
