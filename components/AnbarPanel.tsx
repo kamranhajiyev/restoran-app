@@ -348,18 +348,38 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
   const [itemModal, setItemModal] = useState<StockItem | 'new' | null>(null);
   const [woItem, setWoItem] = useState<StockBalance | null>(null);
   const [typeFilter, setTypeFilter] = useState<'all' | 'product' | 'ingredient'>('all');
+  const [search, setSearch] = useState('');
 
   const typeOf = useMemo(() => {
     const m = new Map(items.map(it => [it.id, it.type ?? 'ingredient']));
     return (id: string) => m.get(id) ?? 'ingredient';
   }, [items]);
-  const shownBalances = typeFilter === 'all' ? balances : balances.filter(b => typeOf(b.stockItemId) === typeFilter);
-  const shownItems = typeFilter === 'all' ? items : items.filter(it => (it.type ?? 'ingredient') === typeFilter);
+  const q = search.trim().toLowerCase();
+  const shownBalances = balances.filter(b =>
+    (typeFilter === 'all' || typeOf(b.stockItemId) === typeFilter) &&
+    (q === '' || (b.name ?? '').toLowerCase().includes(q)));
+  const shownItems = items.filter(it =>
+    (typeFilter === 'all' || (it.type ?? 'ingredient') === typeFilter) &&
+    (q === '' || it.name.toLowerCase().includes(q)));
 
   useEffect(() => { if (!whId && activeWh.length) setWhId(activeWh[0].id); }, [activeWh, whId]);
   async function reloadBalances(id = whId) {
     if (!id) { setBalances([]); return; }
-    setLoadingBal(true); setBalances(await fetchBalances(id)); setLoadingBal(false);
+    setLoadingBal(true);
+    if (id === 'ALL') {
+      // Combined view: sum each item's qty across every warehouse into one row.
+      const all = await fetchBalances();
+      const map = new Map<string, StockBalance>();
+      for (const b of all) {
+        const cur = map.get(b.stockItemId);
+        if (cur) cur.qty += b.qty;
+        else map.set(b.stockItemId, { ...b, warehouseId: 'ALL' });
+      }
+      setBalances([...map.values()]);
+    } else {
+      setBalances(await fetchBalances(id));
+    }
+    setLoadingBal(false);
   }
   useEffect(() => { reloadBalances(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [whId]);
 
@@ -369,29 +389,34 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <select className={`${inputCls} w-auto`} value={whId} onChange={e => setWhId(e.target.value)}>
+          <option value="ALL">Bütün anbarlar (ümumi)</option>
           {activeWh.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
         </select>
         <button className={btnGhost} onClick={() => setItemModal('new')}><Plus className="w-4 h-4" /> Yeni inqrediyent</button>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {([['all', 'Hamısı'], ['product', 'Məhsullar'], ['ingredient', 'İnqrediyentlər']] as const).map(([val, label]) => (
           <button key={val} onClick={() => setTypeFilter(val)}
             className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${typeFilter === val ? 'bg-amber-700 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}>
             {label}
           </button>
         ))}
+        <input
+          type="text" placeholder="Axtar…" value={search} onChange={e => setSearch(e.target.value)}
+          className="flex-1 min-w-[8rem] px-3 py-1.5 text-sm rounded-lg border border-stone-200 focus:outline-none focus:ring-2 focus:ring-stone-300"
+        />
       </div>
 
       <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
         {loadingBal ? <p className="text-sm text-stone-400 p-6 text-center">Yüklənir…</p>
-          : shownBalances.length === 0 ? <p className="text-sm text-stone-400 p-6 text-center">Bu anbarda qalıq yoxdur</p>
+          : shownBalances.length === 0 ? <p className="text-sm text-stone-400 p-6 text-center">{whId === 'ALL' ? 'Qalıq yoxdur' : 'Bu anbarda qalıq yoxdur'}</p>
           : shownBalances.map(b => (
             <div key={b.stockItemId} className="flex items-center justify-between px-4 py-3">
               <span className="text-sm text-stone-800">{b.name}</span>
               <div className="flex items-center gap-3">
                 <span className={`text-sm font-semibold tabular-nums ${b.qty <= 0 ? 'text-red-500' : 'text-stone-800'}`}>{b.qty} {b.unit}</span>
-                <button className={btnGhost} onClick={() => setWoItem(b)}>Silinmə</button>
+                {whId !== 'ALL' && <button className={btnGhost} onClick={() => setWoItem(b)}>Silinmə</button>}
               </div>
             </div>
           ))}

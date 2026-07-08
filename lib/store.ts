@@ -507,7 +507,9 @@ export async function deleteSupplier(id: string): Promise<string | null> {
 export async function fetchStockItems(): Promise<StockItem[]> {
   try {
     const { data, error } = await supabase.from('stock_items')
-      .select('id, name, unit, type, created_at').order('name');
+      .select('id, name, unit, type, created_at')
+      .is('trashed_at', null)   // hide products whose menu item was deleted
+      .order('name');
     if (error || !data) return [];
     return data.map(s => ({ id: s.id, name: s.name, unit: s.unit, type: s.type ?? 'ingredient', createdAt: s.created_at }));
   } catch { return []; }
@@ -536,7 +538,10 @@ export async function deleteStockItem(id: string): Promise<string | null> {
 // Qalıqlar: current balances joined with item name/unit. Optionally one warehouse.
 export async function fetchBalances(warehouseId?: string): Promise<StockBalance[]> {
   try {
-    let q = supabase.from('stock_balances').select('warehouse_id, stock_item_id, qty, stock_items(name, unit)');
+    // !inner + trashed_at filter drops balances of hidden (deleted-menu) products from Qalıqlar.
+    let q = supabase.from('stock_balances')
+      .select('warehouse_id, stock_item_id, qty, stock_items!inner(name, unit)')
+      .is('stock_items.trashed_at', null);
     if (warehouseId) q = q.eq('warehouse_id', warehouseId);
     const { data, error } = await q;
     if (error || !data) return [];
