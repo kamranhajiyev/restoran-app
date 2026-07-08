@@ -1,4 +1,4 @@
-import { CashShift, Category, MenuItem, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftMovement, Staff, StockBalance, StockItem, StockMovement, StockReceipt, Supplier, SupplierLedger, TrashItem, Warehouse, WriteoffEntry } from '@/types';
+import { CashShift, Category, MenuItem, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftMovement, Staff, StockBalance, StockItem, StockMovement, StockReceipt, Supplier, SupplierLedger, SupplierPayment, TrashItem, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { supabase } from './supabase';
 
@@ -696,6 +696,28 @@ export async function fetchSupplierPayments(): Promise<Record<string, number>> {
     }
   } catch { /* ignore */ }
   return out;
+}
+
+// Full dated log of standalone supplier payments (Ödənişlər view). Newest first.
+export async function fetchSupplierPaymentLog(): Promise<SupplierPayment[]> {
+  try {
+    const { data, error } = await supabase.from('supplier_payments')
+      .select('id, supplier_id, amount, note, created_by, created_at, suppliers(name)')
+      .order('created_at', { ascending: false }).limit(300);
+    if (error || !data) return [];
+    return data.map((p: Record<string, unknown>) => {
+      const s = (p.suppliers ?? {}) as { name?: string };
+      return {
+        id: p.id as string,
+        supplierId: (p.supplier_id as string) ?? '',
+        supplierName: s.name ?? '—',
+        amount: Number(p.amount ?? 0),
+        note: (p.note as string) ?? null,
+        createdBy: (p.created_by as string) ?? null,
+        createdAt: p.created_at as string,
+      };
+    });
+  } catch { return []; }
 }
 
 // Per-supplier money summary: total purchased (non-voided), paid, and outstanding debt.

@@ -181,6 +181,17 @@ export interface SupplierLedger {
   debt: number;    // total − paid
 }
 
+// One standalone payment to a supplier, for the Ödənişlər log.
+export interface SupplierPayment {
+  id: string;
+  supplierId: string;
+  supplierName: string;
+  amount: number;
+  note: string | null;
+  createdBy: string | null;
+  createdAt: string;
+}
+
 // One line of a goods receipt, as sent to record_receipt.
 export interface ReceiptLine {
   stockItemId: string;
