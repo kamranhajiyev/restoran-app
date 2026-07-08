@@ -383,6 +383,15 @@ export async function removeOrderItem(orderItemId: string): Promise<boolean> {
   return true;
 }
 
+// Change the quantity of a single line on an open order (authed seller). A quantity of 0 or less
+// removes the line entirely. Stock is untouched — deduction only happens on payment.
+export async function setOrderItemQuantity(orderItemId: string, quantity: number): Promise<boolean> {
+  if (quantity <= 0) return removeOrderItem(orderItemId);
+  const { error } = await supabase.from('order_items').update({ quantity }).eq('id', orderItemId);
+  if (error) { console.error('[setOrderItemQuantity]', error.message); return false; }
+  return true;
+}
+
 export async function editOrderPayment(orderId: string, cashAmount: number, cardAmount: number): Promise<boolean> {
   const { error } = await supabase.from('orders')
     .update({ cash_amount: cashAmount, card_amount: cardAmount, change_amount: 0 })

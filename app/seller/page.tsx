@@ -5,12 +5,12 @@ import {
   PanelLeftClose, PanelLeftOpen, LogOut, X,
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
   ShoppingCart, ChevronLeft, ChevronRight, ChevronDown, Minus, Plus, Wallet,
-  History, Search, Delete, KeyRound, Trash2,
+  History, Search, Delete, KeyRound, Trash2, Check,
 } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
-  fetchMenu, addOrder, addItemsToOrder, removeOrderItem, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
+  fetchMenu, addOrder, addItemsToOrder, setOrderItemQuantity, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
   fetchTablesEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, fetchStaff, verifyStaffPin, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
 } from '@/lib/store';
@@ -192,6 +192,14 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   // when set, the menu view appends items to this existing order instead of creating a new one
   const [appendOrderId, setAppendOrderId]   = useState<string | null>(null);
+  // brief confirmation shown after an existing line's quantity is edited/removed on the server
+  const [savedToast, setSavedToast]         = useState(false);
+  const savedToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function flashSaved() {
+    setSavedToast(true);
+    if (savedToastTimer.current) clearTimeout(savedToastTimer.current);
+    savedToastTimer.current = setTimeout(() => setSavedToast(false), 1600);
+  }
   const [totalOrders, setTotalOrders]       = useState(0);
   const [historyOrders, setHistoryOrders]   = useState<Order[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -548,17 +556,21 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     setView('orders');
   }
 
-  // Remove one existing line from an open order (from the "Əlavə et" edit screen). No stock impact —
-  // an unpaid order hasn't deducted anything. Deletes immediately after a confirm.
-  async function handleRemoveItem(order: Order, oi: OrderItem) {
+  // Reduce an existing line's quantity by one (from the "Əlavə et" edit screen). When it drops to
+  // zero the line is removed. No stock impact — an unpaid order hasn't deducted anything. A brief
+  // toast confirms the change reached the server, so the seller knows it's saved.
+  async function handleDecrementItem(order: Order, oi: OrderItem) {
     if (!oi.id || !isOrderOpen(order)) return;
-    if (!window.confirm(`"${oi.menuItem.name}" sifarişdən silinsin?`)) return;
+    const newQty = oi.quantity - 1;
     const ok = overrideCompanyId
-      ? await fetch('/api/remove-order-item', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderItemId: oi.id, orderId: order.id, companyId: overrideCompanyId, token: overrideToken }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
-      : await removeOrderItem(oi.id);
-    if (!ok) { alert('Silinmədi. Yenidən cəhd edin.'); return; }
-    // Optimistically drop the line, then reconcile with the server.
-    setOrders(prev => prev.map(o => o.id === order.id ? { ...o, items: o.items.filter(x => x.id !== oi.id) } : o));
+      ? await fetch('/api/update-order-item-qty', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderItemId: oi.id, orderId: order.id, quantity: newQty, companyId: overrideCompanyId, token: overrideToken }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      : await setOrderItemQuantity(oi.id, newQty);
+    if (!ok) { alert('Dəyişdirilmədi. Yenidən cəhd edin.'); return; }
+    // Optimistically apply, then reconcile with the server.
+    setOrders(prev => prev.map(o => o.id === order.id
+      ? { ...o, items: newQty <= 0 ? o.items.filter(x => x.id !== oi.id) : o.items.map(x => x.id === oi.id ? { ...x, quantity: newQty } : x) }
+      : o));
+    flashSaved();
     refreshOrders();
   }
 
@@ -1053,6 +1065,14 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
     >
+
+      {/* Transient "saved" toast — confirms an existing-line edit reached the server */}
+      {savedToast && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2 bg-primary-800 text-white text-sm font-medium px-4 py-2 rounded-full shadow-lg">
+          <Check className="w-4 h-4" />
+          Yadda saxlanıldı
+        </div>
+      )}
 
       {/* Header */}
       <header className="sticky top-0 z-50 h-14 border-b border-stone-100/60 bg-white/90 backdrop-blur-sm flex items-center gap-3 px-4">
@@ -1755,7 +1775,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 </div>
                 <div className="flex-1 overflow-y-auto px-4 py-3">
                   {appendOrder
-                    ? <CartItems cart={cart} existingItems={appendOrder.items} addToCart={addToCart} removeFromCart={removeFromCart} onRemoveExisting={oi => handleRemoveItem(appendOrder, oi)} />
+                    ? <CartItems cart={cart} existingItems={appendOrder.items} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} />
                     : cart.length === 0
                     ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
                     : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
@@ -1784,16 +1804,26 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 </div>
               </div>
 
-              {/* Mobile floating cart bar */}
-              {cartCount > 0 && (
+              {/* Mobile floating cart bar. Stays visible throughout append mode (even with an empty
+                  cart) so it's always the way into the panel; falls back to the existing order's
+                  count/total until new items are added. */}
+              {(cartCount > 0 || appendOrder) && (
                 <div className="lg:hidden fixed bottom-16 inset-x-0 z-30 px-4 pb-2 pointer-events-none">
                   <button
                     onClick={() => setMobileCartOpen(true)}
                     className="pointer-events-auto w-full bg-primary-800 text-white rounded-2xl py-3.5 flex items-center justify-between px-5 shadow-lg active:scale-95 transition-transform"
                   >
-                    <span className="bg-white/20 text-white text-xs font-bold px-2 py-0.5 rounded-full min-w-[1.5rem] text-center">{cartCount}</span>
-                    <span className="font-semibold text-sm">Sifarişi gör</span>
-                    <span className="font-bold">{cartTotal.toFixed(2)} ₼</span>
+                    {(() => {
+                      const barCount = cartCount > 0 ? cartCount : appendOrder ? appendOrder.items.reduce((s, oi) => s + oi.quantity, 0) : 0;
+                      const barTotal = cartCount > 0 ? cartTotal : appendOrder ? appendOrder.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0) : 0;
+                      return (
+                        <>
+                          <span className="bg-white/20 text-white text-xs font-bold px-2 py-0.5 rounded-full min-w-[1.5rem] text-center">{barCount}</span>
+                          <span className="font-semibold text-sm">Sifarişi gör</span>
+                          <span className="font-bold">{barTotal.toFixed(2)} ₼</span>
+                        </>
+                      );
+                    })()}
                   </button>
                 </div>
               )}
@@ -1869,7 +1899,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-3">
               {appendOrder
-                ? <CartItems cart={cart} existingItems={appendOrder.items} addToCart={addToCart} removeFromCart={removeFromCart} onRemoveExisting={oi => handleRemoveItem(appendOrder, oi)} />
+                ? <CartItems cart={cart} existingItems={appendOrder.items} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} />
                 : cart.length === 0
                 ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
                 : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
@@ -2137,12 +2167,12 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
 
 // ── CartItems — shared between desktop sidebar and mobile sheet ───────────
 
-function CartItems({ cart, existingItems, addToCart, removeFromCart, onRemoveExisting }: {
+function CartItems({ cart, existingItems, addToCart, removeFromCart, onDecrementExisting }: {
   cart: OrderItem[];
   existingItems?: OrderItem[];
   addToCart: (item: MenuItem, mods?: string) => void;
   removeFromCart: (itemId: string, mods?: string) => void;
-  onRemoveExisting?: (oi: OrderItem) => void;
+  onDecrementExisting?: (oi: OrderItem) => void;
 }) {
   const existingTotal = (existingItems ?? []).reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
   return (
@@ -2160,17 +2190,17 @@ function CartItems({ cart, existingItems, addToCart, removeFromCart, onRemoveExi
                   {oi.menuItem.name}
                   {oi.modifiers && <span className="text-xs text-primary-600 ml-1">({oi.modifiers})</span>}
                 </span>
-                <span className="shrink-0 text-xs">{oi.quantity} əd</span>
-                <span className="shrink-0 w-14 text-right">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
-                {onRemoveExisting && oi.id && (
+                {onDecrementExisting && oi.id && (
                   <button
-                    onClick={() => onRemoveExisting(oi)}
-                    className="shrink-0 w-6 h-6 rounded-full bg-red-50 hover:bg-red-100 text-red-500 flex items-center justify-center active:scale-90"
-                    title="Sil"
+                    onClick={() => onDecrementExisting(oi)}
+                    className="shrink-0 w-6 h-6 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-600 flex items-center justify-center active:scale-90"
+                    title="Bir ədəd azalt"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <Minus className="w-3.5 h-3.5" />
                   </button>
                 )}
+                <span className="shrink-0 text-xs w-8 text-center">{oi.quantity} əd</span>
+                <span className="shrink-0 w-14 text-right">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
               </li>
             ))}
           </ul>
@@ -2274,24 +2304,24 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onAppend, onStatusCh
               </span>
             )}
             {isOrderOpen(order) && (
-              <div className="flex gap-2 pt-1">
+              <div className="flex flex-col gap-2 pt-1">
                 <button
-                  onClick={e => { e.stopPropagation(); onCancel(); }}
-                  className="px-4 py-2.5 rounded-xl border border-red-200 text-red-500 hover:bg-red-50 active:scale-95 text-sm font-semibold transition-all"
+                  onClick={e => { e.stopPropagation(); onPay(); }}
+                  className="w-full bg-primary-800 hover:bg-primary-900 active:scale-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-all"
                 >
-                  Ödənişsiz bağla
+                  Ödəniş
                 </button>
                 <button
                   onClick={e => { e.stopPropagation(); onAppend(); }}
-                  className="px-4 py-2.5 rounded-xl border border-primary-300 text-primary-800 hover:bg-primary-50 active:scale-95 text-sm font-semibold transition-all"
+                  className="w-full px-4 py-2.5 rounded-xl border border-primary-300 text-primary-800 hover:bg-primary-50 active:scale-95 text-sm font-semibold transition-all"
                 >
-                  + Əlavə et
+                  Düzəliş et
                 </button>
                 <button
-                  onClick={e => { e.stopPropagation(); onPay(); }}
-                  className="flex-1 bg-primary-800 hover:bg-primary-900 active:scale-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-all"
+                  onClick={e => { e.stopPropagation(); onCancel(); }}
+                  className="w-full px-4 py-2.5 rounded-xl border border-red-200 text-red-500 hover:bg-red-50 active:scale-95 text-sm font-semibold transition-all"
                 >
-                  Ödəniş
+                  Ödənişsiz bağla
                 </button>
               </div>
             )}
@@ -2367,7 +2397,7 @@ function OrderRow({ order, tableLabel, tz, onPay, onCancel, onAppend, onStatusCh
                   onClick={e => { e.stopPropagation(); onAppend(); }}
                   className="text-xs font-semibold text-primary-800 border border-primary-300 hover:bg-primary-50 rounded-lg px-3 py-1.5 transition-colors"
                 >
-                  + Əlavə et
+                  Düzəliş et
                 </button>
               </div>
             )}
