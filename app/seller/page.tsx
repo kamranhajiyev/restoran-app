@@ -1716,7 +1716,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                             <span className="absolute top-2 right-2 z-10 bg-primary-800 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">{inCart}</span>
                           )}
                           {item.image
-                            ? <img src={item.image} alt={item.name} className="w-full aspect-[4/3] object-cover" />
+                            ? <img src={item.image} alt={item.name} className="w-full aspect-[4/3] object-contain bg-white p-2" />
                             : <div className="w-full aspect-[4/3] bg-primary-50 flex items-center justify-center text-3xl">☕</div>
                           }
                           <div className="p-2.5">
