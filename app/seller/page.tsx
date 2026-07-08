@@ -10,7 +10,7 @@ import {
 import { getSession, logout, validateSession, clearLocalSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
-  fetchMenu, addOrder, addItemsToOrder, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
+  fetchMenu, addOrder, addItemsToOrder, removeOrderItem, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
   fetchTablesEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, fetchStaff, verifyStaffPin, fetchPrintReceipt, setPrintReceiptEnabled,
 } from '@/lib/store';
@@ -542,6 +542,20 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     setCart([]); setNote(''); setMenuSearch('');
     setMobileCartOpen(false);
     setView('orders');
+  }
+
+  // Remove one existing line from an open order (from the "Əlavə et" edit screen). No stock impact —
+  // an unpaid order hasn't deducted anything. Deletes immediately after a confirm.
+  async function handleRemoveItem(order: Order, oi: OrderItem) {
+    if (!oi.id || !isOrderOpen(order)) return;
+    if (!window.confirm(`"${oi.menuItem.name}" sifarişdən silinsin?`)) return;
+    const ok = overrideCompanyId
+      ? await fetch('/api/remove-order-item', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderItemId: oi.id, orderId: order.id, companyId: overrideCompanyId, token: overrideToken }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      : await removeOrderItem(oi.id);
+    if (!ok) { alert('Silinmədi. Yenidən cəhd edin.'); return; }
+    // Optimistically drop the line, then reconcile with the server.
+    setOrders(prev => prev.map(o => o.id === order.id ? { ...o, items: o.items.filter(x => x.id !== oi.id) } : o));
+    refreshOrders();
   }
 
   async function submitOrder() {
@@ -1738,7 +1752,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 </div>
                 <div className="flex-1 overflow-y-auto px-4 py-3">
                   {appendOrder
-                    ? <CartItems cart={cart} existingItems={appendOrder.items} addToCart={addToCart} removeFromCart={removeFromCart} />
+                    ? <CartItems cart={cart} existingItems={appendOrder.items} addToCart={addToCart} removeFromCart={removeFromCart} onRemoveExisting={oi => handleRemoveItem(appendOrder, oi)} />
                     : cart.length === 0
                     ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
                     : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
@@ -1852,7 +1866,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-3">
               {appendOrder
-                ? <CartItems cart={cart} existingItems={appendOrder.items} addToCart={addToCart} removeFromCart={removeFromCart} />
+                ? <CartItems cart={cart} existingItems={appendOrder.items} addToCart={addToCart} removeFromCart={removeFromCart} onRemoveExisting={oi => handleRemoveItem(appendOrder, oi)} />
                 : cart.length === 0
                 ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
                 : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
@@ -2120,11 +2134,12 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
 
 // ── CartItems — shared between desktop sidebar and mobile sheet ───────────
 
-function CartItems({ cart, existingItems, addToCart, removeFromCart }: {
+function CartItems({ cart, existingItems, addToCart, removeFromCart, onRemoveExisting }: {
   cart: OrderItem[];
   existingItems?: OrderItem[];
   addToCart: (item: MenuItem, mods?: string) => void;
   removeFromCart: (itemId: string, mods?: string) => void;
+  onRemoveExisting?: (oi: OrderItem) => void;
 }) {
   const existingTotal = (existingItems ?? []).reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
   return (
@@ -2144,6 +2159,15 @@ function CartItems({ cart, existingItems, addToCart, removeFromCart }: {
                 </span>
                 <span className="shrink-0 text-xs">{oi.quantity} əd</span>
                 <span className="shrink-0 w-14 text-right">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
+                {onRemoveExisting && oi.id && (
+                  <button
+                    onClick={() => onRemoveExisting(oi)}
+                    className="shrink-0 w-6 h-6 rounded-full bg-red-50 hover:bg-red-100 text-red-500 flex items-center justify-center active:scale-90"
+                    title="Sil"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </li>
             ))}
           </ul>

@@ -42,6 +42,7 @@ export async function GET(req: NextRequest) {
     cancelledBy: o.cancelled_by ?? undefined,
     cancelReason: o.cancel_reason ?? undefined,
     items: ((o.order_items as Record<string, unknown>[]) ?? []).map((oi) => ({
+      id: oi.id,
       menuItem: {
         id: oi.menu_item_id,
         name: oi.menu_item_name,
@@ -51,6 +52,7 @@ export async function GET(req: NextRequest) {
       },
       quantity: oi.quantity,
       modifiers: oi.modifiers ?? undefined,
+      variantId: oi.variant_id ?? undefined,
     })),
   }));
 

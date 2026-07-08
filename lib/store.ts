@@ -231,7 +231,8 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
       cancelledAt: o.cancelled_at ?? undefined,
       cancelledBy: o.cancelled_by ?? undefined,
       cancelReason: o.cancel_reason ?? undefined,
-      items: (o.order_items ?? []).map((oi: { menu_item_id: string; menu_item_name: string; menu_item_price: number; quantity: number; modifiers?: string; variant_id?: string }) => ({
+      items: (o.order_items ?? []).map((oi: { id: string; menu_item_id: string; menu_item_name: string; menu_item_price: number; quantity: number; modifiers?: string; variant_id?: string }) => ({
+        id: oi.id,
         menuItem: {
           id: oi.menu_item_id,
           name: oi.menu_item_name,
@@ -371,6 +372,14 @@ export async function deleteOrder(orderId: string): Promise<boolean> {
 export async function restoreOrder(orderId: string, status: 'ödənilib' | 'ləğv edildi'): Promise<boolean> {
   const { error } = await supabase.from('orders').update({ status }).eq('id', orderId);
   if (error) { console.error('[restoreOrder]', error.message); return false; }
+  return true;
+}
+
+// Remove a single line from an open order (authed seller). Stock is untouched — deduction only
+// happens on payment, and an open order hasn't been paid.
+export async function removeOrderItem(orderItemId: string): Promise<boolean> {
+  const { error } = await supabase.from('order_items').delete().eq('id', orderItemId);
+  if (error) { console.error('[removeOrderItem]', error.message); return false; }
   return true;
 }
 

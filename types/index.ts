@@ -44,6 +44,7 @@ export interface MenuItem {
 }
 
 export interface OrderItem {
+  id?: string;          // order_items row id — present on fetched orders, absent for cart items
   menuItem: MenuItem;
   quantity: number;
   modifiers?: string;
