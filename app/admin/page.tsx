@@ -7,7 +7,7 @@ import {
   TrendingUp, Receipt, Star, ChevronDown, Percent,
   Coffee, BarChart2, Package, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
-  GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link, Printer, Check,
+  GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link, Printer, Check, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import {
   DndContext, DragEndEvent, PointerSensor, useSensor, useSensors,
@@ -32,6 +32,7 @@ import {
   fetchStaff, createStaff, updateStaff, setStaffPin, deleteStaff,
   fetchSellerToken, linkProductStock,
   fetchBranding, setLogoUrl as saveLogoUrl, setBrandColor as saveBrandColor,
+  fetchStations,
 } from '@/lib/store';
 import { applyBrand, BRAND_PRESETS, DEFAULT_BRAND } from '@/lib/branding';
 import {
@@ -39,17 +40,17 @@ import {
   addDays, dayDiff, dayOfWeek, dayToDate, tzHour, cutoffMinutes,
 } from '@/lib/business-day';
 import { supabase } from '@/lib/supabase';
-import { CashShift, Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, Staff, TrashItem, isOrderOpen } from '@/types';
+import { CashShift, Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, Staff, Station, TrashItem, isOrderOpen } from '@/types';
 import AppDialog, { DialogState } from '@/components/AppDialog';
 import AnbarPanel from '@/components/AnbarPanel';
+import StationsPanel from '@/components/StationsPanel';
 import PasswordField from '@/components/PasswordField';
 import { validatePassword } from '@/lib/password';
-import { exportMenuExcel, exportOrdersExcel, parseMenuFile, ImportPreview } from '@/lib/excel';
+import { exportMenuExcel, exportOrdersExcel, exportAnalizExcel, parseMenuFile, ImportPreview, AnalizRow } from '@/lib/excel';
 import QRCode from 'react-qr-code';
 import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt, openCashDrawer } from '@/lib/printer';
 
-const COOKING_STATIONS = ['Mətbəx', 'Bar', 'Soyuq mətbəx', 'Pizza', 'Mangal'];
 // RPC raise messages are machine codes — translated here for display
 const STAFF_ERRORS: Record<string, string> = {
   pin_taken: 'Bu PIN artıq başqa əməkdaşda istifadə olunur',
@@ -95,7 +96,7 @@ type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
 
 function emptyForm(cat: string) {
-  return { name: '', price: '', costPrice: '', category: cat, image: '', cookingStation: '', kind: 'meal' as 'product' | 'meal', hasVariants: false, variants: [] as FormVariant[] };
+  return { name: '', price: '', costPrice: '', category: cat, image: '', stationId: '', kind: 'meal' as 'product' | 'meal', hasVariants: false, variants: [] as FormVariant[] };
 }
 
 const AZ_MON_SHORT = ['Yan','Fev','Mar','Apr','May','İyn','İyl','Avq','Sen','Okt','Noy','Dek'];
@@ -243,6 +244,216 @@ function azNormalize(s: string): string {
   return s.toLocaleLowerCase('az').replace(/[çəğıöşü]/g, ch => AZ_CHARS[ch]);
 }
 
+// ── Statistika → Analiz ──────────────────────────────────────────────────────
+
+const LOW_MARGIN = 0.20;
+
+type AnalizChip = 'hamısı' | 'satılmayan' | 'aşağı marja' | 'mayasız';
+type AnalizSortKey = 'name' | 'category' | 'qty' | 'rev' | 'share' | 'cost' | 'profit' | 'margin';
+
+const isUnsold    = (r: AnalizRow) => r.qty === 0 && !r.hidden;
+const isLowMargin = (r: AnalizRow) => r.qty > 0 && !r.noCost && r.margin !== null && r.margin < LOW_MARGIN;
+const isNoCost    = (r: AnalizRow) => r.noCost && r.qty > 0;
+
+const money = (n: number) => `${n.toFixed(2)} ₼`;
+
+function AnalizTh({ k, label, right, sortKey, sortDir, onSort }: {
+  k: AnalizSortKey; label: string; right?: boolean;
+  sortKey: AnalizSortKey; sortDir: 'asc' | 'desc'; onSort: (k: AnalizSortKey) => void;
+}) {
+  const on = sortKey === k;
+  return (
+    <th className={`px-4 py-3 font-medium whitespace-nowrap ${right ? 'text-right' : 'text-left'}`}>
+      <button onClick={() => onSort(k)}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-stone-700 ${on ? 'text-stone-800 font-semibold' : ''}`}>
+        {label}
+        {on && (sortDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
+      </button>
+    </th>
+  );
+}
+
+// Kept a separate component on purpose: the search/sort state below changes on every
+// keystroke, and the parent recomputes every chart aggregate over the full order set on
+// each render (a "1 il" range is 10k+ orders). Holding this state here keeps that off the
+// typing path — only this subtree, ~one row per product, re-renders.
+function AnalizPanel({ rows, from, to }: { rows: AnalizRow[]; from: string; to: string }) {
+  const [search, setSearch] = useState('');
+  const [cat, setCat] = useState('');
+  const [chip, setChip] = useState<AnalizChip>('hamısı');
+  const [sortKey, setSortKey] = useState<AnalizSortKey>('rev');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const chips: [AnalizChip, string, number][] = [
+    ['hamısı', 'Hamısı', rows.length],
+    ['satılmayan', 'Satılmayan', rows.filter(isUnsold).length],
+    ['aşağı marja', 'Aşağı marja', rows.filter(isLowMargin).length],
+    ['mayasız', 'Mayasız', rows.filter(isNoCost).length],
+  ];
+  const catList = [...new Set(rows.map(r => r.category))].sort((a, b) => a.localeCompare(b, 'az'));
+
+  const q = azNormalize(search.trim());
+  const filtered = rows.filter(r => {
+    if (q && !azNormalize(r.name).includes(q)) return false;
+    if (cat && r.category !== cat) return false;
+    if (chip === 'satılmayan') return isUnsold(r);
+    if (chip === 'aşağı marja') return isLowMargin(r);
+    if (chip === 'mayasız') return isNoCost(r);
+    return true;
+  });
+  const visible = [...filtered].sort((a, b) => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    if (sortKey === 'name') return a.name.localeCompare(b.name, 'az') * dir;
+    if (sortKey === 'category') return a.category.localeCompare(b.category, 'az') * dir;
+    // Unsold items have no margin — park them at the bottom rather than treating them as 0%.
+    if (sortKey === 'margin') return ((a.margin ?? -Infinity) - (b.margin ?? -Infinity)) * dir;
+    return (a[sortKey] - b[sortKey]) * dir;
+  });
+
+  const tQty    = visible.reduce((s, r) => s + r.qty, 0);
+  const tRev    = visible.reduce((s, r) => s + r.rev, 0);
+  const tCost   = visible.reduce((s, r) => s + r.cost, 0);
+  const tProfit = tRev - tCost;
+  const tMargin = tRev > 0 ? tProfit / tRev : null;
+
+  function sortBy(k: AnalizSortKey) {
+    if (k === sortKey) { setSortDir(d => (d === 'asc' ? 'desc' : 'asc')); return; }
+    setSortKey(k);
+    setSortDir(k === 'name' || k === 'category' ? 'asc' : 'desc');
+  }
+
+  const th = (k: AnalizSortKey, label: string, right?: boolean) => (
+    <AnalizTh k={k} label={label} right={right} sortKey={sortKey} sortDir={sortDir} onSort={sortBy} />
+  );
+
+  return (
+    <div className="space-y-3">
+      {/* controls */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Məhsul axtar…"
+            className="w-full bg-white border border-stone-200 rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:border-stone-300"
+          />
+        </div>
+        <select
+          value={cat}
+          onChange={e => setCat(e.target.value)}
+          className="bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-700 outline-none focus:border-stone-300"
+        >
+          <option value="">Bütün kateqoriyalar</option>
+          {catList.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <button
+          onClick={() => exportAnalizExcel(visible, from, to)}
+          className="flex items-center gap-1.5 text-xs font-medium text-stone-500 hover:text-stone-700 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors whitespace-nowrap"
+        >
+          <Upload className="w-3.5 h-3.5" /> İxrac
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {chips.map(([c, label, n]) => (
+          <button key={c} onClick={() => setChip(c)}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs rounded-lg font-medium transition-colors ${
+              chip === c ? 'bg-stone-800 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}>
+            {label}
+            <span className={chip === c ? 'text-white/60' : 'text-stone-400'}>{n}</span>
+          </button>
+        ))}
+      </div>
+
+      {chip === 'mayasız' && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+          Bu məhsulların maya dəyəri qeyd edilməyib — sistem onları 100% mənfəətli sayır, ona görə ümumi mənfəət rəqəmi olduğundan yüksək görünür.
+        </p>
+      )}
+
+      <div className="bg-white rounded-xl border border-stone-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-stone-500 border-b border-stone-100">
+                {th('name', 'Məhsul')}
+                {th('category', 'Kateqoriya')}
+                {th('qty', 'Satış', true)}
+                {th('rev', 'Gəlir', true)}
+                {th('share', 'Pay', true)}
+                {th('cost', 'Maya', true)}
+                {th('profit', 'Mənfəət', true)}
+                {th('margin', 'Marja', true)}
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((r, i) => {
+                const dead = r.qty === 0;
+                const low = isLowMargin(r);
+                return (
+                  <tr key={`${r.name}-${i}`} className={`border-b border-stone-50 last:border-0 ${dead ? 'text-stone-400' : 'text-stone-600'}`}>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className={dead ? '' : 'font-medium text-stone-800'}>{r.name}</span>
+                      {r.hidden && <span className="ml-1.5 text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded">Gizli</span>}
+                      {r.orphan && <span className="ml-1.5 text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded">Menyuda yoxdur</span>}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">{r.category}</td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">{dead ? '—' : r.qty}</td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">{dead ? '—' : money(r.rev)}</td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      {dead ? '—' : (
+                        <span className="inline-flex items-center gap-1.5 justify-end">
+                          <span className="w-10 h-1 bg-stone-100 rounded-full overflow-hidden">
+                            <span className="block h-full bg-primary-800 rounded-full" style={{ width: `${Math.min(r.share * 100, 100)}%` }} />
+                          </span>
+                          <span className="tabular-nums w-9">{(r.share * 100).toFixed(1)}%</span>
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      {dead ? '—' : r.noCost
+                        ? <span title="Maya dəyəri qeyd edilməyib" className="text-amber-600">⚠ —</span>
+                        : money(r.cost)}
+                    </td>
+                    <td className={`px-4 py-3 text-right whitespace-nowrap ${dead || r.noCost ? '' : r.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                      {dead || r.noCost ? '—' : money(r.profit)}
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      {dead || r.margin === null ? '—' : r.noCost
+                        ? <span title="Maya dəyəri qeyd edilməyib" className="text-amber-600">⚠ 100%</span>
+                        : <span className={low ? 'text-amber-600 font-medium' : ''}>
+                            {low && '⚠ '}{(r.margin * 100).toFixed(0)}%
+                          </span>}
+                    </td>
+                  </tr>
+                );
+              })}
+              {visible.length === 0 && (
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-stone-400">Nəticə yoxdur</td></tr>
+              )}
+            </tbody>
+            {visible.length > 0 && (
+              <tfoot>
+                <tr className="border-t border-stone-100 bg-stone-50/60 text-stone-800 font-semibold">
+                  <td className="px-4 py-3 whitespace-nowrap">Cəmi</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-stone-500 font-normal">{visible.length} məhsul</td>
+                  <td className="px-4 py-3 text-right whitespace-nowrap">{tQty}</td>
+                  <td className="px-4 py-3 text-right whitespace-nowrap">{money(tRev)}</td>
+                  <td className="px-4 py-3" />
+                  <td className="px-4 py-3 text-right whitespace-nowrap">{money(tCost)}</td>
+                  <td className={`px-4 py-3 text-right whitespace-nowrap ${tProfit >= 0 ? 'text-green-600' : 'text-red-500'}`}>{money(tProfit)}</td>
+                  <td className="px-4 py-3 text-right whitespace-nowrap">{tMargin === null ? '—' : `${(tMargin * 100).toFixed(0)}%`}</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Menyu tab drag & drop wrappers ───────────────────────────────────────────
 
 type DragHandle = {
@@ -285,9 +496,13 @@ function AdminPageContent() {
   const rawTab = searchParams.get('tab');
   // 'categories' merged into 'menu' — keep old links working
   const tab = (rawTab === 'categories' ? 'menu' : rawTab as Tab | null) ?? 'stats';
+  // Statistika sub-view. Absent ?sub= means Ümumi, so existing /admin?tab=stats links are unchanged.
+  const statsSub: 'ümumi' | 'analiz' = searchParams.get('sub') === 'analiz' ? 'analiz' : 'ümumi';
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [stations, setStations] = useState<Station[]>([]);
+  const [menuView, setMenuView] = useState<'items' | 'stations'>('items');
   const [adminName, setAdminName] = useState('Admin');
   const [companyName, setCompanyName] = useState('');
   const [online, setOnline] = useState(true);
@@ -538,6 +753,7 @@ function AdminPageContent() {
       setCustomTo(t);
     });
     fetchStaff().then(setPinStaff);
+    fetchStations().then(setStations);
     fetchSellerToken(session.companyId ?? '').then(setSellerToken);
     fetchBranding().then(({ logoUrl: l, brandColor: b }) => { setLogoState(l); setBrandColorState(b ?? DEFAULT_BRAND); applyBrand(b); });
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchTables(), fetchCompanySlug(session.companyId ?? ''), fetchTablesEnabled(), fetchQrEnabled(), fetchKassaEnabled(), fetchMenuOnly()]).then(([m, o, c, t, tb, slug, te, qre, ke, mo]) => {
@@ -715,6 +931,9 @@ function AdminPageContent() {
     } finally { setLoadingMore(false); }
   }
   function navigate(t: Tab) { router.replace(`/admin?tab=${t}`); }
+  function setStatsSub(s: 'ümumi' | 'analiz') {
+    router.replace(s === 'analiz' ? '/admin?tab=stats&sub=analiz' : '/admin?tab=stats');
+  }
 
   // ── image ──────────────────────────────────────────────────────────────────
   async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -764,7 +983,7 @@ function AdminPageContent() {
       costPrice: item.costPrice ? String(item.costPrice) : '',
       category: item.category,
       image: item.image ?? '',
-      cookingStation: item.cookingStation ?? '',
+      stationId: item.stationId ?? '',
       kind: item.kind ?? 'product',
       hasVariants: !!item.variants?.length,
       variants: item.variants?.map(v => ({ id: v.id, name: v.name, price: String(v.price), costPrice: v.costPrice ? String(v.costPrice) : '' })) ?? [],
@@ -790,7 +1009,7 @@ function AdminPageContent() {
       variants: form.hasVariants ? variants : undefined,
       costPrice: form.costPrice ? parseFloat(form.costPrice) : undefined,
       image: form.image || undefined,
-      cookingStation: form.cookingStation || undefined,
+      stationId: form.stationId || null,
       kind: form.kind,
     };
     const updated = editingId ? menu.map(m => m.id === editingId ? item : m) : [...menu, item];
@@ -1178,6 +1397,17 @@ function AdminPageContent() {
           </select>
         </div>
 
+        {stations.length > 0 && (
+          <div>
+            <label className="text-xs font-medium text-stone-600 mb-1.5 block">Sex</label>
+            <select value={form.stationId} onChange={e => setForm(f => ({ ...f, stationId: e.target.value }))}
+              className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white">
+              <option value="">Sex yoxdur</option>
+              {stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+        )}
+
         <div>
           <label className="text-xs font-medium text-stone-600 mb-1.5 block">Növ</label>
           <div className="inline-flex rounded-lg border border-stone-200 overflow-hidden">
@@ -1428,13 +1658,13 @@ function AdminPageContent() {
     .sort((a, b) => b.profit - a.profit);
   const maxRepCatProfit = Math.max(...repCategories.map(c => Math.abs(c.profit)), 0.01);
 
-  const itemMap: Record<string, { name: string; qty: number; rev: number; cost: number }> = {};
+  const itemMap: Record<string, { name: string; cat: string; qty: number; rev: number; cost: number }> = {};
   chartPaid.forEach(o => {
     const gross = o.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
     const ratio = gross > 0 ? orderTotal(o) / gross : 1;
     o.items.forEach(oi => {
       const k = oi.menuItem.id;
-      if (!itemMap[k]) itemMap[k] = { name: oi.menuItem.name, qty: 0, rev: 0, cost: 0 };
+      if (!itemMap[k]) itemMap[k] = { name: oi.menuItem.name, cat: oi.menuItem.category || 'Digər', qty: 0, rev: 0, cost: 0 };
       itemMap[k].qty += oi.quantity;
       itemMap[k].rev += oi.menuItem.price * oi.quantity * ratio;
       itemMap[k].cost += (menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity;
@@ -1454,6 +1684,45 @@ function AdminPageContent() {
     return item.rev;
   };
   const maxItemMetric = Math.max(...topItems.map(topMetricVal), 0.01);
+
+  // Analiz: one row per product, unlike topItems this keeps the whole menu — including
+  // items that sold nothing, which never appear in itemMap (it's built from order snapshots)
+  // and are therefore invisible everywhere else in the app.
+  const analizRows: AnalizRow[] = [];
+  menu.forEach(m => {
+    const s = itemMap[m.id];
+    const rev = s?.rev ?? 0;
+    const cost = s?.cost ?? 0;
+    analizRows.push({
+      name: m.name,
+      category: m.category || 'Digər',
+      qty: s?.qty ?? 0,
+      rev, cost,
+      profit: rev - cost,
+      margin: rev > 0 ? (rev - cost) / rev : null,
+      share: chartRevenue > 0 ? rev / chartRevenue : 0,
+      hidden: !m.available,
+      // No costPrice on the item (nor on any variant) → menuCostMap has no key for it and
+      // every stats consumer falls back to `?? 0`, so it silently reports 100% margin.
+      noCost: menuCostMap[m.id] === undefined,
+      orphan: false,
+    });
+  });
+  // Sold in this range but no longer on the menu — still real revenue, so don't drop it.
+  Object.entries(itemMap).forEach(([id, s]) => {
+    if (menu.some(m => m.id === id)) return;
+    analizRows.push({
+      name: s.name,
+      category: s.cat,
+      qty: s.qty, rev: s.rev, cost: s.cost,
+      profit: s.rev - s.cost,
+      margin: s.rev > 0 ? (s.rev - s.cost) / s.rev : null,
+      share: chartRevenue > 0 ? s.rev / chartRevenue : 0,
+      hidden: false,
+      noCost: menuCostMap[id] === undefined,
+      orphan: true,
+    });
+  });
 
   const hourlyData = Array.from({ length: 24 }, (_, h) => ({
     label: String(h),
@@ -1744,6 +2013,52 @@ function AdminPageContent() {
                 </div>
               )}
 
+              {/* Sub-view switch + the date range, which drives both Ümumi and Analiz */}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5">
+                  {(['ümumi', 'analiz'] as const).map(s => (
+                    <button key={s} onClick={() => setStatsSub(s)}
+                      className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${statsSub === s ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
+                      {s === 'ümumi' ? 'Ümumi' : 'Analiz'}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5 overflow-x-auto max-w-full">
+                    {([['bugün', 'Bu gün'], ['7g', '7 gün'], ['30g', '30 gün'], ['ay', 'Bu ay'], ['6ay', '6 ay'], ['1il', '1 il']] as [ChartPreset, string][]).map(([p, l]) => {
+                      const [f, t] = presetRange(p, businessToday(bizSettings));
+                      const active = customFrom === f && customTo === t;
+                      return (
+                        <button key={p} onClick={() => { setCustomFrom(f); setCustomTo(t); }}
+                          className={`px-3 py-1 rounded-md text-sm font-semibold transition-colors ${active ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
+                          {l}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-stone-50 border border-stone-200 rounded-lg px-2 py-1">
+                    <input
+                      type="date"
+                      value={customFrom}
+                      onChange={e => setCustomFrom(e.target.value)}
+                      className="text-sm font-medium text-stone-700 bg-transparent border-none outline-none w-[124px]"
+                    />
+                    <span className="text-stone-500 text-xs">—</span>
+                    <input
+                      type="date"
+                      value={customTo}
+                      onChange={e => setCustomTo(e.target.value)}
+                      className="text-sm font-medium text-stone-700 bg-transparent border-none outline-none w-[124px]"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {statsSub === 'analiz' && (
+                <AnalizPanel rows={analizRows} from={rangeFrom} to={rangeTo} />
+              )}
+
+              {statsSub === 'ümumi' && (<>
               {/* Main chart card */}
               <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-5 pb-3">
@@ -1751,35 +2066,6 @@ function AdminPageContent() {
                     Gəlir
                     {dataLoading && <span className="w-3.5 h-3.5 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />}
                   </h3>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5 overflow-x-auto max-w-full">
-                      {([['bugün', 'Bu gün'], ['7g', '7 gün'], ['30g', '30 gün'], ['ay', 'Bu ay'], ['6ay', '6 ay'], ['1il', '1 il']] as [ChartPreset, string][]).map(([p, l]) => {
-                        const [f, t] = presetRange(p, businessToday(bizSettings));
-                        const active = customFrom === f && customTo === t;
-                        return (
-                          <button key={p} onClick={() => { setCustomFrom(f); setCustomTo(t); }}
-                            className={`px-3 py-1 rounded-md text-sm font-semibold transition-colors ${active ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
-                            {l}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="flex items-center gap-1.5 bg-stone-50 border border-stone-200 rounded-lg px-2 py-1">
-                      <input
-                        type="date"
-                        value={customFrom}
-                        onChange={e => setCustomFrom(e.target.value)}
-                        className="text-sm font-medium text-stone-700 bg-transparent border-none outline-none w-[124px]"
-                      />
-                      <span className="text-stone-500 text-xs">—</span>
-                      <input
-                        type="date"
-                        value={customTo}
-                        onChange={e => setCustomTo(e.target.value)}
-                        className="text-sm font-medium text-stone-700 bg-transparent border-none outline-none w-[124px]"
-                      />
-                    </div>
-                  </div>
                 </div>
                 <div className="px-4 pb-2">
                   <LineChartSvg data={chartData} />
@@ -2017,6 +2303,7 @@ function AdminPageContent() {
                   <p className="text-sm">Hələlik heç bir ödəniş yoxdur</p>
                 </div>
               )}
+              </>)}
             </div>
           )}
 
@@ -2458,6 +2745,29 @@ function AdminPageContent() {
           {/* ── MENU ───────────────────────────────────────────────────── */}
           {tab === 'menu' && (
             <div className="max-w-3xl">
+              <div className="flex items-center gap-2 mb-5">
+                {([['items', 'Məhsullar'], ['stations', 'Sexlər']] as const).map(([val, label]) => (
+                  <button
+                    key={val}
+                    onClick={() => setMenuView(val)}
+                    className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${menuView === val ? 'bg-primary-700 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {menuView === 'stations' && (
+                <StationsPanel
+                  stations={stations}
+                  setStations={setStations}
+                  menu={menu}
+                  reloadMenu={async () => setMenu(await fetchMenu())}
+                  setDialog={setDialog}
+                />
+              )}
+
+              {menuView === 'items' && (<>
               <div className="flex items-center justify-between mb-5">
                 <p className="text-sm font-semibold text-stone-600">{menu.filter(m => categories.some(c => c.name === m.category)).length} məhsul</p>
                 <div className="flex items-center gap-2">
@@ -2651,6 +2961,7 @@ function AdminPageContent() {
                   <p className="text-sm text-stone-500">Məhsul yoxdur</p>
                 </div>
               )}
+              </>)}
 
             </div>
           )}

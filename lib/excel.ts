@@ -65,6 +65,43 @@ export function exportOrdersExcel(orders: Order[], timezone: string): void {
   XLSX.writeFile(wb, `sifarisler-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
+export interface AnalizRow {
+  name: string;
+  category: string;
+  qty: number;
+  rev: number;
+  cost: number;
+  profit: number;
+  margin: number | null;
+  share: number;
+  hidden: boolean;
+  noCost: boolean;
+  orphan: boolean;
+}
+
+export function exportAnalizExcel(rows: AnalizRow[], from: string, to: string): void {
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const sheet = rows.map(r => ({
+    'Məhsul': r.name,
+    'Kateqoriya': r.category,
+    'Satış (ədəd)': r.qty,
+    'Gəlir (₼)': r2(r.rev),
+    'Pay (%)': r2(r.share * 100),
+    'Maya (₼)': r.noCost ? '' : r2(r.cost),
+    'Mənfəət (₼)': r.noCost ? '' : r2(r.profit),
+    'Marja (%)': r.margin === null || r.noCost ? '' : r2(r.margin * 100),
+    'Qeyd': [r.hidden && 'Gizli', r.noCost && 'Maya qeyd edilməyib', r.orphan && 'Menyuda yoxdur'].filter(Boolean).join(', '),
+  }));
+  const ws = XLSX.utils.json_to_sheet(sheet.length ? sheet : [{
+    'Məhsul': '', 'Kateqoriya': '', 'Satış (ədəd)': '', 'Gəlir (₼)': '', 'Pay (%)': '',
+    'Maya (₼)': '', 'Mənfəət (₼)': '', 'Marja (%)': '', 'Qeyd': '',
+  }]);
+  ws['!cols'] = [{ wch: 28 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 26 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Analiz');
+  XLSX.writeFile(wb, `analiz-${from}_${to}.xlsx`);
+}
+
 // ─── Import ───────────────────────────────────────────────────────────────────
 
 export interface ImportPreview {
