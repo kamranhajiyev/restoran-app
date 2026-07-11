@@ -1,4 +1,5 @@
 import type { Order } from '@/types';
+import { stringToBytes } from './escpos';
 
 const USB_VID = 0x1FC9;
 const USB_PID = 0x2016;
@@ -8,27 +9,6 @@ let device: USBDevice | null = null;
 
 function isWebUSBAvailable(): boolean {
   return typeof navigator !== 'undefined' && 'usb' in navigator;
-}
-
-function stringToBytes(str: string): number[] {
-  const bytes: number[] = [];
-  const azMap: Record<string, number> = {
-    'ə': 0x65, 'Ə': 0x45,
-    'ğ': 0x67, 'Ğ': 0x47,
-    'ı': 0x69, 'İ': 0x49,
-    'ş': 0x73, 'Ş': 0x53,
-    '₼': 0x6D,
-  };
-  for (let i = 0; i < str.length; i++) {
-    const ch = str[i];
-    const code = str.charCodeAt(i);
-    if (code < 256) {
-      bytes.push(code);
-    } else {
-      bytes.push(azMap[ch] ?? 0x3F);
-    }
-  }
-  return bytes;
 }
 
 async function openDevice(d: USBDevice): Promise<void> {

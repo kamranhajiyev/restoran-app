@@ -23,6 +23,15 @@ export interface Category {
   available: boolean;
 }
 
+// A prep station ("sex"): where an item is made, and which printer its ticket
+// comes out of. printerIp is null until the venue puts a printer on that station.
+export interface Station {
+  id: string;
+  name: string;
+  printerIp?: string | null;
+  printerPort?: number;
+}
+
 export interface MenuItemVariant {
   id: string;
   name: string;
@@ -39,7 +48,7 @@ export interface MenuItem {
   variants?: MenuItemVariant[];
   costPrice?: number;
   image?: string;
-  cookingStation?: string;
+  stationId?: string | null;   // which sex prepares it; null = unassigned
   kind?: 'product' | 'meal';   // absent = treat as 'product'
 }
 

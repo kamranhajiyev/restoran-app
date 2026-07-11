@@ -42,3 +42,6 @@ next-env.d.ts
 
 # claude settings (may contain secrets)
 .claude/
+
+# print agent secrets (service-role key)
+agent/.env

@@ -1,4 +1,4 @@
-import { CashShift, Category, MenuItem, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftMovement, Staff, StockBalance, StockItem, StockMovement, StockReceipt, Supplier, SupplierLedger, SupplierPayment, TrashItem, Warehouse, WriteoffEntry } from '@/types';
+import { CashShift, Category, MenuItem, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, Supplier, SupplierLedger, SupplierPayment, TrashItem, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { supabase } from './supabase';
 
@@ -41,7 +41,7 @@ export async function fetchMenu(): Promise<MenuItem[]> {
       variants: r.variants ?? undefined,
       costPrice: r.cost_price ? Number(r.cost_price) : undefined,
       image: r.image ?? undefined,
-      cookingStation: r.cooking_station ?? undefined,
+      stationId: r.station_id ?? null,
       kind: r.kind ?? 'product',
     }));
   } catch {
@@ -74,7 +74,7 @@ export async function saveMenu(menu: MenuItem[]): Promise<string | null> {
         variants: m.variants ?? null,
         cost_price: m.costPrice ?? null,
         image: m.image ?? null,
-        cooking_station: m.cookingStation ?? null,
+        station_id: m.stationId ?? null,
         kind: m.kind ?? 'product',
         position: rows.length,
         company_id: _companyId,
@@ -140,6 +140,113 @@ export async function saveCategories(categories: Category[]): Promise<string | n
     console.error('[saveCategories]', e);
     return 'Şəbəkə xətası — kateqoriyalar yadda saxlanmadı';
   }
+}
+
+// ─── Stations (sexlər) ────────────────────────────────────────────────────────
+
+let _stationsLoaded = false;
+
+export async function fetchStations(): Promise<Station[]> {
+  try {
+    const { data, error } = await supabase
+      .from('stations')
+      .select('id, name, printer_ip, printer_port')
+      .order('position');
+    if (error || !data) return [];
+    _stationsLoaded = true;
+    return data.map(r => ({
+      id: r.id,
+      name: r.name,
+      printerIp: r.printer_ip ?? null,
+      printerPort: r.printer_port ?? 9100,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// Same upsert-then-prune contract as saveMenu: a failed write leaves the
+// existing rows alone. Pruning a station nulls its items' station_id (FK is
+// ON DELETE SET NULL) — the items themselves are never touched.
+export async function saveStations(stations: Station[]): Promise<string | null> {
+  if (!_companyId || !_stationsLoaded) { console.error('[saveStations] refused: no company context or stations never loaded'); return 'Sexlər hələ yüklənməyib'; }
+  try {
+    const seen = new Set<string>();
+    const rows: Record<string, unknown>[] = [];
+    for (const s of stations) {
+      const name = s.name.trim();
+      if (!name || seen.has(name)) continue;   // the (company_id, name) unique index would reject the whole write
+      seen.add(name);
+      rows.push({
+        id: isValidUUID(s.id) ? s.id : crypto.randomUUID(),
+        name,
+        printer_ip: s.printerIp?.trim() || null,
+        printer_port: s.printerPort ?? 9100,
+        position: rows.length,
+        company_id: _companyId,
+      });
+    }
+    if (rows.length > 0) {
+      const { error } = await supabase.from('stations').upsert(rows, { onConflict: 'id' });
+      if (error) { console.error('[saveStations upsert]', error); return error.message; }
+    }
+    let del = supabase.from('stations').delete().eq('company_id', _companyId);
+    if (rows.length > 0) del = del.not('id', 'in', `(${rows.map(r => `"${r.id}"`).join(',')})`);
+    const { error: delError } = await del;
+    if (delError) { console.error('[saveStations prune]', delError); return delError.message; }
+    return null;
+  } catch (e) {
+    console.error('[saveStations]', e);
+    return 'Şəbəkə xətası — sexlər yadda saxlanmadı';
+  }
+}
+
+// Bulk-assign items to a station straight from the Sexlər view, without
+// round-tripping the whole menu through saveMenu.
+export async function assignItemsToStation(itemIds: string[], stationId: string | null): Promise<string | null> {
+  if (!_companyId) return 'Şirkət tapılmadı';
+  if (itemIds.length === 0) return null;
+  const { error } = await supabase
+    .from('menu_items')
+    .update({ station_id: stationId })
+    .in('id', itemIds)
+    .eq('company_id', _companyId);
+  if (error) { console.error('[assignItemsToStation]', error); return error.message; }
+  return null;
+}
+
+// ─── Print jobs (sex printerləri) ─────────────────────────────────────────────
+
+// Orders whose kitchen/bar ticket never came out. A ticket that vanishes in
+// silence is worse than having no printer at all, so the seller screen shows it.
+export async function fetchFailedPrintOrders(): Promise<string[]> {
+  try {
+    if (!_companyId) return [];
+    const { data, error } = await supabase
+      .from('print_jobs')
+      .select('order_id')
+      .eq('company_id', _companyId)
+      .eq('status', 'failed');
+    if (error || !data) return [];
+    return [...new Set(data.map(r => r.order_id as string))];
+  } catch {
+    return [];
+  }
+}
+
+// Re-queue an order's failed tickets — paper jam, printer was off, someone
+// binned the slip. The payload is untouched, so it reprints what was ordered
+// *then*, not what the order looks like now.
+export async function retryPrintJobs(orderId: string): Promise<string | null> {
+  if (!_companyId) return 'Şirkət tapılmadı';
+  const { error } = await supabase
+    .from('print_jobs')
+    .update({ status: 'pending', attempts: 0, error: null })
+    .eq('order_id', orderId)
+    .eq('company_id', _companyId)
+    .eq('status', 'failed');
+  if (error) { console.error('[retryPrintJobs]', error); return error.message; }
+  return null;
 }
 
 // ─── Trash ────────────────────────────────────────────────────────────────────
@@ -943,6 +1050,20 @@ export async function fetchPrintReceipt(): Promise<boolean> {
 export async function setPrintReceiptEnabled(enabled: boolean): Promise<void> {
   const { error } = await supabase.rpc('set_print_receipt', { enabled });
   if (error) console.error('[setPrintReceiptEnabled]', error);
+}
+
+export async function fetchSoundEnabled(): Promise<boolean> {
+  try {
+    if (!_companyId) return true;
+    const { data, error } = await supabase.from('companies').select('sound_enabled').eq('id', _companyId).single();
+    if (error || !data) return true;
+    return data.sound_enabled !== false;
+  } catch { return true; }
+}
+
+export async function setSoundEnabled(enabled: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_sound_enabled', { enabled });
+  if (error) console.error('[setSoundEnabled]', error);
 }
 
 export async function fetchKassaEnabled(): Promise<boolean> {

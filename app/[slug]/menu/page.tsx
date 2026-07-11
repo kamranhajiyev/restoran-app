@@ -78,7 +78,6 @@ export default function CustomerMenuPage({
         variants: (r.variants as MenuItem['variants']) ?? undefined,
         costPrice: r.cost_price ? Number(r.cost_price) : undefined,
         image: (r.image as string) ?? undefined,
-        cookingStation: (r.cooking_station as string) ?? undefined,
       }));
       const c: { name: string; available: boolean }[] = (catRes.data ?? []).map((r: Record<string, unknown>) => ({
         name: r.name as string,
