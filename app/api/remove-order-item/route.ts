@@ -2,11 +2,13 @@ import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 
 // Public terminal: remove one line from an open (unpaid) order. Token-gated; scoped to the order
-// and company so a stale/forged token or wrong company can't touch it. Stock is untouched — an
-// unpaid order hasn't deducted anything.
+// and company so a stale/forged token or wrong company can't touch it.
+//
+// A SOFT delete: the row stays, struck through on the order card, and is what the kitchen's LEGV
+// slip prints. Stock stays untouched — apply_stock_on_payment() skips rows with removed_at set.
 export async function POST(req: NextRequest) {
-  const { orderItemId, orderId, companyId, token } = (await req.json()) as {
-    orderItemId?: string; orderId?: string; companyId?: string; token?: string;
+  const { orderItemId, orderId, companyId, token, removedBy } = (await req.json()) as {
+    orderItemId?: string; orderId?: string; companyId?: string; token?: string; removedBy?: string;
   };
   if (!orderItemId || !orderId || !companyId) return Response.json({ ok: false }, { status: 400 });
   if (!(await verifySellerToken(companyId, token ?? ''))) return Response.json({ ok: false, error: 'revoked' }, { status: 403 });
@@ -25,7 +27,10 @@ export async function POST(req: NextRequest) {
     return Response.json({ ok: false, error: 'closed' }, { status: 409 });
   }
 
-  const { error } = await db.from('order_items').delete().eq('id', orderItemId).eq('order_id', orderId);
+  const { error } = await db.from('order_items')
+    .update({ removed_at: new Date().toISOString(), removed_by: removedBy ?? 'Satıcı' })
+    .eq('id', orderItemId).eq('order_id', orderId)
+    .is('removed_at', null);            // never re-stamp an already-removed line
   if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
   return Response.json({ ok: true });
 }

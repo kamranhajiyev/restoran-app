@@ -1,5 +1,6 @@
-import { CashShift, Category, MenuItem, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, Supplier, SupplierLedger, SupplierPayment, TrashItem, Warehouse, WriteoffEntry } from '@/types';
+import { CashShift, Category, MenuItem, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
+import { splitOrderItems } from './order-items';
 import { supabase } from './supabase';
 
 async function authHeaders(): Promise<HeadersInit> {
@@ -308,7 +309,13 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
     const offset = opts?.offset ?? 0;
     const all: Awaited<ReturnType<typeof runPage>> = [];
     async function runPage(start: number, end: number) {
-      let q = supabase.from('orders').select('*, order_items(*)').order('created_at', { ascending: false }).range(start, end);
+      // Order the nested rows too: nothing sorted them before, so the item list
+      // relied on incidental insert order — and the batch dividers need them in
+      // the sequence they were actually added.
+      let q = supabase.from('orders').select('*, order_items(*)')
+        .order('created_at', { ascending: false })
+        .order('created_at', { referencedTable: 'order_items', ascending: true })
+        .range(start, end);
       if (opts?.from) q = q.gte('created_at', opts.from);
       if (opts?.to) q = q.lte('created_at', opts.to);
       const { data, error } = await q;
@@ -338,19 +345,7 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
       cancelledAt: o.cancelled_at ?? undefined,
       cancelledBy: o.cancelled_by ?? undefined,
       cancelReason: o.cancel_reason ?? undefined,
-      items: (o.order_items ?? []).map((oi: { id: string; menu_item_id: string; menu_item_name: string; menu_item_price: number; quantity: number; modifiers?: string; variant_id?: string }) => ({
-        id: oi.id,
-        menuItem: {
-          id: oi.menu_item_id,
-          name: oi.menu_item_name,
-          price: Number(oi.menu_item_price),
-          category: '',
-          available: true,
-        },
-        quantity: oi.quantity,
-        modifiers: oi.modifiers ?? undefined,
-        variantId: oi.variant_id ?? undefined,
-      })),
+      ...splitOrderItems(o.order_items),
     }));
   } catch {
     return [];
@@ -482,20 +477,61 @@ export async function restoreOrder(orderId: string, status: 'ödənilib' | 'lə�
   return true;
 }
 
-// Remove a single line from an open order (authed seller). Stock is untouched — deduction only
-// happens on payment, and an open order hasn't been paid.
-export async function removeOrderItem(orderItemId: string): Promise<boolean> {
-  const { error } = await supabase.from('order_items').delete().eq('id', orderItemId);
+// Remove a whole line from an open order (authed seller). A soft delete, not a
+// delete: the row stays so the order card can show it struck through, and so the
+// kitchen's LEGV slip has something to print. Every total filters it out via
+// splitOrderItems, and apply_stock_on_payment() skips it, so the guest is never
+// charged and the warehouse never drains for a dish that wasn't made.
+export async function removeOrderItem(orderItemId: string, removedBy: string): Promise<boolean> {
+  const { error } = await supabase.from('order_items')
+    .update({ removed_at: new Date().toISOString(), removed_by: removedBy })
+    .eq('id', orderItemId)
+    .is('removed_at', null);            // never re-stamp an already-removed line
   if (error) { console.error('[removeOrderItem]', error.message); return false; }
   return true;
 }
 
-// Change the quantity of a single line on an open order (authed seller). A quantity of 0 or less
-// removes the line entirely. Stock is untouched — deduction only happens on payment.
-export async function setOrderItemQuantity(orderItemId: string, quantity: number): Promise<boolean> {
-  if (quantity <= 0) return removeOrderItem(orderItemId);
+// Change a line's quantity on an open order (authed seller).
+//
+// A partial decrement (Cola 2 → 1) records what was *taken away*: the line drops to
+// its new quantity and a ghost row carrying the difference is inserted, already
+// removed. That ghost is what the card strikes through and what the kitchen's
+// "cancel 1 Cola" slip is built from.
+export async function setOrderItemQuantity(orderItemId: string, quantity: number, removedBy: string): Promise<boolean> {
+  if (quantity <= 0) return removeOrderItem(orderItemId, removedBy);
+
+  const { data: row, error: readError } = await supabase
+    .from('order_items')
+    .select('order_id, menu_item_id, menu_item_name, menu_item_price, modifiers, variant_id, quantity')
+    .eq('id', orderItemId)
+    .single();
+  if (readError || !row) { console.error('[setOrderItemQuantity read]', readError?.message); return false; }
+
+  const removedQty = row.quantity - quantity;
+  if (removedQty <= 0) {   // an increase, or no change — nothing was taken away
+    const { error } = await supabase.from('order_items').update({ quantity }).eq('id', orderItemId);
+    if (error) { console.error('[setOrderItemQuantity]', error.message); return false; }
+    return true;
+  }
+
   const { error } = await supabase.from('order_items').update({ quantity }).eq('id', orderItemId);
   if (error) { console.error('[setOrderItemQuantity]', error.message); return false; }
+
+  const { error: ghostError } = await supabase.from('order_items').insert({
+    order_id: row.order_id,
+    menu_item_id: row.menu_item_id,
+    menu_item_name: row.menu_item_name,
+    menu_item_price: row.menu_item_price,
+    modifiers: row.modifiers,
+    variant_id: row.variant_id,
+    quantity: removedQty,
+    removed_at: new Date().toISOString(),
+    removed_by: removedBy,
+  });
+  // The quantity already dropped, so the guest is charged correctly either way —
+  // only the audit trail and the kitchen's cancel slip are lost. Don't fail the
+  // whole action over it.
+  if (ghostError) console.error('[setOrderItemQuantity ghost]', ghostError.message);
   return true;
 }
 
@@ -763,6 +799,67 @@ export async function fetchReceiptLines(receiptId: string): Promise<ReceiptLineD
       };
     });
   } catch { return []; }
+}
+
+// ─── Anbarlar arası transfer ────────────────────────────────────────────────────
+
+export async function fetchTransfers(): Promise<StockTransfer[]> {
+  try {
+    const { data, error } = await supabase.from('stock_transfers')
+      .select('id, from_warehouse_id, to_warehouse_id, note, created_by, created_at, voided_at, voided_by')
+      .order('created_at', { ascending: false }).limit(200);
+    if (error || !data) return [];
+    return data.map(t => ({
+      id: t.id, fromWarehouseId: t.from_warehouse_id, toWarehouseId: t.to_warehouse_id,
+      note: t.note ?? undefined, createdBy: t.created_by ?? undefined, createdAt: t.created_at,
+      voidedAt: t.voided_at ?? undefined, voidedBy: t.voided_by ?? undefined,
+    }));
+  } catch { return []; }
+}
+
+// The lines of one transfer, read off the outgoing leg (the incoming leg mirrors it).
+export async function fetchTransferLines(transferId: string): Promise<TransferLineDetail[]> {
+  try {
+    const { data, error } = await supabase.from('stock_movements')
+      .select('stock_item_id, qty, stock_items(name, unit)')
+      .eq('transfer_id', transferId).eq('reason', 'transfer_out');
+    if (error || !data) return [];
+    return data.map((m: Record<string, unknown>) => {
+      const si = (m.stock_items ?? {}) as { name?: string; unit?: string };
+      return {
+        stockItemId: m.stock_item_id as string,
+        name: si.name ?? '',
+        unit: si.unit ?? '',
+        qty: Math.abs(Number(m.qty ?? 0)),
+      };
+    });
+  } catch { return []; }
+}
+
+// Translate the RPC's raise codes into messages the user can act on.
+function transferError(msg: string): string {
+  const insufficient = msg.match(/insufficient_stock:(.*)/);
+  if (insufficient) return `«${insufficient[1].trim()}» — mənbə anbarda bu qədər qalıq yoxdur.`;
+  if (msg.includes('same_warehouse')) return 'Mənbə və hədəf anbar eyni ola bilməz.';
+  return msg;
+}
+
+export async function recordTransfer(fromId: string, toId: string, lines: TransferLine[], note: string): Promise<string | null> {
+  const { error } = await supabase.rpc('record_transfer', {
+    p_from: fromId,
+    p_to: toId,
+    p_lines: lines.map(l => ({ stock_item_id: l.stockItemId, qty: l.qty })),
+    p_note: note || null,
+  });
+  if (error) { console.error('[recordTransfer]', error); return transferError(error.message); }
+  return null;
+}
+
+// Soft-delete a transfer: reverses both legs, keeps the row (shown red). Idempotent.
+export async function voidTransfer(transferId: string): Promise<string | null> {
+  const { error } = await supabase.rpc('void_transfer', { p_transfer_id: transferId });
+  if (error) { console.error('[voidTransfer]', error); return transferError(error.message); }
+  return null;
 }
 
 // The Silinmələr log: every write-off, newest first, with item + warehouse names.

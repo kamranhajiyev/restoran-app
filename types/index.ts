@@ -58,6 +58,9 @@ export interface OrderItem {
   quantity: number;
   modifiers?: string;
   variantId?: string;   // which variant was chosen — drives per-variant stock deduction
+  createdAt?: string;   // groups the item into a batch: the original order, or a later "Əlavə et"
+  removedAt?: string;   // set = struck through on the order card, and excluded from every total
+  removedBy?: string;
 }
 
 export type OrderStatus = 'gözləyir' | 'hazırlanır' | 'hazırdır' | 'ödənilib' | 'ləğv edildi' | 'silinib';
@@ -139,9 +142,11 @@ export interface StockMovement {
   warehouseId: string;
   stockItemId: string;
   qty: number;
-  reason: 'receipt' | 'writeoff' | 'recount' | 'sale' | 'sale_void' | 'void';
+  reason: 'receipt' | 'writeoff' | 'recount' | 'sale' | 'sale_void' | 'void'
+    | 'transfer_out' | 'transfer_in' | 'transfer_void';
   unitCost?: number;
   receiptId?: string;
+  transferId?: string;
   note?: string;
   createdBy?: string;
   createdAt: string;
@@ -167,6 +172,31 @@ export interface ReceiptLineDetail {
   unit: string;
   qty: number;
   unitCost?: number;
+}
+
+// Anbarlar arası transfer: one move of goods from one warehouse to another.
+export interface StockTransfer {
+  id: string;
+  fromWarehouseId: string;
+  toWarehouseId: string;
+  note?: string;
+  createdBy?: string;
+  createdAt: string;
+  voidedAt?: string;
+  voidedBy?: string;
+}
+
+export interface TransferLine {
+  stockItemId: string;
+  qty: number;
+}
+
+// One line of an existing transfer (reconstructed from its transfer_out movements).
+export interface TransferLineDetail {
+  stockItemId: string;
+  name: string;
+  unit: string;
+  qty: number;          // positive magnitude moved
 }
 
 // A write-off entry for the Silinmələr log.
@@ -226,6 +256,11 @@ export interface Order {
   orderNumber: number;
   tableNumber: number;
   items: OrderItem[];
+  // Items the waiter pulled off the order. Kept OUT of `items` on purpose: every
+  // total, the Analiz report, the Excel export and the customer receipt all read
+  // `items`, and a removed dish appearing in any of them would over-count revenue
+  // and over-charge the guest. Only the order cards read this.
+  removedItems?: OrderItem[];
   status: OrderStatus;
   createdAt: string;
   sellerName: string;

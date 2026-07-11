@@ -44,6 +44,7 @@ import { CashShift, Category, MenuItem, MenuItemVariant, Order, OrderStatus, Res
 import AppDialog, { DialogState } from '@/components/AppDialog';
 import AnbarPanel from '@/components/AnbarPanel';
 import StationsPanel from '@/components/StationsPanel';
+import OrderItemHistory from '@/components/OrderItemHistory';
 import PasswordField from '@/components/PasswordField';
 import { validatePassword } from '@/lib/password';
 import { exportMenuExcel, exportOrdersExcel, exportAnalizExcel, parseMenuFile, ImportPreview, AnalizRow } from '@/lib/excel';
@@ -2403,20 +2404,11 @@ function AdminPageContent() {
                       {/* Expanded items */}
                       {isExpanded && (
                         <div className="px-4 pb-4 bg-stone-50 border-t border-stone-100">
-                          <div className="pt-3 space-y-1 mb-3">
+                          <div className="pt-3 mb-3">
                             <div className="hidden sm:grid grid-cols-[1fr_80px_80px] gap-2 text-xs font-medium text-stone-500 uppercase tracking-wide pb-1 border-b border-stone-200 mb-2">
                               <span>Məhsul</span><span className="text-right">Say</span><span className="text-right">Cəmi</span>
                             </div>
-                            {order.items.map((oi, j) => (
-                              <div key={j} className="flex justify-between text-sm text-stone-700 py-0.5">
-                                <span className="flex-1">
-                                  {oi.menuItem.name}
-                                  {oi.modifiers && <span className="text-xs text-primary-600 ml-1">({oi.modifiers})</span>}
-                                </span>
-                                <span className="text-stone-500 mx-4">{oi.quantity} əd</span>
-                                <span className="font-medium">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
-                              </div>
-                            ))}
+                            <OrderItemHistory order={order} tz={bizSettings.timezone} />
                           </div>
                           {order.note && <p className="text-xs text-stone-500 italic mb-3">Qeyd: {order.note}</p>}
                           {order.status === 'ləğv edildi' && (

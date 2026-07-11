@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { splitOrderItems, type OrderItemRow } from '@/lib/order-items';
 import { createServerClient } from '@/lib/supabase-server';
 
 export async function GET(req: NextRequest) {
@@ -17,7 +18,13 @@ export async function GET(req: NextRequest) {
   if (to) countQ = countQ.lte('created_at', to);
   const { count: totalCount } = await countQ;
 
-  let q = db.from('orders').select('*, order_items(*)').eq('company_id', companyId).order('created_at', { ascending: false }).range(offset, offset + limit - 1);
+  // Order the nested rows too — the batch dividers need the items in the sequence
+  // they were actually added, and nothing sorted them before.
+  let q = db.from('orders').select('*, order_items(*)')
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false })
+    .order('created_at', { referencedTable: 'order_items', ascending: true })
+    .range(offset, offset + limit - 1);
   if (from) q = q.gte('created_at', from);
   if (to) q = q.lte('created_at', to);
   const { data, error } = await q;
@@ -41,19 +48,9 @@ export async function GET(req: NextRequest) {
     cancelledAt: o.cancelled_at ?? undefined,
     cancelledBy: o.cancelled_by ?? undefined,
     cancelReason: o.cancel_reason ?? undefined,
-    items: ((o.order_items as Record<string, unknown>[]) ?? []).map((oi) => ({
-      id: oi.id,
-      menuItem: {
-        id: oi.menu_item_id,
-        name: oi.menu_item_name,
-        price: Number(oi.menu_item_price),
-        category: '',
-        available: true,
-      },
-      quantity: oi.quantity,
-      modifiers: oi.modifiers ?? undefined,
-      variantId: oi.variant_id ?? undefined,
-    })),
+    // Same splitter as lib/store.ts fetchOrders: removed items never enter `items`,
+    // so no total on this path can over-count them either.
+    ...splitOrderItems(o.order_items as OrderItemRow[]),
   }));
 
   return Response.json({ orders, total: totalCount });
