@@ -283,8 +283,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   }, [overrideCompanyId]);
 
   const [refreshing, setRefreshing] = useState(false);
-  const refreshOrders = useCallback(async () => {
-    setRefreshing(true);
+  const refreshOrders = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!silent) setRefreshing(true);
     try {
       if (overrideCompanyId) {
         const d = await fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).catch(() => ({ orders: [], total: 0 }));
@@ -293,7 +294,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
         const [o, total] = await Promise.all([fetchOrders({ limit: 200 }), fetchOrdersCount()]);
         setOrders(o); setTotalOrders(total);
       }
-    } finally { setRefreshing(false); }
+    } finally { if (!silent) setRefreshing(false); }
   }, [overrideCompanyId]);
 
   useEffect(() => {
@@ -405,6 +406,14 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     };
   }, [overrideCompanyId, refreshAll]);
 
+  // Mobile browsers suspend the realtime socket on lock / app-switch / Wi-Fi↔LTE handoff
+  // and it does not reliably re-subscribe, so a phone can sit on a dead channel and silently
+  // never see new orders. Track the channel's live status: `realtimeUp` gates the polling
+  // fallback below (desktop keeps a healthy socket and never polls), and `rtAttempt` forces
+  // a fresh channel when we wake up on a dead one.
+  const [realtimeUp, setRealtimeUp] = useState(false);
+  const [rtAttempt, setRtAttempt] = useState(0);
+
   useEffect(() => {
     const channel = supabase
       .channel('seller-orders')
@@ -414,9 +423,32 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, () => {
         refreshOrders();
       })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [refreshOrders]);
+      .subscribe(status => setRealtimeUp(status === 'SUBSCRIBED'));
+    return () => { setRealtimeUp(false); supabase.removeChannel(channel); };
+  }, [refreshOrders, rtAttempt]);
+
+  useEffect(() => {
+    if (realtimeUp) return;
+    const retry = () => setRtAttempt(a => a + 1);
+    const onVisible = () => { if (document.visibilityState === 'visible') retry(); };
+    window.addEventListener('online', retry);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('online', retry);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [realtimeUp]);
+
+  // Only runs while the socket is not confirmed subscribed — in practice a phone whose
+  // channel died. A missed order is the one failure a POS can't take, so this is the seatbelt.
+  // (The public terminal has its own 40s poll and no realtime at all.)
+  useEffect(() => {
+    if (overrideCompanyId || realtimeUp) return;
+    const id = setInterval(() => {
+      if (document.visibilityState !== 'hidden') refreshOrders({ silent: true });
+    }, 20000);
+    return () => clearInterval(id);
+  }, [overrideCompanyId, realtimeUp, refreshOrders]);
 
   useEffect(() => {
     const channel = supabase
@@ -1171,7 +1203,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
 
               <div className="px-4 md:px-6 py-2 flex items-center gap-3 flex-wrap">
                 <button
-                  onClick={refreshOrders}
+                  onClick={() => refreshOrders()}
                   disabled={refreshing}
                   className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
                 >
