@@ -2,19 +2,20 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Plus, Pencil, Trash2, Warehouse, Boxes, Truck, ShoppingCart, X, BookOpen, Eraser, ChevronDown, Wallet } from 'lucide-react';
+import { Plus, Pencil, Trash2, Warehouse, Boxes, Truck, ShoppingCart, X, BookOpen, Eraser, ChevronDown, Wallet, ArrowLeftRight } from 'lucide-react';
 import {
   fetchWarehouses, createWarehouse, updateWarehouse, deleteWarehouse,
   fetchSuppliers, createSupplier, updateSupplier, deleteSupplier, fetchSupplierLedger, fetchSupplierPayments, addSupplierPayment, fetchSupplierPaymentLog,
   fetchStockItems, createStockItem, updateStockItem, deleteStockItem,
   fetchBalances, fetchReceipts, recordReceipt, updateReceipt, voidReceipt, recordWriteoff,
   fetchReceiptLines, fetchWriteoffs,
+  fetchTransfers, fetchTransferLines, recordTransfer, voidTransfer,
   fetchMenu, fetchRecipeLines, saveRecipe, fetchSalesWarehouse, setSalesWarehouse,
 } from '@/lib/store';
-import { Warehouse as Wh, Supplier, StockItem, StockBalance, StockReceipt, ReceiptLine, ReceiptLineDetail, WriteoffEntry, SupplierLedger, SupplierPayment, MenuItem, RecipeLineRow, RecipeIngredient } from '@/types';
+import { Warehouse as Wh, Supplier, StockItem, StockBalance, StockReceipt, ReceiptLine, ReceiptLineDetail, StockTransfer, TransferLine, TransferLineDetail, WriteoffEntry, SupplierLedger, SupplierPayment, MenuItem, RecipeLineRow, RecipeIngredient } from '@/types';
 import { DialogState } from '@/components/AppDialog';
 
-type Sub = 'warehouses' | 'balances' | 'suppliers' | 'payments' | 'receipts' | 'writeoffs' | 'recipes';
+type Sub = 'warehouses' | 'balances' | 'suppliers' | 'payments' | 'receipts' | 'transfers' | 'writeoffs' | 'recipes';
 
 const SUBS: { id: Sub; label: string; icon: React.ElementType }[] = [
   { id: 'warehouses', label: 'Anbarlar', icon: Warehouse },
@@ -22,6 +23,7 @@ const SUBS: { id: Sub; label: string; icon: React.ElementType }[] = [
   { id: 'suppliers', label: 'Tədarükçülər', icon: Truck },
   { id: 'payments', label: 'Ödənişlər', icon: Wallet },
   { id: 'receipts', label: 'Bazarlıqlar', icon: ShoppingCart },
+  { id: 'transfers', label: 'Transferlər', icon: ArrowLeftRight },
   { id: 'writeoffs', label: 'Silinmələr', icon: Eraser },
   { id: 'recipes', label: 'Reseptlər', icon: BookOpen },
 ];
@@ -40,18 +42,24 @@ export default function AnbarPanel({ setDialog }: { setDialog: (d: DialogState |
   const router = useRouter();
   const searchParams = useSearchParams();
   const subParam = searchParams.get('sub');
-  const sub: Sub = SUBS.some(x => x.id === subParam) ? (subParam as Sub) : 'warehouses';
+  const [warehouses, setWarehouses] = useState<Wh[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [items, setItems] = useState<StockItem[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  // Transfers only mean something with somewhere to transfer to — hide the whole sub-tab until the
+  // company runs a second warehouse, rather than showing a section that can't do anything.
+  const activeWh = useMemo(() => warehouses.filter(w => w.active), [warehouses]);
+  const multiWh = activeWh.length >= 2;
+  const subs = useMemo(() => SUBS.filter(s => s.id !== 'transfers' || multiWh), [multiWh]);
+  const sub: Sub = subs.some(x => x.id === subParam) ? (subParam as Sub) : 'warehouses';
   function setSub(s: Sub) {
     const params = new URLSearchParams(searchParams.toString());
     params.set('tab', 'anbar');
     params.set('sub', s);
     router.replace(`/admin?${params.toString()}`);
   }
-  const [warehouses, setWarehouses] = useState<Wh[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [items, setItems] = useState<StockItem[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
 
   function flash(msg: string) { setToast(msg); setTimeout(() => setToast(null), 2200); }
   function fail(msg: string | null) { if (msg) setDialog({ title: 'Xəta', message: msg }); }
@@ -66,7 +74,7 @@ export default function AnbarPanel({ setDialog }: { setDialog: (d: DialogState |
     <div className="space-y-4">
       {/* sub-tabs */}
       <div className="flex flex-wrap gap-1.5">
-        {SUBS.map(s => {
+        {subs.map(s => {
           const Icon = s.icon;
           const on = sub === s.id;
           return (
@@ -96,6 +104,9 @@ export default function AnbarPanel({ setDialog }: { setDialog: (d: DialogState |
           )}
           {sub === 'receipts' && (
             <ReceiptsTab warehouses={warehouses} suppliers={suppliers} items={items} flash={flash} fail={fail} setDialog={setDialog} />
+          )}
+          {sub === 'transfers' && (
+            <TransfersTab warehouses={warehouses} items={items} flash={flash} fail={fail} setDialog={setDialog} />
           )}
           {sub === 'writeoffs' && (
             <WriteoffsTab />
@@ -351,6 +362,7 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
   const [loadingBal, setLoadingBal] = useState(false);
   const [itemModal, setItemModal] = useState<StockItem | 'new' | null>(null);
   const [woItem, setWoItem] = useState<StockBalance | null>(null);
+  const [trItem, setTrItem] = useState<StockBalance | null>(null);
   const [typeFilter, setTypeFilter] = useState<'all' | 'product' | 'ingredient'>('all');
   const [search, setSearch] = useState('');
 
@@ -420,6 +432,11 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
               <span className="text-sm text-stone-800">{b.name}</span>
               <div className="flex items-center gap-3">
                 <span className={`text-sm font-semibold tabular-nums ${b.qty <= 0 ? 'text-red-500' : 'text-stone-800'}`}>{b.qty} {b.unit}</span>
+                {/* The combined view has no source warehouse to move out of, so transfer/write-off
+                    are only offered when one warehouse is selected. */}
+                {whId !== 'ALL' && activeWh.length >= 2 && b.qty > 0 && (
+                  <button className={btnGhost} onClick={() => setTrItem(b)} title="Başqa anbara köçür"><ArrowLeftRight className="w-3.5 h-3.5" /></button>
+                )}
                 {whId !== 'ALL' && <button className={btnGhost} onClick={() => setWoItem(b)}>Silinmə</button>}
               </div>
             </div>
@@ -454,6 +471,11 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
       )}
       {woItem && (
         <WriteoffModal balance={woItem} warehouseId={whId} onClose={() => setWoItem(null)} onDone={async () => { setWoItem(null); await reloadBalances(); flash('Silinmə qeydə alındı'); }} fail={fail} />
+      )}
+      {trItem && (
+        <TransferModal activeWh={activeWh} items={items} initialFrom={whId} initialItemId={trItem.stockItemId}
+          onClose={() => setTrItem(null)}
+          onDone={async () => { setTrItem(null); await reloadBalances(); flash('Transfer edildi'); }} fail={fail} />
       )}
     </div>
   );
@@ -793,6 +815,214 @@ function NewReceipt({ activeWh, suppliers, items, initial, initialLines, onClose
           <button className={btnGhost} onClick={onClose}>Ləğv et</button>
           <button className={btnPrimary} onClick={save} disabled={busy || !linesReady}>Yadda saxla</button>
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Transferlər ────────────────────────────────────────────────────────────────
+
+function TransfersTab({ warehouses, items, flash, fail, setDialog }: {
+  warehouses: Wh[]; items: StockItem[]; flash: (m: string) => void; fail: (m: string | null) => void; setDialog: (d: DialogState | null) => void;
+}) {
+  const activeWh = useMemo(() => warehouses.filter(w => w.active), [warehouses]);
+  const [transfers, setTransfers] = useState<StockTransfer[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [lineCache, setLineCache] = useState<Record<string, TransferLineDetail[]>>({});
+
+  async function reload() { setTransfers(await fetchTransfers()); setLoaded(true); }
+  useEffect(() => { reload(); }, []);
+
+  const whName = (id: string) => warehouses.find(w => w.id === id)?.name ?? '—';
+
+  async function toggle(t: StockTransfer) {
+    if (expandedId === t.id) { setExpandedId(null); return; }
+    setExpandedId(t.id);
+    if (!lineCache[t.id]) setLineCache(prev => ({ ...prev, [t.id]: [] }));   // placeholder while loading
+    const lines = await fetchTransferLines(t.id);
+    setLineCache(prev => ({ ...prev, [t.id]: lines }));
+  }
+  function askVoid(t: StockTransfer) {
+    setDialog({
+      title: 'Transferi geri qaytar?',
+      message: 'Məhsullar hədəf anbardan çıxılıb mənbə anbara qaytarılacaq. Qeyd siyahıda qırmızı ilə qalacaq.',
+      onConfirm: async () => {
+        const err = await voidTransfer(t.id);
+        if (err) { fail(err); return; }
+        setLineCache({}); setExpandedId(null);
+        await reload(); flash('Transfer geri qaytarıldı');
+      },
+    });
+  }
+
+  if (items.length === 0) return <Empty msg="Əvvəlcə «Qalıqlar» bölməsində məhsul yaradın." />;
+  if (!loaded) return <div className="text-sm text-stone-400 py-10 text-center">Yüklənir…</div>;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-stone-400">Anbarlar arası köçürmə — nə bazarlığa, nə də silinməyə yazılır.</p>
+        <button className={btnPrimary} onClick={() => setCreating(true)}><Plus className="w-4 h-4" /> Yeni transfer</button>
+      </div>
+      <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
+        {transfers.length === 0 && <p className="text-sm text-stone-400 p-6 text-center">Transfer yoxdur</p>}
+        {transfers.map(t => {
+          const voided = !!t.voidedAt;
+          const open = expandedId === t.id;
+          const lines = lineCache[t.id];
+          return (
+            <div key={t.id}>
+              <button className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-stone-50 transition-colors gap-3" onClick={() => toggle(t)}>
+                <div className="min-w-0">
+                  <div className={`text-sm font-medium flex flex-wrap items-center gap-2 ${voided ? 'text-red-500 line-through' : 'text-stone-800'}`}>
+                    {whName(t.fromWarehouseId)} → {whName(t.toWarehouseId)}
+                    {voided && <span className="text-[10px] font-semibold no-underline px-1.5 py-0.5 rounded bg-red-50 text-red-500">geri qaytarılıb</span>}
+                  </div>
+                  <div className="text-xs text-stone-400">
+                    {new Date(t.createdAt).toLocaleString('az-AZ')}{t.createdBy ? ` · ${t.createdBy}` : ''}{t.note ? ` · ${t.note}` : ''}
+                  </div>
+                </div>
+                <ChevronDown className={`w-4 h-4 shrink-0 text-stone-300 transition-transform ${open ? 'rotate-180' : ''}`} />
+              </button>
+              {open && (
+                <div className="px-4 pb-3 bg-stone-50/60">
+                  {lines === undefined ? null : lines.length === 0 ? (
+                    <p className="text-xs text-stone-400 py-2">Yüklənir…</p>
+                  ) : (
+                    <div className="divide-y divide-stone-100">
+                      {lines.map(l => (
+                        <div key={l.stockItemId} className="flex items-center justify-between py-1.5 text-sm">
+                          <span className="text-stone-700">{l.name}</span>
+                          <span className="text-stone-500 tabular-nums">{l.qty} {l.unit}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {!voided ? (
+                    <div className="flex justify-end pt-2">
+                      <button className={btnGhost} onClick={() => askVoid(t)}><Trash2 className="w-3.5 h-3.5 text-red-500" /> Geri qaytar</button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-red-400 pt-2">{t.voidedBy ? `${t.voidedBy} tərəfindən ` : ''}geri qaytarılıb{t.voidedAt ? ` · ${new Date(t.voidedAt).toLocaleString('az-AZ')}` : ''}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {creating && (
+        <TransferModal activeWh={activeWh} items={items} onClose={() => setCreating(false)}
+          onDone={async () => { setCreating(false); await reload(); flash('Transfer edildi'); }} fail={fail} />
+      )}
+    </div>
+  );
+}
+
+function TransferModal({ activeWh, items, initialFrom, initialItemId, onClose, onDone, fail }: {
+  activeWh: Wh[]; items: StockItem[]; initialFrom?: string; initialItemId?: string;
+  onClose: () => void; onDone: () => void; fail: (m: string | null) => void;
+}) {
+  const [fromId, setFromId] = useState(initialFrom && initialFrom !== 'ALL' ? initialFrom : activeWh[0]?.id ?? '');
+  const [pickedTo, setPickedTo] = useState('');
+  const [note, setNote] = useState('');
+  const [lines, setLines] = useState<{ stockItemId: string; qty: string }[]>([{ stockItemId: initialItemId ?? items[0]?.id ?? '', qty: '' }]);
+  const [busy, setBusy] = useState(false);
+  // What the source actually holds — the transfer is refused server-side if a line exceeds it, so
+  // show the ceiling here and block the save before the user hits that error.
+  const [avail, setAvail] = useState<Record<string, number> | null>(null);
+
+  // Target is derived, not stored: picking a source that equals the current target must silently
+  // fall back to another warehouse rather than leave the two selects pointing at the same place.
+  const targets = activeWh.filter(w => w.id !== fromId);
+  const toId = targets.some(w => w.id === pickedTo) ? pickedTo : targets[0]?.id ?? '';
+
+  useEffect(() => {
+    if (!fromId) { setAvail({}); return; }
+    let alive = true;
+    setAvail(null);
+    fetchBalances(fromId).then(bs => {
+      if (!alive) return;
+      setAvail(Object.fromEntries(bs.map(b => [b.stockItemId, b.qty])));
+    });
+    return () => { alive = false; };
+  }, [fromId]);
+
+  const unitOf = (id: string) => items.find(it => it.id === id)?.unit ?? '';
+  const availOf = (id: string) => avail?.[id] ?? 0;
+  const overdrawn = (l: { stockItemId: string; qty: string }) => avail !== null && (parseFloat(l.qty) || 0) > availOf(l.stockItemId);
+  const valid = lines.filter(l => l.stockItemId && parseFloat(l.qty) > 0);
+  const canSave = !!fromId && !!toId && valid.length > 0 && !lines.some(overdrawn) && avail !== null;
+
+  function setLine(i: number, patch: Partial<{ stockItemId: string; qty: string }>) {
+    setLines(prev => prev.map((l, idx) => idx === i ? { ...l, ...patch } : l));
+  }
+  async function save() {
+    const payload: TransferLine[] = valid.map(l => ({ stockItemId: l.stockItemId, qty: parseFloat(l.qty) }));
+    if (!payload.length) return;
+    setBusy(true);
+    const err = await recordTransfer(fromId, toId, payload, note);
+    setBusy(false);
+    if (err) { fail(err); return; }
+    onDone();
+  }
+
+  return (
+    <Modal title="Anbarlar arası transfer" onClose={onClose} wide>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs text-stone-500 mb-1">Mənbə anbar</label>
+          <select className={inputCls} value={fromId} onChange={e => setFromId(e.target.value)}>
+            {activeWh.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-stone-500 mb-1">Hədəf anbar</label>
+          <select className={inputCls} value={toId} onChange={e => setPickedTo(e.target.value)}>
+            {targets.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium text-stone-500">Məhsullar</span>
+          <button className={btnGhost} onClick={() => setLines([...lines, { stockItemId: items[0]?.id ?? '', qty: '' }])}><Plus className="w-3.5 h-3.5" /> Sətir</button>
+        </div>
+        {lines.map((l, i) => {
+          const over = overdrawn(l);
+          return (
+            <div key={i} className="space-y-1.5 rounded-lg border border-stone-100 p-2">
+              <div className="flex items-center gap-2">
+                <select className={`${inputCls} flex-1 min-w-0`} value={l.stockItemId} onChange={e => setLine(i, { stockItemId: e.target.value })}>
+                  {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
+                </select>
+                {lines.length > 1 && <button className="shrink-0 text-stone-400 hover:text-red-500" onClick={() => setLines(lines.filter((_, idx) => idx !== i))}><X className="w-4 h-4" /></button>}
+              </div>
+              <div className="flex items-center gap-2">
+                <input className={`${inputCls} flex-1 min-w-0 ${over ? 'border-red-300 focus:ring-red-200' : ''}`} type="number" placeholder="say"
+                  value={l.qty} onChange={e => setLine(i, { qty: e.target.value })} />
+                <span className="w-8 shrink-0 text-xs text-stone-400">{unitOf(l.stockItemId)}</span>
+                <span className={`text-xs whitespace-nowrap ${over ? 'text-red-500' : 'text-stone-400'}`}>
+                  {avail === null ? '…' : `mövcud: ${availOf(l.stockItemId)}`}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-3">
+        <label className="block text-xs text-stone-500 mb-1">Qeyd</label>
+        <input className={inputCls} value={note} onChange={e => setNote(e.target.value)} placeholder="mətbəxə köçürüldü" />
+      </div>
+
+      <div className="flex justify-end gap-2 mt-4">
+        <button className={btnGhost} onClick={onClose}>Ləğv et</button>
+        <button className={btnPrimary} onClick={save} disabled={busy || !canSave}>Köçür</button>
       </div>
     </Modal>
   );
