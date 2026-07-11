@@ -55,21 +55,44 @@ function tone(startAt: number, freq: number, durationMs: number, type: Oscillato
   osc.stop(startAt + dur);
 }
 
-// New order: a bright rising two-note chime. Reads as "something arrived".
-export function playNewOrder(): void {
+// A context unlocked hours ago is not a context that will make a sound now:
+// browsers suspend it once the tablet idles or the tab goes to the background.
+// Resuming needs no fresh gesture — the original tap still counts — so wake it
+// here rather than leaving the screen silently mute until someone reloads.
+async function ready(): Promise<AudioContext | null> {
   const c = getCtx();
-  if (!c || c.state !== 'running') return;
+  if (!c) return null;
+  if (c.state === 'suspended') {
+    try { await c.resume(); } catch { return null; }
+  }
+  return c.state === 'running' ? c : null;
+}
+
+// The play functions report whether a sound actually came out, so the caller can
+// put the "Səsi aktivləşdir" banner back rather than believing it is still armed.
+
+// New order, or more work added to an open one: a bright rising two-note chime.
+// Reads as "something arrived".
+export async function playNewOrder(): Promise<boolean> {
+  const c = await ready();
+  if (!c) return false;
   const t = c.currentTime;
   tone(t,         880, 130, 'triangle', 0.30);   // A5
   tone(t + 0.13, 1319, 260, 'triangle', 0.30);   // E6
+  return true;
 }
 
 // Item removed: a low descending double-beep. Deliberately nothing like the
 // new-order chime — staff must be able to tell them apart without looking.
-export function playItemRemoved(): void {
-  const c = getCtx();
-  if (!c || c.state !== 'running') return;
-  const t = c.currentTime;
+//
+// `delayMs` staggers it behind the chime when one refresh brings both an added
+// and a removed item: played together the two tones smear into one noise and the
+// removal — the costlier one to miss — is what gets lost.
+export async function playItemRemoved(delayMs = 0): Promise<boolean> {
+  const c = await ready();
+  if (!c) return false;
+  const t = c.currentTime + delayMs / 1000;
   tone(t,        440, 150, 'square', 0.22);   // A4
   tone(t + 0.20, 294, 300, 'square', 0.22);   // D4
+  return true;
 }
