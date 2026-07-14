@@ -1453,7 +1453,7 @@ function AdminPageContent() {
           <div className="grid grid-cols-3 gap-3 items-end">
             <div>
               <label className="text-xs font-medium text-stone-600 mb-1.5 block">Qiymət (₼)</label>
-              <input type="number" placeholder="0.00" step="0.5" min="0" value={form.price}
+              <input type="number" placeholder="0.00" step="0.01" min="0" value={form.price}
                 onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
                 className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white" required />
             </div>
@@ -1479,7 +1479,7 @@ function AdminPageContent() {
               <div key={v.id} className="grid grid-cols-9 gap-2 items-center">
                 <input className="col-span-3 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
                   placeholder={`Variant ${i + 1}`} value={v.name} onChange={e => updateVariant(i, 'name', e.target.value)} required />
-                <input type="number" placeholder="0.00" step="0.5" min="0"
+                <input type="number" placeholder="0.00" step="0.01" min="0"
                   className="col-span-2 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
                   value={v.price} onChange={e => updateVariant(i, 'price', e.target.value)} required />
                 <input type="number" placeholder="0.00" step="0.01" min="0"
@@ -2618,13 +2618,13 @@ function AdminPageContent() {
                         )}
                         <div className="border-t pt-3 flex gap-2">
                           <input
-                            type="number" min="0" step="0.5" placeholder="Sayılan nağd (₼)"
+                            type="number" min="0" step="0.01" placeholder="Sayılan nağd (₼)"
                             value={adminCountedInput}
                             onChange={e => setAdminCountedInput(e.target.value)}
                             className="flex-1 min-w-0 border border-stone-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
                           />
                           <input
-                            type="number" min="0" step="0.5" placeholder="Terminal (₼)"
+                            type="number" min="0" step="0.01" placeholder="Terminal (₼)"
                             value={adminTerminalInput}
                             onChange={e => setAdminTerminalInput(e.target.value)}
                             className="flex-1 min-w-0 border border-stone-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
@@ -2908,7 +2908,7 @@ function AdminPageContent() {
                           className="flex-1 min-w-0 bg-white border border-stone-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700"
                         />
                         <input
-                          type="number" placeholder="₼" step="0.1" min="0"
+                          type="number" placeholder="₼" step="0.01" min="0"
                           value={quickAdd.cat === cat ? quickAdd.price : ''}
                           onChange={e => setQuickAdd({ cat, name: quickAdd.cat === cat ? quickAdd.name : '', price: e.target.value })}
                           onKeyDown={e => {

@@ -1179,7 +1179,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
           </div>
           <label className="block text-sm font-medium text-stone-700 mb-1.5">Kassada başlanğıc məbləğ (₼)</label>
           <input
-            type="number" min="0" step="0.5" placeholder="0.00"
+            type="number" min="0" step="0.01" placeholder="0.00"
             value={openCashInput}
             onChange={e => setOpenCashInput(e.target.value)}
             className="w-full border border-stone-200 rounded-xl px-4 py-3 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-700 mb-4"
@@ -1675,7 +1675,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                         >+ Mədaxil</button>
                       </div>
                       <input
-                        type="number" min="0" step="0.5" placeholder="Məbləğ (₼)"
+                        type="number" min="0" step="0.01" placeholder="Məbləğ (₼)"
                         value={movAmount} onChange={e => setMovAmount(e.target.value)}
                         className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
                       />
@@ -1717,7 +1717,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                   <h2 className="font-semibold text-stone-800 text-sm mb-3">Növbəni bağla</h2>
                   <label className="block text-xs font-medium text-stone-600 mb-1.5">Sayılan nağd (₼)</label>
                   <input
-                    type="number" min="0" step="0.5" placeholder="0.00"
+                    type="number" min="0" step="0.01" placeholder="0.00"
                     value={countedInput} onChange={e => setCountedInput(e.target.value)}
                     className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-700 mb-3"
                   />
@@ -1737,7 +1737,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                   )}
                   <label className="block text-xs font-medium text-stone-600 mb-1.5">💳 Terminal məbləği (Z-hesabat, ₼)</label>
                   <input
-                    type="number" min="0" step="0.5" placeholder="0.00"
+                    type="number" min="0" step="0.01" placeholder="0.00"
                     value={terminalInput} onChange={e => setTerminalInput(e.target.value)}
                     className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-700 mb-3"
                   />
@@ -2217,7 +2217,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                   >%</button>
                 </div>
                 <input
-                  type="number" min="0" step="0.5" placeholder="Endirim..."
+                  type="number" min="0" step="0.01" placeholder="Endirim..."
                   value={discountInput}
                   onChange={e => setDiscountInput(e.target.value)}
                   onFocus={e => e.target.select()}
@@ -2238,7 +2238,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 <div>
                   <label className="text-xs font-medium text-stone-600 mb-1.5 flex items-center gap-1 block">💵 Nağd (₼)</label>
                   <input
-                    type="number" min="0" step="0.5" placeholder="0.00"
+                    type="number" min="0" step="0.01" placeholder="0.00"
                     value={cashInput}
                     onChange={e => setCashInput(e.target.value)}
                     onFocus={e => {
@@ -2256,7 +2256,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 <div>
                   <label className="text-xs font-medium text-stone-600 mb-1.5 flex items-center gap-1 block">💳 Kart (₼)</label>
                   <input
-                    type="number" min="0" step="0.5" placeholder="0.00"
+                    type="number" min="0" step="0.01" placeholder="0.00"
                     value={cardInput}
                     onChange={e => setCardInput(e.target.value)}
                     onFocus={e => {
