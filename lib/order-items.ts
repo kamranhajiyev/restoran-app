@@ -58,6 +58,43 @@ export interface ItemBatch {
   items: OrderItem[];    // active and removed, in one list
 }
 
+// When the order last changed *after* it was rung up — a later "Əlavə et", or an
+// item taken off. Undefined for an untouched order: the original batch is the
+// order itself, not a change to it.
+//
+// Read off the rows' own timestamps rather than tracked in the session, so every
+// device agrees, a refresh doesn't forget, and it makes no difference whether the
+// update arrived by realtime push or by the poll.
+//
+// Which batch is first is decided by itemBatches, NOT by comparing an item against
+// order.createdAt: those are two different clocks. The order's stamp is written by
+// the browser, its items land a moment later carrying the server's now(), and every
+// new order would read as edited within a second of being placed.
+//
+// Instants, never strings: Postgres hands back "…41.208873+00:00" where an
+// optimistic local update makes "…41.000Z", and the two sort differently inside
+// the same second.
+export function lastChangedAt(
+  order: Pick<Order, 'items' | 'removedItems' | 'createdAt'>,
+): string | undefined {
+  let latest: string | undefined;
+  let latestMs = -Infinity;
+  const bump = (at: string | undefined) => {
+    if (!at) return;
+    const ms = Date.parse(at);
+    if (!Number.isNaN(ms) && ms > latestMs) { latestMs = ms; latest = at; }
+  };
+
+  // Every batch after the first is an "Əlavə et".
+  for (const batch of itemBatches(order)) {
+    if (!batch.isFirst) bump(batch.at);
+  }
+  // A removal is a change whichever batch the dish was ordered in.
+  for (const item of order.removedItems ?? []) bump(item.removedAt);
+
+  return latest;
+}
+
 // Every row inserted by one statement shares a single now(), so a batch *is* one
 // press of "Sifariş ver" or "Əlavə et". Removed rows are folded back in at their
 // own timestamp: a fully-removed item stays in the batch it was ordered in, while

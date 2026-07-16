@@ -50,10 +50,11 @@ export interface TicketItem {
 }
 
 export interface TicketPayload {
-  kind: 'new' | 'append' | 'cancel';
+  kind: 'new' | 'append' | 'cancel' | 'move';
   station: string;
   orderNumber: number | null;
   table: number | null;
+  fromTable?: number | null;  // 'move' only: where the order sat before
   waiter: string | null;
   note?: string | null;
   at: string;
@@ -64,6 +65,7 @@ const HEADING: Record<TicketPayload['kind'], string> = {
   new:    'YENI SIFARIS',
   append: 'ELAVE',        // items added to an order the kitchen already has
   cancel: 'LEGV',         // stop cooking these
+  move:   'MASA DEYISDI', // same food, new table — don't run it to the old one
 };
 
 // A kitchen ticket carries no prices — the cook doesn't need them, and they
@@ -84,17 +86,27 @@ export function buildStationTicket(p: TicketPayload): Uint8Array {
   // A cancellation must be unmistakable at a glance across a hot kitchen.
   if (p.kind === 'cancel') {
     lines.push(ESC.BIG, ESC.BOLD_ON, '*** LEGV ***\n', ESC.BOLD_OFF, ESC.NORMAL);
+  } else if (p.kind === 'move') {
+    lines.push(ESC.BIG, ESC.BOLD_ON, '*** MASA DEYISDI ***\n', ESC.BOLD_OFF, ESC.NORMAL);
   } else {
     lines.push(ESC.BOLD_ON, `${HEADING[p.kind]}\n`, ESC.BOLD_OFF);
   }
+
+  const tableLabel = (t: number | null | undefined) => (t ? String(t) : 'Takeaway');
 
   lines.push(
     '-'.repeat(WIDTH) + '\n',
     ESC.LEFT,
     `Sifaris #${p.orderNumber ?? '-'}\n`,
-    `Masa: ${p.table ? p.table : 'Takeaway'}\n`,
-    `${when}\n`,
   );
+  // The old table is the whole point of a move slip: the ticket already at this
+  // station names it, and that's the one being corrected.
+  if (p.kind === 'move') {
+    lines.push(ESC.BOLD_ON, `Masa: ${tableLabel(p.fromTable)} -> ${tableLabel(p.table)}\n`, ESC.BOLD_OFF);
+  } else {
+    lines.push(`Masa: ${tableLabel(p.table)}\n`);
+  }
+  lines.push(`${when}\n`);
   if (p.waiter) lines.push(`Ofisiant: ${p.waiter}\n`);
   lines.push('='.repeat(WIDTH) + '\n');
 

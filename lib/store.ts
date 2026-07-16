@@ -447,6 +447,24 @@ export async function updateOrderStatus(
   return (data?.length ?? 0) > 0;
 }
 
+// A party moves, or the order was rung up on the wrong table. Only the table
+// changes — the order number, the items and the kitchen's place in the queue all
+// stay put. A closed order can't move: its table is history at that point.
+// The stations that already hold a ticket get a notice slip from the
+// orders_enqueue_table_move trigger.
+export async function moveOrderTable(orderId: string, tableId: number): Promise<boolean> {
+  const { data, error } = await supabase.from('orders')
+    .update({ table_id: tableId })
+    .eq('id', orderId)
+    .eq('company_id', _companyId)
+    .neq('status', 'ödənilib')
+    .neq('status', 'ləğv edildi')
+    .neq('status', 'silinib')
+    .select('id');
+  if (error) { console.error('[moveOrderTable]', error.message); return false; }
+  return (data?.length ?? 0) > 0;
+}
+
 // Only unpaid orders can be cancelled — a paid order is final, mistakes after
 // payment are for the owner to sort out manually.
 export async function cancelOrder(orderId: string, reason: string, by: string): Promise<boolean> {
