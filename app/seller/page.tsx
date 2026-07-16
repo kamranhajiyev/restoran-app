@@ -10,7 +10,7 @@ import {
 import { getSession, logout, validateSession, clearLocalSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
-  fetchMenu, addOrder, addItemsToOrder, setOrderItemQuantity, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, fetchCategories, setCompanyContext, fetchTables,
+  fetchMenu, addOrder, addItemsToOrder, setOrderItemQuantity, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, fetchCategories, setCompanyContext, fetchTables,
   fetchTablesEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, fetchStaff, verifyStaffPin, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
@@ -20,11 +20,24 @@ import { snapshotOrders, diffOrderAlerts, type OrdersSnapshot } from '@/lib/orde
 import { applyBrand } from '@/lib/branding';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
 import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, isOrderOpen } from '@/types';
+import { lastChangedAt } from '@/lib/order-items';
 import InstallPWA from '@/components/InstallPWA';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import { connectPrinter, disconnectPrinter, printReceipt, openCashDrawer } from '@/lib/printer';
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
+
+// How long a changed order stays marked, and how often the clock is re-read.
+// The mark can outlive the window by up to one tick — cheaper than a timer per
+// order, and nobody is counting the seconds.
+const CHANGE_WINDOW_MS = 5 * 60 * 1000;
+const CHANGE_TICK_MS   = 30 * 1000;
+
+// A changed order floats to the top — but never while the list is being touched.
+// These rows carry Ödəniş and Ödənişsiz bağla: a row that arrives under a finger
+// already on its way down gets the wrong order paid. So the float waits for the
+// list to sit still this long, and holds off entirely while a sheet is open.
+const FLOAT_SETTLE_MS = 2500;
 
 const AZ_CHARS: Record<string, string> = { 'ç': 'c', 'ə': 'e', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u' };
 function azNormalize(s: string): string {
@@ -214,6 +227,24 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const [cancelReason, setCancelReason]       = useState<string | null>(null);
   const [cancelOtherText, setCancelOtherText] = useState('');
   const [cancelBusy, setCancelBusy]           = useState(false);
+
+  // Drives the amber stripe's expiry. When realtime is up nothing else re-renders
+  // a quiet list, so without a clock of its own a changed order would stay marked
+  // long past its window.
+  const [changeTick, setChangeTick] = useState(() => Date.now());
+  // Changed orders scrolled out of sight, in list order, each with the direction
+  // it lies in — the chip's arrow has to point where the order actually is.
+  const [offscreenChanged, setOffscreenChanged] = useState<{ id: string; above: boolean }[]>([]);
+  const ordersScrollRef = useRef<HTMLDivElement | null>(null);
+  // Which orders are currently floated to the top. Deliberately a step behind
+  // changedIds: it only catches up once the list has been left alone.
+  const [pinnedChanged, setPinnedChanged] = useState<string[]>([]);
+  const lastTouchRef = useRef(0);
+
+  // move-table modal — a busy target needs a second tap to confirm
+  const [movingOrder, setMovingOrder]   = useState<Order | null>(null);
+  const [moveTarget, setMoveTarget]     = useState<number | null>(null);
+  const [moveBusy, setMoveBusy]         = useState(false);
 
   // payment modal
   const [payingOrder, setPayingOrder] = useState<Order | null>(null);
@@ -544,6 +575,18 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     return () => clearInterval(id);
   }, [overrideCompanyId, realtimeUp, refreshOrders]);
 
+  // The stripe's clock. A hidden tab needn't tick, but it must re-read the moment
+  // it comes back: coming off a menu screen or a locked phone to a stripe that
+  // expired ten minutes ago would be a lie.
+  useEffect(() => {
+    const tick = () => setChangeTick(Date.now());
+    const id = setInterval(() => {
+      if (document.visibilityState !== 'hidden') tick();
+    }, CHANGE_TICK_MS);
+    document.addEventListener('visibilitychange', tick);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', tick); };
+  }, []);
+
   useEffect(() => {
     const channel = supabase
       .channel('seller-data')
@@ -845,6 +888,35 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     }
   }
 
+  function jumpToChanged() {
+    const target = offscreenChanged[0];
+    if (!target) return;
+    document.getElementById(`order-${target.id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
+  function openMove(order: Order) {
+    setMovingOrder(order);
+    setMoveTarget(null);
+  }
+
+  async function confirmMove() {
+    if (!movingOrder || !moveTarget || moveBusy) return;
+    const moving = movingOrder;
+    const target = moveTarget;
+    setMoveBusy(true);
+    // Conditional in the DB — a no-op if the order got paid or closed meanwhile
+    const ok = overrideCompanyId
+      ? await fetch('/api/move-table', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: moving.id, tableId: target, companyId: overrideCompanyId, token: overrideToken }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      : await moveOrderTable(moving.id, target);
+    setMoveBusy(false);
+    setMovingOrder(null);
+    if (ok) {
+      setOrders(prev => prev.map(o => o.id === moving.id ? { ...o, tableNumber: target } : o));
+    } else {
+      refreshOrders();
+    }
+  }
+
   // ── kassa (cash shift) ────────────────────────────────────────────────────
 
   const movementsTotal = (s: CashShift) => s.movements.reduce((t, m) => t + m.amount, 0);
@@ -985,8 +1057,72 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const active      = orders.filter(isOrderOpen);
   const bizToday    = businessToday(bizSettings);
   const isToday     = (iso: string) => businessDay(iso, bizSettings) === bizToday;
-  const todayOrders = active.filter(o => isToday(o.createdAt));
-  const prevOrders  = active.filter(o => !isToday(o.createdAt));
+  // Floated first, everything else in the order it already had — sort is stable, so
+  // within each half the list still reads newest-first.
+  const floated = new Set(pinnedChanged);
+  const floatFirst = (a: Order, b: Order) => Number(floated.has(b.id)) - Number(floated.has(a.id));
+  const todayOrders = active.filter(o => isToday(o.createdAt)).sort(floatFirst);
+  const prevOrders  = active.filter(o => !isToday(o.createdAt)).sort(floatFirst);
+
+  // Orders touched in the last CHANGE_WINDOW_MS wear an amber stripe. Derived from
+  // the rows' own timestamps rather than from who tapped what, so every device
+  // agrees and a refresh doesn't forget. The list itself never re-sorts: these rows
+  // carry Ödəniş and Ödənişsiz bağla, and a row that moves under a finger gets the
+  // wrong order paid.
+  const changedIds = new Set(
+    active.filter(o => {
+      const at = lastChangedAt(o);
+      return at !== undefined && changeTick - Date.parse(at) < CHANGE_WINDOW_MS;
+    }).map(o => o.id),
+  );
+  // A Set is a new object every render; the effects below need a value they can compare.
+  const changedKey = [...changedIds].sort().join(',');
+
+  // Let the float catch up, but only once the list has sat still — and never while a
+  // sheet is open over it, since dismissing it would reveal a rearranged list.
+  const sheetOpen = !!payingOrder || !!cancellingOrder || !!movingOrder || !!appendOrderId;
+  useEffect(() => {
+    if (sheetOpen) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const settle = () => {
+      const quietFor = Date.now() - lastTouchRef.current;
+      if (quietFor >= FLOAT_SETTLE_MS) setPinnedChanged(changedKey ? changedKey.split(',') : []);
+      // Touched again while we waited — start the quiet period over.
+      else timer = setTimeout(settle, FLOAT_SETTLE_MS - quietFor);
+    };
+    settle();
+    return () => { if (timer) clearTimeout(timer); };
+  }, [changedKey, sheetOpen]);
+
+  // Which changed orders are out of sight. Watched rather than measured on scroll:
+  // the chip should stay away while the amber row is right there in front of you.
+  useEffect(() => {
+    const root = ordersScrollRef.current;
+    const ids = changedKey ? changedKey.split(',') : [];
+    if (!root || ids.length === 0) { setOffscreenChanged([]); return; }
+
+    const off = new Map<string, boolean>();   // id → lies above the viewport
+    const observer = new IntersectionObserver(entries => {
+      for (const e of entries) {
+        const id = e.target.id.slice('order-'.length);
+        if (e.isIntersecting) off.delete(id);
+        else off.set(id, e.boundingClientRect.top < (e.rootBounds?.top ?? 0));
+      }
+      // Report in list order, so the chip points at — and jumps to — the first one.
+      const inOrder = [...off.keys()]
+        .map(id => document.getElementById(`order-${id}`))
+        .filter((el): el is HTMLElement => !!el)
+        .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+        .map(el => el.id.slice('order-'.length));
+      setOffscreenChanged(inOrder.map(id => ({ id, above: off.get(id)! })));
+    }, { root, threshold: 0.5 });   // half a row showing is enough to count as seen
+
+    for (const id of ids) {
+      const el = document.getElementById(`order-${id}`);
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [changedKey, view]);
   const historyQuery = historySearch.trim().toLowerCase();
   const filteredHistoryOrders = historyQuery
     ? historyOrders.filter(o =>
@@ -1392,7 +1528,26 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 <span>Vaxt</span><span>Sifariş</span><span>Durum</span><span></span><span className="text-right">Ümumi</span>
               </div>
 
-              <div className="flex-1 overflow-y-auto">
+              {/* Any pointer near the list defers the float. Written to a ref, not
+                  state — a re-render per mousemove would be absurd. */}
+              <div
+                ref={ordersScrollRef}
+                onPointerDown={() => { lastTouchRef.current = Date.now(); }}
+                onPointerMove={() => { lastTouchRef.current = Date.now(); }}
+                onScroll={() => { lastTouchRef.current = Date.now(); }}
+                className="flex-1 overflow-y-auto relative"
+              >
+                {/* A changed order the waiter can't see. The list stays put — this
+                    goes to it on a tap, rather than the row coming to the list's top
+                    under someone's finger. */}
+                {offscreenChanged.length > 0 && (
+                  <button
+                    onClick={jumpToChanged}
+                    className="sticky top-2 z-10 mx-auto block bg-amber-400 hover:bg-amber-500 text-amber-950 text-xs font-bold px-3 py-1.5 rounded-full shadow-md active:scale-95 transition-all"
+                  >
+                    {offscreenChanged[0].above ? '↑' : '↓'} {offscreenChanged.length} dəyişiklik
+                  </button>
+                )}
                 {active.length === 0 && (
                   <div className="text-center py-20 text-stone-500">
                     <div className="text-5xl mb-3">📋</div>
@@ -1402,13 +1557,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 {prevOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
-                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onStatusChange={handleStatusChange} />)}
+                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} changed={changedIds.has(o.id)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
-                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onStatusChange={handleStatusChange} />)}
+                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} changed={changedIds.has(o.id)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
               </div>
@@ -2174,6 +2329,64 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
         </div>
       )}
 
+      {/* Move-table modal — bottom sheet on mobile */}
+      {movingOrder && (() => {
+        const targetBusy = moveTarget !== null && tableHasActive(moveTarget, orders);
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
+            <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-md">
+              <h3 className="font-bold text-lg text-stone-800 mb-1">Masanı dəyiş</h3>
+              <p className="text-sm text-stone-600 mb-4">
+                №{movingOrder.orderNumber} · {tableName(movingOrder.tableNumber)} · {orderTotal(movingOrder).toFixed(2)} ₼
+              </p>
+              <p className="text-xs font-semibold text-stone-600 uppercase tracking-wide mb-2">Yeni masa</p>
+              <div className="flex flex-wrap gap-2 mb-4 max-h-56 overflow-y-auto">
+                {tables.map(t => {
+                  const busy = tableHasActive(t.id, orders);
+                  const current = t.id === movingOrder.tableNumber;
+                  const picked = moveTarget === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      disabled={current}
+                      onClick={() => setMoveTarget(t.id)}
+                      className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 disabled:opacity-40 disabled:active:scale-100 ${
+                        picked
+                          ? 'border-primary-500 bg-primary-50 text-primary-800'
+                          : busy
+                            ? 'border-red-200 bg-red-50 text-red-700 hover:border-red-300'
+                            : 'border-stone-200 text-stone-600 hover:border-stone-300'
+                      }`}
+                    >
+                      {t.name}
+                      {current && <span className="text-[10px] ml-1 opacity-70">(hazırkı)</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Two parties on one table is allowed — the floor plan already counts
+                  open orders per table — but it should never happen by accident. */}
+              {targetBusy && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-4">
+                  {tableName(moveTarget)} məşğuldur — orada artıq açıq sifariş var. Yenə də köçürülsün?
+                </p>
+              )}
+              <div className="flex gap-2">
+                <button onClick={() => setMovingOrder(null)} className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">İmtina</button>
+                <button
+                  onClick={confirmMove}
+                  disabled={moveBusy || !moveTarget}
+                  className={`flex-1 py-3 rounded-xl disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2 ${targetBusy ? 'bg-red-500 hover:bg-red-600' : 'bg-primary-800 hover:bg-primary-900'}`}
+                >
+                  {moveBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                  {targetBusy ? 'Yenə də köçür' : 'Köçür'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Payment modal — bottom sheet on mobile */}
       {payingOrder && (() => {
         const fullTotal = orderTotal(payingOrder);
@@ -2455,15 +2668,17 @@ function CartItems({ cart, existingItems, removedItems, addToCart, removeFromCar
 
 // ── OrderRow — mobile card + desktop table row ────────────────────────────
 
-function OrderRow({ order, tableLabel, tz, printFailed, onReprint, onPay, onCancel, onAppend, onStatusChange }: {
+function OrderRow({ order, tableLabel, tz, printFailed, changed, onReprint, onPay, onCancel, onAppend, onMove, onStatusChange }: {
   order: Order;
   tableLabel: string;
   tz: string;
   printFailed: boolean;
+  changed: boolean;
   onReprint: () => void;
   onPay: () => void;
   onCancel: () => void;
   onAppend: () => void;
+  onMove: () => void;
   onStatusChange: (id: string, s: OrderStatus) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -2473,9 +2688,13 @@ function OrderRow({ order, tableLabel, tz, printFailed, onReprint, onPay, onCanc
   ).join(', ');
 
   return (
-    <>
-      {/* Mobile card */}
-      <div className="md:hidden mx-3 my-2 bg-white rounded-2xl border border-stone-100 shadow-sm overflow-hidden">
+    // The id is what the "dəyişiklik" chip scrolls to.
+    <div id={`order-${order.id}`}>
+      {/* Mobile card. A changed order is washed amber end to end — a stripe on the
+          edge was too quiet to catch from across the room. Pale, not saturated: the
+          status pill and the red "bağla" button still have to read, and nothing here
+          is an error. */}
+      <div className={`md:hidden mx-3 my-2 rounded-2xl border shadow-sm overflow-hidden ${changed ? 'bg-amber-50 border-amber-200 border-l-4 border-l-amber-400' : 'bg-white border-stone-100'}`}>
         <button
           className="w-full p-4 text-left"
           onClick={() => setExpanded(e => !e)}
@@ -2515,7 +2734,7 @@ function OrderRow({ order, tableLabel, tz, printFailed, onReprint, onPay, onCanc
         )}
 
         {expanded && (
-          <div className="px-4 pb-4 border-t border-stone-100 bg-stone-50">
+          <div className={`px-4 pb-4 border-t border-stone-100 ${changed ? 'bg-amber-50/70' : 'bg-stone-50'}`}>
             <div className="pt-3 mb-3">
               <OrderItemHistory order={order} tz={tz} />
             </div>
@@ -2539,6 +2758,14 @@ function OrderRow({ order, tableLabel, tz, printFailed, onReprint, onPay, onCanc
                 >
                   Düzəliş et
                 </button>
+                {order.tableNumber !== 0 && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onMove(); }}
+                    className="w-full px-4 py-2.5 rounded-xl border border-stone-300 text-stone-700 hover:bg-stone-100 active:scale-95 text-sm font-semibold transition-all"
+                  >
+                    Masanı dəyiş
+                  </button>
+                )}
                 <button
                   onClick={e => { e.stopPropagation(); onCancel(); }}
                   className="w-full px-4 py-2.5 rounded-xl border border-red-200 text-red-500 hover:bg-red-50 active:scale-95 text-sm font-semibold transition-all"
@@ -2551,8 +2778,9 @@ function OrderRow({ order, tableLabel, tz, printFailed, onReprint, onPay, onCanc
         )}
       </div>
 
-      {/* Desktop table row */}
-      <div className="hidden md:block border-b bg-white hover:bg-stone-50">
+      {/* Desktop table row. Keeps a hover of its own — an amber row that doesn't
+          react under the cursor looks disabled. */}
+      <div className={`hidden md:block border-b ${changed ? 'bg-amber-50 hover:bg-amber-100 border-l-4 border-l-amber-400' : 'bg-white hover:bg-stone-50'}`}>
         <div
           className="w-full grid grid-cols-[120px_1fr_140px_200px_110px] gap-4 px-6 py-4 items-center cursor-pointer"
           onClick={() => setExpanded(e => !e)}
@@ -2609,24 +2837,32 @@ function OrderRow({ order, tableLabel, tz, printFailed, onReprint, onPay, onCanc
         </div>
 
         {expanded && (
-          <div className="px-6 pb-4 bg-stone-50 border-t border-stone-100">
+          <div className={`px-6 pb-4 border-t border-stone-100 ${changed ? 'bg-amber-50/70' : 'bg-stone-50'}`}>
             <div className="pt-3 mb-3">
               <OrderItemHistory order={order} tz={tz} />
             </div>
             {order.note && <p className="text-xs text-stone-500 italic">Qeyd: {order.note}</p>}
             {isOrderOpen(order) && (
-              <div className="flex pt-3 mt-1 border-t border-stone-200">
+              <div className="flex gap-2 pt-3 mt-1 border-t border-stone-200">
                 <button
                   onClick={e => { e.stopPropagation(); onAppend(); }}
                   className="text-xs font-semibold text-primary-800 border border-primary-300 hover:bg-primary-50 rounded-lg px-3 py-1.5 transition-colors"
                 >
                   Düzəliş et
                 </button>
+                {order.tableNumber !== 0 && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onMove(); }}
+                    className="text-xs font-semibold text-stone-700 border border-stone-300 hover:bg-stone-100 rounded-lg px-3 py-1.5 transition-colors"
+                  >
+                    Masanı dəyiş
+                  </button>
+                )}
               </div>
             )}
           </div>
         )}
       </div>
-    </>
+    </div>
   );
 }
