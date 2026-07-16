@@ -27,11 +27,16 @@ import { connectPrinter, disconnectPrinter, printReceipt, openCashDrawer } from 
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
-// How long a changed order stays marked, and how often the clock is re-read.
-// The mark can outlive the window by up to one tick — cheaper than a timer per
+// The colour and the float answer different questions, so only one of them is on a
+// clock. Amber means "this order is not what was originally rung up" and lasts as
+// long as the order is open — a waiter who was out on the floor for twenty minutes
+// still needs to know. Floating to the top means "this changed just now", which
+// stops being true, and says which of several amber orders is the fresh one.
+//
+// The float can outlive its window by up to one tick — cheaper than a timer per
 // order, and nobody is counting the seconds.
-const CHANGE_WINDOW_MS = 5 * 60 * 1000;
-const CHANGE_TICK_MS   = 30 * 1000;
+const FLOAT_WINDOW_MS = 10 * 60 * 1000;
+const CHANGE_TICK_MS  = 30 * 1000;
 
 // A changed order floats to the top — but never while the list is being touched.
 // These rows carry Ödəniş and Ödənişsiz bağla: a row that arrives under a finger
@@ -1064,19 +1069,22 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const todayOrders = active.filter(o => isToday(o.createdAt)).sort(floatFirst);
   const prevOrders  = active.filter(o => !isToday(o.createdAt)).sort(floatFirst);
 
-  // Orders touched in the last CHANGE_WINDOW_MS wear an amber stripe. Derived from
-  // the rows' own timestamps rather than from who tapped what, so every device
-  // agrees and a refresh doesn't forget. The list itself never re-sorts: these rows
-  // carry Ödəniş and Ödənişsiz bağla, and a row that moves under a finger gets the
-  // wrong order paid.
+  // Ever edited → amber, for as long as the order is open. No clock: the fact
+  // doesn't stop being true. Derived from the rows' own timestamps rather than from
+  // who tapped what, so every device agrees and a refresh doesn't forget.
   const changedIds = new Set(
+    active.filter(o => lastChangedAt(o) !== undefined).map(o => o.id),
+  );
+  // Edited *just now* → floats to the top, and is worth a chip if it's out of sight.
+  // This one does expire: it says which of the amber orders is the fresh one.
+  const recentIds = new Set(
     active.filter(o => {
       const at = lastChangedAt(o);
-      return at !== undefined && changeTick - Date.parse(at) < CHANGE_WINDOW_MS;
+      return at !== undefined && changeTick - Date.parse(at) < FLOAT_WINDOW_MS;
     }).map(o => o.id),
   );
   // A Set is a new object every render; the effects below need a value they can compare.
-  const changedKey = [...changedIds].sort().join(',');
+  const recentKey = [...recentIds].sort().join(',');
 
   // Let the float catch up, but only once the list has sat still — and never while a
   // sheet is open over it, since dismissing it would reveal a rearranged list.
@@ -1086,19 +1094,21 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     let timer: ReturnType<typeof setTimeout> | undefined;
     const settle = () => {
       const quietFor = Date.now() - lastTouchRef.current;
-      if (quietFor >= FLOAT_SETTLE_MS) setPinnedChanged(changedKey ? changedKey.split(',') : []);
+      if (quietFor >= FLOAT_SETTLE_MS) setPinnedChanged(recentKey ? recentKey.split(',') : []);
       // Touched again while we waited — start the quiet period over.
       else timer = setTimeout(settle, FLOAT_SETTLE_MS - quietFor);
     };
     settle();
     return () => { if (timer) clearTimeout(timer); };
-  }, [changedKey, sheetOpen]);
+  }, [recentKey, sheetOpen]);
 
-  // Which changed orders are out of sight. Watched rather than measured on scroll:
-  // the chip should stay away while the amber row is right there in front of you.
+  // Which *recently* changed orders are out of sight. Fresh ones only — every edited
+  // order below the fold would leave the chip up permanently, and it would stop
+  // meaning anything. Watched rather than measured on scroll: the chip should stay
+  // away while the amber row is right there in front of you.
   useEffect(() => {
     const root = ordersScrollRef.current;
-    const ids = changedKey ? changedKey.split(',') : [];
+    const ids = recentKey ? recentKey.split(',') : [];
     if (!root || ids.length === 0) { setOffscreenChanged([]); return; }
 
     const off = new Map<string, boolean>();   // id → lies above the viewport
@@ -1122,7 +1132,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       if (el) observer.observe(el);
     }
     return () => observer.disconnect();
-  }, [changedKey, view]);
+  }, [recentKey, view]);
   const historyQuery = historySearch.trim().toLowerCase();
   const filteredHistoryOrders = historyQuery
     ? historyOrders.filter(o =>
