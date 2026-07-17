@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { createServerClient, requireAuth } from '@/lib/supabase-server';
+import { createServerClient, requireAuth, stationInCompany, OWNER_MANAGED_ROLES } from '@/lib/supabase-server';
 
 // Superadmin sees/creates everything; owners are limited to seller accounts
 // inside their own company.
@@ -24,17 +24,42 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await requireAuth(req);
   if (auth instanceof Response) return auth;
-  if (auth.role !== 'superadmin') {
+  if (auth.role !== 'superadmin' && auth.role !== 'owner') {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   const body = await req.json();
   const { username, password, name } = body;
   const role = body.role;
-  const companyId = body.companyId;
+  let stationId: string | null = body.stationId ?? null;
+
+  // An owner creates staff for their OWN company only, and may not mint an owner or
+  // a superadmin. Both are read off the caller's own profile rather than the body,
+  // so a forged companyId can't place an account somewhere else.
+  let companyId: string | null;
+  if (auth.role === 'owner') {
+    if (!(OWNER_MANAGED_ROLES as readonly string[]).includes(role)) {
+      return Response.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    if (!auth.companyId) return Response.json({ error: 'Şirkət tapılmadı' }, { status: 400 });
+    companyId = auth.companyId;
+  } else {
+    companyId = body.companyId ?? null;
+  }
 
   if (!/^[a-z0-9_.-]{2,30}$/i.test(username ?? '')) {
     return Response.json({ error: 'İstifadəçi adı yanlış formatdadır' }, { status: 400 });
+  }
+
+  // An employee with no sex would log in to a blank screen — there is nothing for
+  // the prep screen to filter by.
+  if (role === 'employee') {
+    if (!stationId) return Response.json({ error: 'Sex seçilməyib' }, { status: 400 });
+    if (!companyId || !(await stationInCompany(stationId, companyId))) {
+      return Response.json({ error: 'Sex tapılmadı' }, { status: 400 });
+    }
+  } else {
+    stationId = null;   // only employees are tied to a sex
   }
 
   const db = createServerClient();
@@ -58,6 +83,7 @@ export async function POST(req: NextRequest) {
     name,
     role,
     company_id: companyId ?? null,
+    station_id: stationId,
   });
 
   if (profileError) {

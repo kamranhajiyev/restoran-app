@@ -5,7 +5,7 @@ import Link from 'next/link';
 import {
   QrCode, Zap, BarChart2, Users, LayoutGrid, ShieldCheck, ChevronDown,
 } from 'lucide-react';
-import { getSession } from '@/lib/auth';
+import { getSession, homeFor } from '@/lib/auth';
 
 const BENTO = [
   {
@@ -85,9 +85,7 @@ export default function Home() {
   useEffect(() => {
     const session = getSession();
     if (session) {
-      if (session.role === 'superadmin') router.replace('/superadmin');
-      else if (session.role === 'owner')  router.replace('/admin');
-      else                                router.replace('/seller');
+      router.replace(homeFor(session));
     } else {
       setChecked(true);
     }
