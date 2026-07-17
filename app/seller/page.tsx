@@ -1062,10 +1062,19 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const active      = orders.filter(isOrderOpen);
   const bizToday    = businessToday(bizSettings);
   const isToday     = (iso: string) => businessDay(iso, bizSettings) === bizToday;
-  // Floated first, everything else in the order it already had — sort is stable, so
-  // within each half the list still reads newest-first.
-  const floated = new Set(pinnedChanged);
-  const floatFirst = (a: Order, b: Order) => Number(floated.has(b.id)) - Number(floated.has(a.id));
+  // Floated first, in the order they were changed — most recent edit on top. A plain
+  // "floated vs not" partition wasn't enough: the stable sort then left the group in
+  // created-at order, so an old order edited seconds ago sat *below* a newer one
+  // edited ten minutes back, which is the opposite of the question being answered.
+  //
+  // MAX_SAFE_INTEGER, not Infinity: two un-floated orders would compare
+  // Infinity - Infinity = NaN, which is not a valid comparator result. V8 currently
+  // tolerates it and keeps the order, but that is luck, not a guarantee. Subtracting
+  // equal ranks gives a real 0, so the stable sort leaves everything not floated in
+  // its existing newest-first order.
+  const floatRank = new Map(pinnedChanged.map((id, i) => [id, i]));
+  const rank = (o: Order) => floatRank.get(o.id) ?? Number.MAX_SAFE_INTEGER;
+  const floatFirst = (a: Order, b: Order) => rank(a) - rank(b);
   const todayOrders = active.filter(o => isToday(o.createdAt)).sort(floatFirst);
   const prevOrders  = active.filter(o => !isToday(o.createdAt)).sort(floatFirst);
 
@@ -1076,15 +1085,21 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     active.filter(o => lastChangedAt(o) !== undefined).map(o => o.id),
   );
   // Edited *just now* → floats to the top, and is worth a chip if it's out of sight.
-  // This one does expire: it says which of the amber orders is the fresh one.
-  const recentIds = new Set(
-    active.filter(o => {
-      const at = lastChangedAt(o);
-      return at !== undefined && changeTick - Date.parse(at) < FLOAT_WINDOW_MS;
-    }).map(o => o.id),
-  );
-  // A Set is a new object every render; the effects below need a value they can compare.
-  const recentKey = [...recentIds].sort().join(',');
+  // This one does expire: it says which of the amber orders is the fresh one, so it
+  // is a list in recency order, newest change first — not a set. Which order is
+  // freshest is the entire question the float answers.
+  const recentOrdered = active
+    .map(o => ({ id: o.id, at: lastChangedAt(o) }))
+    .filter((r): r is { id: string; at: string } =>
+      r.at !== undefined && changeTick - Date.parse(r.at) < FLOAT_WINDOW_MS)
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+
+  // The effects below need a value they can compare. It carries the timestamps, not
+  // just the ids: editing an order that is already recent leaves the membership
+  // identical, and an id-only key would never change — so the re-edit would never
+  // reach the top. The order is kept rather than sorted away, so a pure re-ranking
+  // re-runs them too.
+  const recentKey = recentOrdered.map(r => `${r.id}@${r.at}`).join('|');
 
   // Let the float catch up, but only once the list has sat still — and never while a
   // sheet is open over it, since dismissing it would reveal a rearranged list.
@@ -1094,12 +1109,14 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     let timer: ReturnType<typeof setTimeout> | undefined;
     const settle = () => {
       const quietFor = Date.now() - lastTouchRef.current;
-      if (quietFor >= FLOAT_SETTLE_MS) setPinnedChanged(recentKey ? recentKey.split(',') : []);
+      if (quietFor >= FLOAT_SETTLE_MS) setPinnedChanged(recentOrdered.map(r => r.id));
       // Touched again while we waited — start the quiet period over.
       else timer = setTimeout(settle, FLOAT_SETTLE_MS - quietFor);
     };
     settle();
     return () => { if (timer) clearTimeout(timer); };
+    // recentKey stands in for recentOrdered: same data, comparable by value.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recentKey, sheetOpen]);
 
   // Which *recently* changed orders are out of sight. Fresh ones only — every edited
@@ -1108,7 +1125,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   // away while the amber row is right there in front of you.
   useEffect(() => {
     const root = ordersScrollRef.current;
-    const ids = recentKey ? recentKey.split(',') : [];
+    const ids = recentOrdered.map(r => r.id);
     if (!root || ids.length === 0) { setOffscreenChanged([]); return; }
 
     const off = new Map<string, boolean>();   // id → lies above the viewport
@@ -1132,6 +1149,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       if (el) observer.observe(el);
     }
     return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recentKey, view]);
   const historyQuery = historySearch.trim().toLowerCase();
   const filteredHistoryOrders = historyQuery
