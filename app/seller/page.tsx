@@ -28,18 +28,6 @@ import { connectPrinter, disconnectPrinter, printReceipt, openCashDrawer } from 
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
-// How long a changed order stays marked, and how often the clock is re-read.
-// The mark can outlive the window by up to one tick — cheaper than a timer per
-// order, and nobody is counting the seconds.
-const CHANGE_WINDOW_MS = 5 * 60 * 1000;
-const CHANGE_TICK_MS   = 30 * 1000;
-
-// A changed order floats to the top — but never while the list is being touched.
-// These rows carry Ödəniş and Ödənişsiz bağla: a row that arrives under a finger
-// already on its way down gets the wrong order paid. So the float waits for the
-// list to sit still this long, and holds off entirely while a sheet is open.
-const FLOAT_SETTLE_MS = 2500;
-
 const AZ_CHARS: Record<string, string> = { 'ç': 'c', 'ə': 'e', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u' };
 function azNormalize(s: string): string {
   return s.toLocaleLowerCase('az').replace(/[çəğıöşü]/g, ch => AZ_CHARS[ch]);
@@ -613,18 +601,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     }, 20000);
     return () => clearInterval(id);
   }, [overrideCompanyId, realtimeUp, refreshOrders]);
-
-  // The stripe's clock. A hidden tab needn't tick, but it must re-read the moment
-  // it comes back: coming off a menu screen or a locked phone to a stripe that
-  // expired ten minutes ago would be a lie.
-  useEffect(() => {
-    const tick = () => setChangeTick(Date.now());
-    const id = setInterval(() => {
-      if (document.visibilityState !== 'hidden') tick();
-    }, CHANGE_TICK_MS);
-    document.addEventListener('visibilitychange', tick);
-    return () => { clearInterval(id); document.removeEventListener('visibilitychange', tick); };
-  }, []);
 
   useEffect(() => {
     const channel = supabase
