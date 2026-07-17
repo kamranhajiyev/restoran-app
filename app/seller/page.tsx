@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   PanelLeftClose, PanelLeftOpen, LogOut, X,
@@ -7,42 +7,26 @@ import {
   ShoppingCart, ChevronLeft, ChevronRight, ChevronDown, Minus, Plus, Wallet,
   History, Search, Delete, KeyRound, Trash2, Check, Bell, BellOff, AlertTriangle,
 } from 'lucide-react';
-import { getSession, logout, validateSession, clearLocalSession } from '@/lib/auth';
+import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
   fetchMenu, addOrder, addItemsToOrder, setOrderItemQuantity, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, fetchCategories, setCompanyContext, fetchTables,
   fetchTablesEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, fetchStaff, verifyStaffPin, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
+  fetchStations, fetchStationReady, type StationReady,
 } from '@/lib/store';
-import { unlockSound, playNewOrder, playItemRemoved } from '@/lib/sound';
+import { menuIndex, stationForItem, readyStationIds } from '@/lib/stations';
+import { unlockSound, playNewOrder, playItemRemoved, playOrderReady } from '@/lib/sound';
 import { snapshotOrders, diffOrderAlerts, type OrdersSnapshot } from '@/lib/orderAlerts';
 import { applyBrand } from '@/lib/branding';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
-import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, isOrderOpen } from '@/types';
-import { lastChangedAt } from '@/lib/order-items';
+import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import { connectPrinter, disconnectPrinter, printReceipt, openCashDrawer } from '@/lib/printer';
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
-
-// The colour and the float answer different questions, so only one of them is on a
-// clock. Amber means "this order is not what was originally rung up" and lasts as
-// long as the order is open — a waiter who was out on the floor for twenty minutes
-// still needs to know. Floating to the top means "this changed just now", which
-// stops being true, and says which of several amber orders is the fresh one.
-//
-// The float can outlive its window by up to one tick — cheaper than a timer per
-// order, and nobody is counting the seconds.
-const FLOAT_WINDOW_MS = 10 * 60 * 1000;
-const CHANGE_TICK_MS  = 30 * 1000;
-
-// A changed order floats to the top — but never while the list is being touched.
-// These rows carry Ödəniş and Ödənişsiz bağla: a row that arrives under a finger
-// already on its way down gets the wrong order paid. So the float waits for the
-// list to sit still this long, and holds off entirely while a sheet is open.
-const FLOAT_SETTLE_MS = 2500;
 
 const AZ_CHARS: Record<string, string> = { 'ç': 'c', 'ə': 'e', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u' };
 function azNormalize(s: string): string {
@@ -233,19 +217,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const [cancelOtherText, setCancelOtherText] = useState('');
   const [cancelBusy, setCancelBusy]           = useState(false);
 
-  // Drives the amber stripe's expiry. When realtime is up nothing else re-renders
-  // a quiet list, so without a clock of its own a changed order would stay marked
-  // long past its window.
-  const [changeTick, setChangeTick] = useState(() => Date.now());
-  // Changed orders scrolled out of sight, in list order, each with the direction
-  // it lies in — the chip's arrow has to point where the order actually is.
-  const [offscreenChanged, setOffscreenChanged] = useState<{ id: string; above: boolean }[]>([]);
-  const ordersScrollRef = useRef<HTMLDivElement | null>(null);
-  // Which orders are currently floated to the top. Deliberately a step behind
-  // changedIds: it only catches up once the list has been left alone.
-  const [pinnedChanged, setPinnedChanged] = useState<string[]>([]);
-  const lastTouchRef = useRef(0);
-
   // move-table modal — a busy target needs a second tap to confirm
   const [movingOrder, setMovingOrder]   = useState<Order | null>(null);
   const [moveTarget, setMoveTarget]     = useState<number | null>(null);
@@ -299,16 +270,18 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     if (!silent) setPullRefreshing(true);
     try {
       if (overrideCompanyId) {
-        const [m, o, c, tb, st] = await Promise.all([
+        const [m, o, c, tb, st, rd] = await Promise.all([
           fetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
           fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
           fetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
           fetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.tables ?? []).catch(() => []),
           fetch(`/api/public-staff?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.staff ?? []).catch(() => null),
+          fetch(`/api/public-station-ready?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.ready ?? []).catch(() => null),
         ]);
         setMenu(m); setOrders(o); setTables(tb);
         setAvailableCategories(c.filter((cat: { available: boolean }) => cat.available));
         if (st) setPinStaffList(st);
+        if (rd) setReadyRows(rd);
       } else {
         const [m, o, c, st, s] = await Promise.all([
           fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(),
@@ -328,14 +301,25 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     if (!silent) setRefreshing(true);
     try {
       if (overrideCompanyId) {
-        const d = await fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).catch(() => ({ orders: [], total: 0 }));
+        const [d, r] = await Promise.all([
+          fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).catch(() => ({ orders: [], total: 0 })),
+          fetch(`/api/public-station-ready?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.ready ?? []).catch(() => null),
+        ]);
         setOrders(d.orders ?? []); setTotalOrders(d.total ?? 0);
+        // null = the request failed. Keep the last known green rather than blanking
+        // the list: a blip must not make ready food look unready.
+        if (r) setReadyRows(r);
       } else {
-        const [o, total] = await Promise.all([fetchOrders({ limit: 200 }), fetchOrdersCount()]);
-        setOrders(o); setTotalOrders(total);
+        const [o, total, r] = await Promise.all([fetchOrders({ limit: 200 }), fetchOrdersCount(), fetchStationReady()]);
+        setOrders(o); setTotalOrders(total); setReadyRows(r);
       }
     } finally { if (!silent) setRefreshing(false); }
   }, [overrideCompanyId]);
+
+  // Which sex has finished its part of which order. The sexes themselves are needed
+  // to work out which sex owns a line — an order line only carries menu_item_id.
+  const [stations, setStations] = useState<Station[]>([]);
+  const [readyRows, setReadyRows] = useState<StationReady[]>([]);
 
   // ── Order alerts ────────────────────────────────────────────────────────────
   // For venues whose station printers aren't wired up: the kitchen hears the
@@ -394,6 +378,31 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     if (removed) playItemRemoved(newWork ? 450 : 0).then(ok => { if (!ok) setSoundReady(false); });
   }, [orders, soundWanted, soundReady]);
 
+  // ── "Food is ready" ─────────────────────────────────────────────────────────
+  // The seller has ten orders on screen and one sex just finished its part of the
+  // seventh. Without a sound he finds out when the food is cold.
+  //
+  // Keyed on order+sex, not a count: a row deleted by an undo and a different sex
+  // finishing would leave the total unchanged and swallow the second alert.
+  const seenReady = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const key = (r: StationReady) => `${r.orderId}:${r.stationId}`;
+    const current = new Set(readyRows.map(key));
+    const prev = seenReady.current;
+    seenReady.current = current;
+    if (!prev) return;               // first load — don't chime the existing backlog
+    if (!soundWanted || !soundReady) return;
+    // Only orders still on the list: a paid order dropping out of the 200-row window
+    // takes its ready rows with it, and that is not news.
+    const openIds = new Set(orders.filter(isOrderOpen).map(o => o.id));
+    for (const k of current) {
+      if (!prev.has(k) && openIds.has(k.slice(0, k.lastIndexOf(':')))) {
+        playOrderReady().then(ok => { if (!ok) setSoundReady(false); });
+        break;                       // one chime per refresh, however many sexes finished
+      }
+    }
+  }, [readyRows, orders, soundWanted, soundReady]);
+
   // ── Failed station tickets ──────────────────────────────────────────────────
   // The agent gives up after five attempts. If the waiter isn't told, the order
   // simply never gets cooked and nobody finds out until the customer asks.
@@ -437,6 +446,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       fetchCompanySettings(overrideCompanyId).then(setBizSettings);
       fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=1`)
         .then(r => r.json()).then(d => setTotalOrders(d.total ?? 0)).catch(() => {});
+      // Sexes change about once a year — fetched once at boot, not per refresh.
+      fetch(`/api/public-stations?companyId=${overrideCompanyId}`)
+        .then(r => r.json()).then(d => setStations(d.stations ?? [])).catch(() => {});
       // Fetch staff and shift together via server-side routes (bypass RLS — no auth session).
       Promise.all([
         fetch(`/api/public-staff?companyId=${overrideCompanyId}`).then(r => r.json()).catch(() => ({ staff: [] })),
@@ -464,7 +476,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     }
 
     const session = getSession();
-    if (!session || (session.role !== 'seller' && session.role !== 'owner')) { router.replace('/login'); return; }
+    if (!session) { router.replace('/login'); return; }
+    // The till is not an employee's screen — send them to their own sex rather than
+    // to a login form they are already past.
+    if (session.role !== 'seller' && session.role !== 'owner') { router.replace(homeFor(session)); return; }
     validateSession(session).then(valid => {
       if (!valid) { logout(); router.replace('/login'); return; }
       const exp = getSession()?.expiresAt;
@@ -484,6 +499,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       setShift(s); setPinStaffList(st); setShiftChecked(true);
     });
     fetchOrdersCount().then(setTotalOrders);
+    fetchStations().then(setStations);
+    fetchStationReady().then(setReadyRows);
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled(), fetchKassaEnabled(), fetchPrintReceipt()]).then(([m, o, c, tb, te, ke, pr]) => {
       setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te); setKassaOn(ke); setShouldPrintReceipt(pr);
       const available = c.filter(cat => cat.available);
@@ -553,6 +570,11 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, () => {
         refreshOrders();
       })
+      // A sex finishing its part is the one change the seller doesn't make himself,
+      // so it's the one he'd never learn about without this.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_station_ready' }, () => {
+        refreshOrders();
+      })
       .subscribe(status => setRealtimeUp(status === 'SUBSCRIBED'));
     return () => { setRealtimeUp(false); supabase.removeChannel(channel); };
   }, [refreshOrders, rtAttempt]);
@@ -579,18 +601,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     }, 20000);
     return () => clearInterval(id);
   }, [overrideCompanyId, realtimeUp, refreshOrders]);
-
-  // The stripe's clock. A hidden tab needn't tick, but it must re-read the moment
-  // it comes back: coming off a menu screen or a locked phone to a stripe that
-  // expired ten minutes ago would be a lie.
-  useEffect(() => {
-    const tick = () => setChangeTick(Date.now());
-    const id = setInterval(() => {
-      if (document.visibilityState !== 'hidden') tick();
-    }, CHANGE_TICK_MS);
-    document.addEventListener('visibilitychange', tick);
-    return () => { clearInterval(id); document.removeEventListener('visibilitychange', tick); };
-  }, []);
 
   useEffect(() => {
     const channel = supabase
@@ -745,6 +755,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   // confirms the change reached the server.
   async function handleDecrementItem(order: Order, oi: OrderItem) {
     if (!oi.id || !isOrderOpen(order)) return;
+    // Already cooked: taking it off now bins real food, and somebody pays for it. Not
+    // blocked — the guest may genuinely have changed their mind — but not a silent tap
+    // either. Who did it is already on the record (removed_by, removed_at).
+    if (isItemReady(order, oi) && !confirm(`"${oi.menuItem.name}" hazırdır. Yenə də silinsin?`)) return;
     const newQty = oi.quantity - 1;
     markOwnChange(order.id);   // our own removal — don't alert ourselves
     const ok = overrideCompanyId
@@ -891,12 +905,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     } else {
       refreshOrders();
     }
-  }
-
-  function jumpToChanged() {
-    const target = offscreenChanged[0];
-    if (!target) return;
-    document.getElementById(`order-${target.id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 
   function openMove(order: Order) {
@@ -1062,95 +1070,41 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const active      = orders.filter(isOrderOpen);
   const bizToday    = businessToday(bizSettings);
   const isToday     = (iso: string) => businessDay(iso, bizSettings) === bizToday;
-  // Floated first, in the order they were changed — most recent edit on top. A plain
-  // "floated vs not" partition wasn't enough: the stable sort then left the group in
-  // created-at order, so an old order edited seconds ago sat *below* a newer one
-  // edited ten minutes back, which is the opposite of the question being answered.
-  //
-  // MAX_SAFE_INTEGER, not Infinity: two un-floated orders would compare
-  // Infinity - Infinity = NaN, which is not a valid comparator result. V8 currently
-  // tolerates it and keeps the order, but that is luck, not a guarantee. Subtracting
-  // equal ranks gives a real 0, so the stable sort leaves everything not floated in
-  // its existing newest-first order.
-  const floatRank = new Map(pinnedChanged.map((id, i) => [id, i]));
-  const rank = (o: Order) => floatRank.get(o.id) ?? Number.MAX_SAFE_INTEGER;
-  const floatFirst = (a: Order, b: Order) => rank(a) - rank(b);
-  const todayOrders = active.filter(o => isToday(o.createdAt)).sort(floatFirst);
-  const prevOrders  = active.filter(o => !isToday(o.createdAt)).sort(floatFirst);
+  const todayOrders = active.filter(o => isToday(o.createdAt));
+  const prevOrders  = active.filter(o => !isToday(o.createdAt));
 
-  // Ever edited → amber, for as long as the order is open. No clock: the fact
-  // doesn't stop being true. Derived from the rows' own timestamps rather than from
-  // who tapped what, so every device agrees and a refresh doesn't forget.
-  const changedIds = new Set(
-    active.filter(o => lastChangedAt(o) !== undefined).map(o => o.id),
-  );
-  // Edited *just now* → floats to the top, and is worth a chip if it's out of sight.
-  // This one does expire: it says which of the amber orders is the fresh one, so it
-  // is a list in recency order, newest change first — not a set. Which order is
-  // freshest is the entire question the float answers.
-  const recentOrdered = active
-    .map(o => ({ id: o.id, at: lastChangedAt(o) }))
-    .filter((r): r is { id: string; at: string } =>
-      r.at !== undefined && changeTick - Date.parse(r.at) < FLOAT_WINDOW_MS)
-    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  // ── Which sexes have finished ───────────────────────────────────────────────
+  // The only signal on this screen: green means the food is on the counter. A line
+  // is green when the sex that makes it has said so.
+  const menuById = useMemo(() => menuIndex(menu), [menu]);
+  // readyStationIds, not the raw rows: a sex that said "done" before the waiter added
+  // one more beer is not done any more, and the beer must not read as ready.
+  const readyByOrder = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const o of active) m.set(o.id, readyStationIds(o, readyRows, menuById, stations));
+    return m;
+  }, [active, readyRows, menuById, stations]);
 
-  // The effects below need a value they can compare. It carries the timestamps, not
-  // just the ids: editing an order that is already recent leaves the membership
-  // identical, and an id-only key would never change — so the re-edit would never
-  // reach the top. The order is kept rather than sorted away, so a pure re-ranking
-  // re-runs them too.
-  const recentKey = recentOrdered.map(r => `${r.id}@${r.at}`).join('|');
-
-  // Let the float catch up, but only once the list has sat still — and never while a
-  // sheet is open over it, since dismissing it would reveal a rearranged list.
-  const sheetOpen = !!payingOrder || !!cancellingOrder || !!movingOrder || !!appendOrderId;
-  useEffect(() => {
-    if (sheetOpen) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const settle = () => {
-      const quietFor = Date.now() - lastTouchRef.current;
-      if (quietFor >= FLOAT_SETTLE_MS) setPinnedChanged(recentOrdered.map(r => r.id));
-      // Touched again while we waited — start the quiet period over.
-      else timer = setTimeout(settle, FLOAT_SETTLE_MS - quietFor);
-    };
-    settle();
-    return () => { if (timer) clearTimeout(timer); };
-    // recentKey stands in for recentOrdered: same data, comparable by value.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recentKey, sheetOpen]);
-
-  // Which *recently* changed orders are out of sight. Fresh ones only — every edited
-  // order below the fold would leave the chip up permanently, and it would stop
-  // meaning anything. Watched rather than measured on scroll: the chip should stay
-  // away while the amber row is right there in front of you.
-  useEffect(() => {
-    const root = ordersScrollRef.current;
-    const ids = recentOrdered.map(r => r.id);
-    if (!root || ids.length === 0) { setOffscreenChanged([]); return; }
-
-    const off = new Map<string, boolean>();   // id → lies above the viewport
-    const observer = new IntersectionObserver(entries => {
-      for (const e of entries) {
-        const id = e.target.id.slice('order-'.length);
-        if (e.isIntersecting) off.delete(id);
-        else off.set(id, e.boundingClientRect.top < (e.rootBounds?.top ?? 0));
-      }
-      // Report in list order, so the chip points at — and jumps to — the first one.
-      const inOrder = [...off.keys()]
-        .map(id => document.getElementById(`order-${id}`))
-        .filter((el): el is HTMLElement => !!el)
-        .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
-        .map(el => el.id.slice('order-'.length));
-      setOffscreenChanged(inOrder.map(id => ({ id, above: off.get(id)! })));
-    }, { root, threshold: 0.5 });   // half a row showing is enough to count as seen
-
-    for (const id of ids) {
-      const el = document.getElementById(`order-${id}`);
-      if (el) observer.observe(el);
+  // "3/10 hazır" counts LINES, not sexes: the waiter is carrying plates, and a sex
+  // with one beer and a sex with nine kebabs are not half the order each.
+  const readyProgress = useCallback((o: Order): { done: number; total: number } => {
+    const ready = readyByOrder.get(o.id);
+    if (!ready || ready.size === 0) return { done: 0, total: o.items.length };
+    let done = 0;
+    for (const item of o.items) {
+      const sid = stationForItem(item, menuById, stations);
+      if (sid && ready.has(sid)) done++;
     }
-    return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recentKey, view]);
+    return { done, total: o.items.length };
+  }, [readyByOrder, menuById, stations]);
+
+  const isItemReady = useCallback((o: Order, item: OrderItem): boolean => {
+    const ready = readyByOrder.get(o.id);
+    if (!ready) return false;
+    const sid = stationForItem(item, menuById, stations);
+    return !!sid && ready.has(sid);
+  }, [readyByOrder, menuById, stations]);
+
   const historyQuery = historySearch.trim().toLowerCase();
   const filteredHistoryOrders = historyQuery
     ? historyOrders.filter(o =>
@@ -1556,26 +1510,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 <span>Vaxt</span><span>Sifariş</span><span>Durum</span><span></span><span className="text-right">Ümumi</span>
               </div>
 
-              {/* Any pointer near the list defers the float. Written to a ref, not
-                  state — a re-render per mousemove would be absurd. */}
-              <div
-                ref={ordersScrollRef}
-                onPointerDown={() => { lastTouchRef.current = Date.now(); }}
-                onPointerMove={() => { lastTouchRef.current = Date.now(); }}
-                onScroll={() => { lastTouchRef.current = Date.now(); }}
-                className="flex-1 overflow-y-auto relative"
-              >
-                {/* A changed order the waiter can't see. The list stays put — this
-                    goes to it on a tap, rather than the row coming to the list's top
-                    under someone's finger. */}
-                {offscreenChanged.length > 0 && (
-                  <button
-                    onClick={jumpToChanged}
-                    className="sticky top-2 z-10 mx-auto block bg-amber-400 hover:bg-amber-500 text-amber-950 text-xs font-bold px-3 py-1.5 rounded-full shadow-md active:scale-95 transition-all"
-                  >
-                    {offscreenChanged[0].above ? '↑' : '↓'} {offscreenChanged.length} dəyişiklik
-                  </button>
-                )}
+              <div className="flex-1 overflow-y-auto relative">
                 {active.length === 0 && (
                   <div className="text-center py-20 text-stone-500">
                     <div className="text-5xl mb-3">📋</div>
@@ -1585,13 +1520,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 {prevOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
-                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} changed={changedIds.has(o.id)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onStatusChange={handleStatusChange} />)}
+                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
-                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} changed={changedIds.has(o.id)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onStatusChange={handleStatusChange} />)}
+                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
               </div>
@@ -2694,14 +2629,28 @@ function CartItems({ cart, existingItems, removedItems, addToCart, removeFromCar
   );
 }
 
+// How much of an order is on the counter. The count is what makes a green row
+// actionable: "hazır" alone doesn't say whether to pick up the whole tray or one
+// plate, and the waiter would have to open every green order to find out.
+function ReadyBadge({ progress, allReady }: { progress: { done: number; total: number }; allReady: boolean }) {
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full ${
+      allReady ? 'bg-green-600 text-white' : 'bg-green-100 text-green-800 border border-green-300'
+    }`}>
+      {allReady ? '✓ Hamısı hazır' : `${progress.done}/${progress.total} hazır`}
+    </span>
+  );
+}
+
 // ── OrderRow — mobile card + desktop table row ────────────────────────────
 
-function OrderRow({ order, tableLabel, tz, printFailed, changed, onReprint, onPay, onCancel, onAppend, onMove, onStatusChange }: {
+function OrderRow({ order, tableLabel, tz, printFailed, progress, isItemReady, onReprint, onPay, onCancel, onAppend, onMove, onStatusChange }: {
   order: Order;
   tableLabel: string;
   tz: string;
   printFailed: boolean;
-  changed: boolean;
+  progress: { done: number; total: number };
+  isItemReady: (item: OrderItem) => boolean;
   onReprint: () => void;
   onPay: () => void;
   onCancel: () => void;
@@ -2715,14 +2664,18 @@ function OrderRow({ order, tableLabel, tz, printFailed, changed, onReprint, onPa
     oi.modifiers ? `${oi.menuItem.name} (${oi.modifiers})` : oi.menuItem.name
   ).join(', ');
 
+  // Green is the only colour on this list, and it means one thing: food is waiting
+  // to be carried. Partly green — some sexes done, some not — still calls the waiter
+  // over, so both states are marked; only the strength differs.
+  const anyReady = progress.done > 0;
+  const allReady = progress.total > 0 && progress.done === progress.total;
+
   return (
-    // The id is what the "dəyişiklik" chip scrolls to.
     <div id={`order-${order.id}`}>
-      {/* Mobile card. A changed order is washed amber end to end — a stripe on the
-          edge was too quiet to catch from across the room. Pale, not saturated: the
-          status pill and the red "bağla" button still have to read, and nothing here
-          is an error. */}
-      <div className={`md:hidden mx-3 my-2 rounded-2xl border shadow-sm overflow-hidden ${changed ? 'bg-amber-50 border-amber-200 border-l-4 border-l-amber-400' : 'bg-white border-stone-100'}`}>
+      {/* Mobile card, washed green end to end — a stripe on the edge was too quiet to
+          catch from across the room. Pale, not saturated: the status pill and the red
+          "bağla" button still have to read. */}
+      <div className={`md:hidden mx-3 my-2 rounded-2xl border shadow-sm overflow-hidden ${anyReady ? 'bg-green-50 border-green-200 border-l-4 border-l-green-500' : 'bg-white border-stone-100'}`}>
         <button
           className="w-full p-4 text-left"
           onClick={() => setExpanded(e => !e)}
@@ -2743,6 +2696,7 @@ function OrderRow({ order, tableLabel, tz, printFailed, changed, onReprint, onPa
               <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[order.status]}`}>{STATUS_LABELS[order.status]}</span>
             </div>
           </div>
+          {anyReady && <ReadyBadge progress={progress} allReady={allReady} />}
           {!expanded && <p className="text-xs text-stone-600 truncate">{itemsPreview}</p>}
         </button>
 
@@ -2762,9 +2716,9 @@ function OrderRow({ order, tableLabel, tz, printFailed, changed, onReprint, onPa
         )}
 
         {expanded && (
-          <div className={`px-4 pb-4 border-t border-stone-100 ${changed ? 'bg-amber-50/70' : 'bg-stone-50'}`}>
+          <div className={`px-4 pb-4 border-t border-stone-100 ${anyReady ? 'bg-green-50/70' : 'bg-stone-50'}`}>
             <div className="pt-3 mb-3">
-              <OrderItemHistory order={order} tz={tz} />
+              <OrderItemHistory order={order} tz={tz} isItemReady={isItemReady} />
             </div>
             {order.note && <p className="text-xs text-stone-500 italic mb-3">Qeyd: {order.note}</p>}
             {(order.discountAmount ?? 0) > 0 && (
@@ -2806,9 +2760,9 @@ function OrderRow({ order, tableLabel, tz, printFailed, changed, onReprint, onPa
         )}
       </div>
 
-      {/* Desktop table row. Keeps a hover of its own — an amber row that doesn't
+      {/* Desktop table row. Keeps a hover of its own — a green row that doesn't
           react under the cursor looks disabled. */}
-      <div className={`hidden md:block border-b ${changed ? 'bg-amber-50 hover:bg-amber-100 border-l-4 border-l-amber-400' : 'bg-white hover:bg-stone-50'}`}>
+      <div className={`hidden md:block border-b ${anyReady ? 'bg-green-50 hover:bg-green-100 border-l-4 border-l-green-500' : 'bg-white hover:bg-stone-50'}`}>
         <div
           className="w-full grid grid-cols-[120px_1fr_140px_200px_110px] gap-4 px-6 py-4 items-center cursor-pointer"
           onClick={() => setExpanded(e => !e)}
@@ -2826,10 +2780,11 @@ function OrderRow({ order, tableLabel, tz, printFailed, changed, onReprint, onPa
             </p>
             {!expanded && <p className="text-xs text-stone-500 truncate max-w-xs pl-5">{itemsPreview}</p>}
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[order.status]}`}>
               {STATUS_LABELS[order.status]}
             </span>
+            {anyReady && <ReadyBadge progress={progress} allReady={allReady} />}
             {printFailed && (
               <span title="Sexə çıxmadı — printer cavab vermir" className="flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full">
                 <AlertTriangle className="w-3 h-3" /> Çap
@@ -2865,9 +2820,9 @@ function OrderRow({ order, tableLabel, tz, printFailed, changed, onReprint, onPa
         </div>
 
         {expanded && (
-          <div className={`px-6 pb-4 border-t border-stone-100 ${changed ? 'bg-amber-50/70' : 'bg-stone-50'}`}>
+          <div className={`px-6 pb-4 border-t border-stone-100 ${anyReady ? 'bg-green-50/70' : 'bg-stone-50'}`}>
             <div className="pt-3 mb-3">
-              <OrderItemHistory order={order} tz={tz} />
+              <OrderItemHistory order={order} tz={tz} isItemReady={isItemReady} />
             </div>
             {order.note && <p className="text-xs text-stone-500 italic">Qeyd: {order.note}</p>}
             {isOrderOpen(order) && (
