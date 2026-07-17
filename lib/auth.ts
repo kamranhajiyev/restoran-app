@@ -10,6 +10,8 @@ export interface Session {
   companyId: string | null;
   companyName: string | null;
   expiresAt: string | null;
+  // Which sex this employee works. Null for every other role.
+  stationId: string | null;
 }
 
 export type LoginResult = { session: Session } | { error: 'invalid' | 'inactive' };
@@ -25,7 +27,7 @@ export async function login(username: string, password: string): Promise<LoginRe
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('name, role, company_id, active')
+      .select('name, role, company_id, active, station_id')
       .eq('id', data.user.id)
       .single();
 
@@ -53,6 +55,7 @@ export async function login(username: string, password: string): Promise<LoginRe
       companyId: profile.company_id ?? null,
       companyName,
       expiresAt,
+      stationId: profile.station_id ?? null,
     };
 
     localStorage.setItem(AUTH_KEY, JSON.stringify(session));
@@ -68,6 +71,20 @@ export async function login(username: string, password: string): Promise<LoginRe
     return { session };
   } catch {
     return { error: 'invalid' };
+  }
+}
+
+// Where a role lands after login. One function because the landing page and the
+// login page both need it, and a role missing from one of them would silently
+// drop that user onto the till.
+export function homeFor(session: Pick<Session, 'role' | 'stationId'>): string {
+  switch (session.role) {
+    case 'superadmin': return '/superadmin';
+    case 'owner':      return '/admin';
+    // A sex was deleted out from under this employee. /station has nothing to show,
+    // so send them somewhere that explains itself rather than to a blank screen.
+    case 'employee':   return session.stationId ? '/station' : '/no-station';
+    default:           return '/seller';
   }
 }
 
@@ -101,10 +118,21 @@ export async function validateSession(session: Session): Promise<boolean> {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('active')
+      .select('active, station_id')
       .eq('id', session.id)
       .single();
     if (!profile?.active) return false;
+
+    // An owner can move an employee to another sex — or delete the sex out from
+    // under them — while they are logged in. The cached session would go on
+    // showing the old sex's food, so re-read it here the way expiresAt is.
+    if ((profile.station_id ?? null) !== session.stationId) {
+      const stored = getSession();
+      if (stored) {
+        stored.stationId = profile.station_id ?? null;
+        localStorage.setItem(AUTH_KEY, JSON.stringify(stored));
+      }
+    }
 
     if (session.companyId) {
       const { data: co } = await supabase

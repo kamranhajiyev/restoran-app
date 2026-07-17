@@ -1,4 +1,6 @@
-export type Role = 'superadmin' | 'owner' | 'seller';
+// 'employee' works one sex (station) and sees only what that sex prepares. Their
+// profiles.station_id says which; every other role leaves it null.
+export type Role = 'superadmin' | 'owner' | 'seller' | 'employee';
 
 export interface RestaurantTable {
   id: number;

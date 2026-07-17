@@ -1,5 +1,5 @@
 'use client';
-import React, { Suspense, useEffect, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   LayoutDashboard,
@@ -7,7 +7,7 @@ import {
   TrendingUp, Receipt, Star, ChevronDown, Percent,
   Coffee, BarChart2, Package, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
-  GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link, Printer, Check, ArrowUp, ArrowDown,
+  GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link, Printer, Check, ArrowUp, ArrowDown, ChefHat,
 } from 'lucide-react';
 import {
   DndContext, DragEndEvent, PointerSensor, useSensor, useSensors,
@@ -33,6 +33,7 @@ import {
   fetchSellerToken, linkProductStock,
   fetchBranding, setLogoUrl as saveLogoUrl, setBrandColor as saveBrandColor,
   fetchStations,
+  fetchAllUsers, createEmployee, updateEmployee, deleteUser, toggleUserActive,
 } from '@/lib/store';
 import { applyBrand, BRAND_PRESETS, DEFAULT_BRAND } from '@/lib/branding';
 import {
@@ -652,6 +653,27 @@ function AdminPageContent() {
   const [sSaving, setSSaving] = useState(false);
   const [sError, setSError] = useState('');
 
+  // Sex employees — full accounts, not PINs. A prep tablet is always on the same
+  // wall, so the login is typed once at setup; PIN-switching would buy nothing and
+  // every wrong PIN on a greasy screen would lock the till too (staff_pin_state is
+  // keyed by company, not by device).
+  const [employees, setEmployees] = useState<{ id: string; username: string; name: string; active: boolean; stationId: string | null }[]>([]);
+  const [showEmpForm, setShowEmpForm] = useState(false);
+  const [editingEmp, setEditingEmp] = useState<{ id: string; username: string; name: string; stationId: string | null } | null>(null);
+  const [eName, setEName] = useState('');
+  const [eUsername, setEUsername] = useState('');
+  const [ePassword, setEPassword] = useState('');
+  const [eStationId, setEStationId] = useState('');
+  const [eSaving, setESaving] = useState(false);
+  const [eError, setEError] = useState('');
+
+  const reloadEmployees = useCallback(async () => {
+    const users = await fetchAllUsers();
+    setEmployees(users
+      .filter(u => u.role === 'employee')
+      .map(u => ({ id: u.id, username: u.username, name: u.name, active: u.active, stationId: u.stationId })));
+  }, []);
+
   // logins tab
   const [loginEvents, setLoginEvents] = useState<LoginEvent[]>([]);
   const [loginsLoaded, setLoginsLoaded] = useState(false);
@@ -755,6 +777,7 @@ function AdminPageContent() {
     });
     fetchStaff().then(setPinStaff);
     fetchStations().then(setStations);
+    reloadEmployees();
     fetchSellerToken(session.companyId ?? '').then(setSellerToken);
     fetchBranding().then(({ logoUrl: l, brandColor: b }) => { setLogoState(l); setBrandColorState(b ?? DEFAULT_BRAND); applyBrand(b); });
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchTables(), fetchCompanySlug(session.companyId ?? ''), fetchTablesEnabled(), fetchQrEnabled(), fetchKassaEnabled(), fetchMenuOnly()]).then(([m, o, c, t, tb, slug, te, qre, ke, mo]) => {
@@ -3084,6 +3107,102 @@ function AdminPageContent() {
                     </div>
                   </div>
                 ))}
+
+                {/* ── Sex employees ──────────────────────────────────────────
+                    People, so they live here beside the PIN sellers rather than in
+                    Sexlər — that tab is about the sex itself: its name, its printer,
+                    what it makes. */}
+                <div className="flex items-center justify-between gap-3 pt-6 mt-2 border-t border-stone-200">
+                  <div>
+                    <p className="text-sm font-semibold text-stone-600">Sex əməkdaşları · {employees.length}</p>
+                    <p className="text-xs text-stone-400 mt-0.5">Öz hesabı ilə daxil olur, yalnız öz sexinin hazırlayacağı yeməkləri görür</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setEditingEmp(null);
+                      setEName(''); setEUsername(''); setEPassword('');
+                      setEStationId(stations[0]?.id ?? '');
+                      setEError(''); setShowEmpForm(true);
+                    }}
+                    disabled={stations.length === 0}
+                    title={stations.length === 0 ? 'Əvvəlcə sex əlavə edin' : undefined}
+                    className="flex items-center gap-2 bg-primary-800 hover:bg-primary-900 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors shrink-0"
+                  >
+                    <Plus className="w-4 h-4" /> Sex əməkdaşı
+                  </button>
+                </div>
+
+                {stations.length === 0 ? (
+                  // Nothing to attach an employee to. Say so rather than offering a
+                  // form whose only dropdown would be empty.
+                  <div className="bg-white rounded-xl border border-stone-100 p-10 text-center">
+                    <ChefHat className="w-8 h-8 mx-auto mb-3 text-stone-200" />
+                    <p className="text-sm text-stone-500">Əvvəlcə sex yaradın</p>
+                    <p className="text-xs text-stone-400 mt-1">Menyu → Sexlər bölməsindən Mətbəx, Bar və s. əlavə edin</p>
+                  </div>
+                ) : employees.length === 0 ? (
+                  <div className="bg-white rounded-xl border border-stone-100 p-10 text-center">
+                    <ChefHat className="w-8 h-8 mx-auto mb-3 text-stone-200" />
+                    <p className="text-sm text-stone-500">Sex əməkdaşı yoxdur</p>
+                    <p className="text-xs text-stone-400 mt-1">Əlavə etdikdən sonra öz hesabı ilə daxil olub hazırlanacaqları görəcək</p>
+                  </div>
+                ) : employees.map(e => {
+                  const st = stations.find(s => s.id === e.stationId);
+                  return (
+                    <div key={e.id} className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-stone-100 flex items-center justify-center text-stone-500 shrink-0">
+                        <ChefHat className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-stone-800 truncate">{e.name}</p>
+                        <p className="text-xs text-stone-500 truncate">@{e.username}</p>
+                      </div>
+                      {/* The sex was deleted under them — they can log in but have
+                          nothing to prepare, so it can't be left looking normal. */}
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${st ? 'bg-primary-50 text-primary-800' : 'bg-red-50 text-red-600'}`}>
+                        {st?.name ?? 'Sex silinib'}
+                      </span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${e.active ? 'bg-green-100 text-green-700' : 'bg-stone-100 text-stone-600'}`}>
+                        {e.active ? 'Aktiv' : 'Deaktiv'}
+                      </span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => {
+                            setEditingEmp(e);
+                            setEName(e.name); setEUsername(e.username); setEPassword('');
+                            setEStationId(e.stationId ?? stations[0]?.id ?? '');
+                            setEError(''); setShowEmpForm(true);
+                          }}
+                          title="Düzəlt"
+                          className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-primary-700 transition-colors"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={async () => { await toggleUserActive(e.id, !e.active); reloadEmployees(); }}
+                          title={e.active ? 'Deaktiv et' : 'Aktiv et'}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 transition-colors"
+                        >
+                          {e.active ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                        <button
+                          onClick={() => setDialog({
+                            title: 'Əməkdaşı sil?',
+                            message: <><span className="font-medium text-stone-700">&ldquo;{e.name}&rdquo;</span> və hesabı silinəcək. Bir daha daxil ola bilməyəcək.</>,
+                            onConfirm: async () => {
+                              const err = await deleteUser(e.id);
+                              if (err) setDialog({ title: 'Silinmədi', message: err });
+                              else reloadEmployees();
+                            },
+                          })}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-red-50 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           )}
 
@@ -3729,6 +3848,87 @@ function AdminPageContent() {
       )}
 
       {/* ── Create / Edit user modal ────────────────────────────────────── */}
+      {showEmpForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-stone-800">{editingEmp ? 'Sex əməkdaşını düzəlt' : 'Yeni sex əməkdaşı'}</h3>
+              <button onClick={() => setShowEmpForm(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form
+              onSubmit={async e => {
+                e.preventDefault();
+                if (eSaving) return;
+                const name = eName.trim();
+                const username = eUsername.trim();
+                if (!name) { setEError('Ad boş ola bilməz'); return; }
+                if (!/^[a-z0-9_.-]{2,30}$/i.test(username)) { setEError('İstifadəçi adı 2-30 simvol: hərf, rəqəm, . _ -'); return; }
+                if (!editingEmp && ePassword.length < 6) { setEError('Şifrə ən azı 6 simvol olmalıdır'); return; }
+                if (ePassword && ePassword.length < 6) { setEError('Şifrə ən azı 6 simvol olmalıdır'); return; }
+                if (!eStationId) { setEError('Sex seçin'); return; }
+                setESaving(true);
+                const err = editingEmp
+                  ? await updateEmployee(editingEmp.id, {
+                      name, username, stationId: eStationId,
+                      ...(ePassword ? { password: ePassword } : {}),   // blank = leave the password alone
+                    })
+                  : await createEmployee(username, ePassword, name, eStationId);
+                setESaving(false);
+                if (err) { setEError(err); return; }
+                setShowEmpForm(false);
+                reloadEmployees();
+              }}
+              className="space-y-3"
+            >
+              <input
+                value={eName}
+                onChange={e => { setEName(e.target.value); setEError(''); }}
+                placeholder="Ad, məsələn Rəşad"
+                autoFocus
+                className="w-full px-4 py-2.5 border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-700/20 focus:border-primary-700"
+              />
+              <input
+                value={eUsername}
+                onChange={e => { setEUsername(e.target.value); setEError(''); }}
+                placeholder="İstifadəçi adı, məsələn resad"
+                autoCapitalize="none"
+                autoCorrect="off"
+                className="w-full px-4 py-2.5 border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-700/20 focus:border-primary-700"
+              />
+              <input
+                value={ePassword}
+                onChange={e => { setEPassword(e.target.value); setEError(''); }}
+                type="password"
+                placeholder={editingEmp ? 'Yeni şifrə (boş = dəyişmir)' : 'Şifrə'}
+                autoComplete="new-password"
+                className="w-full px-4 py-2.5 border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-700/20 focus:border-primary-700"
+              />
+              <div>
+                <label className="block text-xs font-medium text-stone-500 mb-1">Sex</label>
+                <select
+                  value={eStationId}
+                  onChange={e => { setEStationId(e.target.value); setEError(''); }}
+                  className="w-full px-4 py-2.5 border border-stone-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-700/20 focus:border-primary-700"
+                >
+                  {stations.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+                <p className="text-xs text-stone-400 mt-1">Yalnız bu sexin hazırlayacağı yeməkləri görəcək</p>
+              </div>
+              {eError && <p className="text-xs text-red-600">{eError}</p>}
+              <button
+                type="submit"
+                disabled={eSaving}
+                className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
+              >
+                {eSaving ? 'Gözləyin…' : editingEmp ? 'Yadda saxla' : 'Əlavə et'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {showStaffForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">

@@ -65,10 +65,30 @@ export async function verifySellerToken(companyId: string, token: string): Promi
   return data?.id ?? null;
 }
 
-// Owners may manage only seller accounts inside their own company.
+// The roles an owner is allowed to create and manage inside their own company.
+// Never 'owner' or 'superadmin': an owner who could mint either would escape their
+// own company.
+export const OWNER_MANAGED_ROLES = ['seller', 'employee'] as const;
+
+// Owners may manage only seller/employee accounts inside their own company.
 export async function ownerManages(callerCompanyId: string | null, targetId: string): Promise<boolean> {
   if (!callerCompanyId) return false;
   const db = createServerClient();
   const { data } = await db.from('profiles').select('role, company_id').eq('id', targetId).single();
-  return !!data && data.role === 'seller' && data.company_id === callerCompanyId;
+  return !!data
+    && (OWNER_MANAGED_ROLES as readonly string[]).includes(data.role)
+    && data.company_id === callerCompanyId;
+}
+
+// A sex belongs to exactly one company. Confirming that before writing profiles.station_id
+// stops an owner from attaching their employee to another company's sex.
+export async function stationInCompany(stationId: string, companyId: string): Promise<boolean> {
+  const db = createServerClient();
+  const { data } = await db
+    .from('stations')
+    .select('id')
+    .eq('id', stationId)
+    .eq('company_id', companyId)
+    .maybeSingle();
+  return !!data;
 }

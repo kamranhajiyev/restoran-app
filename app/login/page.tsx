@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { login } from '@/lib/auth';
+import { login, homeFor } from '@/lib/auth';
 import { Store } from 'lucide-react';
 
 export default function LoginPage() {
@@ -24,9 +24,7 @@ export default function LoginPage() {
       return;
     }
     const { session } = result;
-    if (session.role === 'superadmin') router.push('/superadmin');
-    else if (session.role === 'owner')  router.push('/admin');
-    else                                router.push('/seller');
+    router.push(homeFor(session));
   }
 
   return (

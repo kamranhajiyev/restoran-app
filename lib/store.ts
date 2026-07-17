@@ -149,10 +149,15 @@ let _stationsLoaded = false;
 
 export async function fetchStations(): Promise<Station[]> {
   try {
+    // position, then created_at — the same order the print_jobs triggers use to pick
+    // the fallback "first station". position defaults to 0, so without the tiebreak
+    // two stations could rank differently here than they do in the DB, and the prep
+    // screen would show food the ticket sent somewhere else.
     const { data, error } = await supabase
       .from('stations')
       .select('id, name, printer_ip, printer_port')
-      .order('position');
+      .order('position')
+      .order('created_at');
     if (error || !data) return [];
     _stationsLoaded = true;
     return data.map(r => ({
@@ -349,6 +354,68 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
     }));
   } catch {
     return [];
+  }
+}
+
+// ─── Per-sex readiness ────────────────────────────────────────────────────────
+// orders.status ('hazırdır') describes the whole order, but an order spans several
+// sexes. These rows are the only place that can say "the bar is done and the
+// kitchen isn't".
+
+export type StationReady = { orderId: string; stationId: string; readyAt: string; readyBy: string | null };
+
+export async function fetchStationReady(orderIds?: string[]): Promise<StationReady[]> {
+  try {
+    let q = supabase.from('order_station_ready').select('order_id, station_id, ready_at, ready_by');
+    if (orderIds) {
+      if (orderIds.length === 0) return [];
+      q = q.in('order_id', orderIds);
+    }
+    const { data, error } = await q;
+    if (error || !data) return [];
+    return data.map(r => ({
+      orderId: r.order_id,
+      stationId: r.station_id,
+      readyAt: r.ready_at,
+      readyBy: r.ready_by ?? null,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// Upsert, not insert: two cooks at the same sex tapping "Hazırdır" on the same order
+// is a race the primary key would otherwise turn into an error on the second tap.
+// The first tap's time is the one that counts, so ignoreDuplicates keeps it.
+export async function markStationReady(orderId: string, stationId: string, readyBy: string): Promise<string | null> {
+  if (!_companyId) return 'Şirkət tapılmadı';
+  try {
+    const { error } = await supabase
+      .from('order_station_ready')
+      .upsert(
+        { order_id: orderId, station_id: stationId, company_id: _companyId, ready_by: readyBy },
+        { onConflict: 'order_id,station_id', ignoreDuplicates: true },
+      );
+    if (error) { console.error('[markStationReady]', error); return error.message; }
+    return null;
+  } catch (e) {
+    console.error('[markStationReady]', e);
+    return 'Şəbəkə xətası — hazır qeyd edilmədi';
+  }
+}
+
+// Undo, for the tap that was meant for the card underneath.
+export async function unmarkStationReady(orderId: string, stationId: string): Promise<string | null> {
+  try {
+    const { error } = await supabase
+      .from('order_station_ready')
+      .delete()
+      .eq('order_id', orderId)
+      .eq('station_id', stationId);
+    if (error) { console.error('[unmarkStationReady]', error); return error.message; }
+    return null;
+  } catch {
+    return 'Şəbəkə xətası';
   }
 }
 
@@ -1407,13 +1474,48 @@ export async function fetchLoginEvents(): Promise<LoginEvent[]> {
 
 // ─── Superadmin: Users ────────────────────────────────────────────────────────
 
-export async function fetchAllUsers(): Promise<{ id: string; username: string; name: string; role: string; companyId: string | null; active: boolean; createdAt: string }[]> {
+export async function fetchAllUsers(): Promise<{ id: string; username: string; name: string; role: string; companyId: string | null; active: boolean; createdAt: string; stationId: string | null }[]> {
   try {
     const res = await fetch('/api/users', { headers: await authHeaders() });
     if (!res.ok) return [];
     const data = await res.json();
-    return data.map((u: Record<string, unknown>) => ({ id: u.id, username: u.username, name: u.name, role: u.role, companyId: u.company_id ?? null, active: u.active, createdAt: u.created_at }));
+    return data.map((u: Record<string, unknown>) => ({ id: u.id, username: u.username, name: u.name, role: u.role, companyId: u.company_id ?? null, active: u.active, createdAt: u.created_at, stationId: (u.station_id as string | null) ?? null }));
   } catch { return []; }
+}
+
+// ─── Owner: sex employees ─────────────────────────────────────────────────────
+// Same /api/users endpoints the superadmin uses — the route decides what an owner
+// may do (their own company, sellers and employees only). These just carry the sex.
+
+export async function createEmployee(
+  username: string, password: string, name: string, stationId: string,
+): Promise<string | null> {
+  const res = await fetch('/api/users', {
+    method: 'POST',
+    headers: await authHeaders(),
+    body: JSON.stringify({ username, password, name, role: 'employee', stationId }),
+  });
+  if (!res.ok) {
+    const { error } = await res.json();
+    return error ?? 'Xəta baş verdi';
+  }
+  return null;
+}
+
+export async function updateEmployee(
+  id: string,
+  fields: { name?: string; username?: string; password?: string; stationId?: string },
+): Promise<string | null> {
+  const res = await fetch(`/api/users/${id}`, {
+    method: 'PATCH',
+    headers: await authHeaders(),
+    body: JSON.stringify(fields),
+  });
+  if (!res.ok) {
+    const { error } = await res.json();
+    return error ?? 'Xəta baş verdi';
+  }
+  return null;
 }
 
 export async function createUser(username: string, password: string, name: string, role: string, companyId: string | null): Promise<string | null> {

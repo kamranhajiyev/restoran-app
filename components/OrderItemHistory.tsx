@@ -1,7 +1,7 @@
 'use client';
 
 import { itemBatches } from '@/lib/order-items';
-import { Order } from '@/types';
+import { Order, OrderItem } from '@/types';
 
 // The order's item list read as a history rather than a snapshot: what was ordered
 // first, what was added later and when, and what was taken off — struck through and
@@ -9,7 +9,15 @@ import { Order } from '@/types';
 //
 // Removed lines carry no price, because they cost the guest nothing. They live in
 // order.removedItems and never in order.items, so no total can count them.
-export default function OrderItemHistory({ order, tz }: { order: Order; tz: string }) {
+//
+// `isItemReady` marks the lines whose sex has finished them. Optional: the admin
+// panel shows this same history for closed orders, where readiness is long past
+// being interesting.
+export default function OrderItemHistory({ order, tz, isItemReady }: {
+  order: Order;
+  tz: string;
+  isItemReady?: (item: OrderItem) => boolean;
+}) {
   const batches = itemBatches(order);
 
   const time = (iso: string) =>
@@ -43,12 +51,17 @@ export default function OrderItemHistory({ order, tz }: { order: Order; tz: stri
                 </span>
               </div>
             ) : (
-              <div key={oi.id ?? `${b}-${i}`} className="flex justify-between text-sm text-stone-700 py-0.5">
+              // Green = this line's sex says it's done and it's sitting on the counter.
+              <div
+                key={oi.id ?? `${b}-${i}`}
+                className={`flex justify-between text-sm py-0.5 ${isItemReady?.(oi) ? 'text-green-700 font-medium' : 'text-stone-700'}`}
+              >
                 <span className="flex-1">
+                  {isItemReady?.(oi) && <span className="mr-1">✓</span>}
                   {oi.menuItem.name}
                   {oi.modifiers && <span className="text-xs text-primary-600 ml-1">({oi.modifiers})</span>}
                 </span>
-                <span className="text-stone-500 mx-4">{oi.quantity} əd</span>
+                <span className={`mx-4 ${isItemReady?.(oi) ? 'text-green-600' : 'text-stone-500'}`}>{oi.quantity} əd</span>
                 <span className="font-medium">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
               </div>
             )
