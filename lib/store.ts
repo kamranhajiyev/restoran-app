@@ -386,15 +386,20 @@ export async function fetchStationReady(orderIds?: string[]): Promise<StationRea
 
 // Upsert, not insert: two cooks at the same sex tapping "Hazırdır" on the same order
 // is a race the primary key would otherwise turn into an error on the second tap.
-// The first tap's time is the one that counts, so ignoreDuplicates keeps it.
+//
+// The conflict UPDATES ready_at rather than ignoring it. A sex re-clears after the
+// waiter adds work (readyStationIds compares ready_at against the new line's
+// created_at), so tapping "Hazırdır" again MUST push ready_at past that line — an
+// ignored write would leave it stuck at the first tap and the card would never
+// clear. Two near-simultaneous taps resolve fine: last write wins, sub-second apart.
 export async function markStationReady(orderId: string, stationId: string, readyBy: string): Promise<string | null> {
   if (!_companyId) return 'Şirkət tapılmadı';
   try {
     const { error } = await supabase
       .from('order_station_ready')
       .upsert(
-        { order_id: orderId, station_id: stationId, company_id: _companyId, ready_by: readyBy },
-        { onConflict: 'order_id,station_id', ignoreDuplicates: true },
+        { order_id: orderId, station_id: stationId, company_id: _companyId, ready_by: readyBy, ready_at: new Date().toISOString() },
+        { onConflict: 'order_id,station_id' },
       );
     if (error) { console.error('[markStationReady]', error); return error.message; }
     return null;
