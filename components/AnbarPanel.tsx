@@ -773,7 +773,6 @@ function NewReceipt({ activeWh, suppliers, items, initial, initialLines, onClose
       <div className="mt-4 space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-stone-500">Məhsullar</span>
-          <button className={btnGhost} onClick={() => setLines([...lines, { stockItemId: items[0]?.id ?? '', qty: '', unitCost: '' }])}><Plus className="w-3.5 h-3.5" /> Sətir</button>
         </div>
         {lines.map((l, i) => (
           <div key={i} className="space-y-1.5 rounded-lg border border-stone-100 p-2">
@@ -791,6 +790,7 @@ function NewReceipt({ activeWh, suppliers, items, initial, initialLines, onClose
             </div>
           </div>
         ))}
+        <button className={btnGhost} onClick={() => setLines([...lines, { stockItemId: items[0]?.id ?? '', qty: '', unitCost: '' }])}><Plus className="w-3.5 h-3.5" /> Sətir</button>
       </div>
 
       <div className="grid grid-cols-2 gap-3 mt-3">
@@ -1194,7 +1194,7 @@ function RecipeModal({ menuItem, items, initial, onClose, onSaved, fail }: {
             <select className={`${inputCls} flex-1`} value={r.stockItemId} onChange={e => setRow(i, { stockItemId: e.target.value })}>
               {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
             </select>
-            <input className={`${inputCls} w-24`} type="number" placeholder="miqdar" value={r.qty} onChange={e => setRow(i, { qty: e.target.value })} />
+            <input className={`${inputCls} w-16`} type="number" placeholder="miqdar" value={r.qty} onChange={e => setRow(i, { qty: e.target.value })} />
             <span className="text-xs text-stone-400 w-8">{unitOf(r.stockItemId)}</span>
             <button className="text-stone-400 hover:text-red-500" onClick={() => setRows(rows.filter((_, idx) => idx !== i))}><X className="w-4 h-4" /></button>
           </div>
