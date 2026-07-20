@@ -431,6 +431,24 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     if (ok) { setDeviceMuted(false); localStorage.removeItem('soundMuted'); }
   }
 
+  // Coming back to the screen after a lock / app-switch is exactly when iOS has
+  // suspended (or zombified) the audio engine. Re-arm it the moment the tab is
+  // visible again, so the next order chimes instead of us waiting for a play to
+  // fail first. unlockSound() rebuilds a dead context; a real failure flips
+  // soundReady off and the "Səsi aktivləşdir" banner comes back.
+  useEffect(() => {
+    if (!soundWanted) return;
+    const rearm = () => {
+      if (document.visibilityState === 'visible') unlockSound().then(setSoundReady);
+    };
+    window.addEventListener('focus', rearm);
+    document.addEventListener('visibilitychange', rearm);
+    return () => {
+      window.removeEventListener('focus', rearm);
+      document.removeEventListener('visibilitychange', rearm);
+    };
+  }, [soundWanted]);
+
   function muteDevice() {
     setDeviceMuted(true);
     localStorage.setItem('soundMuted', '1');

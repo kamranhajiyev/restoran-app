@@ -208,6 +208,23 @@ export default function StationPage() {
     setSoundReady(await unlockSound());
   }
 
+  // Same as the seller screen: returning after a lock / app-switch is when iOS has
+  // killed the audio engine, so re-arm it as soon as the tab is visible again
+  // rather than letting the next order's beep be the thing that discovers it's dead.
+  // Only worth doing once sound has been armed at least once on this device.
+  useEffect(() => {
+    if (!soundReady) return;
+    const rearm = () => {
+      if (document.visibilityState === 'visible') unlockSound().then(setSoundReady);
+    };
+    window.addEventListener('focus', rearm);
+    document.addEventListener('visibilitychange', rearm);
+    return () => {
+      window.removeEventListener('focus', rearm);
+      document.removeEventListener('visibilitychange', rearm);
+    };
+  }, [soundReady]);
+
   async function onReady(orderId: string) {
     if (!stationId || busyId) return;
     setBusyId(orderId);

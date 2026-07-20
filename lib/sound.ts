@@ -6,14 +6,70 @@
 
 let ctx: AudioContext | null = null;
 
+// iOS suspends — or worse, *interrupts* — the context when the screen locks or the
+// app is backgrounded. `interrupted` marks that we came back from such a state and
+// must verify the engine is genuinely alive before trusting it (see `revive`).
+let interrupted = false;
+let wired = false;
+
+// Notice the moments that break audio: the tab going hidden (lock / app-switch) and
+// the context itself dropping out of 'running'. Both mean the next beep can't be
+// trusted until revived. Wired once, lazily, the first time a context exists.
+function wire() {
+  if (wired || typeof document === 'undefined') return;
+  wired = true;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') interrupted = true;
+  });
+}
+
 function getCtx(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   if (!ctx) {
     const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!Ctor) return null;
     ctx = new Ctor();
+    ctx.onstatechange = () => { if (ctx && ctx.state !== 'running') interrupted = true; };
   }
+  wire();
   return ctx;
+}
+
+// Throw the current context away so getCtx() builds a fresh one. iOS can leave a
+// context reporting state 'running' while its clock is frozen and no sound ever
+// comes out; the only cure is a brand-new context.
+function rebuild() {
+  const old = ctx;
+  ctx = null;
+  if (old) { try { old.close(); } catch { /* already gone */ } }
+}
+
+// True only if the audio clock actually moves. A healthy context advances
+// currentTime; the frozen-but-'running' iOS zombie does not. Costs ~60ms, so it
+// runs only on the revive path, never before an ordinary foreground beep.
+function clockAdvancing(c: AudioContext): Promise<boolean> {
+  const t0 = c.currentTime;
+  return new Promise(res => setTimeout(() => res(c.currentTime > t0), 60));
+}
+
+// Bring audio back after an interruption. Resume if suspended, then prove the clock
+// is running; if it isn't, discard the zombie and build a fresh, resumed context.
+async function revive(c: AudioContext): Promise<AudioContext | null> {
+  if (c.state !== 'running') {
+    try { await c.resume(); } catch { /* fall through to rebuild */ }
+  }
+  if (c.state === 'running' && await clockAdvancing(c)) {
+    interrupted = false;
+    return c;
+  }
+  rebuild();
+  const fresh = getCtx();
+  if (!fresh) return null;
+  if (fresh.state !== 'running') {
+    try { await fresh.resume(); } catch { return null; }
+  }
+  interrupted = false;
+  return fresh.state === 'running' ? fresh : null;
 }
 
 // Browsers refuse to produce sound until the user has interacted with the page.
@@ -22,10 +78,7 @@ function getCtx(): AudioContext | null {
 export async function unlockSound(): Promise<boolean> {
   const c = getCtx();
   if (!c) return false;
-  if (c.state === 'suspended') {
-    try { await c.resume(); } catch { return false; }
-  }
-  return c.state === 'running';
+  return (await revive(c)) !== null;
 }
 
 export function isSoundUnlocked(): boolean {
@@ -56,16 +109,18 @@ function tone(startAt: number, freq: number, durationMs: number, type: Oscillato
 }
 
 // A context unlocked hours ago is not a context that will make a sound now:
-// browsers suspend it once the tablet idles or the tab goes to the background.
-// Resuming needs no fresh gesture — the original tap still counts — so wake it
-// here rather than leaving the screen silently mute until someone reloads.
+// browsers suspend it once the tablet idles or the tab goes to the background,
+// and iOS can hand back a 'running' context whose clock is dead. Heal it here —
+// resume, or rebuild if it's a zombie — rather than leaving the screen silently
+// mute until someone reloads.
 async function ready(): Promise<AudioContext | null> {
   const c = getCtx();
   if (!c) return null;
-  if (c.state === 'suspended') {
-    try { await c.resume(); } catch { return null; }
-  }
-  return c.state === 'running' ? c : null;
+  // Fast path: a context still running and never interrupted plays immediately.
+  // Anything else — suspended, or back from a lock/background — goes through the
+  // full revive-and-verify, which rebuilds a frozen zombie rather than trusting it.
+  if (!interrupted && c.state === 'running') return c;
+  return revive(c);
 }
 
 // The play functions report whether a sound actually came out, so the caller can
