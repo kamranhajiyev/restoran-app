@@ -9,6 +9,7 @@ const COL = {
   price: 'Qiymət (₼)',
   cost: 'Maya dəyəri (₼)',
   available: 'Mövcud',
+  kind: 'Növ',
   variants: 'Variantlar',
 } as const;
 
@@ -30,13 +31,14 @@ export function exportMenuExcel(menu: MenuItem[], categories: Category[]): void 
     [COL.price]: m.price,
     [COL.cost]: m.costPrice ?? '',
     [COL.available]: m.available ? 'Bəli' : 'Xeyr',
+    [COL.kind]: m.kind === 'meal' ? 'Yemək' : 'Məhsul',
     [COL.variants]: serializeVariants(m.variants),
   }));
   const catRows = categories.map(c => ({ 'Ad': c.name, 'Aktiv': c.available ? 'Bəli' : 'Xeyr' }));
 
   const wb = XLSX.utils.book_new();
-  const menuSheet = XLSX.utils.json_to_sheet(menuRows.length ? menuRows : [{ [COL.category]: '', [COL.name]: '', [COL.price]: '', [COL.cost]: '', [COL.available]: '', [COL.variants]: '' }]);
-  menuSheet['!cols'] = [{ wch: 18 }, { wch: 30 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 30 }];
+  const menuSheet = XLSX.utils.json_to_sheet(menuRows.length ? menuRows : [{ [COL.category]: '', [COL.name]: '', [COL.price]: '', [COL.cost]: '', [COL.available]: '', [COL.kind]: '', [COL.variants]: '' }]);
+  menuSheet['!cols'] = [{ wch: 18 }, { wch: 30 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 30 }];
   XLSX.utils.book_append_sheet(wb, menuSheet, 'Menyu');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catRows), 'Kateqoriyalar');
   XLSX.writeFile(wb, `menyu-${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -121,6 +123,7 @@ function headerKey(raw: string): keyof typeof COL | null {
   if (h.startsWith('qiymət') || h.startsWith('qiymet') || h === 'price') return 'price';
   if (h.startsWith('maya') || h === 'cost' || h.startsWith('cost')) return 'cost';
   if (h.startsWith('mövcud') || h.startsWith('movcud') || h === 'available' || h === 'aktiv') return 'available';
+  if (h.startsWith('növ') || h.startsWith('nov') || h === 'kind' || h === 'type') return 'kind';
   if (h.startsWith('variant')) return 'variants';
   return null;
 }
@@ -129,6 +132,14 @@ function parseBool(raw: unknown): boolean {
   const s = String(raw ?? '').trim().toLowerCase();
   if (['xeyr', 'no', 'false', '0', 'yox'].includes(s)) return false;
   return true; // default: available
+}
+
+function parseKind(raw: unknown): 'product' | 'meal' | undefined {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (!s) return undefined;
+  if (s.startsWith('yem') || s === 'meal') return 'meal';
+  if (s.startsWith('məh') || s.startsWith('meh') || s === 'product') return 'product';
+  return undefined;
 }
 
 function parsePrice(raw: unknown): number | null {
@@ -218,6 +229,7 @@ export async function parseMenuFile(
 
     const cost = parsePrice(mapped.cost);
     const available = parseBool(mapped.available);
+    const kind = parseKind(mapped.kind);
 
     if (!existingCatByLower.has(category.toLowerCase()) && !newCategories.some(c => c.name.toLowerCase() === category.toLowerCase())) {
       newCategories.push({ name: category, available: catAvailability.get(category.toLowerCase()) ?? true });
@@ -233,6 +245,7 @@ export async function parseMenuFile(
         available,
         costPrice: cost ?? undefined,
         variants,
+        ...(kind ? { kind } : {}),
       });
     } else {
       newItems.push({
@@ -243,6 +256,7 @@ export async function parseMenuFile(
         available,
         costPrice: cost ?? undefined,
         variants,
+        kind: kind ?? 'product',
       });
     }
   });
