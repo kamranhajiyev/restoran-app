@@ -679,9 +679,20 @@ export type PinResult =
   | { ok: false; error: 'locked'; lockedUntil: string }
   | { ok: false; error: 'no_company' | 'network' };
 
-export async function verifyStaffPin(pin: string): Promise<PinResult> {
+// A stable per-terminal id so PIN lockout is scoped to this device, not the
+// whole company. Persists in localStorage; a cleared browser gets a fresh one.
+export function getDeviceId(): string {
+  if (typeof window === 'undefined') return '';
   try {
-    const { data, error } = await supabase.rpc('verify_staff_pin', { p_pin: pin });
+    let id = localStorage.getItem('deviceId');
+    if (!id) { id = crypto.randomUUID(); localStorage.setItem('deviceId', id); }
+    return id;
+  } catch { return ''; }
+}
+
+export async function verifyStaffPin(pin: string, deviceId: string): Promise<PinResult> {
+  try {
+    const { data, error } = await supabase.rpc('verify_staff_pin', { p_pin: pin, p_device_id: deviceId });
     if (error || !data) return { ok: false, error: 'network' };
     if (data.ok) return { ok: true, id: data.id, name: data.name };
     if (data.error === 'locked') return { ok: false, error: 'locked', lockedUntil: data.locked_until };

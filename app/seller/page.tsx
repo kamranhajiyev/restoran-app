@@ -12,7 +12,7 @@ import { supabase } from '@/lib/supabase';
 import {
   fetchMenu, addOrder, addItemsToOrder, setOrderItemQuantity, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, fetchCategories, setCompanyContext, fetchTables,
   fetchTablesEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
-  fetchCompanySettings, fetchStaff, verifyStaffPin, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
+  fetchCompanySettings, fetchStaff, verifyStaffPin, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
   fetchStations, fetchStationReady, type StationReady,
 } from '@/lib/store';
@@ -132,14 +132,15 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     setPinMsg('');
     if (next.length < 4) return;
     setPinBusy(true);
+    const deviceId = getDeviceId();
     // Public terminal has no Supabase session — verify via server-side API route
     const res = overrideCompanyId
       ? await fetch('/api/verify-pin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ companyId: overrideCompanyId, pin: next, token: overrideToken }),
+          body: JSON.stringify({ companyId: overrideCompanyId, pin: next, token: overrideToken, deviceId }),
         }).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }))
-      : await verifyStaffPin(next);
+      : await verifyStaffPin(next, deviceId);
     setPinBusy(false);
     setPinInput('');
     if (res.ok) {
