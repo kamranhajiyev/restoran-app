@@ -237,14 +237,23 @@ export async function parseMenuFile(
 
     const existing = byName.get(nameKey);
     if (existing) {
-      // Existing product: id, image and cooking station are preserved
+      // Existing product: id, image and cooking station are preserved.
+      // Reuse each variant's existing id (matched by name) instead of the fresh UUID parseVariants
+      // minted — a variant's id keys its stock item via recipe_lines.variant_id, so regenerating it
+      // on every import makes link_product_stock create a duplicate stock item each time.
+      const reconciledVariants = variants?.map(v => {
+        const prev = existing.variants?.find(
+          ev => ev.name.trim().toLowerCase() === v.name.trim().toLowerCase(),
+        );
+        return prev ? { ...v, id: prev.id } : v;
+      });
       updatedItems.push({
         ...existing,
         category,
         price,
         available,
         costPrice: cost ?? undefined,
-        variants,
+        variants: reconciledVariants,
         ...(kind ? { kind } : {}),
       });
     } else {
