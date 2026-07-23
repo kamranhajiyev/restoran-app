@@ -18,6 +18,7 @@ import {
 } from '@/lib/store';
 import { menuIndex, stationForItem, readyStationIds } from '@/lib/stations';
 import { unlockSound, playNewOrder, playItemRemoved, playOrderReady } from '@/lib/sound';
+import { subscribeToPush, pushState, type PushState } from '@/lib/push';
 import { snapshotOrders, diffOrderAlerts, type OrdersSnapshot } from '@/lib/orderAlerts';
 import { applyBrand } from '@/lib/branding';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
@@ -334,6 +335,21 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const [soundReady, setSoundReady] = useState(false);        // browser has allowed audio
   const soundWanted = soundOn && !deviceMuted;
 
+  // OS push, the only alert that reaches a waiter whose phone is locked or whose tab is
+  // in the background — a page cannot make a sound there. Independent of the in-page
+  // beep flags above: this works even when the app is closed.
+  const [pushPerm, setPushPerm] = useState<PushState>('default');
+  useEffect(() => { setPushPerm(pushState()); }, []);
+
+  // Whether the tab is in front, so the "food ready" diff below can hold a missed chime
+  // until the waiter looks back instead of swallowing it while hidden.
+  const [pageVisible, setPageVisible] = useState(true);
+  useEffect(() => {
+    const onVis = () => setPageVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+
   // Changes this device made itself — the waiter shouldn't beep at his own tap.
   //
   // Suppression is per order and time-boxed: touching an order mutes it here
@@ -390,9 +406,16 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     const key = (r: StationReady) => `${r.orderId}:${r.stationId}`;
     const current = new Set(readyRows.map(key));
     const prev = seenReady.current;
+    if (!prev) { seenReady.current = current; return; }  // first load — no backlog chime
+    if (!soundWanted) { seenReady.current = current; return; }
+    // A hidden tab cannot make a sound — the browser suspends the audio engine. Don't
+    // advance the snapshot while hidden: hold the ready rows that arrived so the chime
+    // fires the instant the waiter looks back (the catch-up beep), instead of being
+    // silently marked seen and lost. OS push covers the truly-away case; this covers
+    // the return. Re-runs on pageVisible so the held rows chime the moment we're back.
+    if (document.visibilityState === 'hidden') return;
     seenReady.current = current;
-    if (!prev) return;               // first load — don't chime the existing backlog
-    if (!soundWanted || !soundReady) return;
+    if (!soundReady) return;
     // Only orders still on the list: a paid order dropping out of the 200-row window
     // takes its ready rows with it, and that is not news.
     const openIds = new Set(orders.filter(isOrderOpen).map(o => o.id));
@@ -402,7 +425,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
         break;                       // one chime per refresh, however many sexes finished
       }
     }
-  }, [readyRows, orders, soundWanted, soundReady]);
+  }, [readyRows, orders, soundWanted, soundReady, pageVisible]);
 
   // ── Failed station tickets ──────────────────────────────────────────────────
   // The agent gives up after five attempts. If the waiter isn't told, the order
@@ -430,6 +453,16 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     const ok = await unlockSound();
     setSoundReady(ok);
     if (ok) { setDeviceMuted(false); localStorage.removeItem('soundMuted'); }
+  }
+
+  async function enablePush() {
+    const cid = overrideCompanyId ?? getSession()?.companyId ?? '';
+    if (!cid) return;
+    try {
+      setPushPerm(await subscribeToPush(cid, overrideToken));
+    } catch {
+      setPushPerm(pushState());
+    }
   }
 
   // Coming back to the screen after a lock / app-switch is exactly when iOS has
@@ -1503,6 +1536,38 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                   >
                     <BellOff className="w-3.5 h-3.5" /> Səs söndürülüb — aç
                   </button>
+                </div>
+              )}
+
+              {/* OS notifications: the only alert that reaches the waiter when the phone
+                  is locked or the app is in the background — the in-page beep can't. */}
+              {pushPerm === 'default' && (
+                <div className="mx-4 md:mx-6 mb-2 flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5">
+                  <Bell className="w-4 h-4 text-blue-600 shrink-0" />
+                  <p className="flex-1 text-sm text-blue-900">Telefon arxa planda olanda da bildiriş alın.</p>
+                  <button
+                    onClick={enablePush}
+                    className="shrink-0 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    Bildirişləri aktivləşdir
+                  </button>
+                </div>
+              )}
+
+              {pushPerm === 'ios-needs-install' && (
+                <div className="mx-4 md:mx-6 mb-2 flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5">
+                  <Bell className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                  <p className="flex-1 text-sm text-blue-900">
+                    Arxa plan bildirişləri üçün: Paylaş menyusundan <span className="font-medium">Ana ekrana əlavə et</span>, sonra tətbiqi ikondan açın.
+                  </p>
+                </div>
+              )}
+
+              {pushPerm === 'denied' && (
+                <div className="px-4 md:px-6 -mt-1 mb-1">
+                  <p className="flex items-center gap-1.5 text-xs text-stone-400">
+                    <BellOff className="w-3.5 h-3.5" /> Bildirişlər brauzerdə bloklanıb — brauzer parametrlərindən açın.
+                  </p>
                 </div>
               )}
 

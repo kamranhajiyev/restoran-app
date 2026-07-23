@@ -243,7 +243,33 @@ export default function StationPage() {
     if (err) {
       setReadyRows(rows => rows.filter(r => !(r.orderId === orderId && r.stationId === stationId)));
       setOnline(false);
+      return;
     }
+    // Tell any backgrounded waiter, whose page cannot make a sound — only a pushed OS
+    // notification reaches a locked phone or a hidden tab. Fire-and-forget: a failed
+    // push must never block or undo the readiness the cook just recorded.
+    notifyWaiters(orderId);
+  }
+
+  async function notifyWaiters(orderId: string) {
+    const order = orders.find(o => o.id === orderId);
+    const where = order?.tableNumber ? `Masa ${order.tableNumber}` : 'Sifariş';
+    const num = order ? ` #${order.orderNumber}` : '';
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      await fetch('/api/notify-ready', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+        },
+        body: JSON.stringify({
+          orderId,
+          title: `${where}${num} hazırdır`,
+          body: `${station?.name ?? 'Sex'} sifarişi hazır etdi`,
+        }),
+      });
+    } catch { /* the on-screen green badge is still the source of truth */ }
   }
 
   async function onUndo(orderId: string) {

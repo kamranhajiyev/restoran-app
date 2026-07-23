@@ -20,6 +20,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-qr-code": "^2.2.0",
+    "web-push": "^3.6.7",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
@@ -29,6 +30,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/w3c-web-usb": "^1.0.14",
+    "@types/web-push": "^3.6.4",
     "eslint": "^9",
     "eslint-config-next": "16.2.7",
     "tailwindcss": "^4",
