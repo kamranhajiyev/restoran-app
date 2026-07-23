@@ -178,13 +178,20 @@ export default function StationPage() {
     return orders
       .filter(o => isOrderOpen(o))
       .filter(o => !readySet.has(o.id))
-      .map(o => ({ order: o, ...sliceForStation(o, stationId, menuById, stations) }))
+      // This sex's last ready_at on this order, if any — the cutoff that hides
+      // the batch it already made when a later addition re-opens the card.
+      .map(o => {
+        const readyAt = readyRows.find(
+          r => r.orderId === o.id && r.stationId === stationId,
+        )?.readyAt ?? null;
+        return { order: o, ...sliceForStation(o, stationId, menuById, stations, readyAt) };
+      })
       // Nothing of ours on this order — it belongs to another sex entirely.
       .filter(c => c.items.length > 0 || c.removedItems.length > 0)
       // Newest first, as asked. The waiting time and the late colour are what keep
       // an old card at the bottom from being forgotten.
       .sort((a, b) => Date.parse(b.order.createdAt) - Date.parse(a.order.createdAt));
-  }, [orders, readySet, stationId, menuById, stations]);
+  }, [orders, readySet, readyRows, stationId, menuById, stations]);
 
   // ── Sound ───────────────────────────────────────────────────────────────────
   // Same diff the seller uses, fed the station-filtered list: the pizza screen must

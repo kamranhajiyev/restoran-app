@@ -92,15 +92,35 @@ export function readyStationIds(
 }
 
 // This sex's share of an order: its active lines and its removed lines.
+//
+// `since` is this sex's last ready_at, when it has one. A card only re-opens
+// because work landed after that instant (see readyStationIds), and re-showing
+// what was already made is how a cook makes the same dish twice — so anything
+// batched at or before `since` is dropped and the card shows only the new work.
+// No ready row → no cutoff → the whole slice, exactly as before.
 export function sliceForStation(
-  order: Pick<Order, 'items' | 'removedItems'>,
+  order: Pick<Order, 'items' | 'removedItems' | 'createdAt'>,
   stationId: string,
   menuById: Map<string, MenuItem>,
   stations: Station[],
+  since?: string | null,
 ): { items: OrderItem[]; removedItems: OrderItem[] } {
   const mine = (i: OrderItem) => stationForItem(i, menuById, stations) === stationId;
+
+  const sinceMs = since ? Date.parse(since) : NaN;
+  // Fail open: an unparseable time on either side keeps the line rather than
+  // hiding real work. Null createdAt falls back to the order's own time, the
+  // same original-batch stand-in itemBatches uses for pre-migration rows.
+  const stillOpen = (i: OrderItem) => {
+    if (Number.isNaN(sinceMs)) return true;
+    const addedMs = Date.parse(i.createdAt ?? order.createdAt);
+    if (Number.isNaN(addedMs)) return true;
+    return addedMs > sinceMs;
+  };
+  const kept = (i: OrderItem) => mine(i) && stillOpen(i);
+
   return {
-    items: order.items.filter(mine),
-    removedItems: (order.removedItems ?? []).filter(mine),
+    items: order.items.filter(kept),
+    removedItems: (order.removedItems ?? []).filter(kept),
   };
 }
