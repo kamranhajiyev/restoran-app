@@ -29,6 +29,26 @@ const LATE_MS = 15 * 60 * 1000;
 // a card's clock would otherwise freeze at whatever it said when it arrived.
 const CLOCK_MS = 10 * 1000;
 
+// When this sex's clock on a card starts: the oldest thing it still has to make,
+// not the order's own age. After "Hazırdır" the card only comes back for items
+// added later, and those have waited seconds — an hour-old order number must not
+// stamp them "gecikir" the moment they land.
+function waitingSince(
+  slice: { items: OrderItem[]; removedItems: OrderItem[] },
+  createdAt: string,
+): string {
+  let oldestMs = Infinity;
+  let oldestISO = createdAt;
+  for (const item of [...slice.items, ...slice.removedItems]) {
+    // No createdAt belongs to the original order — the same stand-in
+    // itemBatches and sliceForStation use for pre-migration rows.
+    const iso = item.createdAt ?? createdAt;
+    const ms = Date.parse(iso);
+    if (!Number.isNaN(ms) && ms < oldestMs) { oldestMs = ms; oldestISO = iso; }
+  }
+  return oldestISO;
+}
+
 function waitedLabel(fromISO: string, now: number): string {
   const mins = Math.floor((now - Date.parse(fromISO)) / 60000);
   if (!Number.isFinite(mins) || mins < 1) return 'indicə';
@@ -184,13 +204,16 @@ export default function StationPage() {
         const readyAt = readyRows.find(
           r => r.orderId === o.id && r.stationId === stationId,
         )?.readyAt ?? null;
-        return { order: o, ...sliceForStation(o, stationId, menuById, stations, readyAt) };
+        const slice = sliceForStation(o, stationId, menuById, stations, readyAt);
+        return { order: o, ...slice, since: waitingSince(slice, o.createdAt) };
       })
       // Nothing of ours on this order — it belongs to another sex entirely.
       .filter(c => c.items.length > 0 || c.removedItems.length > 0)
-      // Newest first, as asked. The waiting time and the late colour are what keep
-      // an old card at the bottom from being forgotten.
-      .sort((a, b) => Date.parse(b.order.createdAt) - Date.parse(a.order.createdAt));
+      // Newest first, as asked — by when THIS sex's pending work arrived, so a
+      // re-opened old order sorts with its new dish rather than by its number.
+      // The waiting time and the late colour are what keep an old card at the
+      // bottom from being forgotten.
+      .sort((a, b) => Date.parse(b.since) - Date.parse(a.since));
   }, [orders, readySet, readyRows, stationId, menuById, stations]);
 
   // ── Sound ───────────────────────────────────────────────────────────────────
@@ -347,6 +370,7 @@ export default function StationPage() {
                 order={card.order}
                 items={card.items}
                 removedItems={card.removedItems}
+                since={card.since}
                 now={now}
                 busy={busyId === card.order.id}
                 onReady={() => { onReady(card.order.id); setLastDone({ id: card.order.id, number: card.order.orderNumber }); }}
@@ -372,16 +396,17 @@ export default function StationPage() {
 }
 
 function StationCard({
-  order, items, removedItems, now, busy, onReady,
+  order, items, removedItems, since, now, busy, onReady,
 }: {
   order: Order;
   items: OrderItem[];
   removedItems: OrderItem[];
+  since: string;
   now: number;
   busy: boolean;
   onReady: () => void;
 }) {
-  const waitedMs = now - Date.parse(order.createdAt);
+  const waitedMs = now - Date.parse(since);
   const late = waitedMs > LATE_MS;
 
   // Reuse the seller's batching so the card reads as a history: the original order,
@@ -411,7 +436,7 @@ function StationCard({
 
       {/* Always visible: newest-first only works if an old card still shouts. */}
       <div className={`px-4 pb-2 text-xs font-semibold ${late ? 'text-red-600' : 'text-stone-500'}`}>
-        {waitedLabel(order.createdAt, now)}{late ? ' · gecikir' : ''}
+        {waitedLabel(since, now)}{late ? ' · gecikir' : ''}
       </div>
 
       <div className="px-4 pb-3 flex-1 space-y-3">
