@@ -1191,12 +1191,15 @@ function RecipeModal({ menuItem, items, initial, onClose, onSaved, fail }: {
       <div className="space-y-2">
         {rows.map((r, i) => (
           <div key={i} className="flex items-center gap-2">
-            <select className={`${inputCls} flex-1`} value={r.stockItemId} onChange={e => setRow(i, { stockItemId: e.target.value })}>
+            {/* The name is the long text, so it takes the room; a quantity is
+                never more than a few digits. Sized by flex-basis, not width —
+                inputCls carries w-full, which beats any w-* put next to it. */}
+            <select className={`${inputCls} flex-1 min-w-0`} value={r.stockItemId} onChange={e => setRow(i, { stockItemId: e.target.value })}>
               {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
             </select>
-            <input className={`${inputCls} w-16`} type="number" placeholder="miqdar" value={r.qty} onChange={e => setRow(i, { qty: e.target.value })} />
-            <span className="text-xs text-stone-400 w-8">{unitOf(r.stockItemId)}</span>
-            <button className="text-stone-400 hover:text-red-500" onClick={() => setRows(rows.filter((_, idx) => idx !== i))}><X className="w-4 h-4" /></button>
+            <input className={`${inputCls} basis-24 grow-0 shrink-0 min-w-0`} type="number" placeholder="miqdar" value={r.qty} onChange={e => setRow(i, { qty: e.target.value })} />
+            <span className="text-xs text-stone-400 w-8 shrink-0">{unitOf(r.stockItemId)}</span>
+            <button className="text-stone-400 hover:text-red-500 shrink-0" onClick={() => setRows(rows.filter((_, idx) => idx !== i))}><X className="w-4 h-4" /></button>
           </div>
         ))}
         <button className={btnGhost} onClick={() => setRows([...rows, { stockItemId: items[0]?.id ?? '', qty: '' }])}><Plus className="w-3.5 h-3.5" /> Sətir</button>
