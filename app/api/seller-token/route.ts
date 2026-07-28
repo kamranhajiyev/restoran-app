@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   const db = createServerClient();
   const { data } = await db
     .from('companies')
-    .select('id, name, logo_url, brand_color')
+    .select('id, name, logo_url, brand_color, expires_at')
     .eq('slug', slug)
     .eq('seller_token', token)
     .eq('active', true)
@@ -18,7 +18,9 @@ export async function GET(req: NextRequest) {
     .maybeSingle();
 
   if (!data) return Response.json({ error: 'invalid' }, { status: 404 });
-  return Response.json({ companyId: data.id, companyName: data.name, logoUrl: data.logo_url ?? null, brandColor: data.brand_color ?? null });
+  // expiresAt rides along so the terminal can show the same subscription banner a
+  // logged-in seller gets. It has no session to read it from.
+  return Response.json({ companyId: data.id, companyName: data.name, logoUrl: data.logo_url ?? null, brandColor: data.brand_color ?? null, expiresAt: data.expires_at ?? null });
 }
 
 // Owner only: regenerate this company's seller token

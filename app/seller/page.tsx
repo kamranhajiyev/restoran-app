@@ -85,7 +85,7 @@ function tableHasActive(n: number, orders: Order[]): boolean {
   return orders.some(o => o.tableNumber === n && isOrderOpen(o));
 }
 
-export default function SellerPage({ overrideCompanyId, overrideCompanyName, overrideToken, overrideLogoUrl, overrideBrandColor }: { overrideCompanyId?: string; overrideCompanyName?: string; overrideToken?: string; overrideLogoUrl?: string | null; overrideBrandColor?: string | null } = {}) {
+export default function SellerPage({ overrideCompanyId, overrideCompanyName, overrideToken, overrideLogoUrl, overrideBrandColor, overrideExpiresAt }: { overrideCompanyId?: string; overrideCompanyName?: string; overrideToken?: string; overrideLogoUrl?: string | null; overrideBrandColor?: string | null; overrideExpiresAt?: string | null } = {}) {
   const router = useRouter();
   const [logoUrl, setLogoUrl] = useState<string | null>(overrideLogoUrl ?? null);
   const [view, setView]             = useState<View>('orders');
@@ -495,6 +495,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       setCompanyContext(overrideCompanyId);
       setSellerName(overrideCompanyName ?? 'Satıcı');
       applyBrand(overrideBrandColor);
+      // No session here, so the expiry the banner reads has to be handed in by the
+      // route. Without it the terminal is the one screen that never warns.
+      setExpiresAt(overrideExpiresAt ?? null);
       fetchCompanySettings(overrideCompanyId).then(setBizSettings);
       fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=1`)
         .then(r => r.json()).then(d => setTotalOrders(d.total ?? 0)).catch(() => {});
@@ -561,7 +564,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       if (cats.length > 0) setActiveCategory(cats[0]);
     }).catch(() => setOnline(false));
     return () => authSub.subscription.unsubscribe();
-  }, [router, overrideCompanyId, overrideCompanyName, overrideBrandColor]);
+  }, [router, overrideCompanyId, overrideCompanyName, overrideBrandColor, overrideExpiresAt]);
 
   useEffect(() => {
     if (overrideCompanyId) return;

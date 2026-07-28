@@ -8,14 +8,14 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
   const [state, setState] = useState<
     | { status: 'loading' }
     | { status: 'invalid' }
-    | { status: 'ready'; companyId: string; companyName: string; logoUrl: string | null; brandColor: string | null }
+    | { status: 'ready'; companyId: string; companyName: string; logoUrl: string | null; brandColor: string | null; expiresAt: string | null }
   >({ status: 'loading' });
 
   useEffect(() => {
     fetch(`/api/seller-token?slug=${encodeURIComponent(slug)}&token=${encodeURIComponent(token)}`)
       .then(r => r.json())
       .then(d => {
-        if (d.companyId) setState({ status: 'ready', companyId: d.companyId, companyName: d.companyName, logoUrl: d.logoUrl ?? null, brandColor: d.brandColor ?? null });
+        if (d.companyId) setState({ status: 'ready', companyId: d.companyId, companyName: d.companyName, logoUrl: d.logoUrl ?? null, brandColor: d.brandColor ?? null, expiresAt: d.expiresAt ?? null });
         else setState({ status: 'invalid' });
       })
       .catch(() => setState({ status: 'invalid' }));
@@ -31,7 +31,16 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
       if (document.visibilityState === 'hidden') return;
       try {
         const r = await fetch(`/api/seller-token?slug=${encodeURIComponent(slug)}&token=${encodeURIComponent(token)}`);
-        if (!cancelled && r.status === 404) setState({ status: 'invalid' });
+        if (cancelled) return;
+        if (r.status === 404) { setState({ status: 'invalid' }); return; }
+        // A renewal paid mid-shift should clear the subscription banner on its
+        // own — this poll is already running, so it costs nothing to carry.
+        if (r.ok) {
+          const d = await r.json();
+          if (!cancelled) {
+            setState(s => (s.status === 'ready' ? { ...s, expiresAt: d.expiresAt ?? null } : s));
+          }
+        }
       } catch { /* ignore transient network errors */ }
     };
     const id = setInterval(revalidate, 40000);
@@ -72,6 +81,7 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
       overrideToken={token}
       overrideLogoUrl={state.logoUrl}
       overrideBrandColor={state.brandColor}
+      overrideExpiresAt={state.expiresAt}
     />
   );
 }
