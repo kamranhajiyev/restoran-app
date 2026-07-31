@@ -126,6 +126,18 @@ export default function AnbarPanel({ setDialog }: { setDialog: (d: DialogState |
 
 // ─── Anbarlar ──────────────────────────────────────────────────────────────────
 
+// delete_warehouse raises a code per refusal so each one can be said out loud — the old
+// blanket "qalıqları boşaldın" also fired for an already-empty warehouse, which no amount
+// of emptying could fix. History means archive (Aktiv seçimini götür), not delete.
+function deleteWarehouseError(err: string): string {
+  const hist = err.match(/has_history:(\d+)/);
+  if (hist) return `Bu anbarda ${hist[1]} əməliyyat qeydi var — silmək olmaz. «Düzəlt» → «Aktiv» seçimini götürüb arxivləşdirin.`;
+  if (err.includes('sales_warehouse')) return 'Bu anbar satış anbarı kimi seçilib — əvvəlcə başqa anbar seçin.';
+  if (err.includes('has_stock')) return 'Bu anbarda qalıq var — əvvəlcə boşaldın.';
+  if (err.includes('bad_warehouse')) return 'Anbar tapılmadı.';
+  return err;
+}
+
 function WarehousesTab({ warehouses, reload, flash, fail, setDialog }: {
   warehouses: Wh[]; reload: () => Promise<void>; flash: (m: string) => void; fail: (m: string | null) => void; setDialog: (d: DialogState | null) => void;
 }) {
@@ -157,7 +169,7 @@ function WarehousesTab({ warehouses, reload, flash, fail, setDialog }: {
     setDialog({
       title: 'Anbarı sil?', message: `«${w.name}» silinəcək.`, onConfirm: async () => {
         const err = await deleteWarehouse(w.id);
-        if (err) fail(err.includes('foreign') || err.includes('violates') ? 'Bu anbarda hərəkət var — əvvəlcə qalıqları boşaldın.' : err);
+        if (err) fail(deleteWarehouseError(err));
         else { await reload(); flash('Silindi'); }
       },
     });

@@ -728,8 +728,13 @@ export async function updateWarehouse(id: string, name: string, active: boolean)
   return null;
 }
 
+// Goes through an RPC because a bare DELETE let six foreign keys decide the answer, and
+// stock_balances keeps a qty = 0 row per item forever — so an emptied warehouse was
+// undeletable. The RPC clears those cached rows and refuses only for real history.
+// Returns a code ('sales_warehouse', 'has_history:57', 'has_stock', …) for the caller
+// to phrase; see supabase/migrations/20260731_delete_warehouse.sql.
 export async function deleteWarehouse(id: string): Promise<string | null> {
-  const { error } = await supabase.from('warehouses').delete().eq('id', id);
+  const { error } = await supabase.rpc('delete_warehouse', { p_id: id });
   if (error) { console.error('[deleteWarehouse]', error); return error.message; }
   return null;
 }
