@@ -50,6 +50,13 @@ export function splitOrderItems(rows: OrderItemRow[] | null | undefined): {
   return { items, removedItems };
 }
 
+// When the order was closed — paid or cancelled. Undefined while it is still open.
+// An order can only take one of those two exits, so the order of the fallback
+// never decides anything.
+export function orderClosedAt(o: Pick<Order, 'paidAt' | 'cancelledAt'>): string | undefined {
+  return o.paidAt ?? o.cancelledAt;
+}
+
 // ── Rendering the order as a history ─────────────────────────────────────────
 
 export interface ItemBatch {

@@ -36,6 +36,7 @@ import {
   fetchAllUsers, createEmployee, updateEmployee, deleteUser, toggleUserActive,
 } from '@/lib/store';
 import { applyBrand, BRAND_PRESETS, DEFAULT_BRAND } from '@/lib/branding';
+import { orderClosedAt } from '@/lib/order-items';
 import {
   CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc,
   addDays, dayDiff, dayOfWeek, dayToDate, tzHour, cutoffMinutes,
@@ -2396,6 +2397,7 @@ function AdminPageContent() {
               <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
                 {visibleOrders.map((order, i) => {
                   const isExpanded = expandedOrderId === order.id;
+                  const closedAt = orderClosedAt(order);
                   return (
                     <div key={order.id} className={i < visibleOrders.length - 1 ? 'border-b border-stone-50' : ''}>
                       {/* Row */}
@@ -2409,6 +2411,10 @@ function AdminPageContent() {
                         <span className="text-xs text-stone-500 flex-shrink-0 hidden sm:block">
                           {new Date(order.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
                           {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
+                          {' → '}
+                          {closedAt
+                            ? new Date(closedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })
+                            : '—'}
                         </span>
                         <span className="text-sm font-semibold text-stone-800 flex-shrink-0 text-right">
                           {(order.discountAmount ?? 0) > 0

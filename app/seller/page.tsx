@@ -21,6 +21,7 @@ import { unlockSound, playNewOrder, playItemRemoved, playOrderReady } from '@/li
 import { subscribeToPush, pushState, type PushState } from '@/lib/push';
 import { snapshotOrders, diffOrderAlerts, type OrdersSnapshot } from '@/lib/orderAlerts';
 import { applyBrand } from '@/lib/branding';
+import { orderClosedAt } from '@/lib/order-items';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
 import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
@@ -923,7 +924,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       ? await fetch('/api/update-order-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: order.id, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined, companyId: overrideCompanyId, token: overrideToken }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
       : await updateOrderStatus(order.id, 'ödənilib', cashKept, card, change, discountAmt || undefined, discountAmt ? discountType : undefined);
     if (paid) {
-      const paidOrder = { ...order, status: 'ödənilib' as const, cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined };
+      // paidAt mirrors what the DB just wrote, so the history shows a closing time
+      // straight away instead of a dash until the next fetch
+      const paidOrder = { ...order, status: 'ödənilib' as const, paidAt: new Date().toISOString(), cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined };
       setOrders(prev => prev.map(o => o.id === order.id ? paidOrder : o));
       if (printerConnected) {
         const cName = getSession()?.companyName ?? '';
@@ -1709,6 +1712,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                     {filteredHistoryOrders.map((order, i) => {
                       const isExpanded = expandedOrderId === order.id;
                       const tLabel = tableName(order.tableNumber);
+                      const closedAt = orderClosedAt(order);
                       return (
                         <div key={order.id} className={i < filteredHistoryOrders.length - 1 ? 'border-b border-stone-50' : ''}>
                           <button
@@ -1723,6 +1727,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                             <span className="text-xs text-stone-500 flex-shrink-0 hidden sm:block">
                               {new Date(order.createdAt).toLocaleDateString('az-AZ', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
                               {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
+                              {' → '}
+                              {closedAt
+                                ? new Date(closedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })
+                                : '—'}
                             </span>
                             <span className="text-sm font-semibold text-stone-800 flex-shrink-0 text-right">
                               {(order.discountAmount ?? 0) > 0
@@ -1741,8 +1749,12 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                           {isExpanded && (
                             <div className="px-4 pb-4 bg-stone-50 border-t border-stone-100">
                               <p className="pt-3 text-xs text-stone-500 sm:hidden">
-                                {new Date(order.createdAt).toLocaleDateString('az-AZ', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
+                                Açıldı: {new Date(order.createdAt).toLocaleDateString('az-AZ', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
                                 {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
+                                {' · '}
+                                {closedAt
+                                  ? `Bağlandı: ${new Date(closedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}`
+                                  : 'açıqdır'}
                               </p>
                               <div className="pt-3 space-y-1 mb-3">
                                 {order.items.map((oi, j) => (

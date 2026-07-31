@@ -273,6 +273,7 @@ export interface Order {
   changeAmount?: number; // returned to the customer — display only, never revenue
   discountAmount?: number;
   discountType?: '%' | '₼';
+  paidAt?: string;
   cancelledAt?: string;
   cancelledBy?: string;
   cancelReason?: string;

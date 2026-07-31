@@ -45,6 +45,7 @@ export async function GET(req: NextRequest) {
     changeAmount: o.change_amount ? Number(o.change_amount) : undefined,
     discountAmount: o.discount_amount ? Number(o.discount_amount) : undefined,
     discountType: o.discount_type ?? undefined,
+    paidAt: o.paid_at ?? undefined,
     cancelledAt: o.cancelled_at ?? undefined,
     cancelledBy: o.cancelled_by ?? undefined,
     cancelReason: o.cancel_reason ?? undefined,

@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { Category, MenuItem, MenuItemVariant, Order } from '@/types';
+import { orderClosedAt } from '@/lib/order-items';
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
@@ -48,10 +49,14 @@ export function exportOrdersExcel(orders: Order[], timezone: string): void {
   const rows = orders.map(o => {
     const gross = o.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
     const total = gross - (o.discountAmount ?? 0);
+    const closed = orderClosedAt(o);
     return {
       'Sifariş №': o.orderNumber,
       'Satıcı': o.sellerName,
       'Tarix': new Date(o.createdAt).toLocaleString('az-AZ', { timeZone: timezone, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      // Blank while the order is still open — an empty cell reads better in Excel
+      // than a placeholder, and it keeps the column sortable as a date.
+      'Bağlanma': closed ? new Date(closed).toLocaleString('az-AZ', { timeZone: timezone, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
       'Status': o.status,
       'Məhsullar': o.items.map(i => `${i.menuItem.name} x${i.quantity}`).join(', '),
       'Endirim (₼)': o.discountAmount ?? 0,
@@ -60,8 +65,8 @@ export function exportOrdersExcel(orders: Order[], timezone: string): void {
       'Cəmi (₼)': o.status === 'ləğv edildi' ? '-' : Math.round(total * 100) / 100,
     };
   });
-  const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ 'Sifariş №': '', 'Satıcı': '', 'Tarix': '', 'Status': '', 'Məhsullar': '', 'Endirim (₼)': '', 'Nağd (₼)': '', 'Kart (₼)': '', 'Cəmi (₼)': '' }]);
-  ws['!cols'] = [{ wch: 10 }, { wch: 16 }, { wch: 20 }, { wch: 14 }, { wch: 50 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
+  const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ 'Sifariş №': '', 'Satıcı': '', 'Tarix': '', 'Bağlanma': '', 'Status': '', 'Məhsullar': '', 'Endirim (₼)': '', 'Nağd (₼)': '', 'Kart (₼)': '', 'Cəmi (₼)': '' }]);
+  ws['!cols'] = [{ wch: 10 }, { wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 14 }, { wch: 50 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Sifarişlər');
   XLSX.writeFile(wb, `sifarisler-${new Date().toISOString().slice(0, 10)}.xlsx`);
