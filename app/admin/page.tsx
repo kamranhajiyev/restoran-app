@@ -1909,6 +1909,19 @@ function AdminPageContent() {
 
         <div className="flex-1" />
 
+        {companySlug && sellerToken && (
+          <a
+            href={`/s/${companySlug}/${sellerToken}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Satıcı terminalını aç"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl hover:border-primary-300 hover:bg-primary-50 transition-colors mr-2"
+          >
+            <Tablet className="w-4 h-4 text-primary-700" />
+            <span className="hidden sm:inline text-xs font-semibold text-primary-800">Satıcı terminalı</span>
+          </a>
+        )}
+
         {printerConnected && (
           <button
             onClick={openCashDrawer}
