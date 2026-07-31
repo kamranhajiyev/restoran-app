@@ -1397,16 +1397,16 @@ export async function updateCompanyName(id: string, name: string): Promise<void>
   } catch (e) { console.error('[updateCompanyName]', e); }
 }
 
-export async function updateCompanyExpiry(id: string, expiresAt: string | null): Promise<void> {
-  try {
-    await supabase.from('companies').update({ expires_at: expiresAt }).eq('id', id);
-  } catch (e) { console.error('[updateCompanyExpiry]', e); }
+export async function updateCompanyExpiry(id: string, expiresAt: string | null): Promise<string | null> {
+  const { error } = await supabase.from('companies').update({ expires_at: expiresAt }).eq('id', id);
+  if (error) { console.error('[updateCompanyExpiry]', error); return error.message; }
+  return null;
 }
 
-export async function updateCompanyProfile(id: string, ownerName: string, address: string, phone: string): Promise<void> {
-  try {
-    await supabase.from('companies').update({ owner_name: ownerName, address, phone }).eq('id', id);
-  } catch (e) { console.error('[updateCompanyProfile]', e); }
+export async function updateCompanyProfile(id: string, ownerName: string, address: string, phone: string): Promise<string | null> {
+  const { error } = await supabase.from('companies').update({ owner_name: ownerName, address, phone }).eq('id', id);
+  if (error) { console.error('[updateCompanyProfile]', error); return error.message; }
+  return null;
 }
 
 // Owner's own profile save — direct updates to companies are superadmin-only
@@ -1436,10 +1436,10 @@ export async function updateCompanyHours(workOpen: string, workClose: string): P
   if (error) console.error('[updateCompanyHours]', error);
 }
 
-export async function updateCompanyTimezone(id: string, timezone: string): Promise<void> {
-  try {
-    await supabase.from('companies').update({ timezone }).eq('id', id);
-  } catch (e) { console.error('[updateCompanyTimezone]', e); }
+export async function updateCompanyTimezone(id: string, timezone: string): Promise<string | null> {
+  const { error } = await supabase.from('companies').update({ timezone }).eq('id', id);
+  if (error) { console.error('[updateCompanyTimezone]', error); return error.message; }
+  return null;
 }
 
 export async function fetchCompanyProfile(id: string): Promise<{ ownerName: string; address: string; phone: string } | null> {

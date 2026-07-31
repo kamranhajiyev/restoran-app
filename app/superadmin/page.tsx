@@ -50,6 +50,12 @@ interface Company {
   ownerUser?: SAUser;
 }
 
+interface ModalSnapshot {
+  owner: string; address: string; phone: string;
+  timezone: string; expiry: string | null;
+  accName: string; accUsername: string;
+}
+
 export default function SuperadminPage() {
   const router = useRouter();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -69,7 +75,6 @@ export default function SuperadminPage() {
   const [profExpiry, setProfExpiry] = useState<string | null>(null);
   const [profTimezone, setProfTimezone] = useState(DEFAULT_TZ);
   const [showCustomDate, setShowCustomDate] = useState(false);
-  const [profSaving, setProfSaving] = useState(false);
   const [profMsg, setProfMsg] = useState('');
 
   // profile modal — admin account section
@@ -77,8 +82,12 @@ export default function SuperadminPage() {
   const [ownerName, setOwnerName] = useState('');
   const [ownerUsername, setOwnerUsername] = useState('');
   const [ownerPassword, setOwnerPassword] = useState('');
-  const [ownerSaving, setOwnerSaving] = useState(false);
   const [ownerMsg, setOwnerMsg] = useState('');
+
+  // One save button covers both sections. The snapshot is what the fields held
+  // when the modal opened — anything different is unsaved work worth warning about.
+  const [modalSaving, setModalSaving] = useState(false);
+  const [snapshot, setSnapshot] = useState<ModalSnapshot | null>(null);
 
   // create company form
   const [showCompanyForm, setShowCompanyForm] = useState(false);
@@ -124,31 +133,122 @@ export default function SuperadminPage() {
 
   function openProfileModal(c: Company) {
     setProfileCompany(c);
+    setShowCustomDate(false);
+    setProfMsg('');
+    setOwnerMsg('');
+    setOwnerPassword('');
+    fillModalFrom(c);
+  }
+
+  // Loads the fields from a company row and re-arms the unsaved-changes check.
+  // Called on open and again after every successful save.
+  function fillModalFrom(c: Company) {
     setProfOwner(c.ownerName ?? '');
     setProfAddress(c.address ?? '');
     setProfPhone(c.phone ?? '');
     setProfExpiry(c.expiresAt ?? null);
     setProfTimezone(c.timezone || DEFAULT_TZ);
-    setShowCustomDate(false);
-    setProfMsg('');
     setModalOwnerUser(c.ownerUser ?? null);
     setOwnerName(c.ownerUser?.name ?? '');
     setOwnerUsername(c.ownerUser?.username ?? '');
-    setOwnerPassword('');
-    setOwnerMsg('');
+    setSnapshot({
+      owner: c.ownerName ?? '',
+      address: c.address ?? '',
+      phone: c.phone ?? '',
+      timezone: c.timezone || DEFAULT_TZ,
+      expiry: c.expiresAt ?? null,
+      accName: c.ownerUser?.name ?? '',
+      accUsername: c.ownerUser?.username ?? '',
+    });
   }
 
-  async function handleSaveProfile() {
+  function isDirty(): boolean {
+    if (!snapshot) return false;
+    if (ownerPassword) return true;
+    return profOwner !== snapshot.owner
+      || profAddress !== snapshot.address
+      || profPhone !== snapshot.phone
+      || profTimezone !== snapshot.timezone
+      || profExpiry !== snapshot.expiry
+      || ownerName !== snapshot.accName
+      || ownerUsername !== snapshot.accUsername;
+  }
+
+  function closeProfileModal() {
+    if (!isDirty()) { setProfileCompany(null); return; }
+    setDialog({
+      title: 'Saxlanmamış dəyişikliklər',
+      message: 'Dəyişiklikləri saxlamadan çıxsanız, doldurduğunuz məlumatlar itəcək.',
+      confirmLabel: 'Çıx',
+      onConfirm: () => setProfileCompany(null),
+    });
+  }
+
+  // One button for the whole modal. Two separate save buttons used to let a
+  // superadmin fill in the company details, press "+ Hesab yarat", and walk away
+  // with the details never written — the owner then logged in to empty fields.
+  async function handleSave() {
     if (!profileCompany) return;
-    setProfSaving(true);
-    await Promise.all([
-      updateCompanyProfile(profileCompany.id, profOwner.trim(), profAddress.trim(), profPhone.trim()),
+    setProfMsg(''); setOwnerMsg('');
+
+    // Trim into the inputs too, so what is stored and what is shown stay identical
+    // and a stray space can't leave the modal looking permanently unsaved.
+    const owner = profOwner.trim(), address = profAddress.trim(), phone = profPhone.trim();
+    setProfOwner(owner); setProfAddress(address); setProfPhone(phone);
+    const accName = ownerName.trim(), accUsername = ownerUsername.trim();
+    setOwnerName(accName); setOwnerUsername(accUsername);
+    const creating = !modalOwnerUser;
+    // A brand new account needs all three fields; leaving the whole section blank
+    // just means "company details only".
+    const anyAccountField = !!(accName || accUsername || ownerPassword);
+    if (creating && anyAccountField && !(accName && accUsername && ownerPassword)) {
+      setOwnerMsg('Xəta: Bütün sahələri doldurun');
+      return;
+    }
+    if (ownerPassword) {
+      const pwErr = validatePassword(ownerPassword, accUsername);
+      if (pwErr) { setOwnerMsg('Xəta: ' + pwErr); return; }
+    }
+
+    setModalSaving(true);
+
+    const errs = await Promise.all([
+      updateCompanyProfile(profileCompany.id, owner, address, phone),
       updateCompanyExpiry(profileCompany.id, profExpiry),
       updateCompanyTimezone(profileCompany.id, profTimezone),
     ]);
+    const profErr = errs.find(Boolean);
+    if (profErr) {
+      setProfMsg('Xəta: ' + profErr);
+      setModalSaving(false);
+      return;
+    }
+
+    // The company details are already committed above, so an account failure here
+    // costs only the account — it never rolls the details back.
+    let accErr: string | null = null;
+    if (creating && anyAccountField) {
+      accErr = await createUser(accUsername, ownerPassword, accName, 'owner', profileCompany.id);
+    } else if (modalOwnerUser) {
+      accErr = await updateOwnerAccount(modalOwnerUser.id, accName, accUsername, ownerPassword || undefined);
+    }
+
+    const updated = await loadData();
+    const fresh = updated.find(c => c.id === profileCompany.id);
+    if (fresh) setProfileCompany(fresh);
+    setModalSaving(false);
+
+    if (accErr) {
+      // Keep whatever was typed into the account fields so it can be corrected —
+      // only mark the company details as saved.
+      setSnapshot(s => s && { ...s, owner, address, phone, timezone: profTimezone, expiry: profExpiry });
+      setOwnerMsg('Xəta: ' + accErr);
+      return;
+    }
+
+    if (fresh) fillModalFrom(fresh);
+    setOwnerPassword('');
     setProfMsg('Yadda saxlandı');
-    setProfSaving(false);
-    loadData();
     setTimeout(() => setProfMsg(''), 2000);
   }
 
@@ -165,49 +265,6 @@ export default function SuperadminPage() {
     }
     base.setMonth(base.getMonth() + months);
     setProfExpiry(base.toISOString());
-  }
-
-  async function handleSaveOwner() {
-    if (!profileCompany || !modalOwnerUser) return;
-    if (ownerPassword) {
-      const pwErr = validatePassword(ownerPassword, ownerUsername);
-      if (pwErr) { setOwnerMsg('Xəta: ' + pwErr); return; }
-    }
-    setOwnerSaving(true);
-    const err = await updateOwnerAccount(modalOwnerUser.id, ownerName.trim(), ownerUsername.trim(), ownerPassword || undefined);
-    if (err) {
-      setOwnerMsg('Xəta: ' + err);
-    } else {
-      setModalOwnerUser(prev => prev ? { ...prev, name: ownerName.trim(), username: ownerUsername.trim() } : null);
-      setOwnerPassword('');
-      setOwnerMsg('Yadda saxlandı');
-      loadData();
-      setTimeout(() => setOwnerMsg(''), 2000);
-    }
-    setOwnerSaving(false);
-  }
-
-  async function handleCreateOwner() {
-    if (!profileCompany) return;
-    if (!ownerName.trim() || !ownerUsername.trim() || !ownerPassword) {
-      setOwnerMsg('Bütün sahələri doldurun');
-      return;
-    }
-    const pwErr = validatePassword(ownerPassword, ownerUsername);
-    if (pwErr) { setOwnerMsg('Xəta: ' + pwErr); return; }
-    setOwnerSaving(true);
-    const err = await createUser(ownerUsername.trim(), ownerPassword, ownerName.trim(), 'owner', profileCompany.id);
-    if (err) {
-      setOwnerMsg('Xəta: ' + err);
-    } else {
-      setOwnerMsg('Hesab yaradıldı');
-      setOwnerPassword('');
-      const updated = await loadData();
-      const updatedComp = updated.find(c => c.id === profileCompany.id);
-      if (updatedComp?.ownerUser) setModalOwnerUser(updatedComp.ownerUser);
-      setTimeout(() => setOwnerMsg(''), 2000);
-    }
-    setOwnerSaving(false);
   }
 
   async function handleToggleOwnerActive() {
@@ -228,6 +285,8 @@ export default function SuperadminPage() {
         setOwnerName('');
         setOwnerUsername('');
         setOwnerPassword('');
+        // The account is gone for real — the blank fields are not unsaved work.
+        setSnapshot(s => s && { ...s, accName: '', accUsername: '' });
         loadData();
       },
     });
@@ -680,14 +739,14 @@ export default function SuperadminPage() {
 
       {/* Company Profile + Admin Account Modal */}
       {profileCompany && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={closeProfileModal}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <UserCircle className="w-5 h-5 text-[#2779a7]" />
                 <h3 className="font-bold text-gray-800">{profileCompany.name}</h3>
               </div>
-              <button onClick={() => setProfileCompany(null)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100">
+              <button onClick={closeProfileModal} className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -756,12 +815,6 @@ export default function SuperadminPage() {
                   </p>
                 )}
               </div>
-              <div className="flex items-center gap-3">
-                <button onClick={handleSaveProfile} disabled={profSaving} className="flex-1 bg-[#2779a7] hover:bg-[#21678e] disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors">
-                  {profSaving ? 'Saxlanır...' : 'Yadda saxla'}
-                </button>
-                {profMsg && <span className="text-xs text-green-600 font-medium">{profMsg}</span>}
-              </div>
             </div>
 
             <div className="border-t border-gray-100 my-5" />
@@ -792,14 +845,9 @@ export default function SuperadminPage() {
                     {modalOwnerUser.active ? 'Aktiv' : 'Deaktiv'}
                   </button>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button onClick={handleSaveOwner} disabled={ownerSaving} className="flex-1 bg-[#2779a7] hover:bg-[#21678e] disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors">
-                    {ownerSaving ? 'Saxlanır...' : 'Yadda saxla'}
-                  </button>
-                  <button onClick={handleDeleteOwner} className="w-10 h-10 flex items-center justify-center rounded-xl text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors border border-gray-200">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                <button onClick={handleDeleteOwner} className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-medium text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors border border-gray-200">
+                  <Trash2 className="w-3.5 h-3.5" /> Hesabı sil
+                </button>
                 {ownerMsg && <p className={`text-xs font-medium ${ownerMsg.startsWith('Xəta') ? 'text-red-500' : 'text-green-600'}`}>{ownerMsg}</p>}
               </div>
             ) : (
@@ -817,12 +865,18 @@ export default function SuperadminPage() {
                   <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><KeyRound className="w-3.5 h-3.5" />Şifrə</label>
                   <PasswordField value={ownerPassword} onChange={setOwnerPassword} placeholder="••••••" focusClass="focus:ring-[#2779a7]" />
                 </div>
-                <button onClick={handleCreateOwner} disabled={ownerSaving} className="w-full bg-[#2779a7] hover:bg-[#21678e] disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors">
-                  {ownerSaving ? 'Yaradılır...' : '+ Hesab yarat'}
-                </button>
+                <p className="text-xs text-gray-400">Üç sahəni də doldurun — hesab aşağıdakı düymə ilə yaradılacaq.</p>
                 {ownerMsg && <p className={`text-xs font-medium ${ownerMsg.startsWith('Xəta') ? 'text-red-500' : 'text-green-600'}`}>{ownerMsg}</p>}
               </div>
             )}
+
+            {/* One save for the whole modal — company details and admin account together */}
+            <div className="border-t border-gray-100 mt-5 pt-4 flex items-center gap-3">
+              <button onClick={handleSave} disabled={modalSaving} className="flex-1 bg-[#2779a7] hover:bg-[#21678e] disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors">
+                {modalSaving ? 'Saxlanır...' : 'Yadda saxla'}
+              </button>
+              {profMsg && <span className={`text-xs font-medium ${profMsg.startsWith('Xəta') ? 'text-red-500' : 'text-green-600'}`}>{profMsg}</span>}
+            </div>
           </div>
         </div>
       )}
