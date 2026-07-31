@@ -152,19 +152,13 @@ export async function playItemRemoved(delayMs = 0): Promise<boolean> {
   return true;
 }
 
-// A sex finished its part: a soft three-note major arpeggio.
-//
-// The seller hears this next to playNewOrder(), and both rise — so the telling
-// apart is done by timbre and length, not pitch direction: sine against triangle,
-// three notes against two. "Food is ready, go and get it", not "more work".
-//
-// `delayMs` for the same reason playItemRemoved has one: one refresh can bring a
-// new order and a ready sex together, and two chimes on top of each other are one
-// noise that means neither.
-export async function playOrderReady(delayMs = 0): Promise<boolean> {
+// A sex finished its part: a soft three-note major arpeggio. "Food is ready, go
+// and get it" — the only sound the seller screen makes, so it needs no telling
+// apart from anything else there.
+export async function playOrderReady(): Promise<boolean> {
   const c = await ready();
   if (!c) return false;
-  const t = c.currentTime + delayMs / 1000;
+  const t = c.currentTime;
   tone(t,        1047, 120, 'sine', 0.26);   // C6
   tone(t + 0.11, 1319, 120, 'sine', 0.26);   // E6
   tone(t + 0.22, 1568, 300, 'sine', 0.26);   // G6

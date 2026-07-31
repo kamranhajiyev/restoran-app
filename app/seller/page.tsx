@@ -17,9 +17,8 @@ import {
   fetchStations, fetchStationReady, type StationReady,
 } from '@/lib/store';
 import { menuIndex, stationForItem, readyStationIds } from '@/lib/stations';
-import { unlockSound, playNewOrder, playItemRemoved, playOrderReady } from '@/lib/sound';
+import { unlockSound, playOrderReady } from '@/lib/sound';
 import { subscribeToPush, pushState, type PushState } from '@/lib/push';
-import { snapshotOrders, diffOrderAlerts, type OrdersSnapshot } from '@/lib/orderAlerts';
 import { applyBrand } from '@/lib/branding';
 import { orderClosedAt } from '@/lib/order-items';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
@@ -325,12 +324,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const [readyRows, setReadyRows] = useState<StationReady[]>([]);
 
   // ── Order alerts ────────────────────────────────────────────────────────────
-  // For venues whose station printers aren't wired up: the kitchen hears the
-  // order instead of reading a ticket.
+  // This screen makes exactly one sound: "the food is ready". Orders being punched
+  // in or lines being deleted are the kitchen's business, and beep on the sex
+  // screen they were sent to — a waiter has no use for another waiter's tap.
   //
-  // Detection diffs the orders list rather than reading realtime payloads, because
+  // Detection diffs the ready rows rather than reading realtime payloads, because
   // every path — realtime push (authed) and the 40s poll (public terminal) — lands
-  // in the same setOrders. One mechanism covers both modes.
+  // in the same state. One mechanism covers both modes.
   const [soundOn, setSoundOn] = useState(false);              // company-wide, admin-controlled
   const [deviceMuted, setDeviceMuted] = useState(false);      // this device only
   const [soundReady, setSoundReady] = useState(false);        // browser has allowed audio
@@ -351,23 +351,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
 
-  // Changes this device made itself — the waiter shouldn't beep at his own tap.
-  //
-  // Suppression is per order and time-boxed: touching an order mutes it here
-  // until the server's version of that change has had time to come back. An
-  // earlier version counted expected changes instead, which meant a count that
-  // was never claimed (a save that failed, an alert that arrived while sound was
-  // off) sat in the map forever and swallowed the next real alert for that order.
-  // A deadline expires on its own; a counter does not.
-  const OWN_CHANGE_MS = 8000;
-  const ownChanges = useRef<Map<string, number>>(new Map());
-  const isOwnChange = (orderId: string) => (ownChanges.current.get(orderId) ?? 0) > Date.now();
-  const markOwnChange = (orderId: string) => ownChanges.current.set(orderId, Date.now() + OWN_CHANGE_MS);
-
-  // Null until the first list arrives, so loading 40 existing orders on startup
-  // doesn't fire 40 chimes.
-  const seen = useRef<OrdersSnapshot | null>(null);
-
   // The mute flag is read here rather than in a useState initializer: /seller is
   // prerendered, and a server-rendered "unmuted" that flips to "muted" on hydrate
   // is a mismatch.
@@ -377,24 +360,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       setDeviceMuted(localStorage.getItem('soundMuted') === '1');
     });
   }, [overrideCompanyId]);
-
-  useEffect(() => {
-    const snapshot = snapshotOrders(orders);
-    const prev = seen.current;
-    seen.current = snapshot;
-    if (!prev) return;                        // first load — nothing to compare against
-    if (!soundWanted || !soundReady) return;
-
-    const { newWork, removed } = diffOrderAlerts(prev, snapshot, isOwnChange);
-
-    // Both, when a refresh brings both: the removal is the one that wastes food if
-    // it goes unheard, so it must not be dropped just because a chime also fired.
-    // A play that makes no sound means the browser suspended the audio engine
-    // behind our back — put the "Səsi aktivləşdir" banner back rather than let the
-    // screen sit silently mute.
-    if (newWork) playNewOrder().then(ok => { if (!ok) setSoundReady(false); });
-    if (removed) playItemRemoved(newWork ? 450 : 0).then(ok => { if (!ok) setSoundReady(false); });
-  }, [orders, soundWanted, soundReady]);
 
   // ── "Food is ready" ─────────────────────────────────────────────────────────
   // The seller has ten orders on screen and one sex just finished its part of the
@@ -773,16 +738,12 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     const newItems = cart;
     const newNote = note.trim();
     setSubmitting(true);
-    markOwnChange(orderId);   // our own append — don't alert ourselves
     const saveError = overrideCompanyId
       ? await fetch('/api/add-order-items', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId, items: newItems, companyId: overrideCompanyId, note: newNote, token: overrideToken }) })
           .then(r => r.json()).then(d => d.ok ? null : (d.error || 'failed')).catch(() => 'failed')
       : await addItemsToOrder(orderId, newItems, newNote);
     setSubmitting(false);
     if (saveError) {
-      // Nothing was appended, so unmute the order — otherwise it would swallow the
-      // chime for a genuine append from another device.
-      ownChanges.current.delete(orderId);
       const reason = /fetch|network|failed to fetch|load failed|failed/i.test(saveError)
         ? 'İnternet bağlantısı yoxdur.'
         : /closed|409/i.test(saveError)
@@ -791,10 +752,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       alert(`Məhsullar əlavə edilmədi.\n\nSəbəb: ${reason}\n\nYenidən cəhd edin.`);
       return;
     }
-    // Restart the mute window from the save, not from the tap: on a slow connection
-    // the round trip can eat the whole window, and the server's copy of our own
-    // append would then come back and chime at us.
-    markOwnChange(orderId);
     // Optimistically merge the new items into the order (status stays the same).
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, items: [...o.items, ...newItems], note: newNote || undefined } : o));
     setExpandedOrderId(orderId);
@@ -816,12 +773,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     // either. Who did it is already on the record (removed_by, removed_at).
     if (isItemReady(order, oi) && !confirm(`"${oi.menuItem.name}" hazırdır. Yenə də silinsin?`)) return;
     const newQty = oi.quantity - 1;
-    markOwnChange(order.id);   // our own removal — don't alert ourselves
     const ok = overrideCompanyId
       ? await fetch('/api/update-order-item-qty', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderItemId: oi.id, orderId: order.id, quantity: newQty, companyId: overrideCompanyId, token: overrideToken, removedBy: effectiveSeller }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
       : await setOrderItemQuantity(oi.id, newQty, effectiveSeller);
-    if (!ok) { ownChanges.current.delete(order.id); alert('Dəyişdirilmədi. Yenidən cəhd edin.'); return; }
-    markOwnChange(order.id);   // restart the window from the save — see submitAppend
+    if (!ok) { alert('Dəyişdirilmədi. Yenidən cəhd edin.'); return; }
 
     // Optimistically apply, then reconcile with the server. The removed line must move
     // into removedItems, not vanish: dropping it would make it flicker off the card and
@@ -868,7 +823,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       staffId: activeStaff?.id,
       note: note.trim() || undefined,
     };
-    markOwnChange(order.id);   // our own order — the other devices beep, not this one
     const saveError = await addOrder(order);
     setSubmitting(false);
     if (saveError) {
@@ -880,10 +834,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
         ? 'İcazə xətası.'
         : saveError;
       alert(`Sifariş yadda saxlanılmadı.\n\nSəbəb: ${reason}\n\nYenidən cəhd edin.`);
-      ownChanges.current.delete(order.id);   // nothing was saved — nothing of ours to mute
       return;
     }
-    markOwnChange(order.id);   // restart the window from the save — see submitAppend
     setOrders(prev => [order, ...prev]);
     setCart([]); setNote(''); setSelectedTable(null); setOrderType(null);
     setMobileCartOpen(false);

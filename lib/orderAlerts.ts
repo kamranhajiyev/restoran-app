@@ -27,18 +27,12 @@ export interface OrderAlerts {
   removed: boolean;   // an item, or a unit of one, taken off an open order
 }
 
-// `isOwn(orderId)` mutes orders this device just changed — a waiter shouldn't be
-// alerted by his own tap.
-export function diffOrderAlerts(
-  prev: OrdersSnapshot,
-  next: OrdersSnapshot,
-  isOwn: (orderId: string) => boolean = () => false,
-): OrderAlerts {
+export function diffOrderAlerts(prev: OrdersSnapshot, next: OrdersSnapshot): OrderAlerts {
   let newWork = false;
   let removed = false;
 
   for (const orderId of next.keys()) {
-    if (!prev.has(orderId) && !isOwn(orderId)) newWork = true;
+    if (!prev.has(orderId)) newWork = true;
   }
 
   for (const [orderId, before] of prev) {
@@ -46,7 +40,6 @@ export function diffOrderAlerts(
     // An order missing from the new list fell off the end of the 200-row window as
     // newer ones arrived. That is not a removal.
     if (!now) continue;
-    if (isOwn(orderId)) continue;
 
     // Items added to an already-open order are new work for the kitchen too — same
     // chime as a new order, or a waiter's "one more kebab" goes unheard.
