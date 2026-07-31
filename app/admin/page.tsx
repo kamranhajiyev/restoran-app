@@ -1922,6 +1922,8 @@ function AdminPageContent() {
           </a>
         )}
 
+        <InstallPWA />
+
         {printerConnected && (
           <button
             onClick={openCashDrawer}
@@ -1947,8 +1949,6 @@ function AdminPageContent() {
             )}
           </div>
         </button>
-
-        <InstallPWA />
 
         <button
           onClick={() => { logout(); router.push('/login'); }}

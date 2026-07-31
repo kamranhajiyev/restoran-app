@@ -53,10 +53,11 @@ export default function InstallPWA() {
     <div ref={ref} className="relative">
       <button
         onClick={() => isIOS ? setOpen(o => !o) : handleInstall()}
-        className="w-9 h-9 flex items-center justify-center rounded-lg text-stone-500 hover:text-primary-700 hover:bg-primary-50 transition-colors"
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl hover:border-primary-300 hover:bg-primary-50 transition-colors"
         title="Tətbiqi quraşdır"
       >
-        <MonitorSmartphone className="w-4 h-4" />
+        <MonitorSmartphone className="w-4 h-4 text-primary-700" />
+        <span className="hidden sm:inline text-xs font-semibold text-primary-800">Tətbiqi quraşdır</span>
       </button>
 
       {isIOS && open && (
