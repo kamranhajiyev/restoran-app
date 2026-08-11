@@ -72,9 +72,9 @@ async function revive(c: AudioContext): Promise<AudioContext | null> {
   return fresh.state === 'running' ? fresh : null;
 }
 
-// Browsers refuse to produce sound until the user has interacted with the page.
-// A kitchen tablet sitting untouched on a shelf would stay silent forever, so
-// the UI must call this from a real click — see the "Səsi aktivləşdir" banner.
+// Browsers refuse to produce sound until the user has interacted with the page, so
+// this has to run off a real gesture — either any tap at all (armSoundOnFirstGesture)
+// or the "Səsi aktivləşdir" button the UI falls back to.
 export async function unlockSound(): Promise<boolean> {
   const c = getCtx();
   if (!c) return false;
@@ -83,6 +83,24 @@ export async function unlockSound(): Promise<boolean> {
 
 export function isSoundUnlocked(): boolean {
   return ctx?.state === 'running';
+}
+
+// The gesture the browser demands need not be a dedicated "enable sound" button —
+// any tap on the page counts. A waiter opening an order or pulling to refresh has
+// already given us one, so arm the engine off that rather than making him dismiss a
+// banner first. `onArmed` reports the outcome so the UI can ask outright only in the
+// rare case where a genuine gesture still failed.
+export function armSoundOnFirstGesture(onArmed: (ok: boolean) => void): () => void {
+  if (typeof document === 'undefined') return () => {};
+  const events = ['pointerdown', 'touchstart', 'keydown'] as const;
+  const off = () => events.forEach(e => document.removeEventListener(e, handler));
+  async function handler() {
+    const ok = await unlockSound();
+    onArmed(ok);
+    if (ok) off();   // armed — the rearm-on-focus path keeps it alive from here
+  }
+  events.forEach(e => document.addEventListener(e, handler, { passive: true }));
+  return off;
 }
 
 // One note. `type` shapes the timbre: a triangle reads as a friendly chime,
@@ -124,7 +142,7 @@ async function ready(): Promise<AudioContext | null> {
 }
 
 // The play functions report whether a sound actually came out, so the caller can
-// put the "Səsi aktivləşdir" banner back rather than believing it is still armed.
+// surface the "Səsi aktivləşdir" banner rather than believing it is still armed.
 
 // New order, or more work added to an open one: a bright rising two-note chime.
 // Reads as "something arrived".

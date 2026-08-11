@@ -17,8 +17,7 @@ import {
   fetchStations, fetchStationReady, type StationReady,
 } from '@/lib/store';
 import { menuIndex, stationForItem, readyStationIds } from '@/lib/stations';
-import { unlockSound, playOrderReady } from '@/lib/sound';
-import { subscribeToPush, pushState, type PushState } from '@/lib/push';
+import { unlockSound, armSoundOnFirstGesture, playOrderReady } from '@/lib/sound';
 import { applyBrand } from '@/lib/branding';
 import { orderClosedAt } from '@/lib/order-items';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
@@ -334,13 +333,12 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const [soundOn, setSoundOn] = useState(false);              // company-wide, admin-controlled
   const [deviceMuted, setDeviceMuted] = useState(false);      // this device only
   const [soundReady, setSoundReady] = useState(false);        // browser has allowed audio
+  // Only true once asking the waiter is the last resort left: a real gesture came and
+  // the browser still refused, a beep died mid-shift, or nobody has touched an idle
+  // screen at all. The banner hangs off this, not off !soundReady, so an ordinary
+  // waiter — who arms the sound with his first tap — never sees it.
+  const [soundBlocked, setSoundBlocked] = useState(false);
   const soundWanted = soundOn && !deviceMuted;
-
-  // OS push, the only alert that reaches a waiter whose phone is locked or whose tab is
-  // in the background — a page cannot make a sound there. Independent of the in-page
-  // beep flags above: this works even when the app is closed.
-  const [pushPerm, setPushPerm] = useState<PushState>('default');
-  useEffect(() => { setPushPerm(pushState()); }, []);
 
   // Whether the tab is in front, so the "food ready" diff below can hold a missed chime
   // until the waiter looks back instead of swallowing it while hidden.
@@ -387,7 +385,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     const openIds = new Set(orders.filter(isOrderOpen).map(o => o.id));
     for (const k of current) {
       if (!prev.has(k) && openIds.has(k.slice(0, k.lastIndexOf(':')))) {
-        playOrderReady().then(ok => { if (!ok) setSoundReady(false); });
+        playOrderReady().then(ok => { if (!ok) { setSoundReady(false); setSoundBlocked(true); } });
         break;                       // one chime per refresh, however many sexes finished
       }
     }
@@ -418,28 +416,43 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   async function enableSound() {
     const ok = await unlockSound();
     setSoundReady(ok);
+    setSoundBlocked(!ok);
     if (ok) { setDeviceMuted(false); localStorage.removeItem('soundMuted'); }
   }
 
-  async function enablePush() {
-    const cid = overrideCompanyId ?? getSession()?.companyId ?? '';
-    if (!cid) return;
-    try {
-      setPushPerm(await subscribeToPush(cid, overrideToken));
-    } catch {
-      setPushPerm(pushState());
-    }
-  }
+  // Arm the audio engine off whatever the waiter taps first — an order, Yenilə, the PIN
+  // pad — instead of making him dismiss a banner to grant a permission he grants anyway
+  // by working. The immediate unlockSound() covers a reload of a page already gestured
+  // on; the listener covers a cold open.
+  //
+  // The timer is for the case a gesture never comes: a tablet left on a shelf would
+  // otherwise sit silent with nothing on screen explaining why. After 10s untouched we
+  // put the banner up, which is both the explanation and the tap we need.
+  useEffect(() => {
+    if (!soundWanted || soundReady) return;
+    let alive = true;
+    const armed = (ok: boolean) => {
+      if (!alive || !ok) return;
+      clearTimeout(timer);
+      setSoundReady(true);
+      setSoundBlocked(false);
+    };
+    const timer = setTimeout(() => { if (alive) setSoundBlocked(true); }, 10000);
+    unlockSound().then(armed);
+    const off = armSoundOnFirstGesture(armed);
+    return () => { alive = false; clearTimeout(timer); off(); };
+  }, [soundWanted, soundReady]);
 
   // Coming back to the screen after a lock / app-switch is exactly when iOS has
   // suspended (or zombified) the audio engine. Re-arm it the moment the tab is
   // visible again, so the next order chimes instead of us waiting for a play to
-  // fail first. unlockSound() rebuilds a dead context; a real failure flips
-  // soundReady off and the "Səsi aktivləşdir" banner comes back.
+  // fail first. unlockSound() rebuilds a dead context; a real failure leaves soundReady
+  // off, and the effect above is still listening for the next tap to try again.
   useEffect(() => {
     if (!soundWanted) return;
     const rearm = () => {
-      if (document.visibilityState === 'visible') unlockSound().then(setSoundReady);
+      if (document.visibilityState !== 'visible') return;
+      unlockSound().then(ok => { setSoundReady(ok); if (ok) setSoundBlocked(false); });
     };
     window.addEventListener('focus', rearm);
     document.addEventListener('visibilitychange', rearm);
@@ -1460,9 +1473,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 <p className="text-sm text-stone-600 mt-0.5">Aktiv sifarişlər</p>
               </div>
 
-              {/* The browser blocks audio until the page is tapped, so a screen left
-                  untouched on a shelf would stay silent. Say so, and take the tap. */}
-              {soundOn && !deviceMuted && !soundReady && (
+              {/* Last resort only. The waiter's own tapping normally arms the sound
+                  before this can appear; it shows for the screen nobody touches, or
+                  when the browser refused a gesture we did get. */}
+              {soundOn && !deviceMuted && !soundReady && soundBlocked && (
                 <div className="mx-4 md:mx-6 mb-2 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5">
                   <Bell className="w-4 h-4 text-amber-600 shrink-0" />
                   <p className="flex-1 text-sm text-amber-900">Yeni sifariş səsi söndürülüb — brauzer icazə istəyir.</p>
@@ -1494,38 +1508,6 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                   >
                     <BellOff className="w-3.5 h-3.5" /> Səs söndürülüb — aç
                   </button>
-                </div>
-              )}
-
-              {/* OS notifications: the only alert that reaches the waiter when the phone
-                  is locked or the app is in the background — the in-page beep can't. */}
-              {pushPerm === 'default' && (
-                <div className="mx-4 md:mx-6 mb-2 flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5">
-                  <Bell className="w-4 h-4 text-blue-600 shrink-0" />
-                  <p className="flex-1 text-sm text-blue-900">Telefon arxa planda olanda da bildiriş alın.</p>
-                  <button
-                    onClick={enablePush}
-                    className="shrink-0 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors"
-                  >
-                    Bildirişləri aktivləşdir
-                  </button>
-                </div>
-              )}
-
-              {pushPerm === 'ios-needs-install' && (
-                <div className="mx-4 md:mx-6 mb-2 flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5">
-                  <Bell className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-                  <p className="flex-1 text-sm text-blue-900">
-                    Arxa plan bildirişləri üçün: Paylaş menyusundan <span className="font-medium">Ana ekrana əlavə et</span>, sonra tətbiqi ikondan açın.
-                  </p>
-                </div>
-              )}
-
-              {pushPerm === 'denied' && (
-                <div className="px-4 md:px-6 -mt-1 mb-1">
-                  <p className="flex items-center gap-1.5 text-xs text-stone-400">
-                    <BellOff className="w-3.5 h-3.5" /> Bildirişlər brauzerdə bloklanıb — brauzer parametrlərindən açın.
-                  </p>
                 </div>
               )}
 
