@@ -586,6 +586,19 @@ function AdminPageContent() {
   const [totalOrders, setTotalOrders] = useState(0);
   const [orderSearch, setOrderSearch] = useState('');
   const [ordersPreset, setOrdersPreset] = useState<'all' | 'bugün' | 'bu həftə'>('all');
+  // Date range for the orders tab. The presets above only filter the loaded page,
+  // so a picked range is fetched from the server instead — that's the only way to
+  // reach orders older than the last 200.
+  const [ordersFrom, setOrdersFrom] = useState('');
+  const [ordersTo, setOrdersTo] = useState('');
+  // Tagged with the range it was fetched for, so a stale list is never shown
+  // under a newly picked range while the new one is still loading.
+  const [rangeResult, setRangeResult] = useState<{ key: string; data: Order[] } | null>(null);
+  const [rangeLoading, setRangeLoading] = useState(false);
+  const [rangeRefreshKey, setRangeRefreshKey] = useState(0);
+  // Empty while the range is incomplete or backwards — the presets stay in charge then.
+  const ordersRangeKey = ordersFrom && ordersTo && ordersFrom <= ordersTo ? `${ordersFrom}|${ordersTo}` : '';
+  const rangeOrders = ordersRangeKey && rangeResult?.key === ordersRangeKey ? rangeResult.data : null;
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const touchStartY = useRef<number | null>(null);
@@ -859,6 +872,20 @@ function AdminPageContent() {
     }).finally(() => { setDataLoading(false); setStatsLoaded(true); });
   }, [sessionReady, customFrom, customTo, bizSettings, statsRefreshKey]);
 
+  // Orders tab date range — fetched from the server so it isn't limited to the
+  // loaded page. A cleared or invalid range falls back to the preset filters.
+  useEffect(() => {
+    if (!sessionReady || !ordersRangeKey) return;
+    const from = businessDayStartUtc(ordersFrom, bizSettings).toISOString();
+    const to = new Date(businessDayStartUtc(addDays(ordersTo, 1), bizSettings).getTime() - 1).toISOString();
+    let cancelled = false;
+    const t = setTimeout(() => setRangeLoading(true), 0);
+    fetchOrders({ from, to })
+      .then(o => { if (!cancelled) setRangeResult({ key: ordersRangeKey, data: o }); })
+      .finally(() => { if (!cancelled) setRangeLoading(false); });
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [sessionReady, ordersRangeKey, ordersFrom, ordersTo, bizSettings, rangeRefreshKey]);
+
   useEffect(() => {
     if (!sessionReady || tab !== 'kassa') return;
     setShiftsLoading(true);
@@ -909,6 +936,13 @@ function AdminPageContent() {
     setStatsRefreshKey(k => k + 1);
   }
 
+  // Applies a local edit to both order lists, so a change made while a date range
+  // is showing doesn't disappear when the range list is the one on screen.
+  function patchOrder(id: string, patch: (o: Order) => Order) {
+    setOrders(prev => prev.map(o => o.id === id ? patch(o) : o));
+    setRangeResult(prev => prev ? { ...prev, data: prev.data.map(o => o.id === id ? patch(o) : o) } : prev);
+  }
+
   async function refresh() {
     setRefreshing(true);
     try {
@@ -916,6 +950,8 @@ function AdminPageContent() {
       setOrders(o);
       setTotalOrders(total);
       invalidateTodayStatsCache();
+      // Past ranges never change on their own — only refetch one that reaches today.
+      if (rangeOrders && ordersTo >= businessToday(bizSettings)) setRangeRefreshKey(k => k + 1);
     } finally { setRefreshing(false); }
   }
 
@@ -1189,11 +1225,11 @@ function AdminPageContent() {
   }
 
   async function handleStatusChange(orderId: string, status: OrderStatus) {
-    const prevStatus = orders.find(o => o.id === orderId)?.status;
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
+    const prevStatus = (rangeOrders ?? orders).find(o => o.id === orderId)?.status;
+    patchOrder(orderId, o => ({ ...o, status }));
     const ok = await updateOrderStatus(orderId, status);
     if (!ok && prevStatus) {
-      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: prevStatus } : o));
+      patchOrder(orderId, o => ({ ...o, status: prevStatus }));
     }
   }
 
@@ -1225,9 +1261,7 @@ function AdminPageContent() {
     setCancelBusy(false);
     setCancellingOrder(null);
     if (ok) {
-      setOrders(prev => prev.map(o => o.id === cancelling.id
-        ? { ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: adminName, cancelledAt: new Date().toISOString() }
-        : o));
+      patchOrder(cancelling.id, o => ({ ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: adminName, cancelledAt: new Date().toISOString() }));
     } else {
       refresh();
     }
@@ -1571,7 +1605,11 @@ function AdminPageContent() {
     : 0;
   const todayStr = businessToday(bizSettings);
   const weekStart = addDays(todayStr, -((dayOfWeek(todayStr) + 6) % 7));
-  const ordersDateFiltered = ordersPreset === 'bugün'
+  // A picked date range replaces the loaded page entirely — it was fetched for
+  // exactly those days, so the presets don't apply on top of it.
+  const ordersDateFiltered = rangeOrders
+    ? rangeOrders
+    : ordersPreset === 'bugün'
     ? orders.filter(o => businessDay(o.createdAt, bizSettings) === todayStr)
     : ordersPreset === 'bu həftə'
     ? orders.filter(o => businessDay(o.createdAt, bizSettings) >= weekStart)
@@ -2380,7 +2418,9 @@ function AdminPageContent() {
             <div className="max-w-3xl space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-stone-500">
-                  {totalOrders > orders.length ? `${totalOrders} sifariş · son ${orders.length}` : `${orders.length} sifariş`} · {activeOrders.length} aktiv
+                  {rangeOrders
+                    ? `${rangeOrders.length} sifariş · seçilmiş tarix`
+                    : totalOrders > orders.length ? `${totalOrders} sifariş · son ${orders.length}` : `${orders.length} sifariş`} · {activeOrders.length} aktiv
                 </p>
                 <div className="flex items-center gap-2">
                   <button
@@ -2402,16 +2442,45 @@ function AdminPageContent() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {(['all', 'bugün', 'bu həftə'] as const).map(p => (
                   <button
                     key={p}
-                    onClick={() => setOrdersPreset(p)}
-                    className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${ordersPreset === p ? 'bg-primary-800 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}
+                    onClick={() => { setOrdersPreset(p); setOrdersFrom(''); setOrdersTo(''); }}
+                    className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${!rangeOrders && ordersPreset === p ? 'bg-primary-800 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}
                   >
                     {p === 'all' ? 'Hamısı' : p === 'bugün' ? 'Bugün' : 'Bu həftə'}
                   </button>
                 ))}
+
+                <div className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 ${rangeOrders ? 'bg-primary-50 border-primary-300' : 'bg-white border-stone-200'}`}>
+                  <input
+                    type="date"
+                    value={ordersFrom}
+                    max={ordersTo || undefined}
+                    onChange={e => setOrdersFrom(e.target.value)}
+                    className="text-xs font-medium text-stone-700 bg-transparent border-none outline-none w-[118px]"
+                  />
+                  <span className="text-stone-400 text-xs">—</span>
+                  <input
+                    type="date"
+                    value={ordersTo}
+                    min={ordersFrom || undefined}
+                    onChange={e => setOrdersTo(e.target.value)}
+                    className="text-xs font-medium text-stone-700 bg-transparent border-none outline-none w-[118px]"
+                  />
+                </div>
+
+                {(ordersFrom || ordersTo) && (
+                  <button
+                    onClick={() => { setOrdersFrom(''); setOrdersTo(''); }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-white border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors"
+                  >
+                    Tarixi sıfırla
+                  </button>
+                )}
+
+                {rangeLoading && <span className="w-3.5 h-3.5 border-2 border-primary-200 border-t-primary-800 rounded-full animate-spin" />}
               </div>
 
               <div className="relative">
@@ -2424,16 +2493,16 @@ function AdminPageContent() {
                 />
               </div>
 
-              {orders.length === 0 && (
+              {ordersDateFiltered.length === 0 && (
                 <div className="bg-white rounded-xl border border-stone-100 card p-16 text-center">
                   <Coffee className="w-10 h-10 mx-auto mb-3 text-stone-200" />
-                  <p className="text-sm text-stone-500">Sifariş yoxdur</p>
+                  <p className="text-sm text-stone-500">{rangeOrders ? 'Seçilmiş tarixdə sifariş yoxdur' : 'Sifariş yoxdur'}</p>
                 </div>
               )}
 
-              {orders.length > 0 && visibleOrders.length === 0 && (
+              {ordersDateFiltered.length > 0 && visibleOrders.length === 0 && (
                 <div className="bg-white rounded-xl border border-stone-100 card p-10 text-center">
-                  <p className="text-sm text-stone-500">Axtarışa uyğun sifariş tapılmadı (yüklənmiş {orders.length} sifariş arasında)</p>
+                  <p className="text-sm text-stone-500">Axtarışa uyğun sifariş tapılmadı ({ordersDateFiltered.length} sifariş arasında)</p>
                 </div>
               )}
 
@@ -2536,7 +2605,7 @@ function AdminPageContent() {
                                 <button
                                   onClick={() => setDialog({ title: 'Sifarişi sil?', message: <>№{order.orderNumber} silinib statusuna keçəcək. Bərpa edə bilərsiniz.</>, onConfirm: async () => {
                                     const ok = await deleteOrder(order.id);
-                                    if (ok) setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'silinib' as OrderStatus } : o));
+                                    if (ok) patchOrder(order.id, o => ({ ...o, status: 'silinib' as OrderStatus }));
                                   }})}
                                   className="text-xs font-semibold text-red-400 border border-red-200 hover:bg-red-50 rounded-lg px-2.5 py-1 transition-colors"
                                 >
@@ -2548,7 +2617,7 @@ function AdminPageContent() {
                                   onClick={async () => {
                                     const prev = (order.cashAmount || order.cardAmount) ? 'ödənilib' : 'ləğv edildi';
                                     const ok = await restoreOrder(order.id, prev);
-                                    if (ok) setOrders(prev2 => prev2.map(o => o.id === order.id ? { ...o, status: prev as OrderStatus } : o));
+                                    if (ok) patchOrder(order.id, o => ({ ...o, status: prev as OrderStatus }));
                                   }}
                                   className="text-xs font-semibold text-green-600 border border-green-200 hover:bg-green-50 rounded-lg px-2.5 py-1 transition-colors"
                                 >
@@ -2575,7 +2644,7 @@ function AdminPageContent() {
                 })}
               </div>
 
-              {!orderQuery && orders.length < totalOrders && (
+              {!orderQuery && !rangeOrders && orders.length < totalOrders && (
                 <button
                   onClick={loadMoreOrders}
                   disabled={loadingMore}
@@ -3728,10 +3797,7 @@ function AdminPageContent() {
                   setEditPaymentBusy(true);
                   const ok = await editOrderPayment(editingPaymentOrder.id, cash, card);
                   if (ok) {
-                    setOrders(prev => prev.map(o => o.id === editingPaymentOrder.id
-                      ? { ...o, cashAmount: cash, cardAmount: card, changeAmount: 0 }
-                      : o
-                    ));
+                    patchOrder(editingPaymentOrder.id, o => ({ ...o, cashAmount: cash, cardAmount: card, changeAmount: 0 }));
                     setEditingPaymentOrder(null);
                     setEditPaymentError('');
                   }
