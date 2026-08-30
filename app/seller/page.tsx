@@ -10,18 +10,18 @@ import {
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
-  fetchMenu, addOrder, addItemsToOrder, setOrderItemQuantity, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, fetchCategories, setCompanyContext, fetchTables,
+  fetchMenu, addOrder, addItemsToOrder, setOrderItemQuantity, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, fetchCategories, setCompanyContext, fetchTables, fetchHalls,
   fetchTablesEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, fetchStaff, verifyStaffPin, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
-  fetchStations, fetchStationReady, type StationReady,
+  fetchStations, fetchStationReady, fetchModifierGroups, type StationReady,
 } from '@/lib/store';
 import { menuIndex, stationForItem, readyStationIds } from '@/lib/stations';
 import { unlockSound, armSoundOnFirstGesture, playOrderReady } from '@/lib/sound';
 import { applyBrand } from '@/lib/branding';
 import { orderClosedAt } from '@/lib/order-items';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
-import { CashShift, Category, MenuItem, Order, OrderItem, OrderStatus, RestaurantTable, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
+import { CashShift, Category, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import { connectPrinter, disconnectPrinter, printReceipt, openCashDrawer } from '@/lib/printer';
@@ -33,24 +33,16 @@ function azNormalize(s: string): string {
   return s.toLocaleLowerCase('az').replace(/[çəğıöşü]/g, ch => AZ_CHARS[ch]);
 }
 
+// The station panel reads tables over the public API, which hands back raw DB
+// rows (hall_id, not hallId) — bring them to the shape the rest of the page uses.
+type ApiTableRow = Omit<RestaurantTable, 'hallId'> & { hall_id?: string | null };
+function normalizeTables(rows: ApiTableRow[]): RestaurantTable[] {
+  return rows.map(({ hall_id, ...t }) => ({ ...t, hallId: hall_id ?? undefined }));
+}
+
 type View = 'orders' | 'new-order' | 'menu' | 'kassa' | 'history';
 type PayMethod = 'nağd' | 'kart';
 type OrderType = 'masa' | 'takeaway';
-
-const MOD_GROUPS: Record<string, { label: string; options: string[] }[]> = {
-  'Qəhvə': [
-    { label: 'Ölçü', options: ['S', 'M', 'L'] },
-    { label: 'Süd', options: ['Tam', 'Oat', 'Badam', 'Soya'] },
-    { label: 'Temp', options: ['İsti', 'Buzlu'] },
-  ],
-  'Çay': [
-    { label: 'Ölçü', options: ['Kiçik', 'Böyük'] },
-    { label: 'Temp', options: ['İsti', 'Soyuq'] },
-  ],
-  'Soyuq içkilər': [
-    { label: 'Ölçü', options: ['Kiçik', 'Böyük'] },
-  ],
-};
 
 const STATUS_COLORS: Record<OrderStatus, string> = {
   'gözləyir':  'bg-primary-100 text-primary-700',
@@ -97,6 +89,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
 
   // new order
   const [tables, setTables]                 = useState<RestaurantTable[]>([]);
+  const [halls, setHalls]                   = useState<Hall[]>([]);
+  const [activeHallId, setActiveHallId]     = useState<string | null>(null);
   // Tables off (takeaway-only company): the Masa/Takeaway screen is skipped and
   // "Yeni sifariş" opens the product menu directly
   const [tablesOn, setTablesOn]             = useState(true);
@@ -251,8 +245,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const [shouldPrintReceipt, setShouldPrintReceipt] = useState(true);
 
   // modifier / variant modal
+  const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([]);
   const [modifierItem, setModifierItem] = useState<MenuItem | null>(null);
-  const [selectedMods, setSelectedMods] = useState<Record<string, string>>({});
+  // group id → the option ids picked in it. A pick-one group holds at most one.
+  const [selectedMods, setSelectedMods] = useState<Record<string, string[]>>({});
   const [selectedVariant, setSelectedVariant] = useState<{ id: string; name: string; price: number } | null>(null);
 
   // Company timezone + working hours: "Bu gün" follows the business day, so a
@@ -271,25 +267,31 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     if (!silent) setPullRefreshing(true);
     try {
       if (overrideCompanyId) {
-        const [m, o, c, tb, st, rd] = await Promise.all([
+        const [m, o, c, tb, st, rd, mg] = await Promise.all([
           fetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
           fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
           fetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
-          fetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.tables ?? []).catch(() => []),
+          fetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => ({ tables: normalizeTables(d.tables ?? []), halls: (d.halls ?? []) as Hall[] })).catch(() => ({ tables: [], halls: [] })),
           fetch(`/api/public-staff?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.staff ?? []).catch(() => null),
           fetch(`/api/public-station-ready?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.ready ?? []).catch(() => null),
+          fetch(`/api/public-modifiers?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.groups ?? null).catch(() => null),
         ]);
-        setMenu(m); setOrders(o); setTables(tb);
+        setMenu(m); setOrders(o); setTables(tb.tables); setHalls(tb.halls);
         setAvailableCategories(c.filter((cat: { available: boolean }) => cat.available));
         if (st) setPinStaffList(st);
         if (rd) setReadyRows(rd);
+        // Keep the sets already in hand if the read failed: an empty list would
+        // silently drop priced options off the next sale.
+        if (mg) setModifierGroups(mg);
       } else {
-        const [m, o, c, st, s] = await Promise.all([
-          fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(),
+        const [m, o, c, st, s, mg, tb, hl] = await Promise.all([
+          fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(), fetchModifierGroups(),
+          fetchTables(), fetchHalls(),
         ]);
-        setMenu(m); setOrders(o); setShift(s);
+        setMenu(m); setOrders(o); setShift(s); setTables(tb); setHalls(hl);
         setAvailableCategories(c.filter(cat => cat.available));
         setPinStaffList(st);
+        setModifierGroups(mg);
       }
     } catch { /* ignore */ } finally {
       if (!silent) setPullRefreshing(false);
@@ -492,15 +494,17 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
         setShift(shiftData.shift ?? null);
         setShiftChecked(true);
       });
+      fetch(`/api/public-modifiers?companyId=${overrideCompanyId}`)
+        .then(r => r.json()).then(d => setModifierGroups(d.groups ?? [])).catch(() => {});
       Promise.all([
         fetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
         fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
         fetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
-        fetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.tables ?? []).catch(() => []),
+        fetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => ({ tables: normalizeTables(d.tables ?? []), halls: (d.halls ?? []) as Hall[] })).catch(() => ({ tables: [], halls: [] })),
         fetchTablesEnabled(),
         fetchKassaEnabled(),
       ]).then(([m, o, c, tb, te, ke]) => {
-        setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te); setKassaOn(ke as boolean);
+        setOnline(true); setMenu(m); setOrders(o); setTables(tb.tables); setHalls(tb.halls); setTablesOn(te); setKassaOn(ke as boolean);
         const available = c.filter((cat: { available: boolean }) => cat.available);
         setAvailableCategories(available);
         const cats = available.filter((a: { name: string }) => m.some((i: { category: string }) => i.category === a.name)).map((a: { name: string }) => a.name);
@@ -535,6 +539,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     fetchOrdersCount().then(setTotalOrders);
     fetchStations().then(setStations);
     fetchStationReady().then(setReadyRows);
+    fetchModifierGroups().then(setModifierGroups);
+    fetchHalls().then(setHalls);
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled(), fetchKassaEnabled(), fetchPrintReceipt()]).then(([m, o, c, tb, te, ke, pr]) => {
       setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te); setKassaOn(ke); setShouldPrintReceipt(pr);
       const available = c.filter(cat => cat.available);
@@ -550,10 +556,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     async function sync() {
       if (!getSession()) return;
       try {
-        const [m, o, c, st, s] = await Promise.all([
-          fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(),
+        const [m, o, c, st, s, mg] = await Promise.all([
+          fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(), fetchModifierGroups(),
         ]);
-        setMenu(m); setOrders(o); setShift(s);
+        setMenu(m); setOrders(o); setShift(s); setModifierGroups(mg);
         setAvailableCategories(c.filter(cat => cat.available));
         setPinStaffList(st);
       } catch { /* ignore focus sync errors */ }
@@ -642,6 +648,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => refreshAll())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => refreshAll())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_tables' }, () => refreshAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'halls' }, () => refreshAll())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'companies' }, async () => {
         const [te, ke] = await Promise.all([fetchTablesEnabled(), fetchKassaEnabled()]);
         setTablesOn(te); setKassaOn(ke);
@@ -652,36 +659,53 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
 
   // ── cart helpers ──────────────────────────────────────────────────────────
 
-  function addToCart(item: MenuItem, mods?: string, variantId?: string) {
+  // Two cart lines merge only when they are the same product, the same picks AND
+  // the same price. Price is in the key because the same label can now cost
+  // different amounts — a set re-priced mid-cart must not fold two lines together
+  // and charge both at one price.
+  function sameCartLine(ci: OrderItem, itemId: string, mods?: string, price?: number): boolean {
+    return ci.menuItem.id === itemId
+      && (ci.modifiers ?? '') === (mods ?? '')
+      && (price === undefined || ci.menuItem.price === price);
+  }
+
+  function addToCart(item: MenuItem, mods?: string, variantId?: string, modifiersDetail?: SelectedModifier[]) {
     setCart(prev => {
-      const ex = prev.find(ci => ci.menuItem.id === item.id && (ci.modifiers ?? '') === (mods ?? ''));
+      const ex = prev.find(ci => sameCartLine(ci, item.id, mods, item.price));
       if (ex) return prev.map(ci =>
-        ci.menuItem.id === item.id && (ci.modifiers ?? '') === (mods ?? '')
-          ? { ...ci, quantity: ci.quantity + 1 } : ci
+        sameCartLine(ci, item.id, mods, item.price) ? { ...ci, quantity: ci.quantity + 1 } : ci
       );
-      return [...prev, { menuItem: item, quantity: 1, modifiers: mods, variantId }];
+      return [...prev, { menuItem: item, quantity: 1, modifiers: mods, variantId, modifiersDetail }];
     });
   }
 
-  function removeFromCart(itemId: string, mods?: string) {
+  function removeFromCart(itemId: string, mods?: string, price?: number) {
     setCart(prev => {
-      const ex = prev.find(ci => ci.menuItem.id === itemId && (ci.modifiers ?? '') === (mods ?? ''));
+      const ex = prev.find(ci => sameCartLine(ci, itemId, mods, price));
       if (!ex) return prev;
-      if (ex.quantity === 1) return prev.filter(ci => !(ci.menuItem.id === itemId && (ci.modifiers ?? '') === (mods ?? '')));
+      if (ex.quantity === 1) return prev.filter(ci => !sameCartLine(ci, itemId, mods, price));
       return prev.map(ci =>
-        ci.menuItem.id === itemId && (ci.modifiers ?? '') === (mods ?? '')
-          ? { ...ci, quantity: ci.quantity - 1 } : ci
+        sameCartLine(ci, itemId, mods, price) ? { ...ci, quantity: ci.quantity - 1 } : ci
       );
     });
+  }
+
+  // The reusable sets this item offers, in the order the owner arranged them.
+  function groupsForItem(item: MenuItem): ModifierGroup[] {
+    const ids = item.modifierGroupIds ?? [];
+    if (ids.length === 0) return [];
+    return ids
+      .map(id => modifierGroups.find(g => g.id === id))
+      .filter((g): g is ModifierGroup => !!g && g.options.length > 0);
   }
 
   function handleMenuItemTap(item: MenuItem) {
-    const groups = MOD_GROUPS[item.category] ?? [];
+    const groups = groupsForItem(item);
     const hasVariants = (item.variants?.length ?? 0) > 0;
     if (hasVariants || groups.length > 0) {
-      const init: Record<string, string> = {};
-      groups.forEach(g => { init[g.label] = g.options[0]; });
-      setSelectedMods(init);
+      // Nothing is preselected: with prices in play, a default pick would quietly
+      // add money the seller never chose. Required groups are enforced instead.
+      setSelectedMods({});
       setSelectedVariant(hasVariants ? { id: item.variants![0].id, name: item.variants![0].name, price: item.variants![0].price } : null);
       setModifierItem(item);
     } else {
@@ -689,21 +713,79 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     }
   }
 
+  // What the current modal selection comes to. One place computes the price, the
+  // label and the snapshot, so what the seller is shown and what is charged can
+  // never disagree.
+  const modifierDraft = useMemo(() => {
+    if (!modifierItem) return null;
+    const base = selectedVariant?.price ?? modifierItem.price;
+    const detail: SelectedModifier[] = [];
+    for (const g of groupsForItem(modifierItem)) {
+      for (const optId of selectedMods[g.id] ?? []) {
+        const opt = g.options.find(o => o.id === optId);
+        if (opt) detail.push({ groupName: g.name, optionName: opt.name, price: opt.price });
+      }
+    }
+    // Two decimals: summing 0.1-style prices in binary floating point otherwise
+    // leaves 3.0000000000000004 on the receipt.
+    const price = Math.round((base + detail.reduce((s, d) => s + d.price, 0)) * 100) / 100;
+    const label = [selectedVariant?.name, ...detail.map(d => d.optionName)].filter(Boolean).join(' · ');
+    // A required group with nothing picked blocks the add.
+    const missing = groupsForItem(modifierItem).some(g => g.minSelect > 0 && (selectedMods[g.id]?.length ?? 0) === 0);
+    return { price, label, detail, missing };
+  // groupsForItem reads modifierGroups; both are in the deps below.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modifierItem, selectedVariant, selectedMods, modifierGroups]);
+
+  function toggleModOption(group: ModifierGroup, optionId: string) {
+    setSelectedMods(prev => {
+      const current = prev[group.id] ?? [];
+      const isOn = current.includes(optionId);
+      // Pick-one replaces; tapping the picked option again clears it, so a
+      // non-required group can be left empty on purpose.
+      if (group.maxSelect === 1) return { ...prev, [group.id]: isOn ? [] : [optionId] };
+      if (isOn) return { ...prev, [group.id]: current.filter(id => id !== optionId) };
+      if (group.maxSelect !== null && current.length >= group.maxSelect) return prev;
+      return { ...prev, [group.id]: [...current, optionId] };
+    });
+  }
+
   function confirmModifiers() {
-    if (!modifierItem) return;
-    const groups = MOD_GROUPS[modifierItem.category] ?? [];
-    const modsStr = groups.map(g => selectedMods[g.label]).filter(Boolean).join(' · ');
-    const itemToAdd = selectedVariant ? { ...modifierItem, price: selectedVariant.price } : modifierItem;
-    const label = [selectedVariant?.name, modsStr].filter(Boolean).join(' · ');
-    addToCart(itemToAdd, label || undefined, selectedVariant?.id);
+    if (!modifierItem || !modifierDraft || modifierDraft.missing) return;
+    // The folded price rides on menuItem.price — the snapshot every total reads.
+    const itemToAdd = { ...modifierItem, price: modifierDraft.price };
+    addToCart(
+      itemToAdd,
+      modifierDraft.label || undefined,
+      selectedVariant?.id,
+      modifierDraft.detail.length > 0 ? modifierDraft.detail : undefined,
+    );
     setModifierItem(null);
     setSelectedVariant(null);
+    setSelectedMods({});
   }
 
   function tableName(id: number | null): string {
     if (!id) return tablesOn ? 'Takeaway' : '';
     return tables.find(t => t.id === id)?.name ?? `Masa ${id}`;
   }
+
+  function hallName(id: string | undefined): string {
+    return halls.find(h => h.id === (id ?? halls[0]?.id))?.name ?? '';
+  }
+
+  // Tables predating halls have no hall_id; they belong to the first hall so the
+  // floor plan never hides a table the seller can still be handed an order for.
+  const firstHallId = halls[0]?.id ?? null;
+  const hallTables = useMemo(
+    () => tables.filter(t => (t.hallId ?? firstHallId) === activeHallId),
+    [tables, activeHallId, firstHallId],
+  );
+
+  useEffect(() => {
+    if (halls.length === 0) { setActiveHallId(null); return; }
+    setActiveHallId(prev => (prev && halls.some(h => h.id === prev) ? prev : halls[0].id));
+  }, [halls]);
 
   function handleNav(id: View) {
     if (id === 'kassa' && !kassaOn) return;
@@ -1945,6 +2027,21 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
               {orderType === 'masa' && (
                 <div>
                   <p className="text-sm font-medium text-stone-700 mb-3">Masanı seçin</p>
+                  {halls.length > 1 && (
+                    <div className="flex flex-wrap gap-1 bg-stone-100 rounded-xl p-1 mb-3 max-w-fit">
+                      {halls.map(h => (
+                        <button
+                          key={h.id}
+                          onClick={() => setActiveHallId(h.id)}
+                          className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors active:scale-95 ${
+                            activeHallId === h.id ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-700'
+                          }`}
+                        >
+                          {h.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex items-center gap-3 text-xs text-stone-600 mb-4">
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-100 border border-green-300 inline-block" /> Boş</span>
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block" /> Dolu</span>
@@ -1958,7 +2055,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                       backgroundSize: '24px 24px',
                     }}
                   >
-                    {tables.map((t, i) => {
+                    {hallTables.map((t, i) => {
                       const busy = tableHasActive(t.id, orders);
                       const posX = t.x ?? (20 + (i % 5) * 130);
                       const posY = t.y ?? (20 + Math.floor(i / 5) * 110);
@@ -2355,6 +2452,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                       }`}
                     >
                       {t.name}
+                      {halls.length > 1 && <span className="text-[10px] ml-1 text-stone-400">{hallName(t.hallId)}</span>}
                       {current && <span className="text-[10px] ml-1 opacity-70">(hazırkı)</span>}
                     </button>
                   );
@@ -2528,7 +2626,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
             <h3 className="font-bold text-lg text-stone-800 mb-1">{modifierItem.name}</h3>
             <p className="text-sm text-stone-500 mb-4">Seçimləri edin</p>
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-[55vh] overflow-y-auto">
               {(modifierItem.variants?.length ?? 0) > 0 && (
                 <div>
                   <p className="text-xs font-semibold text-stone-600 uppercase tracking-wide mb-2">Variant</p>
@@ -2545,26 +2643,53 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                   </div>
                 </div>
               )}
-              {(MOD_GROUPS[modifierItem.category] ?? []).map(group => (
-                <div key={group.label}>
-                  <p className="text-xs font-semibold text-stone-600 uppercase tracking-wide mb-2">{group.label}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {group.options.map(opt => (
-                      <button
-                        key={opt}
-                        onClick={() => setSelectedMods(prev => ({ ...prev, [group.label]: opt }))}
-                        className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${selectedMods[group.label] === opt ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 text-stone-600 hover:border-stone-300'}`}
-                      >
-                        {opt}
-                      </button>
-                    ))}
+              {groupsForItem(modifierItem).map(group => {
+                const picked = selectedMods[group.id] ?? [];
+                return (
+                  <div key={group.id}>
+                    <p className="text-xs font-semibold text-stone-600 uppercase tracking-wide mb-2">
+                      {group.name}
+                      {group.minSelect > 0 && <span className="text-red-500 ml-1">*</span>}
+                      {group.maxSelect !== 1 && <span className="text-stone-400 font-normal normal-case ml-1.5">(bir neçə seçim)</span>}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {group.options.map(opt => {
+                        const on = picked.includes(opt.id);
+                        return (
+                          <button
+                            key={opt.id}
+                            onClick={() => toggleModOption(group, opt.id)}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${on ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 text-stone-600 hover:border-stone-300'}`}
+                          >
+                            {opt.image && <img src={opt.image} alt="" className="w-6 h-6 rounded object-cover" />}
+                            <span>{opt.name}</span>
+                            {/* A 0 price is a free choice — showing "+0.00 ₼" would only add noise. */}
+                            {opt.price > 0 && (
+                              <span className={on ? 'text-primary-700' : 'text-stone-400'}>+{opt.price.toFixed(2)} ₼</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
-            <div className="flex gap-2 mt-6">
-              <button onClick={() => setModifierItem(null)} className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">Ləğv et</button>
-              <button onClick={confirmModifiers} className="flex-1 py-3 rounded-xl bg-primary-800 hover:bg-primary-900 text-white font-semibold text-sm active:scale-95">Əlavə et</button>
+            {modifierDraft && (
+              <p className="mt-4 text-sm text-stone-600 flex items-baseline justify-between">
+                <span>Qiymət</span>
+                <span className="text-lg font-bold text-stone-800">{modifierDraft.price.toFixed(2)} ₼</span>
+              </p>
+            )}
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => { setModifierItem(null); setSelectedMods({}); }} className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">Ləğv et</button>
+              <button
+                onClick={confirmModifiers}
+                disabled={modifierDraft?.missing}
+                className="flex-1 py-3 rounded-xl bg-primary-800 hover:bg-primary-900 disabled:bg-stone-200 disabled:text-stone-400 text-white font-semibold text-sm active:scale-95 disabled:active:scale-100"
+              >
+                {modifierDraft?.missing ? 'Seçim edin' : 'Əlavə et'}
+              </button>
             </div>
           </div>
         </div>
@@ -2581,7 +2706,9 @@ function CartItems({ cart, existingItems, removedItems, addToCart, removeFromCar
   existingItems?: OrderItem[];
   removedItems?: OrderItem[];
   addToCart: (item: MenuItem, mods?: string) => void;
-  removeFromCart: (itemId: string, mods?: string) => void;
+  // price identifies the line: the same product with the same label can sit in the
+  // cart at two prices if its set was re-priced between the two taps.
+  removeFromCart: (itemId: string, mods?: string, price?: number) => void;
   onDecrementExisting?: (oi: OrderItem) => void;
 }) {
   // Active items only — removed lines cost the guest nothing.
@@ -2634,7 +2761,7 @@ function CartItems({ cart, existingItems, removedItems, addToCart, removeFromCar
       )}
     <ul className="space-y-3">
       {cart.map(ci => (
-        <li key={ci.menuItem.id + (ci.modifiers ?? '')} className="flex items-center gap-3">
+        <li key={ci.menuItem.id + (ci.modifiers ?? '') + ci.menuItem.price} className="flex items-center gap-3">
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-stone-800 truncate">{ci.menuItem.name}</p>
             {ci.modifiers && <p className="text-xs text-primary-600 truncate">{ci.modifiers}</p>}
@@ -2642,7 +2769,7 @@ function CartItems({ cart, existingItems, removedItems, addToCart, removeFromCar
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <button
-              onClick={() => removeFromCart(ci.menuItem.id, ci.modifiers)}
+              onClick={() => removeFromCart(ci.menuItem.id, ci.modifiers, ci.menuItem.price)}
               className="w-7 h-7 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-600 flex items-center justify-center active:scale-90"
             >
               <Minus className="w-3 h-3" />

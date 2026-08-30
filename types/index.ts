@@ -2,6 +2,14 @@
 // profiles.station_id says which; every other role leaves it null.
 export type Role = 'superadmin' | 'owner' | 'seller' | 'employee';
 
+// A named floor plan. Tables belong to exactly one hall; the plan is drawn one
+// hall at a time in both the admin and the seller panel.
+export interface Hall {
+  id: string;
+  name: string;
+  position: number;
+}
+
 export interface RestaurantTable {
   id: number;
   name: string;
@@ -11,6 +19,7 @@ export interface RestaurantTable {
   w?: number;
   h?: number;
   shape?: 'rect' | 'round' | 'rect-v';
+  hallId?: string;
 }
 
 export interface TrashItem {
@@ -41,6 +50,34 @@ export interface MenuItemVariant {
   costPrice?: number;
 }
 
+// A reusable set of options ("Şuruplar", "Ölçü"). Built once, attached to as many
+// menu items as the owner likes. Each selected option's price is ADDED on top of
+// the item's base (or variant) price; an option priced 0 is a free choice.
+export interface ModifierOption {
+  id: string;
+  name: string;
+  price: number;      // 0 = no effect on the line price
+  image?: string;
+  position: number;
+}
+
+export interface ModifierGroup {
+  id: string;
+  name: string;
+  minSelect: number;          // 1 = the seller must pick before the item can be added
+  maxSelect: number | null;   // 1 = pick one; null = pick any number
+  position: number;
+  options: ModifierOption[];
+}
+
+// What the seller actually chose, snapshotted onto the order line. Display only —
+// the money is already folded into OrderItem.menuItem.price.
+export interface SelectedModifier {
+  groupName: string;
+  optionName: string;
+  price: number;
+}
+
 export interface MenuItem {
   id: string;
   name: string;
@@ -52,6 +89,7 @@ export interface MenuItem {
   image?: string;
   stationId?: string | null;   // which sex prepares it; null = unassigned
   kind?: 'product' | 'meal';   // absent = treat as 'product'
+  modifierGroupIds?: string[]; // which reusable sets this item offers
 }
 
 export interface OrderItem {
@@ -59,6 +97,10 @@ export interface OrderItem {
   menuItem: MenuItem;
   quantity: number;
   modifiers?: string;
+  // The per-option breakdown behind `modifiers`. Absent on rows written before
+  // modifier sets existed, and on lines with no modifiers. menuItem.price already
+  // includes these prices, so no total needs to read this.
+  modifiersDetail?: SelectedModifier[];
   variantId?: string;   // which variant was chosen — drives per-variant stock deduction
   createdAt?: string;   // groups the item into a batch: the original order, or a later "Əlavə et"
   removedAt?: string;   // set = struck through on the order card, and excluded from every total

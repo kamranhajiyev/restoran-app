@@ -1,4 +1,4 @@
-import { CashShift, Category, MenuItem, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
+import { CashShift, Category, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
 import { supabase } from './supabase';
@@ -33,6 +33,23 @@ export async function fetchMenu(): Promise<MenuItem[]> {
     const { data, error } = await supabase.from('menu_items').select('*').order('position');
     if (error || !data) return [];
     _menuLoaded = true;
+
+    // Which reusable modifier sets each item offers. A failed link read must not
+    // look like "no item has any set" — that would make the next saveMenu prune
+    // every link. On error we leave modifierGroupIds undefined, which saveMenu
+    // reads as "don't touch this item's links".
+    const { data: links, error: linkError } = await supabase
+      .from('menu_item_modifier_groups')
+      .select('menu_item_id, group_id')
+      .order('position');
+    const byItem = new Map<string, string[]>();
+    if (!linkError && links) {
+      for (const l of links) {
+        const bucket = byItem.get(l.menu_item_id);
+        if (bucket) bucket.push(l.group_id); else byItem.set(l.menu_item_id, [l.group_id]);
+      }
+    }
+
     return data.map(r => ({
       id: r.id,
       name: r.name,
@@ -44,6 +61,7 @@ export async function fetchMenu(): Promise<MenuItem[]> {
       image: r.image ?? undefined,
       stationId: r.station_id ?? null,
       kind: r.kind ?? 'product',
+      modifierGroupIds: linkError ? undefined : (byItem.get(r.id) ?? []),
     }));
   } catch {
     return [];
@@ -62,10 +80,18 @@ export async function saveMenu(menu: MenuItem[]): Promise<string | null> {
     // trash-restore); one duplicate id would reject the entire write.
     const seen = new Set<string>();
     const rows: Record<string, unknown>[] = [];
+    // Only for items that actually carried a list — undefined means "the caller
+    // doesn't know about this item's sets", and its links are left alone.
+    const linkRows: { menu_item_id: string; group_id: string; position: number }[] = [];
+    const relinkedItemIds: string[] = [];
     for (const m of menu) {
       const id = isValidUUID(m.id) ? m.id : crypto.randomUUID();
       if (seen.has(id)) continue;
       seen.add(id);
+      if (m.modifierGroupIds) {
+        relinkedItemIds.push(id);
+        m.modifierGroupIds.forEach((gid, i) => linkRows.push({ menu_item_id: id, group_id: gid, position: i }));
+      }
       rows.push({
         id,
         name: m.name,
@@ -89,6 +115,18 @@ export async function saveMenu(menu: MenuItem[]): Promise<string | null> {
     if (rows.length > 0) del = del.not('id', 'in', `(${rows.map(r => `"${r.id}"`).join(',')})`);
     const { error: delError } = await del;
     if (delError) { console.error('[saveMenu prune]', delError); return delError.message; }
+
+    // Replace the modifier-set links of the items we were given a list for. Items
+    // deleted above took their links with them (FK cascade), so nothing is orphaned.
+    if (relinkedItemIds.length > 0) {
+      const { error: unlinkError } = await supabase
+        .from('menu_item_modifier_groups').delete().in('menu_item_id', relinkedItemIds);
+      if (unlinkError) { console.error('[saveMenu unlink]', unlinkError); return unlinkError.message; }
+      if (linkRows.length > 0) {
+        const { error: linkError } = await supabase.from('menu_item_modifier_groups').insert(linkRows);
+        if (linkError) { console.error('[saveMenu link]', linkError); return linkError.message; }
+      }
+    }
     return null;
   } catch (e) {
     console.error('[saveMenu]', e);
@@ -98,6 +136,105 @@ export async function saveMenu(menu: MenuItem[]): Promise<string | null> {
 
 export async function setMenuItemAvailable(id: string, available: boolean): Promise<void> {
   await supabase.from('menu_items').update({ available }).eq('id', id).eq('company_id', _companyId);
+}
+
+// ─── Modifikatorlar ───────────────────────────────────────────────────────────
+
+// Same "failed fetch must not wipe data" guard as the menu: a save is refused
+// until a fetch has succeeded at least once.
+let _modifiersLoaded = false;
+
+export async function fetchModifierGroups(): Promise<ModifierGroup[]> {
+  try {
+    const [{ data: groups, error: gError }, { data: options, error: oError }] = await Promise.all([
+      supabase.from('modifier_groups').select('*').order('position'),
+      supabase.from('modifier_options').select('*').order('position'),
+    ]);
+    if (gError || !groups || oError || !options) return [];
+    _modifiersLoaded = true;
+
+    const byGroup = new Map<string, ModifierOption[]>();
+    for (const o of options) {
+      const opt: ModifierOption = {
+        id: o.id,
+        name: o.name,
+        price: Number(o.price),
+        image: o.image ?? undefined,
+        position: o.position,
+      };
+      const bucket = byGroup.get(o.group_id);
+      if (bucket) bucket.push(opt); else byGroup.set(o.group_id, [opt]);
+    }
+
+    return groups.map(g => ({
+      id: g.id,
+      name: g.name,
+      minSelect: g.min_select,
+      maxSelect: g.max_select ?? null,
+      position: g.position,
+      options: byGroup.get(g.id) ?? [],
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// Upsert-then-prune, mirroring saveMenu: a rejected write leaves the existing sets
+// intact instead of emptying them. Returns an error message for the UI, or null.
+export async function saveModifierGroups(groups: ModifierGroup[]): Promise<string | null> {
+  if (!_companyId || !_modifiersLoaded) {
+    console.error('[saveModifierGroups] refused: no company context or sets never loaded');
+    return 'Modifikatorlar hələ yüklənməyib';
+  }
+  try {
+    const groupRows = groups.map((g, i) => ({
+      id: isValidUUID(g.id) ? g.id : crypto.randomUUID(),
+      company_id: _companyId,
+      name: g.name,
+      min_select: g.minSelect,
+      max_select: g.maxSelect,
+      position: i,
+    }));
+
+    if (groupRows.length > 0) {
+      const { error } = await supabase.from('modifier_groups').upsert(groupRows, { onConflict: 'id' });
+      if (error) { console.error('[saveModifierGroups upsert]', error); return error.message; }
+    }
+    let delGroups = supabase.from('modifier_groups').delete().eq('company_id', _companyId);
+    if (groupRows.length > 0) delGroups = delGroups.not('id', 'in', `(${groupRows.map(r => `"${r.id}"`).join(',')})`);
+    const { error: delError } = await delGroups;
+    if (delError) { console.error('[saveModifierGroups prune]', delError); return delError.message; }
+
+    // Options are written against the ids the groups just got, so a brand-new set
+    // and its options land in the same save.
+    const optionRows = groups.flatMap((g, gi) =>
+      g.options.map((o, i) => ({
+        id: isValidUUID(o.id) ? o.id : crypto.randomUUID(),
+        group_id: groupRows[gi].id,
+        name: o.name,
+        price: o.price,
+        image: o.image ?? null,
+        position: i,
+      })));
+
+    if (optionRows.length > 0) {
+      const { error } = await supabase.from('modifier_options').upsert(optionRows, { onConflict: 'id' });
+      if (error) { console.error('[saveModifierGroups options]', error); return error.message; }
+    }
+    // Prune only within the surviving groups — a deleted group already took its
+    // options with it via the FK cascade.
+    if (groupRows.length > 0) {
+      let delOptions = supabase.from('modifier_options')
+        .delete().in('group_id', groupRows.map(r => r.id));
+      if (optionRows.length > 0) delOptions = delOptions.not('id', 'in', `(${optionRows.map(r => `"${r.id}"`).join(',')})`);
+      const { error } = await delOptions;
+      if (error) { console.error('[saveModifierGroups options prune]', error); return error.message; }
+    }
+    return null;
+  } catch (e) {
+    console.error('[saveModifierGroups]', e);
+    return 'Şəbəkə xətası — modifikatorlar yadda saxlanmadı';
+  }
 }
 
 // ─── Categories ───────────────────────────────────────────────────────────────
@@ -443,9 +580,12 @@ export async function addOrder(order: Order): Promise<string | null> {
       order_id: order.id,
       menu_item_id: String(oi.menuItem.id),
       menu_item_name: String(oi.menuItem.name),
+      // Already includes every selected modifier's price — this snapshot is what
+      // every total in the app reads.
       menu_item_price: Number(oi.menuItem.price),
       quantity: Number(oi.quantity),
       modifiers: oi.modifiers ?? null,
+      modifiers_detail: oi.modifiersDetail ?? null,
       variant_id: oi.variantId ?? null,
     }));
     const { error: itemsError } = await supabase.from('order_items').insert(rows);
@@ -474,6 +614,7 @@ export async function addItemsToOrder(orderId: string, items: OrderItem[], note?
         menu_item_price: Number(oi.menuItem.price),
         quantity: Number(oi.quantity),
         modifiers: oi.modifiers ?? null,
+        modifiers_detail: oi.modifiersDetail ?? null,
         variant_id: oi.variantId ?? null,
       }));
       const { error } = await supabase.from('order_items').insert(rows);
@@ -593,7 +734,7 @@ export async function setOrderItemQuantity(orderItemId: string, quantity: number
 
   const { data: row, error: readError } = await supabase
     .from('order_items')
-    .select('order_id, menu_item_id, menu_item_name, menu_item_price, modifiers, variant_id, quantity')
+    .select('order_id, menu_item_id, menu_item_name, menu_item_price, modifiers, modifiers_detail, variant_id, quantity')
     .eq('id', orderItemId)
     .single();
   if (readError || !row) { console.error('[setOrderItemQuantity read]', readError?.message); return false; }
@@ -614,6 +755,7 @@ export async function setOrderItemQuantity(orderItemId: string, quantity: number
     menu_item_name: row.menu_item_name,
     menu_item_price: row.menu_item_price,
     modifiers: row.modifiers,
+    modifiers_detail: row.modifiers_detail,
     variant_id: row.variant_id,
     quantity: removedQty,
     removed_at: new Date().toISOString(),
@@ -1291,7 +1433,7 @@ export async function setKassaEnabled(enabled: boolean): Promise<{ error?: strin
 
 export async function fetchTables(): Promise<RestaurantTable[]> {
   try {
-    const { data, error } = await supabase.from('restaurant_tables').select('id, name, capacity, x, y, w, h, shape').order('id');
+    const { data, error } = await supabase.from('restaurant_tables').select('id, name, capacity, x, y, w, h, shape, hall_id').order('id');
     if (error || !data) return [];
     return data.map(r => ({
       id: r.id,
@@ -1302,14 +1444,15 @@ export async function fetchTables(): Promise<RestaurantTable[]> {
       w: r.w ?? 100,
       h: r.h ?? 70,
       shape: (r.shape ?? 'rect') as 'rect' | 'round' | 'rect-v',
+      hallId: r.hall_id ?? undefined,
     }));
   } catch { return []; }
 }
 
-export async function createTable(name: string, capacity: number, shape: string = 'rect', w?: number, h?: number): Promise<string | null> {
+export async function createTable(name: string, capacity: number, shape: string = 'rect', w?: number, h?: number, hallId?: string | null): Promise<string | null> {
   const { data, error } = await supabase
     .from('restaurant_tables')
-    .insert({ name, capacity, shape, w: w ?? null, h: h ?? null, company_id: _companyId })
+    .insert({ name, capacity, shape, w: w ?? null, h: h ?? null, hall_id: hallId ?? null, company_id: _companyId })
     .select('id')
     .single();
   if (error) { console.error('[createTable]', error); return error.message; }
@@ -1332,6 +1475,62 @@ export async function deleteTable(id: number): Promise<string | null> {
   const { error } = await supabase.from('restaurant_tables').delete().eq('id', id);
   if (error) { console.error('[deleteTable]', error); return error.message; }
   return null;
+}
+
+export async function moveTableToHall(id: number, hallId: string): Promise<void> {
+  try {
+    await supabase.from('restaurant_tables').update({ hall_id: hallId }).eq('id', id);
+  } catch (e) { console.error('[moveTableToHall]', e); }
+}
+
+// ─── Zallar ───────────────────────────────────────────────────────────────────
+
+export async function fetchHalls(): Promise<Hall[]> {
+  try {
+    const { data, error } = await supabase.from('halls').select('id, name, position').order('position').order('name');
+    if (error || !data) return [];
+    return data.map(r => ({ id: r.id, name: r.name, position: r.position ?? 0 }));
+  } catch { return []; }
+}
+
+export async function createHall(name: string): Promise<{ id?: string; error?: string }> {
+  const { data, error } = await supabase
+    .from('halls')
+    .insert({ name, company_id: _companyId })
+    .select('id')
+    .single();
+  if (error) {
+    console.error('[createHall]', error);
+    return { error: error.code === '23505' ? 'Bu adda zal artıq var.' : error.message };
+  }
+  return { id: data.id };
+}
+
+export async function renameHall(id: string, name: string): Promise<string | null> {
+  const { error } = await supabase.from('halls').update({ name }).eq('id', id);
+  if (error) {
+    console.error('[renameHall]', error);
+    return error.code === '23505' ? 'Bu adda zal artıq var.' : error.message;
+  }
+  return null;
+}
+
+export async function deleteHall(id: string): Promise<string | null> {
+  const { error } = await supabase.from('halls').delete().eq('id', id);
+  // 23503: restaurant_tables.hall_id still points here — the hall is not empty.
+  if (error) {
+    console.error('[deleteHall]', error);
+    return error.code === '23503' ? 'Bu zalda masalar var — əvvəlcə onları köçürün və ya silin.' : error.message;
+  }
+  return null;
+}
+
+// Tables created before halls existed (or by a company whose first hall is only
+// being made now) carry hall_id = null; adopt them into the hall being created.
+export async function adoptOrphanTables(hallId: string): Promise<void> {
+  try {
+    await supabase.from('restaurant_tables').update({ hall_id: hallId }).is('hall_id', null);
+  } catch (e) { console.error('[adoptOrphanTables]', e); }
 }
 
 // ─── Superadmin: Companies ────────────────────────────────────────────────────

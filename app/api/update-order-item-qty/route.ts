@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
 
   const { data: row, error: readErr } = await db
     .from('order_items')
-    .select('menu_item_id, menu_item_name, menu_item_price, modifiers, variant_id, quantity')
+    .select('menu_item_id, menu_item_name, menu_item_price, modifiers, modifiers_detail, variant_id, quantity')
     .eq('id', orderItemId).eq('order_id', orderId)
     .single();
   if (readErr || !row) return Response.json({ ok: false }, { status: 404 });
@@ -65,6 +65,7 @@ export async function POST(req: NextRequest) {
       menu_item_name: row.menu_item_name,
       menu_item_price: row.menu_item_price,
       modifiers: row.modifiers,
+      modifiers_detail: row.modifiers_detail,
       variant_id: row.variant_id,
       quantity: removedQty,
       removed_at: now,

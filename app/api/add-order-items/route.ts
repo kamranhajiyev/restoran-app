@@ -1,10 +1,13 @@
 import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
+import type { SelectedModifier } from '@/types';
 
 interface IncomingItem {
+  // price already includes every selected modifier — the client folds them in.
   menuItem: { id: string | number; name: string; price: number };
   quantity: number;
   modifiers?: string;
+  modifiersDetail?: SelectedModifier[];
   variantId?: string;
 }
 
@@ -42,6 +45,7 @@ export async function POST(req: NextRequest) {
     menu_item_price: Number(oi.menuItem.price),
     quantity: Number(oi.quantity),
     modifiers: oi.modifiers ?? null,
+    modifiers_detail: oi.modifiersDetail ?? null,
     variant_id: oi.variantId ?? null,
   }));
 

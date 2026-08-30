@@ -34,7 +34,7 @@ import {
   fetchStaff, createStaff, updateStaff, setStaffPin, deleteStaff,
   fetchSellerToken, linkProductStock,
   fetchBranding, setLogoUrl as saveLogoUrl, setBrandColor as saveBrandColor,
-  fetchStations,
+  fetchStations, fetchModifierGroups,
   fetchAllUsers, createEmployee, updateEmployee, deleteUser, toggleUserActive,
 } from '@/lib/store';
 import { applyBrand, BRAND_PRESETS, DEFAULT_BRAND } from '@/lib/branding';
@@ -44,10 +44,11 @@ import {
   addDays, dayDiff, dayOfWeek, dayToDate, tzHour, cutoffMinutes,
 } from '@/lib/business-day';
 import { supabase } from '@/lib/supabase';
-import { CashShift, Category, MenuItem, MenuItemVariant, Order, OrderStatus, RestaurantTable, Staff, Station, TrashItem, isOrderOpen } from '@/types';
+import { CashShift, Category, Hall, MenuItem, MenuItemVariant, ModifierGroup, Order, OrderStatus, RestaurantTable, Staff, Station, TrashItem, isOrderOpen } from '@/types';
 import AppDialog, { DialogState } from '@/components/AppDialog';
 import AnbarPanel from '@/components/AnbarPanel';
 import StationsPanel from '@/components/StationsPanel';
+import ModifiersPanel from '@/components/ModifiersPanel';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import PasswordField from '@/components/PasswordField';
 import { validatePassword } from '@/lib/password';
@@ -101,7 +102,7 @@ type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
 
 function emptyForm(cat: string) {
-  return { name: '', price: '', costPrice: '', category: cat, image: '', stationId: '', kind: 'meal' as 'product' | 'meal', hasVariants: false, variants: [] as FormVariant[] };
+  return { name: '', price: '', costPrice: '', category: cat, image: '', stationId: '', kind: 'meal' as 'product' | 'meal', hasVariants: false, variants: [] as FormVariant[], modifierGroupIds: [] as string[] };
 }
 
 const AZ_MON_SHORT = ['Yan','Fev','Mar','Apr','May','İyn','İyl','Avq','Sen','Okt','Noy','Dek'];
@@ -507,7 +508,8 @@ function AdminPageContent() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [stations, setStations] = useState<Station[]>([]);
-  const [menuView, setMenuView] = useState<'items' | 'stations'>('items');
+  const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([]);
+  const [menuView, setMenuView] = useState<'items' | 'stations' | 'modifiers'>('items');
   const [adminName, setAdminName] = useState('Admin');
   const [companyName, setCompanyName] = useState('');
   const [online, setOnline] = useState(true);
@@ -828,6 +830,8 @@ function AdminPageContent() {
     });
     fetchStaff().then(setPinStaff);
     fetchStations().then(setStations);
+    fetchModifierGroups().then(setModifierGroups);
+    fetchHalls().then(setHalls);
     reloadEmployees();
     fetchSellerToken(session.companyId ?? '').then(setSellerToken);
     fetchBranding().then(({ logoUrl: l, brandColor: b }) => { setLogoState(l); setBrandColorState(b ?? DEFAULT_BRAND); applyBrand(b); });
@@ -1086,6 +1090,7 @@ function AdminPageContent() {
       kind: item.kind ?? 'product',
       hasVariants: !!item.variants?.length,
       variants: item.variants?.map(v => ({ id: v.id, name: v.name, price: String(v.price), costPrice: v.costPrice ? String(v.costPrice) : '' })) ?? [],
+      modifierGroupIds: item.modifierGroupIds ?? [],
     });
     setShowForm(false);
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
@@ -1110,6 +1115,9 @@ function AdminPageContent() {
       image: form.image || undefined,
       stationId: form.stationId || null,
       kind: form.kind,
+      // Only sets that still exist — a set deleted since the form opened would
+      // otherwise be re-linked and fail the insert's foreign key.
+      modifierGroupIds: form.modifierGroupIds.filter(id => modifierGroups.some(g => g.id === id)),
     };
     const updated = editingId ? menu.map(m => m.id === editingId ? item : m) : [...menu, item];
     setMenu(updated);
@@ -1639,6 +1647,33 @@ function AdminPageContent() {
               </div>
             ))}
             <button type="button" onClick={addVariant} className="text-sm text-primary-800 hover:text-primary-950 font-medium">+ Variant əlavə et</button>
+          </div>
+        )}
+
+        {modifierGroups.length > 0 && (
+          <div>
+            <label className="text-xs font-medium text-stone-600 mb-1.5 block">
+              Modifikatorlar
+              <span className="text-stone-400 font-normal ml-1">— satarkən bu seçimlər təklif olunur</span>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {modifierGroups.map(g => {
+                const on = form.modifierGroupIds.includes(g.id);
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => setForm(f => ({
+                      ...f,
+                      modifierGroupIds: on ? f.modifierGroupIds.filter(id => id !== g.id) : [...f.modifierGroupIds, g.id],
+                    }))}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${on ? 'border-primary-700 bg-primary-50 text-primary-800' : 'border-stone-200 bg-white text-stone-600 hover:border-stone-300'}`}
+                  >
+                    {g.name}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -2938,7 +2973,7 @@ function AdminPageContent() {
           {tab === 'menu' && (
             <div className="max-w-3xl">
               <div className="flex items-center gap-2 mb-5">
-                {([['items', 'Məhsullar'], ['stations', 'Sexlər']] as const).map(([val, label]) => (
+                {([['items', 'Məhsullar'], ['stations', 'Sexlər'], ['modifiers', 'Modifikatorlar']] as const).map(([val, label]) => (
                   <button
                     key={val}
                     onClick={() => setMenuView(val)}
@@ -2955,6 +2990,15 @@ function AdminPageContent() {
                   setStations={setStations}
                   menu={menu}
                   reloadMenu={async () => setMenu(await fetchMenu())}
+                  setDialog={setDialog}
+                />
+              )}
+
+              {menuView === 'modifiers' && (
+                <ModifiersPanel
+                  groups={modifierGroups}
+                  setGroups={setModifierGroups}
+                  menu={menu}
                   setDialog={setDialog}
                 />
               )}

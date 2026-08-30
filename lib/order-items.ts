@@ -1,4 +1,4 @@
-import { Order, OrderItem } from '@/types';
+import { Order, OrderItem, SelectedModifier } from '@/types';
 
 // One `order_items` row as it comes back from PostgREST.
 export interface OrderItemRow {
@@ -8,6 +8,7 @@ export interface OrderItemRow {
   menu_item_price: number;
   quantity: number;
   modifiers?: string | null;
+  modifiers_detail?: SelectedModifier[] | null;
   variant_id?: string | null;
   created_at?: string | null;
   removed_at?: string | null;
@@ -26,6 +27,7 @@ export function mapOrderItem(oi: OrderItemRow): OrderItem {
     },
     quantity: oi.quantity,
     modifiers: oi.modifiers ?? undefined,
+    modifiersDetail: oi.modifiers_detail ?? undefined,
     variantId: oi.variant_id ?? undefined,
     createdAt: oi.created_at ?? undefined,
     removedAt: oi.removed_at ?? undefined,
