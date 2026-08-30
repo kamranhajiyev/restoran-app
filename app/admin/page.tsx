@@ -8,6 +8,7 @@ import {
   Coffee, BarChart2, Package, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
   GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link, Printer, Check, ArrowUp, ArrowDown, ChefHat,
+  Building2, AtSign,
 } from 'lucide-react';
 import {
   DndContext, DragEndEvent, PointerSensor, useSensor, useSensors,
@@ -15,7 +16,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getSession, logout, validateSession, clearLocalSession } from '@/lib/auth';
+import { getSession, logout, validateSession, clearLocalSession, updateSession } from '@/lib/auth';
 import {
   fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, editOrderPayment, deleteOrder, restoreOrder,
   fetchShifts, fetchShiftSales, closeShift, fetchOpenShift,
@@ -26,7 +27,7 @@ import {
   fetchTablesEnabled, setTablesEnabled,
   fetchQrEnabled, setQrEnabled, fetchMenuOnly, setMenuOnly,
   fetchKassaEnabled, setKassaEnabled,
-  fetchCompanyProfile, updateMyCompanyProfile, verifyPassword,
+  fetchCompanyProfile, updateMyCompanyProfile, fetchMyUsername, updateOwnerAccount, verifyPassword,
   fetchCompanySettings, updateCompanyHours,
   fetchLoginEvents, LoginEvent,
   fetchStaff, createStaff, updateStaff, setStaffPin, deleteStaff,
@@ -681,6 +682,11 @@ function AdminPageContent() {
 
   // profile modal
   const [showProfile, setShowProfile] = useState(false);
+  const [profName, setProfName] = useState('');
+  const [profUsername, setProfUsername] = useState('');
+  // What the login was when the modal opened, so an unchanged username doesn't
+  // hit the users endpoint on every save.
+  const [profUsernameSaved, setProfUsernameSaved] = useState('');
   const [profOwner, setProfOwner] = useState('');
   const [profAddress, setProfAddress] = useState('');
   const [profPhone, setProfPhone] = useState('');
@@ -688,6 +694,9 @@ function AdminPageContent() {
   const [profClose, setProfClose] = useState('00:00');
   const [profSaving, setProfSaving] = useState(false);
   const [profMsg, setProfMsg] = useState('');
+  // A rejected username lands in the same slot as "Yadda saxlandı", so the
+  // colour has to say which one it is.
+  const [profMsgErr, setProfMsgErr] = useState(false);
   const [pwCurrent, setPwCurrent] = useState('');
   const [pwNew, setPwNew] = useState('');
   const [pwConfirm, setPwConfirm] = useState('');
@@ -699,13 +708,19 @@ function AdminPageContent() {
   async function openProfile() {
     const session = getSession();
     if (!session?.companyId) return;
-    const profile = await fetchCompanyProfile(session.companyId);
+    const [profile, username] = await Promise.all([
+      fetchCompanyProfile(session.companyId),
+      fetchMyUsername(session.id),
+    ]);
+    setProfName(profile?.name ?? '');
+    setProfUsername(username);
+    setProfUsernameSaved(username);
     setProfOwner(profile?.ownerName ?? '');
     setProfAddress(profile?.address ?? '');
     setProfPhone(profile?.phone ?? '');
     setProfOpen(bizSettings.workOpen);
     setProfClose(bizSettings.workClose);
-    setProfMsg('');
+    setProfMsg(''); setProfMsgErr(false);
     setPwCurrent(''); setPwNew(''); setPwConfirm(''); setPwMsg('');
     setShowProfile(true);
   }
@@ -713,12 +728,27 @@ function AdminPageContent() {
   async function handleSaveProfile() {
     const session = getSession();
     if (!session?.companyId) return;
+    const name = profName.trim();
+    if (!name) { setProfMsgErr(true); setProfMsg('Müəssisənin adı boş ola bilməz'); return; }
     setProfSaving(true);
+    setProfMsgErr(false);
+
+    // The username is the login, so a rejected one (taken, bad format) must not
+    // be reported as saved — do it first and bail out before the rest.
+    const username = profUsername.trim();
+    if (username && username !== profUsernameSaved) {
+      const err = await updateOwnerAccount(session.id, session.name, username);
+      if (err) { setProfMsgErr(true); setProfMsg(err); setProfSaving(false); return; }
+      setProfUsernameSaved(username);
+    }
+
     const open = profOpen || '00:00', close = profClose || '00:00';
     await Promise.all([
-      updateMyCompanyProfile(profOwner.trim(), profAddress.trim(), profPhone.trim()),
+      updateMyCompanyProfile(name, profOwner.trim(), profAddress.trim(), profPhone.trim()),
       updateCompanyHours(open, close),
     ]);
+    updateSession({ companyName: name });
+    setCompanyName(name);
     setBizSettings(prev => ({ ...prev, workOpen: open, workClose: close }));
     setProfMsg('Yadda saxlandı');
     setProfSaving(false);
@@ -4253,6 +4283,28 @@ function AdminPageContent() {
                 <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide mb-3">Müəssisə məlumatları</p>
                 <div className="space-y-3">
                   <div>
+                    <label className="text-xs font-medium text-stone-600 flex items-center gap-1 mb-1"><Building2 className="w-3.5 h-3.5" />Müəssisənin adı</label>
+                    <input
+                      value={profName}
+                      onChange={e => setProfName(e.target.value)}
+                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
+                      placeholder="Məkanın adı"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-stone-600 flex items-center gap-1 mb-1"><AtSign className="w-3.5 h-3.5" />İstifadəçi adı</label>
+                    <input
+                      value={profUsername}
+                      onChange={e => setProfUsername(e.target.value)}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-400"
+                      placeholder="istifadeci"
+                    />
+                    <p className="text-xs text-stone-500 mt-1">Girişdə bu ad istifadə olunur — dəyişsəniz, növbəti dəfə yeni adla daxil olun</p>
+                  </div>
+                  <div>
                     <label className="text-xs font-medium text-stone-600 flex items-center gap-1 mb-1"><User className="w-3.5 h-3.5" />Sahibin adı</label>
                     <input
                       value={profOwner}
@@ -4310,7 +4362,7 @@ function AdminPageContent() {
                     >
                       {profSaving ? 'Saxlanır...' : 'Yadda saxla'}
                     </button>
-                    {profMsg && <span className="text-xs text-green-600 font-medium">{profMsg}</span>}
+                    {profMsg && <span className={`text-xs font-medium ${profMsgErr ? 'text-red-600' : 'text-green-600'}`}>{profMsg}</span>}
                   </div>
                 </div>
               </div>

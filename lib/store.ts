@@ -1411,8 +1411,8 @@ export async function updateCompanyProfile(id: string, ownerName: string, addres
 
 // Owner's own profile save — direct updates to companies are superadmin-only
 // under RLS, so owners go through a security definer RPC like set_work_hours.
-export async function updateMyCompanyProfile(ownerName: string, address: string, phone: string): Promise<void> {
-  const { error } = await supabase.rpc('set_company_profile', { owner_name_t: ownerName, address_t: address, phone_t: phone });
+export async function updateMyCompanyProfile(name: string, ownerName: string, address: string, phone: string): Promise<void> {
+  const { error } = await supabase.rpc('set_company_profile', { name_t: name, owner_name_t: ownerName, address_t: address, phone_t: phone });
   if (error) console.error('[updateMyCompanyProfile]', error);
 }
 
@@ -1442,12 +1442,21 @@ export async function updateCompanyTimezone(id: string, timezone: string): Promi
   return null;
 }
 
-export async function fetchCompanyProfile(id: string): Promise<{ ownerName: string; address: string; phone: string } | null> {
+export async function fetchCompanyProfile(id: string): Promise<{ name: string; ownerName: string; address: string; phone: string } | null> {
   try {
-    const { data, error } = await supabase.from('companies').select('owner_name, address, phone').eq('id', id).single();
+    const { data, error } = await supabase.from('companies').select('name, owner_name, address, phone').eq('id', id).single();
     if (error || !data) return null;
-    return { ownerName: data.owner_name ?? '', address: data.address ?? '', phone: data.phone ?? '' };
+    return { name: data.name ?? '', ownerName: data.owner_name ?? '', address: data.address ?? '', phone: data.phone ?? '' };
   } catch { return null; }
+}
+
+// The session caches the display name but not the login, so the profile modal
+// reads it straight from the row — profiles_select allows id = auth.uid().
+export async function fetchMyUsername(id: string): Promise<string> {
+  try {
+    const { data } = await supabase.from('profiles').select('username').eq('id', id).single();
+    return data?.username ?? '';
+  } catch { return ''; }
 }
 
 export async function verifyPassword(id: string, password: string): Promise<boolean> {

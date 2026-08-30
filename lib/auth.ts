@@ -94,6 +94,14 @@ export function getSession(): Session | null {
   return raw ? JSON.parse(raw) : null;
 }
 
+// Patch the cached session in place. An owner renaming their own venue would
+// otherwise keep seeing the old name in the header until the next login.
+export function updateSession(patch: Partial<Session>) {
+  const stored = getSession();
+  if (!stored) return;
+  localStorage.setItem(AUTH_KEY, JSON.stringify({ ...stored, ...patch }));
+}
+
 export function logout() {
   supabase.auth.signOut();
   localStorage.removeItem(AUTH_KEY);
