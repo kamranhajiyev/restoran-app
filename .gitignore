@@ -45,3 +45,6 @@ next-env.d.ts
 
 # print agent secrets (service-role key)
 agent/.env
+
+# supabase CLI scratch (version cache, linked-project state)
+supabase/.temp/

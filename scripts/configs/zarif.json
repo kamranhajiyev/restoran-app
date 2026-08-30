@@ -1,0 +1,29 @@
+{
+  "name": "Zarif",
+
+  "dishes": {
+    "sheet": 0,
+    "headerRows": 2,
+    "columns": {
+      "name": 2,
+      "category": 3,
+      "price": 6
+    }
+  },
+
+  "products": {
+    "sheet": 0,
+    "headerRows": 2,
+    "columns": {
+      "name": 3,
+      "category": 4,
+      "price": 7
+    }
+  },
+
+  "variantDetection": "byEmptyCategory",
+
+  "categoryFallthrough": true,
+
+  "skipIfNoPrice": false
+}
