@@ -1,5 +1,5 @@
 'use client';
-import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   LayoutDashboard,
@@ -23,7 +23,8 @@ import {
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash, emptyTrash,
   setCompanyContext, updateUser,
-  fetchTables, createTable, updateTable, updateTableLayout, deleteTable, fetchCompanySlug,
+  fetchTables, createTable, updateTable, updateTableLayout, deleteTable, moveTableToHall, fetchCompanySlug,
+  fetchHalls, createHall, renameHall, deleteHall, adoptOrphanTables,
   fetchTablesEnabled, setTablesEnabled,
   fetchQrEnabled, setQrEnabled, fetchMenuOnly, setMenuOnly,
   fetchKassaEnabled, setKassaEnabled,
@@ -623,6 +624,11 @@ function AdminPageContent() {
 
   // tables tab
   const [tables, setTables] = useState<RestaurantTable[]>([]);
+  const [halls, setHalls] = useState<Hall[]>([]);
+  const [activeHallId, setActiveHallId] = useState<string | null>(null);
+  const [showHallForm, setShowHallForm] = useState<'create' | 'rename' | null>(null);
+  const [hallName, setHallName] = useState('');
+  const [hallSaving, setHallSaving] = useState(false);
   const [showTableForm, setShowTableForm] = useState(false);
   const [editingTable, setEditingTable] = useState<RestaurantTable | null>(null);
   const [tName, setTName] = useState('');
@@ -632,6 +638,7 @@ function AdminPageContent() {
   const qrRef = useRef<HTMLDivElement>(null);
   const [tableView, setTableView] = useState<'list' | 'floor'>('floor');
   const [tShape, setTShape] = useState<'rect' | 'round' | 'rect-v'>('rect');
+  const [tHallId, setTHallId] = useState('');
   const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
   const [dragging, setDragging] = useState<{ id: number; ox: number; oy: number; mx: number; my: number } | null>(null);
   const [tableSavedToast, setTableSavedToast] = useState(false);
@@ -959,10 +966,10 @@ function AdminPageContent() {
     if (pullRefreshing) return;
     setPullRefreshing(true);
     try {
-      const [m, o, c, tb, total] = await Promise.all([
-        fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchOrdersCount(),
+      const [m, o, c, tb, total, hl] = await Promise.all([
+        fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchOrdersCount(), fetchHalls(),
       ]);
-      setMenu(m); setOrders(o); setCategories(c); setTables(tb); setTotalOrders(total);
+      setMenu(m); setOrders(o); setCategories(c); setTables(tb); setTotalOrders(total); setHalls(hl);
       invalidateTodayStatsCache();
     } catch { /* ignore */ } finally { setPullRefreshing(false); }
   }
@@ -994,6 +1001,7 @@ function AdminPageContent() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => refreshAllRef.current())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => refreshAllRef.current())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_tables' }, () => refreshAllRef.current())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'halls' }, () => refreshAllRef.current())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cash_shifts' }, () => refreshKassa())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -1383,11 +1391,61 @@ function AdminPageContent() {
     persistCategories(updated);
   }
 
+  // ── zallar ────────────────────────────────────────────────────────────────
+  // A table with no hall_id predates halls (or its company's first hall is only
+  // being made now) — show it in the first hall rather than nowhere.
+  const firstHallId = halls[0]?.id ?? null;
+  const hallTables = useMemo(
+    () => tables.filter(t => (t.hallId ?? firstHallId) === activeHallId),
+    [tables, activeHallId, firstHallId],
+  );
+  const activeHall = halls.find(h => h.id === activeHallId) ?? null;
+
+  useEffect(() => {
+    if (halls.length === 0) { setActiveHallId(null); return; }
+    setActiveHallId(prev => (prev && halls.some(h => h.id === prev) ? prev : halls[0].id));
+  }, [halls]);
+
+  async function submitHallForm(e: React.FormEvent) {
+    e.preventDefault();
+    const name = hallName.trim();
+    if (!name) return;
+    setHallSaving(true);
+    if (showHallForm === 'rename' && activeHallId) {
+      const err = await renameHall(activeHallId, name);
+      if (err) { setDialog({ title: 'Saxlanmadı', message: err }); setHallSaving(false); return; }
+      setHalls(prev => prev.map(h => h.id === activeHallId ? { ...h, name } : h));
+    } else {
+      const { id, error } = await createHall(name);
+      if (error || !id) { setDialog({ title: 'Yaradılmadı', message: error ?? 'Xəta' }); setHallSaving(false); return; }
+      // First hall of the venue: pull in any table still sitting outside a hall.
+      if (halls.length === 0) await adoptOrphanTables(id);
+      const [hl, tb] = await Promise.all([fetchHalls(), fetchTables()]);
+      setHalls(hl); setTables(tb); setActiveHallId(id);
+    }
+    setHallSaving(false);
+    setShowHallForm(null);
+    setHallName('');
+  }
+
+  function removeHall() {
+    if (!activeHall) return;
+    setDialog({
+      title: 'Zalı sil?',
+      message: <><span className="font-medium text-stone-700">&ldquo;{activeHall.name}&rdquo;</span> silinəcək.</>,
+      onConfirm: () => deleteHall(activeHall.id).then(err => {
+        if (err) { setDialog({ title: 'Silinmədi', message: err }); return; }
+        setHalls(prev => prev.filter(h => h.id !== activeHall.id));
+      }),
+    });
+  }
+
   // ── table canvas drag ─────────────────────────────────────────────────────
-  function autoPos(id: number, existing: typeof tables): { x: number; y: number } {
-    const col = existing.length % 5;
-    const row = Math.floor(existing.length / 5);
-    return { x: 20 + col * 130, y: 20 + row * 110 };
+  // Fallback slot for a table that has never been dragged (x/y still null). Keyed
+  // on the table's index in its hall — on the hall's length it put every such
+  // table on the same spot, so a freshly filled hall looked like one table.
+  function autoPos(idx: number): { x: number; y: number } {
+    return { x: 20 + (idx % 5) * 130, y: 20 + Math.floor(idx / 5) * 110 };
   }
   function handleTableDragStart(e: React.MouseEvent, t: typeof tables[0]) {
     e.preventDefault();
@@ -1396,8 +1454,9 @@ function AdminPageContent() {
     const dragState = { id: t.id, ox: t.x ?? 20, oy: t.y ?? 20, mx: e.clientX, my: e.clientY };
     setDragging(dragState);
 
-    // Snapshot other tables once at drag start — they don't move during the drag.
-    const otherTables = tables.filter(x => x.id !== t.id);
+    // Snapshot the other tables once at drag start — they don't move during the
+    // drag. Only this hall's: guides must not snap to a table on another plan.
+    const otherTables = hallTables.filter(x => x.id !== t.id);
     let rafId: number | null = null;
 
     function onMove(ev: MouseEvent) {
@@ -3576,31 +3635,81 @@ function AdminPageContent() {
               )}
 
               {tablesOn && (<>
+              {/* Zal seçici — hər zalın öz planı var */}
+              <div className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-2 flex-wrap">
+                <select
+                  value={activeHallId ?? ''}
+                  onChange={e => {
+                    if (e.target.value === '__new') { setHallName(''); setShowHallForm('create'); return; }
+                    setActiveHallId(e.target.value);
+                    setSelectedTableId(null);
+                  }}
+                  className="border border-stone-200 rounded-lg px-3 py-2 text-sm font-semibold text-stone-700 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  {halls.length === 0 && <option value="">Zal yoxdur</option>}
+                  {halls.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+                  <option value="__new">＋ Zal əlavə et</option>
+                </select>
+                {activeHall && (
+                  <>
+                    <button
+                      onClick={() => { setHallName(activeHall.name); setShowHallForm('rename'); }}
+                      title="Zalın adını dəyiş"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-primary-700 transition-colors"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={removeHall}
+                      title="Zalı sil"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-red-50 hover:text-red-500 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </>
+                )}
+                <span className="ml-auto text-xs text-stone-400">{halls.length} zal · {tables.length} masa</span>
+              </div>
+
+              {halls.length === 0 && (
+                <div className="bg-white rounded-xl border border-stone-100 p-16 text-center">
+                  <LayoutDashboard className="w-10 h-10 mx-auto mb-3 text-stone-200" />
+                  <p className="text-sm text-stone-500 mb-4">Zal yoxdur — masaları yerləşdirmək üçün əvvəlcə zal əlavə edin</p>
+                  <button
+                    onClick={() => { setHallName(''); setShowHallForm('create'); }}
+                    className="inline-flex items-center gap-2 bg-primary-800 hover:bg-primary-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors"
+                  >
+                    <Plus className="w-4 h-4" /> Zal əlavə et
+                  </button>
+                </div>
+              )}
+
+              {halls.length > 0 && (<>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <p className="text-sm font-semibold text-stone-600">{tables.length} masa</p>
+                  <p className="text-sm font-semibold text-stone-600">{hallTables.length} masa</p>
                   <div className="flex bg-stone-100 rounded-lg p-0.5 gap-0.5">
                     <button onClick={() => setTableView('floor')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${tableView === 'floor' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-600'}`}>Plan</button>
                     <button onClick={() => setTableView('list')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${tableView === 'list' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-600'}`}>Siyahı</button>
                   </div>
                 </div>
                 <button
-                  onClick={() => { setEditingTable(null); setTName(''); setTCapacity('4'); setTShape('rect'); setShowTableForm(true); }}
+                  onClick={() => { setEditingTable(null); setTName(''); setTCapacity('4'); setTShape('rect'); setTHallId(activeHallId ?? ''); setShowTableForm(true); }}
                   className="flex items-center gap-2 bg-primary-800 hover:bg-primary-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors"
                 >
                   <Plus className="w-4 h-4" /> Masa əlavə et
                 </button>
               </div>
 
-              {tables.length === 0 && (
+              {hallTables.length === 0 && (
                 <div className="bg-white rounded-xl border border-stone-100 p-16 text-center">
                   <LayoutDashboard className="w-10 h-10 mx-auto mb-3 text-stone-200" />
-                  <p className="text-sm text-stone-500">Masa yoxdur</p>
+                  <p className="text-sm text-stone-500">Bu zalda masa yoxdur</p>
                 </div>
               )}
 
               {/* Floor plan / canvas view */}
-              {tableView === 'floor' && tables.length > 0 && (
+              {tableView === 'floor' && hallTables.length > 0 && (
                 <div className="bg-white rounded-xl border border-stone-100 overflow-hidden">
                   <div className="flex items-center gap-4 px-4 py-3 border-b border-stone-50 text-xs text-stone-500">
                     <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-green-400 inline-block" />Boş</span>
@@ -3625,12 +3734,12 @@ function AdminPageContent() {
                         }
                       />
                     ))}
-                    {tables.map((t, idx) => {
+                    {hallTables.map((t, idx) => {
                       const busy = orders.some(o => o.tableNumber === t.id && isOrderOpen(o));
                       const activeOrder = orders.find(o => o.tableNumber === t.id && isOrderOpen(o));
                       const isSelected = selectedTableId === t.id;
                       const isRound = t.shape === 'round';
-                      const pos = autoPos(idx, tables);
+                      const pos = autoPos(idx);
                       const x = t.x ?? pos.x;
                       const y = t.y ?? pos.y;
                       const w = t.w ?? 100;
@@ -3654,7 +3763,7 @@ function AdminPageContent() {
                           {isSelected && (
                             <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex gap-1 bg-white rounded-lg shadow border border-stone-100 px-1.5 py-1">
                               <button onClick={e => { e.stopPropagation(); setQrTable(t); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-primary-700"><QrCode className="w-3 h-3" /></button>
-                              <button onClick={e => { e.stopPropagation(); setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-primary-700"><Pencil className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setTHallId(t.hallId ?? activeHallId ?? ''); setShowTableForm(true); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-primary-700"><Pencil className="w-3 h-3" /></button>
                               <button onClick={e => { e.stopPropagation(); if (busy) { setDialog({ title: 'Silinmədi', message: 'Aktiv sifarişi olan masanı silmək olmaz.' }); return; } setDialog({ title: 'Masanı sil?', message: <><span className="font-medium text-stone-700">&ldquo;{t.name}&rdquo;</span> silinəcək.</>, onConfirm: () => deleteTable(t.id).then(err => { if (err) setDialog({ title: 'Silinmədi', message: err }); else setTables(prev => prev.filter(x => x.id !== t.id)); }) }); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
                             </div>
                           )}
@@ -3674,9 +3783,9 @@ function AdminPageContent() {
               )}
 
               {/* List view */}
-              {tableView === 'list' && tables.length > 0 && (
+              {tableView === 'list' && hallTables.length > 0 && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {tables.map(t => {
+                  {hallTables.map(t => {
                     const busy = orders.some(o => o.tableNumber === t.id && isOrderOpen(o));
                     return (
                       <div key={t.id} className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
@@ -3694,7 +3803,7 @@ function AdminPageContent() {
                           <button onClick={() => setQrTable(t)} title="QR kod" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-primary-700 transition-colors">
                             <QrCode className="w-4 h-4" />
                           </button>
-                          <button onClick={() => { setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setShowTableForm(true); }} title="Düzəlt" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-primary-700 transition-colors">
+                          <button onClick={() => { setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setTHallId(t.hallId ?? activeHallId ?? ''); setShowTableForm(true); }} title="Düzəlt" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-primary-700 transition-colors">
                             <Pencil className="w-4 h-4" />
                           </button>
                           <button
@@ -3719,6 +3828,7 @@ function AdminPageContent() {
                   })}
                 </div>
               )}
+              </>)}
               </>)}
             </div>
           )}
@@ -3877,9 +3987,11 @@ function AdminPageContent() {
                 if (editingTable) {
                   await updateTable(editingTable.id, tName.trim(), cap);
                   await updateTableLayout(editingTable.id, editingTable.x ?? 20, editingTable.y ?? 20, sw, sh, tShape);
-                  setTables(prev => prev.map(x => x.id === editingTable.id ? { ...x, name: tName.trim(), capacity: cap, shape: tShape, w: sw, h: sh } : x));
+                  const targetHall = tHallId || editingTable.hallId || activeHallId;
+                  if (targetHall && targetHall !== editingTable.hallId) await moveTableToHall(editingTable.id, targetHall);
+                  setTables(prev => prev.map(x => x.id === editingTable.id ? { ...x, name: tName.trim(), capacity: cap, shape: tShape, w: sw, h: sh, hallId: targetHall ?? undefined } : x));
                 } else {
-                  const err = await createTable(tName.trim(), cap, tShape, sw, sh);
+                  const err = await createTable(tName.trim(), cap, tShape, sw, sh, activeHallId);
                   if (err) { setDialog({ title: 'Xəta', message: err }); setTSaving(false); return; }
                   const fresh = await fetchTables();
                   setTables(fresh);
@@ -3911,6 +4023,18 @@ function AdminPageContent() {
                   required
                 />
               </div>
+              {editingTable && halls.length > 1 && (
+                <div>
+                  <label className="text-xs font-medium text-stone-600 block mb-1">Zal</label>
+                  <select
+                    value={tHallId}
+                    onChange={e => setTHallId(e.target.value)}
+                    className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    {halls.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="text-xs font-medium text-stone-600 block mb-2">Forma</label>
                 <div className="flex gap-2">
@@ -3933,6 +4057,40 @@ function AdminPageContent() {
                 className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors mt-2"
               >
                 {tSaving ? 'Saxlanır...' : editingTable ? 'Yadda saxla' : 'Yarat'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Create / rename hall modal ──────────────────────────────────── */}
+      {showHallForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-stone-800">{showHallForm === 'rename' ? 'Zalın adı' : 'Yeni zal'}</h3>
+              <button onClick={() => setShowHallForm(null)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={submitHallForm} className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-stone-600 block mb-1">Zalın adı</label>
+                <input
+                  value={hallName}
+                  onChange={e => setHallName(e.target.value)}
+                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  placeholder="Əsas zal"
+                  autoFocus
+                  required
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={hallSaving}
+                className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors mt-2"
+              >
+                {hallSaving ? 'Saxlanır...' : showHallForm === 'rename' ? 'Yadda saxla' : 'Əlavə et'}
               </button>
             </form>
           </div>

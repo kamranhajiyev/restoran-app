@@ -3,16 +3,22 @@ import { createServerClient } from '@/lib/supabase-server';
 
 export async function GET(req: NextRequest) {
   const companyId = req.nextUrl.searchParams.get('companyId');
-  if (!companyId) return Response.json({ tables: [] }, { status: 400 });
+  if (!companyId) return Response.json({ tables: [], halls: [] }, { status: 400 });
 
   const db = createServerClient();
-  const { data, error } = await db
-    .from('restaurant_tables')
-    .select('id, name, capacity, x, y, w, h, shape')
-    .eq('company_id', companyId)
-    .order('id');
+  const [tableRes, hallRes] = await Promise.all([
+    db.from('restaurant_tables')
+      .select('id, name, capacity, x, y, w, h, shape, hall_id')
+      .eq('company_id', companyId)
+      .order('id'),
+    db.from('halls')
+      .select('id, name, position')
+      .eq('company_id', companyId)
+      .order('position')
+      .order('name'),
+  ]);
 
-  if (error) return Response.json({ tables: [] }, { status: 500 });
+  if (tableRes.error) return Response.json({ tables: [], halls: [] }, { status: 500 });
 
-  return Response.json({ tables: data ?? [] });
+  return Response.json({ tables: tableRes.data ?? [], halls: hallRes.data ?? [] });
 }
