@@ -1,5 +1,6 @@
 import type { Order } from '@/types';
 import { stringToBytes, ESC, WIDTH } from './escpos';
+import { rasterize, type Line } from './raster';
 
 const USB_VID = 0x1FC9;
 const USB_PID = 0x2016;
@@ -30,12 +31,6 @@ async function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
     device = null;
     return false;
   }
-}
-
-// Text goes through the CP857 encoder; command sequences with high bytes in them
-// (the drawer pulse ends in 0xFF) must not, or the encoder reads them as letters.
-async function sendRaw(data: string): Promise<boolean> {
-  return sendBytes(new Uint8Array(stringToBytes(data)));
 }
 
 export async function connectPrinter(): Promise<boolean> {
@@ -99,61 +94,57 @@ export async function printReceipt(order: Order, companyName: string): Promise<b
 
     // Every money line shares one right-hand column, so the amounts stack no
     // matter how long the label is.
-    const row = (label: string, amount: string) => `${label}${amount.padStart(WIDTH - label.length)}\n`;
+    const row = (label: string, amount: string) => `${label}${amount.padStart(WIDTH - label.length)}`;
     const money = (n: number) => `${n.toFixed(2)}m`;
 
-    const lines: string[] = [
-      ESC.INIT,
-      ESC.CODEPAGE,         // CP857 — Azerbaijani letters instead of '?'
-      ESC.CENTER,
-      ESC.BIG,
-      companyName + '\n',
-      ESC.NORMAL,
-      '-'.repeat(WIDTH) + '\n',
-      `Sifariş #${order.orderNumber}\n`,
-      `Masa: ${order.tableNumber === 0 ? 'Takeaway' : order.tableNumber}\n`,
-      `${date}\n`,
-      `Kassir: ${order.sellerName}\n`,
-      '='.repeat(WIDTH) + '\n',
-      ESC.LEFT,
+    const lines: Line[] = [
+      { text: companyName, big: true, center: true },
+      { text: '-'.repeat(WIDTH), center: true },
+      { text: `Sifariş #${order.orderNumber}`, center: true },
+      { text: `Masa: ${order.tableNumber === 0 ? 'Takeaway' : order.tableNumber}`, center: true },
+      { text: date, center: true },
+      { text: `Kassir: ${order.sellerName}`, center: true },
+      { text: '='.repeat(WIDTH) },
     ];
 
     for (const item of order.items) {
-      // name | qty | price, summing to exactly WIDTH so nothing wraps
+      // name | qty | price, filling the line exactly
       const name = item.menuItem.name.substring(0, WIDTH - 12).padEnd(WIDTH - 12);
       const qty = `${item.quantity}x`.padStart(4);
       const price = money(item.menuItem.price * item.quantity).padStart(8);
-      lines.push(`${name}${qty}${price}\n`);
-      if (item.modifiers) lines.push(`  ${item.modifiers}\n`);
+      lines.push({ text: `${name}${qty}${price}` });
+      if (item.modifiers) lines.push({ text: `  ${item.modifiers}` });
     }
 
-    lines.push('='.repeat(WIDTH) + '\n');
+    lines.push({ text: '='.repeat(WIDTH) });
 
     const discount = order.discountAmount ?? 0;
     if (discount > 0) {
-      lines.push(row('Cəmi:', money(total)));
+      lines.push({ text: row('Cəmi:', money(total)) });
       // The percentage the cashier typed isn't stored — only the manat it came
       // to — so it's read back off the pre-discount total.
       const pct = total > 0 ? Math.round((discount / total) * 100) : 0;
       const label = order.discountType === '%' ? `Endirim (${pct}%)` : 'Endirim';
-      lines.push(row(label, `-${money(discount)}`));
+      lines.push({ text: row(label, `-${money(discount)}`) });
     }
 
-    lines.push(ESC.BIG);
-    lines.push(row('CƏMİ:', money(paid)));
-    lines.push(ESC.NORMAL);
+    lines.push({ text: row('CƏMİ:', money(paid)), big: true });
 
-    if ((order.cashAmount ?? 0) > 0) lines.push(row('Nağd:', money(order.cashAmount!)));
-    if ((order.cardAmount ?? 0) > 0) lines.push(row('Kart:', money(order.cardAmount!)));
-    if ((order.changeAmount ?? 0) > 0) lines.push(row('Qaytarıldı:', money(order.changeAmount!)));
+    if ((order.cashAmount ?? 0) > 0) lines.push({ text: row('Nağd:', money(order.cashAmount!)) });
+    if ((order.cardAmount ?? 0) > 0) lines.push({ text: row('Kart:', money(order.cardAmount!)) });
+    if ((order.changeAmount ?? 0) > 0) lines.push({ text: row('Qaytarıldı:', money(order.changeAmount!)) });
 
-    lines.push(ESC.CENTER);
-    lines.push('-'.repeat(WIDTH) + '\n');
-    lines.push('Təşəkkürlər!\n');
-    lines.push('\n\n\n');
-    lines.push(ESC.CUT);
+    lines.push({ text: '-'.repeat(WIDTH), center: true });
+    lines.push({ text: 'Təşəkkürlər!', center: true });
 
-    return await sendRaw(lines.join(''));
+    const head = new Uint8Array(stringToBytes(ESC.INIT + ESC.LEFT));
+    const image = rasterize(lines, WIDTH);
+    const tail = new Uint8Array(stringToBytes('\n\n\n' + ESC.CUT));
+    const out = new Uint8Array(head.length + image.length + tail.length);
+    out.set(head, 0);
+    out.set(image, head.length);
+    out.set(tail, head.length + image.length);
+    return await sendBytes(out);
   } catch (err) {
     console.error('[Printer] Cap alinmadi:', err);
     return false;
