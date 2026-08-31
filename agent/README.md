@@ -1,5 +1,15 @@
 # Print agent — sex printerləri
 
+> **Superseded by the desktop app.** The Windows build (`electron/`) does this
+> job from inside the POS itself, signed in as an ordinary waiter, so no
+> service-role key ever reaches a customer's machine. This agent remains for
+> setups without the desktop app.
+>
+> **Never run both for the same restaurant.** The agent takes jobs straight from
+> `status = 'pending'` and knows nothing about `claim_print_jobs()`, so it and
+> the desktop app would each print the same ticket. One or the other.
+
+
 Sends each order's items to the printer of the station (**sex**) that prepares
 them: the fish to the kitchen, the wine to the bar.
 

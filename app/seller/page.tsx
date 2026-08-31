@@ -25,6 +25,7 @@ import { CashShift, Category, Hall, MenuItem, ModifierGroup, Order, OrderItem, O
 import InstallPWA from '@/components/InstallPWA';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import { connectPrinter, disconnectPrinter, printReceipt, openCashDrawer } from '@/lib/printer';
+import { isDesktop, startKitchenPrinting } from '@/lib/desktopPrint';
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
@@ -550,6 +551,17 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     }).catch(() => setOnline(false));
     return () => authSub.subscription.unsubscribe();
   }, [router, overrideCompanyId, overrideCompanyName, overrideBrandColor, overrideExpiresAt]);
+
+  // ── Kitchen printers ────────────────────────────────────────────────────────
+  // Only inside the desktop shell, and only for a real login: claiming tickets
+  // goes through RLS, and the public terminal has no auth session to scope it.
+  // In a browser this is a no-op, so the tablets are unaffected.
+  useEffect(() => {
+    if (overrideCompanyId || !isDesktop()) return;
+    const companyId = getSession()?.companyId;
+    if (!companyId) return;
+    return startKitchenPrinting(companyId);
+  }, [overrideCompanyId]);
 
   useEffect(() => {
     if (overrideCompanyId) return;

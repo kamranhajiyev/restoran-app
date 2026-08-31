@@ -1,0 +1,65 @@
+# Builds the Windows installer.
+#
+# A .exe can only be produced on Windows, and there is no Windows machine here —
+# so GitHub's runner is the build box. Push, wait, download the installer from
+# the run's Artifacts. Tag a version and it is attached to a Release instead, so
+# a restaurant can be sent a permanent link rather than a file over chat.
+
+name: Desktop (Windows)
+
+on:
+  workflow_dispatch:      # build on demand, from the Actions tab
+    inputs:
+      url:
+        description: 'Site the app opens (blank = production)'
+        required: false
+        default: ''
+  push:
+    tags: ['v*']          # a tagged version also publishes a Release
+    branches: [main]
+    paths:
+      - 'electron/**'
+      - 'lib/tcp-print.ts'
+      - 'package.json'
+      - '.github/workflows/desktop.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # A blank url leaves posUrl unset and the app falls back to production.
+      # Passing a Vercel preview builds an installer for testing a branch
+      # against a real printer without pointing a live restaurant at it.
+      - name: Build installer
+        run: |
+          if ("${{ inputs.url }}") {
+            npm run desktop:compile
+            npx electron-builder --win --config.extraMetadata.posUrl="${{ inputs.url }}"
+          } else {
+            npm run desktop:dist
+          }
+        env:
+          # electron-builder would otherwise try to publish to GitHub on its own.
+          # The release step below does that, and only for tags.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PossibllePOS-Setup
+          path: release/*.exe
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.exe

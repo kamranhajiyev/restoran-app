@@ -2,12 +2,41 @@
   "name": "restoran-app",
   "version": "0.1.0",
   "private": true,
+  "main": "dist-electron/electron/main.js",
+  "// posUrl": "Site the desktop app opens. Currently the development deploy — testing kitchen printing against a live restaurant is not an option. Change to https://www.possiblle.com when it ships.",
+  "posUrl": "https://restoran-app-git-development-p-f968e3-kamrans-projects-11d6b816.vercel.app",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "agent": "tsx --env-file=agent/.env agent/index.ts"
+    "agent": "tsx --env-file=agent/.env agent/index.ts",
+    "desktop:compile": "tsc -p electron/tsconfig.json",
+    "desktop": "npm run desktop:compile && node scripts/run-electron.mjs",
+    "desktop:preview": "npm run desktop:compile && node scripts/run-electron.mjs --url=https://restoran-app-git-development-p-f968e3-kamrans-projects-11d6b816.vercel.app",
+    "desktop:dist": "npm run desktop:compile && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.possiblle.pos",
+    "productName": "Possiblle POS",
+    "directories": {
+      "output": "release"
+    },
+    "// files": "The window loads the live site, so no web assets are packaged — only the shell.",
+    "files": [
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "artifactName": "PossibllePOS-Setup-${version}.exe"
+    },
+    "nsis": {
+      "// perMachine": "false so a waiter without an admin password can install it.",
+      "perMachine": false,
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -31,6 +60,8 @@
     "@types/react-dom": "^19",
     "@types/w3c-web-usb": "^1.0.14",
     "@types/web-push": "^3.6.4",
+    "electron": "^44.1.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.7",
     "tailwindcss": "^4",

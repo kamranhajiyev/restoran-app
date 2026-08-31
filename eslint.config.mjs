@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Compiled output of the Electron shell, and the installers built from it.
+    // It is CommonJS by design, which every rule here is right to reject in
+    // source and wrong to reject in a build artifact.
+    "dist-electron/**",
+    "release/**",
   ]),
 ]);
 

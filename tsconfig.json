@@ -30,5 +30,7 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  // electron/ is compiled separately by electron/tsconfig.json — it targets Node
+  // and CommonJS, not the browser, and must not be dragged into the Next build.
+  "exclude": ["node_modules", "electron", "dist-electron", "release"]
 }

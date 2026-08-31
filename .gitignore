@@ -48,3 +48,7 @@ agent/.env
 
 # supabase CLI scratch (version cache, linked-project state)
 supabase/.temp/
+
+# Electron build output
+dist-electron/
+release/
