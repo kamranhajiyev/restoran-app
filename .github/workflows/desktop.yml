@@ -16,7 +16,11 @@ on:
         default: ''
   push:
     tags: ['v*']          # a tagged version also publishes a Release
-    branches: [main]
+    # The "Run workflow" button only appears once this file is on the default
+    # branch, so the working branch is listed here too — otherwise there is no
+    # way to build an installer before merging, which is exactly when it is
+    # needed.
+    branches: [main, development-printer-cash-drawer]
     paths:
       - 'electron/**'
       - 'lib/tcp-print.ts'
