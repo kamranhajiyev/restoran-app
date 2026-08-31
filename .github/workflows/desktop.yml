@@ -43,7 +43,12 @@ jobs:
           node-version: 24
           cache: npm
 
-      - run: npm ci
+      # Not `npm ci`. The lockfile is generated on macOS, and npm records only
+      # the optional platform packages that machine needed — on Windows it then
+      # wants @emnapi/* for the wasm fallbacks, finds them absent, and refuses
+      # the whole install. `npm install` resolves what this platform actually
+      # needs. The lock is not committed from here, so nothing drifts.
+      - run: npm install --no-audit --no-fund
 
       # A blank url leaves posUrl unset and the app falls back to production.
       # Passing a Vercel preview builds an installer for testing a branch
