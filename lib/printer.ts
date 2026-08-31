@@ -160,28 +160,6 @@ export async function printReceipt(order: Order, companyName: string): Promise<b
   }
 }
 
-// Turkish letters sit at different byte positions depending on which Turkish
-// page the firmware carries, so probing one layout can't rule the other out:
-// a CP1254 page would fail a CP857 probe and look like no page at all.
-const PROBE_857  = String.fromCharCode(0x87, 0xA7, 0x8D, 0x98, 0x94, 0x9F, 0x81);
-const PROBE_1254 = String.fromCharCode(0xE7, 0xF0, 0xFD, 0xDD, 0xF6, 0xFE, 0xFC);
-
-// Sweeps every codepage index the printer has and prints both layouts under
-// each, labelled 'a' (CP857) and 'b' (CP1254). Whichever cell reads "çğıİöşü"
-// names both the index and the layout to encode in. An index the firmware
-// doesn't know is ignored rather than refused, so those rows silently repeat
-// the last page that did take — which is exactly how a wrong constant hides.
-export async function printCodepageTest(): Promise<boolean> {
-  const lines: string[] = [ESC.INIT, ESC.LEFT];
-  for (let n = 0; n <= 32; n++) {
-    lines.push(`\x1B\x74${String.fromCharCode(n)}`);
-    lines.push(`${String(n).padStart(2)}a ${PROBE_857}   ${String(n).padStart(2)}b ${PROBE_1254}\n`);
-  }
-  lines.push('\nAxtarilan: cgiiosu\n', ESC.CODEPAGE, '\n\n\n', ESC.CUT);
-  // Raw: stringToBytes would rewrite the very bytes under test.
-  return await sendBytes(new Uint8Array(lines.join('').split('').map(c => c.charCodeAt(0))));
-}
-
 export async function openCashDrawer(): Promise<boolean> {
   try {
     return await sendBytes(new Uint8Array([0x1B, 0x70, 0x00, 0x19, 0xFF]));

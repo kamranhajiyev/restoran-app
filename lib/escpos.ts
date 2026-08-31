@@ -2,13 +2,19 @@
 // bytes over WebUSB, the print agent sends the same bytes over a TCP socket.
 // Shared so a ticket can never drift between the two transports.
 
-export const WIDTH = 32;   // Xprinter XP-Q806K, 58mm roll
+// The XP-Q806K's self-test reports "Char line FontA/B: 48/64" at a 72mm print
+// width. We lay out to 47 rather than 48 on purpose: a line that exactly fills
+// the carriage makes the printer wrap on its own, and that wrap lands on top of
+// our own newline — which is what pushed every price one row below its name.
+export const WIDTH = 47;
 
-// CP857 (IBM Turkish) carries every Azerbaijani letter except ə. The index the
-// printer wants for it is not standardised across ESC/POS clones — 13 is the
-// Epson-compatible value the XP-Q806K uses. If accented letters come out as
-// garbage after a firmware change, printCodepageTest() below finds the new one.
-export const CODEPAGE_CP857 = 13;
+// CP857 (IBM Turkish) carries every Azerbaijani letter except ə. The index is
+// not standardised across ESC/POS clones: the XP-Q806K's self-test lists it as
+// "61:PC857(Turkey)", far outside the Epson-compatible range. A printer ignores
+// an index it doesn't know instead of refusing it, so a wrong value here shows
+// up only as garbled letters — hold the FEED button at power-on to reprint the
+// self-test and read the real number off the paper.
+export const CODEPAGE_CP857 = 61;
 
 export const ESC = {
   INIT:      '\x1B\x40',
