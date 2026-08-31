@@ -1,5 +1,5 @@
 import type { Order } from '@/types';
-import { stringToBytes } from './escpos';
+import { stringToBytes, ESC, WIDTH } from './escpos';
 
 const USB_VID = 0x1FC9;
 const USB_PID = 0x2016;
@@ -17,13 +17,12 @@ async function openDevice(d: USBDevice): Promise<void> {
   await d.claimInterface(0);
 }
 
-async function sendRaw(data: string): Promise<boolean> {
+async function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
   if (!device) {
     console.error('[Printer] Yazıcı qoşulu deyil');
     return false;
   }
   try {
-    const bytes = new Uint8Array(stringToBytes(data));
     await device.transferOut(USB_ENDPOINT, bytes);
     return true;
   } catch (err) {
@@ -31,6 +30,12 @@ async function sendRaw(data: string): Promise<boolean> {
     device = null;
     return false;
   }
+}
+
+// Text goes through the CP857 encoder; command sequences with high bytes in them
+// (the drawer pulse ends in 0xFF) must not, or the encoder reads them as letters.
+async function sendRaw(data: string): Promise<boolean> {
+  return sendBytes(new Uint8Array(stringToBytes(data)));
 }
 
 export async function connectPrinter(): Promise<boolean> {
@@ -92,52 +97,61 @@ export async function printReceipt(order: Order, companyName: string): Promise<b
     const paid = (order.cashAmount ?? 0) + (order.cardAmount ?? 0);
     const date = new Date(order.createdAt).toLocaleString('az-AZ', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
+    // Every money line shares one right-hand column, so the amounts stack no
+    // matter how long the label is.
+    const row = (label: string, amount: string) => `${label}${amount.padStart(WIDTH - label.length)}\n`;
+    const money = (n: number) => `${n.toFixed(2)}m`;
+
     const lines: string[] = [
-      '\x1B\x40',           // init printer
-      '\x1B\x61\x01',       // center align
-      '\x1B\x21\x10',       // double height
+      ESC.INIT,
+      ESC.CODEPAGE,         // CP857 — Azerbaijani letters instead of '?'
+      ESC.CENTER,
+      ESC.BIG,
       companyName + '\n',
-      '\x1B\x21\x00',       // normal size
-      '--------------------------------\n',
-      `Sifaris #${order.orderNumber}\n`,
+      ESC.NORMAL,
+      '-'.repeat(WIDTH) + '\n',
+      `Sifariş #${order.orderNumber}\n`,
       `Masa: ${order.tableNumber === 0 ? 'Takeaway' : order.tableNumber}\n`,
       `${date}\n`,
       `Kassir: ${order.sellerName}\n`,
-      '================================\n',
-      '\x1B\x61\x00',       // left align
+      '='.repeat(WIDTH) + '\n',
+      ESC.LEFT,
     ];
 
     for (const item of order.items) {
-      const name = item.menuItem.name.substring(0, 20).padEnd(20);
-      const qty = `${item.quantity}x`;
-      const price = ((item.menuItem.price) * item.quantity).toFixed(2);
-      lines.push(`${name} ${qty.padStart(3)} ${price.padStart(7)}m\n`);
+      // name | qty | price, summing to exactly WIDTH so nothing wraps
+      const name = item.menuItem.name.substring(0, WIDTH - 12).padEnd(WIDTH - 12);
+      const qty = `${item.quantity}x`.padStart(4);
+      const price = money(item.menuItem.price * item.quantity).padStart(8);
+      lines.push(`${name}${qty}${price}\n`);
       if (item.modifiers) lines.push(`  ${item.modifiers}\n`);
     }
 
-    lines.push('================================\n');
+    lines.push('='.repeat(WIDTH) + '\n');
 
-    if ((order.discountAmount ?? 0) > 0) {
-      lines.push(`Cemi:           ${total.toFixed(2).padStart(7)}m\n`);
-      const discLabel = order.discountType === '%'
-        ? `Endirim (${order.discountAmount?.toFixed(2)}m)`
-        : 'Endirim';
-      lines.push(`${discLabel.padEnd(20)} -${(order.discountAmount ?? 0).toFixed(2).padStart(7)}m\n`);
+    const discount = order.discountAmount ?? 0;
+    if (discount > 0) {
+      lines.push(row('Cəmi:', money(total)));
+      // The percentage the cashier typed isn't stored — only the manat it came
+      // to — so it's read back off the pre-discount total.
+      const pct = total > 0 ? Math.round((discount / total) * 100) : 0;
+      const label = order.discountType === '%' ? `Endirim (${pct}%)` : 'Endirim';
+      lines.push(row(label, `-${money(discount)}`));
     }
 
-    lines.push('\x1B\x21\x10');  // double height
-    lines.push(`CEMI:          ${paid.toFixed(2).padStart(7)}m\n`);
-    lines.push('\x1B\x21\x00');  // normal
+    lines.push(ESC.BIG);
+    lines.push(row('CƏMİ:', money(paid)));
+    lines.push(ESC.NORMAL);
 
-    if ((order.cashAmount ?? 0) > 0) lines.push(`Nagd:          ${(order.cashAmount ?? 0).toFixed(2).padStart(7)}m\n`);
-    if ((order.cardAmount ?? 0) > 0) lines.push(`Kart:          ${(order.cardAmount ?? 0).toFixed(2).padStart(7)}m\n`);
-    if ((order.changeAmount ?? 0) > 0) lines.push(`Qaytarildi:    ${(order.changeAmount ?? 0).toFixed(2).padStart(7)}m\n`);
+    if ((order.cashAmount ?? 0) > 0) lines.push(row('Nağd:', money(order.cashAmount!)));
+    if ((order.cardAmount ?? 0) > 0) lines.push(row('Kart:', money(order.cardAmount!)));
+    if ((order.changeAmount ?? 0) > 0) lines.push(row('Qaytarıldı:', money(order.changeAmount!)));
 
-    lines.push('\x1B\x61\x01');  // center
-    lines.push('--------------------------------\n');
-    lines.push('Tesekkuller!\n');
+    lines.push(ESC.CENTER);
+    lines.push('-'.repeat(WIDTH) + '\n');
+    lines.push('Təşəkkürlər!\n');
     lines.push('\n\n\n');
-    lines.push('\x1D\x56\x41\x00');  // cut paper
+    lines.push(ESC.CUT);
 
     return await sendRaw(lines.join(''));
   } catch (err) {
@@ -146,9 +160,23 @@ export async function printReceipt(order: Order, companyName: string): Promise<b
   }
 }
 
+// Prints "Çörək İçki Ödəniş Şirniyyat Günü" under each candidate codepage index,
+// labelled. Whichever line reads correctly is the value CODEPAGE_CP857 wants.
+// Only needed if a firmware change moves the Turkish page out from under 13.
+export async function printCodepageTest(): Promise<boolean> {
+  const CANDIDATES = [13, 14, 15, 16, 17, 18, 25, 40, 47];
+  const sample = 'Çörək İçki Ödəniş Şirniyyat Günü';
+  const lines: string[] = [ESC.INIT, ESC.LEFT];
+  for (const n of CANDIDATES) {
+    lines.push(`\x1B\x74${String.fromCharCode(n)}`, `${String(n).padStart(2)}: ${sample}\n`);
+  }
+  lines.push(ESC.CODEPAGE, '\n\n\n', ESC.CUT);
+  return await sendRaw(lines.join(''));
+}
+
 export async function openCashDrawer(): Promise<boolean> {
   try {
-    return await sendRaw('\x1B\x70\x00\x19\xFF');
+    return await sendBytes(new Uint8Array([0x1B, 0x70, 0x00, 0x19, 0xFF]));
   } catch (err) {
     console.error('[Printer] Pul cekmeceyi acilmadi:', err);
     return false;

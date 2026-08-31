@@ -2,10 +2,17 @@
 // bytes over WebUSB, the print agent sends the same bytes over a TCP socket.
 // Shared so a ticket can never drift between the two transports.
 
-const WIDTH = 32;   // Xprinter XP-Q806K, 58mm roll
+export const WIDTH = 32;   // Xprinter XP-Q806K, 58mm roll
+
+// CP857 (IBM Turkish) carries every Azerbaijani letter except ə. The index the
+// printer wants for it is not standardised across ESC/POS clones — 13 is the
+// Epson-compatible value the XP-Q806K uses. If accented letters come out as
+// garbage after a firmware change, printCodepageTest() below finds the new one.
+export const CODEPAGE_CP857 = 13;
 
 export const ESC = {
   INIT:      '\x1B\x40',
+  CODEPAGE:  `\x1B\x74${String.fromCharCode(CODEPAGE_CP857)}`,
   CENTER:    '\x1B\x61\x01',
   LEFT:      '\x1B\x61\x00',
   BIG:       '\x1B\x21\x10',   // double height
@@ -16,24 +23,29 @@ export const ESC = {
   DRAWER:    '\x1B\x70\x00\x19\xFF',
 } as const;
 
-// The printer's codepage has no Azerbaijani letters, so they are transliterated
-// to their closest ASCII form: "Balıq qızartması" prints as "Baliq qizartmasi".
-// Anything else outside Latin-1 becomes '?' rather than garbage bytes.
-const AZ_MAP: Record<string, number> = {
-  'ə': 0x65, 'Ə': 0x45,
-  'ğ': 0x67, 'Ğ': 0x47,
-  'ı': 0x69, 'İ': 0x49,
-  'ş': 0x73, 'Ş': 0x53,
+// Where each Azerbaijani letter lives in CP857. ə/Ə are the one gap — no ESC/POS
+// codepage has them — so those alone stay transliterated: "Şəkərbura" prints as
+// "Şekerbura", with every other letter intact.
+const CP857: Record<string, number> = {
+  'ç': 0x87, 'Ç': 0x80,
+  'ğ': 0xA7, 'Ğ': 0xA6,
+  'ı': 0x8D, 'İ': 0x98,
+  'ö': 0x94, 'Ö': 0x99,
+  'ş': 0x9F, 'Ş': 0x9E,
+  'ü': 0x81, 'Ü': 0x9A,
+  'ə': 0x65, 'Ə': 0x45,   // no codepage has these — closest ASCII
   '₼': 0x6D,
 };
 
+// Byte values above 0x7F mean different letters in CP857 than they do in the
+// Unicode/Latin-1 range they came from, so only ASCII passes through untouched.
 export function stringToBytes(str: string): number[] {
   const bytes: number[] = [];
   for (let i = 0; i < str.length; i++) {
     const ch = str[i];
     const code = str.charCodeAt(i);
-    if (code < 256) bytes.push(code);
-    else bytes.push(AZ_MAP[ch] ?? 0x3F);
+    if (code < 0x80) bytes.push(code);
+    else bytes.push(CP857[ch] ?? 0x3F);
   }
   return bytes;
 }
@@ -62,10 +74,10 @@ export interface TicketPayload {
 }
 
 const HEADING: Record<TicketPayload['kind'], string> = {
-  new:    'YENI SIFARIS',
-  append: 'ELAVE',        // items added to an order the kitchen already has
-  cancel: 'LEGV',         // stop cooking these
-  move:   'MASA DEYISDI', // same food, new table — don't run it to the old one
+  new:    'YENİ SİFARİŞ',
+  append: 'ƏLAVƏ',        // items added to an order the kitchen already has
+  cancel: 'LƏĞV',         // stop cooking these
+  move:   'MASA DƏYİŞDİ', // same food, new table — don't run it to the old one
 };
 
 // A kitchen ticket carries no prices — the cook doesn't need them, and they
@@ -77,6 +89,7 @@ export function buildStationTicket(p: TicketPayload): Uint8Array {
 
   const lines: string[] = [
     ESC.INIT,
+    ESC.CODEPAGE,
     ESC.CENTER,
     ESC.BIG,
     `${p.station}\n`,
@@ -85,9 +98,9 @@ export function buildStationTicket(p: TicketPayload): Uint8Array {
 
   // A cancellation must be unmistakable at a glance across a hot kitchen.
   if (p.kind === 'cancel') {
-    lines.push(ESC.BIG, ESC.BOLD_ON, '*** LEGV ***\n', ESC.BOLD_OFF, ESC.NORMAL);
+    lines.push(ESC.BIG, ESC.BOLD_ON, '*** LƏĞV ***\n', ESC.BOLD_OFF, ESC.NORMAL);
   } else if (p.kind === 'move') {
-    lines.push(ESC.BIG, ESC.BOLD_ON, '*** MASA DEYISDI ***\n', ESC.BOLD_OFF, ESC.NORMAL);
+    lines.push(ESC.BIG, ESC.BOLD_ON, '*** MASA DƏYİŞDİ ***\n', ESC.BOLD_OFF, ESC.NORMAL);
   } else {
     lines.push(ESC.BOLD_ON, `${HEADING[p.kind]}\n`, ESC.BOLD_OFF);
   }
@@ -97,7 +110,7 @@ export function buildStationTicket(p: TicketPayload): Uint8Array {
   lines.push(
     '-'.repeat(WIDTH) + '\n',
     ESC.LEFT,
-    `Sifaris #${p.orderNumber ?? '-'}\n`,
+    `Sifariş #${p.orderNumber ?? '-'}\n`,
   );
   // The old table is the whole point of a move slip: the ticket already at this
   // station names it, and that's the one being corrected.

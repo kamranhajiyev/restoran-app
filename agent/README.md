@@ -49,14 +49,18 @@ option is a shortcut to `npm run agent` in the Startup folder
 | when | ticket |
 |---|---|
 | new order | **YENI SIFARIS** — only that station's items |
-| items added to an open order | **ELAVE** — only the new items |
-| item removed, or order cancelled | **\*\*\* LEGV \*\*\*** — stop cooking these |
+| items added to an open order | **ƏLAVƏ** — only the new items |
+| item removed, or order cancelled | **\*\*\* LƏĞV \*\*\*** — stop cooking these |
 
 No prices: a cook needs the quantity and the dish, and nothing else competing
 for the eye.
 
-Azerbaijani letters are transliterated (`Balıq` → `Baliq`) because the printer's
-character set has no `ə`, `ğ`, `ı`, `ş`.
+Tickets print in CP857 (Turkish), selected with `ESC t 13` at the top of every
+job, so `ç ğ ı İ ö ş ü` come out as themselves. `ə` is the one exception — no
+ESC/POS codepage contains it — so `Şəkərbura` prints as `Şekerbura`. If accented
+letters ever come back as garbage, the printer's CP857 index has changed: run
+`printCodepageTest()` from `lib/printer.ts` and set `CODEPAGE_CP857` in
+`lib/escpos.ts` to whichever index prints correctly.
 
 ## When something doesn't print
 
