@@ -160,18 +160,22 @@ export async function printReceipt(order: Order, companyName: string): Promise<b
   }
 }
 
-// Prints "Çörək İçki Ödəniş Şirniyyat Günü" under each candidate codepage index,
-// labelled. Whichever line reads correctly is the value CODEPAGE_CP857 wants.
-// Only needed if a firmware change moves the Turkish page out from under 13.
+// Sweeps every codepage index the printer might have and prints the Azerbaijani
+// letters under each one, labelled. The line that reads "Çğıİöşü ÇĞIİÖŞÜ" names
+// the index CODEPAGE_CP857 wants. An index the firmware doesn't know is ignored
+// rather than refused, so those rows just repeat whatever page was last set —
+// which is exactly how a wrong constant hides itself.
 export async function printCodepageTest(): Promise<boolean> {
-  const CANDIDATES = [13, 14, 15, 16, 17, 18, 25, 40, 47];
-  const sample = 'Çörək İçki Ödəniş Şirniyyat Günü';
   const lines: string[] = [ESC.INIT, ESC.LEFT];
-  for (const n of CANDIDATES) {
+  // The bytes, not the letters: stringToBytes would rewrite the letters through
+  // the map and defeat the test. These are the CP857 positions being probed.
+  const sample = String.fromCharCode(0x87, 0xA7, 0x8D, 0x98, 0x94, 0x9F, 0x81, 0x20,
+                                     0x80, 0xA6, 0x49, 0x98, 0x99, 0x9E, 0x9A);
+  for (let n = 0; n <= 47; n++) {
     lines.push(`\x1B\x74${String.fromCharCode(n)}`, `${String(n).padStart(2)}: ${sample}\n`);
   }
-  lines.push(ESC.CODEPAGE, '\n\n\n', ESC.CUT);
-  return await sendRaw(lines.join(''));
+  lines.push('\nDogru: Cgii-osu / CGIIOSU\n', ESC.CODEPAGE, '\n\n\n', ESC.CUT);
+  return await sendBytes(new Uint8Array(lines.join('').split('').map(c => c.charCodeAt(0))));
 }
 
 export async function openCashDrawer(): Promise<boolean> {

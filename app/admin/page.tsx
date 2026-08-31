@@ -55,7 +55,7 @@ import { validatePassword } from '@/lib/password';
 import { exportMenuExcel, exportOrdersExcel, exportAnalizExcel, parseMenuFile, ImportPreview, AnalizRow } from '@/lib/excel';
 import QRCode from 'react-qr-code';
 import InstallPWA from '@/components/InstallPWA';
-import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt, openCashDrawer } from '@/lib/printer';
+import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt, openCashDrawer, printCodepageTest } from '@/lib/printer';
 
 // RPC raise messages are machine codes — translated here for display
 const STAFF_ERRORS: Record<string, string> = {
@@ -4704,6 +4704,16 @@ function AdminPageContent() {
                   >
                     Yazıcı seç
                   </button>
+                  {/* Diagnostic: which index this printer's firmware puts the
+                      Turkish codepage on. Only needed when letters print wrong. */}
+                  {printerConnected && (
+                    <button
+                      onClick={() => { printCodepageTest(); }}
+                      className="w-full border border-stone-200 hover:bg-stone-50 text-stone-600 font-medium py-2 rounded-xl text-xs transition-colors"
+                    >
+                      Hərf testi çap et
+                    </button>
+                  )}
                   {printerError && <p className="text-xs text-red-500">{printerError}</p>}
                 </div>
               </div>
