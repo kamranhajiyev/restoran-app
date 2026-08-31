@@ -103,17 +103,18 @@ export async function printReceipt(order: Order, companyName: string): Promise<b
       { text: `Sifariş #${order.orderNumber}`, center: true },
       { text: `Masa: ${order.tableNumber === 0 ? 'Takeaway' : order.tableNumber}`, center: true },
       { text: date, center: true },
-      { text: `Kassir: ${order.sellerName}`, center: true },
+      { text: `Ofisiant: ${order.sellerName}`, center: true },
       { text: '='.repeat(WIDTH) },
     ];
 
     for (const item of order.items) {
-      // name | qty | price, filling the line exactly
-      const name = item.menuItem.name.substring(0, WIDTH - 12).padEnd(WIDTH - 12);
+      // name | qty | price, filling the line exactly. The modifier rides on the
+      // same line as its dish — on a line of its own it read as another item.
+      const label = item.modifiers ? `${item.menuItem.name} (${item.modifiers})` : item.menuItem.name;
+      const name = label.substring(0, WIDTH - 12).padEnd(WIDTH - 12);
       const qty = `${item.quantity}x`.padStart(4);
       const price = money(item.menuItem.price * item.quantity).padStart(8);
       lines.push({ text: `${name}${qty}${price}` });
-      if (item.modifiers) lines.push({ text: `  ${item.modifiers}` });
     }
 
     lines.push({ text: '='.repeat(WIDTH) });

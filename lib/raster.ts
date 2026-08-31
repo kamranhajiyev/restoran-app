@@ -8,8 +8,8 @@
 
 const DOTS = 576;          // 72mm at 203dpi, the printer's full carriage
 const BYTES_PER_ROW = DOTS / 8;
-const NORMAL_H = 24;
-const BIG_H = 36;
+const NORMAL_H = 28;       // ~20px glyphs need the leading to stay readable
+const BIG_H = 42;          // 1.5x, matching what ESC.BIG did vertically
 const PAD_TOP = 4;
 // A raster command's height field is one byte in practice on these clones, so
 // tall receipts go out as a series of bands rather than one oversized image.
@@ -21,15 +21,21 @@ export type Line = {
   center?: boolean;
 };
 
-const STACK = 'ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
+// Thermal heads spread ink and the paper fades, so a thin face at ~20px prints
+// grey and breaks up. Bold is the single biggest legibility win available here,
+// and in a monospace face it costs nothing: the advance width is identical, so
+// the columns don't shift. DejaVu leads the stack for its heavy, open shapes and
+// its full Azerbaijani coverage; the rest are per-platform fallbacks.
+const STACK = '"DejaVu Sans Mono", "Liberation Mono", Consolas, Menlo, ui-monospace, monospace';
+const WEIGHT = 'bold';
 
 // The layout is monospace column arithmetic (WIDTH characters to a line), so the
 // font has to be sized to make exactly that many characters span the carriage.
 function fitFont(ctx: CanvasRenderingContext2D, cols: number): string {
   const probe = 40;
-  ctx.font = `${probe}px ${STACK}`;
+  ctx.font = `${WEIGHT} ${probe}px ${STACK}`;
   const width = ctx.measureText('0'.repeat(cols)).width;
-  return `${Math.floor((probe * DOTS) / width)}px ${STACK}`;
+  return `${WEIGHT} ${Math.floor((probe * DOTS) / width)}px ${STACK}`;
 }
 
 export function rasterize(lines: Line[], cols: number): Uint8Array {
@@ -81,9 +87,11 @@ function toRaster(px: Uint8ClampedArray, height: number): Uint8Array {
       for (let x = 0; x < DOTS; x++) {
         const i = ((top + y) * DOTS + x) * 4;
         // Luminance, not just alpha: antialiased edges land mid-grey and the
-        // threshold decides whether the dot fires.
+        // threshold decides whether the dot fires. Set well above mid-grey so
+        // those edge pixels print — at this size, dropping them eats most of a
+        // stroke and the text comes out spindly.
         const lum = (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000;
-        if (lum < 128) band[y * BYTES_PER_ROW + (x >> 3)] |= 0x80 >> (x & 7);
+        if (lum < 176) band[y * BYTES_PER_ROW + (x >> 3)] |= 0x80 >> (x & 7);
       }
     }
 
