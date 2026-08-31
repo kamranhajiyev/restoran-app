@@ -33,9 +33,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Must match the Node that writes package-lock.json locally. npm 10 and
+      # npm 11 disagree about whether optional wasm peers belong in the lock, so
+      # a lock written by one makes `npm ci` fail under the other with a
+      # "Missing: @emnapi/… from lock file" that looks like a corrupt lockfile
+      # and is only a version difference.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - run: npm ci
