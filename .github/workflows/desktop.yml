@@ -57,7 +57,7 @@ jobs:
         run: |
           if ("${{ inputs.url }}") {
             npm run desktop:compile
-            npx electron-builder --win --config.extraMetadata.posUrl="${{ inputs.url }}"
+            npx electron-builder --win --publish never --config.extraMetadata.posUrl="${{ inputs.url }}"
           } else {
             npm run desktop:dist
           }

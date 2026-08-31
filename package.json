@@ -14,7 +14,7 @@
     "desktop:compile": "tsc -p electron/tsconfig.json",
     "desktop": "npm run desktop:compile && node scripts/run-electron.mjs",
     "desktop:preview": "npm run desktop:compile && node scripts/run-electron.mjs --url=https://restoran-app-git-development-p-f968e3-kamrans-projects-11d6b816.vercel.app",
-    "desktop:dist": "npm run desktop:compile && electron-builder --win"
+    "desktop:dist": "npm run desktop:compile && electron-builder --win --publish never"
   },
   "build": {
     "appId": "com.possiblle.pos",
@@ -22,17 +22,23 @@
     "directories": {
       "output": "release"
     },
-    "// files": "The window loads the live site, so no web assets are packaged — only the shell.",
     "files": [
       "dist-electron/**/*",
-      "package.json"
+      "package.json",
+      "!node_modules/**/*"
     ],
     "win": {
-      "target": "nsis",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "artifactName": "PossibllePOS-Setup-${version}.exe"
     },
     "nsis": {
-      "// perMachine": "false so a waiter without an admin password can install it.",
       "perMachine": false,
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
