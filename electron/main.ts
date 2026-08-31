@@ -69,6 +69,55 @@ function createWindow(): void {
     void shell.openExternal(url);
     return { action: 'deny' };
   });
+
+  grantReceiptPrinterAccess(win);
+}
+
+// ── The USB receipt printer ──────────────────────────────────────────────────
+// The till's own printer is driven from the page over WebUSB, not through the
+// station queue. Chrome asks the user to pick the device; Electron asks the
+// application instead, and an app that answers nothing leaves the picker empty
+// forever — the receipt printer simply stops working inside the desktop build
+// while continuing to work in a browser tab.
+//
+// There is exactly one printer worth picking, so pick it rather than showing a
+// chooser: a waiter mid-service should not be identifying USB devices.
+const PRINTER_VID = 0x1fc9;
+const PRINTER_PID = 0x2016;
+
+const isReceiptPrinter = (d: { vendorId: number; productId: number }) =>
+  d.vendorId === PRINTER_VID && d.productId === PRINTER_PID;
+
+function grantReceiptPrinterAccess(win: BrowserWindow): void {
+  // An allowlist, not a blanket yes: this window loads a remote page, and the
+  // only device-level things the POS legitimately needs are the printer and the
+  // "order ready" notification. Camera, microphone and location are not part of
+  // the product, so nothing should be able to ask for them silently.
+  const ALLOWED = new Set(['usb', 'notifications', 'clipboard-sanitized-write']);
+  win.webContents.session.setPermissionCheckHandler((_wc, permission) =>
+    ALLOWED.has(permission),
+  );
+  win.webContents.session.setPermissionRequestHandler((_wc, permission, callback) =>
+    callback(ALLOWED.has(permission)),
+  );
+
+  // Consulted both for a fresh request and for navigator.usb.getDevices() after
+  // a restart, which is what makes the printer reconnect on its own instead of
+  // asking to be paired again every morning.
+  win.webContents.session.setDevicePermissionHandler(details =>
+    details.deviceType === 'usb' && !!details.device && isReceiptPrinter(details.device as
+      { vendorId: number; productId: number }),
+  );
+
+  // Fired on the session, not on webContents.
+  win.webContents.session.on('select-usb-device', (event, details, callback) => {
+    event.preventDefault();
+    const printer = details.deviceList.find(isReceiptPrinter);
+    // No printer attached: answer with nothing so requestDevice() rejects and
+    // the page shows its own "Yazici tapilmadi", rather than hanging on a
+    // picker that will never be answered.
+    callback(printer?.deviceId);
+  });
 }
 
 // Two copies of the POS on one machine would each claim tickets, and the second
