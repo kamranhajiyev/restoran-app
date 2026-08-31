@@ -935,7 +935,11 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     setCart([]); setNote(''); setSelectedTable(null); setOrderType(null);
     setMobileCartOpen(false);
     setView('orders');
-    openPayment(order);
+    // No payment sheet here on purpose. It used to open the moment the order was
+    // placed, pre-filled with the full amount as cash, so one stray tap on
+    // "Ödənildi ✓" closed an order nobody had paid for yet. Payment is now always
+    // deliberate: the waiter opens it from the order card's Ödəniş button when the
+    // money is actually in hand.
   }
 
   // Pre-fill cash with the total — the common case is exact cash payment;
