@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   const db = createServerClient();
   const { data, error } = await db
     .from('menu_items')
-    .select('id, name, price, category, available, variants, cost_price, image, station_id, position')
+    .select('id, name, price, category, available, qr_visible, variants, cost_price, image, station_id, position')
     .eq('company_id', companyId)
     .order('position');
 
@@ -33,6 +33,7 @@ export async function GET(req: NextRequest) {
     price: Number(r.price),
     category: r.category,
     available: r.available,
+    qrVisible: r.qr_visible ?? true,
     variants: r.variants ?? undefined,
     costPrice: r.cost_price ? Number(r.cost_price) : undefined,
     image: r.image ?? undefined,

@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   const db = createServerClient();
   const { data, error } = await db
     .from('categories')
-    .select('name, available, position')
+    .select('name, available, qr_visible, position')
     .eq('company_id', companyId)
     .order('position');
 

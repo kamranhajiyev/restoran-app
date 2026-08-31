@@ -1110,6 +1110,7 @@ function AdminPageContent() {
       price: basePrice,
       category: form.category,
       available: editingId ? (menu.find(m => m.id === editingId)?.available ?? true) : true,
+      qrVisible: editingId ? (menu.find(m => m.id === editingId)?.qrVisible ?? true) : true,
       variants: form.hasVariants ? variants : undefined,
       costPrice: form.costPrice ? parseFloat(form.costPrice) : undefined,
       image: form.image || undefined,
@@ -1174,6 +1175,13 @@ function AdminPageContent() {
   }
   function toggleAvailable(id: string) {
     const updated = menu.map(m => m.id === id ? { ...m, available: !m.available } : m);
+    setMenu(updated);
+    persistMenu(updated);
+  }
+  // Separate from `available`: this one hides the item from the customer's QR menu
+  // only, leaving the seller free to keep ringing it up.
+  function toggleQrVisible(id: string) {
+    const updated = menu.map(m => m.id === id ? { ...m, qrVisible: m.qrVisible === false } : m);
     setMenu(updated);
     persistMenu(updated);
   }
@@ -1395,6 +1403,13 @@ function AdminPageContent() {
   }
   function toggleCategoryAvailable(name: string) {
     const updated = categories.map(c => c.name === name ? { ...c, available: !c.available } : c);
+    setCategories(updated);
+    persistCategories(updated);
+  }
+  // Hiding a category from the QR menu takes its products with it — the customer
+  // never sees the category, so per-product QR switches inside it stop mattering.
+  function toggleCategoryQrVisible(name: string) {
+    const updated = categories.map(c => c.name === name ? { ...c, qrVisible: c.qrVisible === false } : c);
     setCategories(updated);
     persistCategories(updated);
   }
@@ -3053,7 +3068,7 @@ function AdminPageContent() {
 
               <DndContext sensors={dndSensors} collisionDetection={menuCollision} onDragEnd={handleMenuDragEnd}>
               <SortableContext items={categories.map(c => `cat:${c.name}`)} strategy={verticalListSortingStrategy}>
-              {categories.map(({ name: cat, available: catAvailable }) => {
+              {categories.map(({ name: cat, available: catAvailable, qrVisible: catQrVisible }) => {
                 const allItems = menu.filter(m => m.category === cat);
                 const items = allItems.filter(m =>
                   (kindFilter === 'all' || (m.kind ?? 'product') === kindFilter) &&
@@ -3078,9 +3093,13 @@ function AdminPageContent() {
                         <span className="text-xs font-semibold text-stone-500 bg-stone-100 rounded-full px-1.5 py-0.5">{items.length}</span>
                       </button>
                       {!catAvailable && <span className="text-xs bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded font-medium">Gizli</span>}
+                      {catAvailable && catQrVisible === false && <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">QR gizli</span>}
                       <div className="flex items-center gap-0.5 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => toggleCategoryAvailable(cat)} title={catAvailable ? 'Kateqoriyanı satışda gizlət — satıcı və QR menyuda görünməyəcək' : 'Kateqoriyanı yenidən satışa aç'} className={`text-xs px-2 py-0.5 rounded-lg font-medium transition-colors ${catAvailable ? 'text-stone-500 hover:bg-stone-100' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
                           {catAvailable ? 'Gizlət' : 'Aç'}
+                        </button>
+                        <button onClick={() => toggleCategoryQrVisible(cat)} title={catQrVisible === false ? 'Kateqoriyanı QR menyuda göstər' : 'Kateqoriyanı yalnız QR menyudan gizlət — satıcıda qalır'} className={`text-xs px-2 py-0.5 rounded-lg font-medium transition-colors ${catQrVisible === false ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'text-stone-500 hover:bg-stone-100'}`}>
+                          {catQrVisible === false ? 'QR ✕' : 'QR'}
                         </button>
                         <button onClick={() => { setEditCatTarget(cat); setEditCatValue(cat); }} title="Kateqoriyanın adını dəyiş" className="text-xs text-primary-600 hover:text-primary-800 px-2 py-0.5 rounded-lg hover:bg-primary-50 transition-colors font-medium">Adını dəyiş</button>
                         <button onClick={() => setDialog({ title: 'Kateqoriyanı sil?', message: <><span className="font-medium text-stone-700">&ldquo;{cat}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.</>, onConfirm: () => deleteCategory(cat) })} title="Kateqoriyanı və içindəki məhsulları sil (zibil qutusuna gedir)" className="text-xs text-red-400 hover:text-red-600 px-2 py-0.5 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
@@ -3128,6 +3147,9 @@ function AdminPageContent() {
                             <button onClick={() => duplicateItem(item.id)} title="Məhsulun kopyasını yarat" className="text-xs text-purple-500 hover:text-purple-700 px-2 py-1 rounded-lg hover:bg-purple-50 transition-colors font-medium">Kopyala</button>
                             <button onClick={() => toggleAvailable(item.id)} title={item.available ? 'Satışdan götür — satıcı və QR menyuda görünməyəcək' : 'Yenidən satışa qaytar'} className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${item.available ? 'bg-stone-100 text-stone-600 hover:bg-stone-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
                               {item.available ? 'Gizlət' : 'Aç'}
+                            </button>
+                            <button onClick={() => toggleQrVisible(item.id)} title={item.qrVisible === false ? 'QR menyuda göstər' : 'Yalnız QR menyudan gizlət — satıcı sata bilər'} className={`text-xs px-2 py-1 rounded-lg font-medium transition-colors ${item.qrVisible === false ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'}`}>
+                              {item.qrVisible === false ? 'QR ✕' : 'QR'}
                             </button>
                             <button onClick={() => setDialog({ title: 'Məhsulu sil?', message: <><span className="font-medium text-stone-700">&ldquo;{item.name}&rdquo;</span> silinəcək. Bu əməliyyat geri qaytarıla bilməz.</>, onConfirm: () => deleteItem(item.id) })} title="Məhsulu sil (zibil qutusuna gedir)" className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium">Sil</button>
                           </div>

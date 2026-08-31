@@ -32,6 +32,7 @@ export interface TrashItem {
 export interface Category {
   name: string;
   available: boolean;
+  qrVisible?: boolean;  // absent = visible. Read only by the QR menu, never the POS.
 }
 
 // A prep station ("sex"): where an item is made, and which printer its ticket
@@ -84,6 +85,7 @@ export interface MenuItem {
   price: number;
   category: string;
   available: boolean;
+  qrVisible?: boolean;         // absent = visible. QR menu only; the POS ignores it.
   variants?: MenuItemVariant[];
   costPrice?: number;
   image?: string;

@@ -33,7 +33,7 @@ export default function CustomerMenuPage({
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [table, setTable] = useState<RestaurantTable | null>(null);
   const [menu, setMenu] = useState<MenuItem[]>([]);
-  const [categories, setCategories] = useState<{ name: string; available: boolean }[]>([]);
+  const [categories, setCategories] = useState<{ name: string }[]>([]);
   const [activeCategory, setActiveCategory] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
@@ -75,15 +75,20 @@ export default function CustomerMenuPage({
         price: Number(r.price),
         category: r.category as string,
         available: r.available as boolean,
+        qrVisible: (r.qr_visible as boolean) ?? true,
         variants: (r.variants as MenuItem['variants']) ?? undefined,
         costPrice: r.cost_price ? Number(r.cost_price) : undefined,
         image: (r.image as string) ?? undefined,
       }));
-      const c: { name: string; available: boolean }[] = (catRes.data ?? []).map((r: Record<string, unknown>) => ({
+      // Two independent switches, both of which must be on for a customer to see it:
+      // `available` (sold at all — shared with the POS) and `qr_visible` (shown on
+      // this menu — QR only). Hiding a category from QR hides everything inside it.
+      const c: { name: string; available: boolean; qrVisible: boolean }[] = (catRes.data ?? []).map((r: Record<string, unknown>) => ({
         name: r.name as string,
         available: r.available as boolean,
+        qrVisible: (r.qr_visible as boolean) ?? true,
       }));
-      const availableCats = c.filter((cat: { name: string; available: boolean }) => cat.available);
+      const availableCats = c.filter(cat => cat.available && cat.qrVisible).map(cat => ({ name: cat.name }));
       const tableRow = tableId ? ((tableRes.data ?? []) as Record<string, unknown>[])[0] ?? null : null;
       if (tableId && !tableRow) { setError('Masa tapılmadı.'); setLoading(false); return; }
       const t: RestaurantTable | null = tableRow ? {
@@ -98,9 +103,10 @@ export default function CustomerMenuPage({
       } : null;
 
       setTable(t);
-      setMenu(m.filter((item: MenuItem) => item.available));
+      const visible = m.filter((item: MenuItem) => item.available && item.qrVisible !== false);
+      setMenu(visible);
       setCategories(availableCats);
-      const firstCat = availableCats.find((cat: { name: string }) => m.some((i: MenuItem) => i.category === cat.name));
+      const firstCat = availableCats.find((cat: { name: string }) => visible.some((i: MenuItem) => i.category === cat.name));
       if (firstCat) setActiveCategory(firstCat.name);
       setMenuOnly(menuOnlyVal);
       setLoading(false);

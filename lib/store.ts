@@ -56,6 +56,7 @@ export async function fetchMenu(): Promise<MenuItem[]> {
       price: Number(r.price),
       category: r.category,
       available: r.available,
+      qrVisible: r.qr_visible ?? true,
       variants: r.variants ?? undefined,
       costPrice: r.cost_price ? Number(r.cost_price) : undefined,
       image: r.image ?? undefined,
@@ -98,6 +99,7 @@ export async function saveMenu(menu: MenuItem[]): Promise<string | null> {
         price: m.price,
         category: m.category,
         available: m.available,
+        qr_visible: m.qrVisible ?? true,
         variants: m.variants ?? null,
         cost_price: m.costPrice ?? null,
         image: m.image ?? null,
@@ -244,10 +246,11 @@ export async function saveModifierGroups(groups: ModifierGroup[]): Promise<strin
 // data and got persisted by the next save, polluting the company's categories.
 export async function fetchCategories(): Promise<Category[]> {
   try {
-    const { data, error } = await supabase.from('categories').select('name, available').order('position');
+    const { data, error } = await supabase.from('categories').select('name, available, qr_visible').order('position');
     if (error || !data) return [];
     _categoriesLoaded = true;
-    return data.map((r: { name: string; available: boolean }) => ({ name: r.name, available: r.available }));
+    return data.map((r: { name: string; available: boolean; qr_visible: boolean | null }) =>
+      ({ name: r.name, available: r.available, qrVisible: r.qr_visible ?? true }));
   } catch {
     return [];
   }
@@ -259,11 +262,11 @@ export async function saveCategories(categories: Category[]): Promise<string | n
   if (!_companyId || !_categoriesLoaded) { console.error('[saveCategories] refused: no company context or categories never loaded'); return 'Kateqoriyalar hələ yüklənməyib'; }
   try {
     const seen = new Set<string>();
-    const rows: { name: string; available: boolean; position: number; company_id: string }[] = [];
+    const rows: { name: string; available: boolean; qr_visible: boolean; position: number; company_id: string }[] = [];
     for (const c of categories) {
       if (seen.has(c.name)) continue;
       seen.add(c.name);
-      rows.push({ name: c.name, available: c.available, position: rows.length, company_id: _companyId });
+      rows.push({ name: c.name, available: c.available, qr_visible: c.qrVisible ?? true, position: rows.length, company_id: _companyId });
     }
     if (rows.length > 0) {
       const { error } = await supabase.from('categories').upsert(rows, { onConflict: 'company_id,name' });
