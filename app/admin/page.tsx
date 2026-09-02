@@ -56,6 +56,7 @@ import { exportMenuExcel, exportOrdersExcel, exportAnalizExcel, parseMenuFile, I
 import QRCode from 'react-qr-code';
 import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt, openCashDrawer } from '@/lib/printer';
+import { isDesktop } from '@/lib/desktopPrint';
 
 // RPC raise messages are machine codes — translated here for display
 const STAFF_ERRORS: Record<string, string> = {
@@ -2091,6 +2092,16 @@ function AdminPageContent() {
             href={`/s/${companySlug}/${sellerToken}`}
             target="_blank"
             rel="noopener noreferrer"
+            // Inside the desktop shell a new window is handed to the real browser
+            // (electron/main.ts denies target="_blank"), which puts the till screen
+            // in Chrome — outside the app, where the USB printer is already claimed
+            // by this window and kitchen tickets have nothing to carry them. Keep it
+            // in the window it was opened from; a browser tab still gets a new tab.
+            onClick={e => {
+              if (!isDesktop()) return;
+              e.preventDefault();
+              router.push(`/s/${companySlug}/${sellerToken}`);
+            }}
             title="Satıcı terminalını aç"
             className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl hover:border-primary-300 hover:bg-primary-50 transition-colors mr-2"
           >

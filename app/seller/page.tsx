@@ -404,7 +404,12 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const [printFailed, setPrintFailed] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (overrideCompanyId) return;   // public terminal: RLS blocks print_jobs (no auth session)
+    // print_jobs is behind RLS, so this needs a session — which the terminal link
+    // has whenever it runs on a machine somebody signed in on, the register being
+    // exactly that. Without one the query returns nothing rather than failing, but
+    // asking at all is pointless.
+    const companyId = getSession()?.companyId;
+    if (!companyId || (overrideCompanyId && overrideCompanyId !== companyId)) return;
     let alive = true;
     fetchFailedPrintOrders().then(ids => { if (alive) setPrintFailed(new Set(ids)); });
     return () => { alive = false; };
@@ -557,13 +562,21 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   }, [router, overrideCompanyId, overrideCompanyName, overrideBrandColor, overrideExpiresAt]);
 
   // ── Kitchen printers ────────────────────────────────────────────────────────
-  // Only inside the desktop shell, and only for a real login: claiming tickets
-  // goes through RLS, and the public terminal has no auth session to scope it.
-  // In a browser this is a no-op, so the tablets are unaffected.
+  // Only inside the desktop shell, and only with a real login: claiming tickets
+  // goes through RLS. In a browser this is a no-op, so the tablets are unaffected.
+  //
+  // What decides it is the session on the machine, not the route that drew the
+  // page. The register runs the terminal link inside the shell with an owner
+  // already signed in, and refusing on the route alone left that session unused —
+  // slips piled up in print_jobs with nothing on the network to carry them.
+  //
+  // A session belonging to another company is the one case to refuse: a terminal
+  // link pointed at one restaurant must never drain another's queue.
   useEffect(() => {
-    if (overrideCompanyId || !isDesktop()) return;
+    if (!isDesktop()) return;
     const companyId = getSession()?.companyId;
     if (!companyId) return;
+    if (overrideCompanyId && overrideCompanyId !== companyId) return;
     return startKitchenPrinting(companyId);
   }, [overrideCompanyId]);
 
@@ -1525,6 +1538,19 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
           <span className="font-semibold text-stone-800 text-sm md:hidden truncate max-w-[160px]">{overrideCompanyName || getSession()?.companyName || 'Kafe'}</span>
         </div>
         <div className="flex-1" />
+        {/* The desktop shell has no browser chrome, so a till opened from admin
+            would be a room with no door. Only shown to a machine that is actually
+            signed in — on a waiter's tablet there is no admin to go back to. */}
+        {overrideCompanyId && isDesktop() && getSession()?.companyId === overrideCompanyId && (
+          <button
+            onClick={() => router.push('/admin')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50 transition-colors"
+            title="Admin panelinə qayıt"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            <span className="hidden sm:inline">Admin</span>
+          </button>
+        )}
         <div className="flex items-center gap-2 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl">
           <div className="w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold">
             {effectiveSeller[0]?.toUpperCase()}
