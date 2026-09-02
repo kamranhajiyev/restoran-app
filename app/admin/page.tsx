@@ -16,7 +16,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getSession, logout, validateSession, clearLocalSession, updateSession } from '@/lib/auth';
+import { getSession, logout, validateSession, clearLocalSession, updateSession, lockAdmin, unlockAdmin, isAdminLocked } from '@/lib/auth';
 import {
   fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, editOrderPayment, deleteOrder, restoreOrder,
   fetchShifts, fetchShiftSales, closeShift, fetchOpenShift,
@@ -625,6 +625,15 @@ function AdminPageContent() {
   const [sessionReady, setSessionReady] = useState(false);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
 
+  // Coming back up from the till: the panel stays behind the owner's password.
+  // Starts false so the server-rendered markup matches the first client paint —
+  // sessionStorage only exists once mounted.
+  const [locked, setLocked] = useState(false);
+  const [unlockPw, setUnlockPw] = useState('');
+  const [unlockShow, setUnlockShow] = useState(false);
+  const [unlockErr, setUnlockErr] = useState('');
+  const [unlockBusy, setUnlockBusy] = useState(false);
+
   // tables tab
   const [tables, setTables] = useState<RestaurantTable[]>([]);
   const [halls, setHalls] = useState<Hall[]>([]);
@@ -792,6 +801,26 @@ function AdminPageContent() {
     setPwCurrent(''); setPwNew(''); setPwConfirm('');
     setPwSaving(false);
     setTimeout(() => setPwMsg(''), 2000);
+  }
+
+  // Read the lock on mount — this catches every way back into the panel: the
+  // till's "Admin" button, Alt+←, a reload, a typed URL.
+  useEffect(() => {
+    setLocked(isAdminLocked());
+  }, []);
+
+  async function handleUnlock(e: React.FormEvent) {
+    e.preventDefault();
+    const session = getSession();
+    if (!session) { router.replace('/login'); return; }
+    setUnlockBusy(true);
+    setUnlockErr('');
+    const ok = await verifyPassword(session.id, unlockPw);
+    setUnlockBusy(false);
+    if (!ok) { setUnlockErr('Şifrə səhvdir'); setUnlockPw(''); return; }
+    unlockAdmin();
+    setUnlockPw('');
+    setLocked(false);
   }
 
   useEffect(() => {
@@ -2054,6 +2083,77 @@ function AdminPageContent() {
     );
   }
 
+  // ── Locked: back from the till, password required ──────────────────────────
+  // Returned before the panel so nothing behind it is ever painted. Every hook
+  // above still runs, so the panel is already loaded the moment it unlocks.
+  if (locked) {
+    return (
+      <div className="min-h-screen bg-[#f7f3ed] flex items-center justify-center p-4">
+        <form
+          onSubmit={handleUnlock}
+          className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-stone-100 p-6 space-y-4"
+        >
+          <div className="flex flex-col items-center text-center gap-2">
+            <div className="w-12 h-12 rounded-2xl bg-primary-100 flex items-center justify-center">
+              <Lock className="w-5 h-5 text-primary-800" />
+            </div>
+            <h1 className="text-base font-semibold text-stone-800">Admin paneli bağlıdır</h1>
+            <p className="text-sm text-stone-500">Davam etmək üçün admin şifrəsini daxil edin</p>
+          </div>
+
+          <div className="relative">
+            <input
+              type={unlockShow ? 'text' : 'password'}
+              value={unlockPw}
+              onChange={e => { setUnlockPw(e.target.value); setUnlockErr(''); }}
+              placeholder="Şifrə"
+              autoFocus
+              className="w-full border border-stone-200 rounded-xl px-3 py-2.5 pr-11 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+            <button
+              type="button"
+              onClick={() => setUnlockShow(v => !v)}
+              title={unlockShow ? 'Gizlət' : 'Göstər'}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-lg text-stone-400 hover:text-stone-600 hover:bg-stone-100 transition-colors"
+            >
+              {unlockShow ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+
+          {unlockErr && <p className="text-sm text-red-500 text-center">{unlockErr}</p>}
+
+          <button
+            type="submit"
+            disabled={unlockBusy || !unlockPw}
+            className="w-full py-2.5 rounded-xl bg-primary-800 hover:bg-primary-900 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+          >
+            {unlockBusy ? 'Yoxlanılır…' : 'Aç'}
+          </button>
+
+          <div className="flex items-center justify-between pt-1">
+            {companySlug && sellerToken ? (
+              <button
+                type="button"
+                onClick={() => router.push(`/s/${companySlug}/${sellerToken}`)}
+                className="text-xs text-stone-500 hover:text-stone-700 transition-colors"
+              >
+                Satıcı terminalına qayıt
+              </button>
+            ) : <span />}
+            {/* A forgotten password must not trap the machine on this screen. */}
+            <button
+              type="button"
+              onClick={() => { logout(); router.replace('/login'); }}
+              className="text-xs text-stone-500 hover:text-red-500 transition-colors"
+            >
+              Çıxış
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
   const meta = PAGE_META[tab];
 
   return (
@@ -2100,6 +2200,9 @@ function AdminPageContent() {
             onClick={e => {
               if (!isDesktop()) return;
               e.preventDefault();
+              // Same window, so the way back is the same window too — lock it
+              // behind the owner's password before handing the screen over.
+              lockAdmin();
               router.push(`/s/${companySlug}/${sellerToken}`);
             }}
             title="Satıcı terminalını aç"

@@ -2,6 +2,29 @@ import { supabase } from './supabase';
 import { Role } from '@/types';
 
 const AUTH_KEY = 'restoran_auth';
+const ADMIN_LOCK_KEY = 'restoran_admin_locked';
+
+// Stepping from admin down to the till locks the panel behind the owner's own
+// password, so a cashier left alone at the terminal cannot walk back up into it.
+// The gate lives on /admin rather than on the till's "Admin" button because the
+// desktop shell still honours Alt+← and a reload — both of which would walk
+// straight past a button-level prompt.
+//
+// localStorage, not sessionStorage: restarting the desktop app would otherwise
+// clear the lock and drop whoever is at the terminal straight into the panel,
+// since the login is already cached. Only the password — or a fresh login —
+// lifts it.
+export function lockAdmin() {
+  try { localStorage.setItem(ADMIN_LOCK_KEY, '1'); } catch { /* private mode */ }
+}
+
+export function unlockAdmin() {
+  try { localStorage.removeItem(ADMIN_LOCK_KEY); } catch { /* private mode */ }
+}
+
+export function isAdminLocked(): boolean {
+  try { return localStorage.getItem(ADMIN_LOCK_KEY) === '1'; } catch { return false; }
+}
 
 export interface Session {
   id: string;
@@ -105,12 +128,15 @@ export function updateSession(patch: Partial<Session>) {
 export function logout() {
   supabase.auth.signOut();
   localStorage.removeItem(AUTH_KEY);
+  // Signing in again is proof enough — don't make the next owner face the lock.
+  unlockAdmin();
 }
 
 // Use inside onAuthStateChange callbacks instead of logout().
 // logout() calls signOut() which fires SIGNED_OUT which retriggers the callback → infinite loop.
 export function clearLocalSession() {
   localStorage.removeItem(AUTH_KEY);
+  unlockAdmin();
 }
 
 export async function validateSession(session: Session): Promise<boolean> {
