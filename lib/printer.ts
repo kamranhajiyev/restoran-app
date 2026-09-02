@@ -86,36 +86,87 @@ export function savePrinter(_name: string): void {
   // WebUSB persists authorization via browser — no manual save needed
 }
 
+// Every money line shares one right-hand column, so the amounts stack no
+// matter how long the label is.
+const row = (label: string, amount: string) => `${label}${amount.padStart(WIDTH - label.length)}`;
+const money = (n: number) => `${n.toFixed(2)}m`;
+
+// The header both papers share: who, which order, which table, when, whose.
+function head(order: Order, companyName: string, heading?: string): Line[] {
+  const date = new Date(order.createdAt).toLocaleString('az-AZ', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const lines: Line[] = [
+    { text: companyName, big: true, center: true },
+    { text: '-'.repeat(WIDTH), center: true },
+  ];
+  if (heading) lines.push({ text: heading, big: true, center: true });
+  lines.push(
+    { text: `Sifariş #${order.orderNumber}`, center: true },
+    { text: `Masa: ${order.tableNumber === 0 ? 'Takeaway' : order.tableNumber}`, center: true },
+    { text: date, center: true },
+    { text: `Ofisiant: ${order.sellerName}`, center: true },
+    { text: '='.repeat(WIDTH) },
+  );
+  return lines;
+}
+
+// name | qty | price, filling the line exactly. The modifier rides on the
+// same line as its dish — on a line of its own it read as another item.
+function itemLines(order: Order): Line[] {
+  return order.items.map(item => {
+    const label = item.modifiers ? `${item.menuItem.name} (${item.modifiers})` : item.menuItem.name;
+    const name = label.substring(0, WIDTH - 12).padEnd(WIDTH - 12);
+    const qty = `${item.quantity}x`.padStart(4);
+    const price = money(item.menuItem.price * item.quantity).padStart(8);
+    return { text: `${name}${qty}${price}` };
+  });
+}
+
+async function send(lines: Line[]): Promise<boolean> {
+  const prefix = new Uint8Array(stringToBytes(ESC.INIT + ESC.LEFT));
+  const image = rasterize(lines, WIDTH);
+  const tail = new Uint8Array(stringToBytes('\n\n\n' + ESC.CUT));
+  const out = new Uint8Array(prefix.length + image.length + tail.length);
+  out.set(prefix, 0);
+  out.set(image, prefix.length);
+  out.set(tail, prefix.length + image.length);
+  return await sendBytes(out);
+}
+
+// The bill the waiter carries to the table, printed while the order is still
+// open. Deliberately not the same paper as printReceipt: the money has not been
+// taken yet, so there is no cash/card split, no change and no thank-you — only
+// what was eaten and what it comes to. "HESAB" at the top is what stops a
+// customer from treating it as proof of payment.
+export async function printBill(order: Order, companyName: string): Promise<boolean> {
+  try {
+    const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
+    const discount = order.discountAmount ?? 0;
+
+    const lines: Line[] = [...head(order, companyName, 'HESAB'), ...itemLines(order)];
+
+    lines.push({ text: '='.repeat(WIDTH) });
+    // A discount agreed before payment still belongs on the bill — the customer
+    // is being asked for the net figure, not the menu one.
+    if (discount > 0) {
+      lines.push({ text: row('Cəmi:', money(gross)) });
+      lines.push({ text: row('Endirim:', `-${money(discount)}`) });
+    }
+    lines.push({ text: row('ÖDƏNİLƏCƏK:', money(gross - discount)), big: true });
+    lines.push({ text: '-'.repeat(WIDTH), center: true });
+
+    return await send(lines);
+  } catch (err) {
+    console.error('[Printer] Hesab cap alinmadi:', err);
+    return false;
+  }
+}
+
 export async function printReceipt(order: Order, companyName: string): Promise<boolean> {
   try {
     const total = (order.cashAmount ?? 0) + (order.cardAmount ?? 0) + (order.discountAmount ?? 0);
     const paid = (order.cashAmount ?? 0) + (order.cardAmount ?? 0);
-    const date = new Date(order.createdAt).toLocaleString('az-AZ', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-    // Every money line shares one right-hand column, so the amounts stack no
-    // matter how long the label is.
-    const row = (label: string, amount: string) => `${label}${amount.padStart(WIDTH - label.length)}`;
-    const money = (n: number) => `${n.toFixed(2)}m`;
-
-    const lines: Line[] = [
-      { text: companyName, big: true, center: true },
-      { text: '-'.repeat(WIDTH), center: true },
-      { text: `Sifariş #${order.orderNumber}`, center: true },
-      { text: `Masa: ${order.tableNumber === 0 ? 'Takeaway' : order.tableNumber}`, center: true },
-      { text: date, center: true },
-      { text: `Ofisiant: ${order.sellerName}`, center: true },
-      { text: '='.repeat(WIDTH) },
-    ];
-
-    for (const item of order.items) {
-      // name | qty | price, filling the line exactly. The modifier rides on the
-      // same line as its dish — on a line of its own it read as another item.
-      const label = item.modifiers ? `${item.menuItem.name} (${item.modifiers})` : item.menuItem.name;
-      const name = label.substring(0, WIDTH - 12).padEnd(WIDTH - 12);
-      const qty = `${item.quantity}x`.padStart(4);
-      const price = money(item.menuItem.price * item.quantity).padStart(8);
-      lines.push({ text: `${name}${qty}${price}` });
-    }
+    const lines: Line[] = [...head(order, companyName), ...itemLines(order)];
 
     lines.push({ text: '='.repeat(WIDTH) });
 
@@ -138,14 +189,7 @@ export async function printReceipt(order: Order, companyName: string): Promise<b
     lines.push({ text: '-'.repeat(WIDTH), center: true });
     lines.push({ text: 'Təşəkkürlər!', center: true });
 
-    const head = new Uint8Array(stringToBytes(ESC.INIT + ESC.LEFT));
-    const image = rasterize(lines, WIDTH);
-    const tail = new Uint8Array(stringToBytes('\n\n\n' + ESC.CUT));
-    const out = new Uint8Array(head.length + image.length + tail.length);
-    out.set(head, 0);
-    out.set(image, head.length);
-    out.set(tail, head.length + image.length);
-    return await sendBytes(out);
+    return await send(lines);
   } catch (err) {
     console.error('[Printer] Cap alinmadi:', err);
     return false;

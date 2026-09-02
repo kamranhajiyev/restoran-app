@@ -5,7 +5,7 @@ import {
   PanelLeftClose, PanelLeftOpen, LogOut, X,
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
   ShoppingCart, ChevronLeft, ChevronRight, ChevronDown, Minus, Plus, Wallet,
-  History, Search, Delete, KeyRound, Trash2, Check, Bell, BellOff, AlertTriangle,
+  History, Search, Delete, KeyRound, Trash2, Check, Bell, BellOff, AlertTriangle, Printer,
 } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
@@ -24,7 +24,7 @@ import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, business
 import { CashShift, Category, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
 import OrderItemHistory from '@/components/OrderItemHistory';
-import { connectPrinter, disconnectPrinter, printReceipt, openCashDrawer } from '@/lib/printer';
+import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, openCashDrawer } from '@/lib/printer';
 import { isDesktop, startKitchenPrinting } from '@/lib/desktopPrint';
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
@@ -244,6 +244,10 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const [clearConfirm, setClearConfirm] = useState(false);
   const [printerConnected, setPrinterConnected] = useState(false);
   const [shouldPrintReceipt, setShouldPrintReceipt] = useState(true);
+  // Which order's bill is on its way to the printer. Holds the id rather than a
+  // flag so only that row's button goes quiet — pairing shows a browser dialog,
+  // and a second press behind it would queue a duplicate bill.
+  const [printBillBusy, setPrintBillBusy] = useState<string | null>(null);
 
   // modifier / variant modal
   const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([]);
@@ -954,6 +958,36 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     // money is actually in hand.
   }
 
+  // The bill the waiter takes to the table, printed on demand from the still-open
+  // order. Nothing is written to the DB: this is a piece of paper, not a state
+  // change, so it can be printed as many times as the table asks for it.
+  //
+  // Pairing happens here rather than sending the cashier to the admin panel. Only
+  // admin has "Yazıcı seç", and a waiter who has never opened admin would press
+  // this button and get silence — so an unpaired printer asks to be picked, once,
+  // on the click that needs it.
+  async function handlePrintBill(order: Order) {
+    if (printBillBusy) return;
+    setPrintBillBusy(order.id);
+    try {
+      let ready = printerConnected;
+      if (!ready) {
+        ready = await selectPrinter();
+        setPrinterConnected(ready);
+        // Cancelling the browser's device picker is a decision, not a fault —
+        // the waiter closed it on purpose and doesn't need an alert about it.
+        if (!ready) return;
+      }
+      const ok = await printBill(order, overrideCompanyName || getSession()?.companyName || '');
+      if (!ok) {
+        setPrinterConnected(false);
+        alert('Hesab çap olunmadı — yazıcı bağlantısını yoxlayın.');
+      }
+    } finally {
+      setPrintBillBusy(null);
+    }
+  }
+
   // Pre-fill cash with the total — the common case is exact cash payment;
   // the field selects on focus so a different amount can be typed straight over it.
   function openPayment(order: Order) {
@@ -992,7 +1026,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       const paidOrder = { ...order, status: 'ödənilib' as const, paidAt: new Date().toISOString(), cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined };
       setOrders(prev => prev.map(o => o.id === order.id ? paidOrder : o));
       if (printerConnected) {
-        const cName = getSession()?.companyName ?? '';
+        // The public terminal link has no session, so the name has to come off
+        // the props there or the receipt prints with a blank header.
+        const cName = overrideCompanyName || getSession()?.companyName || '';
         if (shouldPrintReceipt) printReceipt(paidOrder, cName);
         if (cashKept > 0) openCashDrawer();
       }
@@ -1642,13 +1678,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 {prevOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
-                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onStatusChange={handleStatusChange} />)}
+                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
-                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onStatusChange={handleStatusChange} />)}
+                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
               </div>
@@ -2612,13 +2648,24 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                   <span>✓</span>
                 </div>
               )}
-              {printerConnected && (
+              {printerConnected ? (
                 <button
                   onClick={() => { const next = !shouldPrintReceipt; setShouldPrintReceipt(next); setPrintReceiptEnabled(next); }}
                   className={`w-full flex items-center justify-between px-4 py-3 rounded-xl mb-3 text-sm font-semibold transition-colors ${shouldPrintReceipt ? 'bg-green-50 text-green-700' : 'bg-stone-100 text-stone-500'}`}
                 >
                   <span>🖨️ Çek çap et</span>
                   <span>{shouldPrintReceipt ? '✓' : '—'}</span>
+                </button>
+              ) : (
+                // Without this the toggle simply isn't there and the receipt never
+                // comes out, with nothing on screen saying why. The cashier is the
+                // one standing at the machine, so the pairing offer belongs here
+                // rather than behind the admin panel.
+                <button
+                  onClick={async () => { setPrinterConnected(await selectPrinter()); }}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl mb-3 text-sm font-semibold bg-stone-100 text-stone-500 hover:bg-stone-200 transition-colors"
+                >
+                  <Printer className="w-4 h-4" />Yazıcı seç
                 </button>
               )}
               <div className="flex gap-2">
@@ -2820,7 +2867,7 @@ function ReadyBadge({ progress, allReady }: { progress: { done: number; total: n
 
 // ── OrderRow — mobile card + desktop table row ────────────────────────────
 
-function OrderRow({ order, tableLabel, tz, printFailed, progress, isItemReady, onReprint, onPay, onCancel, onAppend, onMove, onStatusChange }: {
+function OrderRow({ order, tableLabel, tz, printFailed, progress, isItemReady, onReprint, onPay, onCancel, onAppend, onMove, onPrintBill, billBusy, onStatusChange }: {
   order: Order;
   tableLabel: string;
   tz: string;
@@ -2832,6 +2879,8 @@ function OrderRow({ order, tableLabel, tz, printFailed, progress, isItemReady, o
   onCancel: () => void;
   onAppend: () => void;
   onMove: () => void;
+  onPrintBill: () => void;
+  billBusy: boolean;
   onStatusChange: (id: string, s: OrderStatus) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -2909,6 +2958,15 @@ function OrderRow({ order, tableLabel, tz, printFailed, progress, isItemReady, o
                   className="w-full bg-primary-800 hover:bg-primary-900 active:scale-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-all"
                 >
                   Ödəniş
+                </button>
+                {/* The bill the customer sees, printed while the order is still
+                    open — the paper between the kitchen ticket and the receipt. */}
+                <button
+                  onClick={e => { e.stopPropagation(); onPrintBill(); }}
+                  disabled={billBusy}
+                  className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-emerald-300 text-emerald-700 hover:bg-emerald-50 active:scale-95 disabled:opacity-50 text-sm font-semibold transition-all"
+                >
+                  <Printer className="w-4 h-4" />{billBusy ? 'Çap olunur…' : 'Çap et'}
                 </button>
                 <button
                   onClick={e => { e.stopPropagation(); onAppend(); }}
@@ -3003,6 +3061,13 @@ function OrderRow({ order, tableLabel, tz, printFailed, progress, isItemReady, o
             {order.note && <p className="text-xs text-stone-500 italic">Qeyd: {order.note}</p>}
             {isOrderOpen(order) && (
               <div className="flex gap-2 pt-3 mt-1 border-t border-stone-200">
+                <button
+                  onClick={e => { e.stopPropagation(); onPrintBill(); }}
+                  disabled={billBusy}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 border border-emerald-300 hover:bg-emerald-50 disabled:opacity-50 rounded-lg px-3 py-1.5 transition-colors"
+                >
+                  <Printer className="w-3.5 h-3.5" />{billBusy ? 'Çap olunur…' : 'Çap et'}
+                </button>
                 <button
                   onClick={e => { e.stopPropagation(); onAppend(); }}
                   className="text-xs font-semibold text-primary-800 border border-primary-300 hover:bg-primary-50 rounded-lg px-3 py-1.5 transition-colors"
