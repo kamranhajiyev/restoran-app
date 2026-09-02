@@ -12,7 +12,8 @@
 // tablets and phones that will never see a printer.
 
 import { supabase } from './supabase';
-import { buildStationTicket, type TicketPayload } from './escpos';
+import { type TicketPayload } from './escpos';
+import { buildStationTicketRaster } from './station-ticket';
 
 export interface PosNative {
   isDesktop: true;
@@ -84,7 +85,7 @@ async function runJob(job: ClaimedJob): Promise<void> {
   if (!station?.ip) return release(job.id);
 
   try {
-    await native.print(station.ip, station.port, buildStationTicket(job.payload));
+    await native.print(station.ip, station.port, buildStationTicketRaster(job.payload));
     await supabase.from('print_jobs')
       .update({ status: 'printed', printed_at: new Date().toISOString(), error: null })
       .eq('id', job.id);
