@@ -1,6 +1,7 @@
 import type { Order } from '@/types';
 import { stringToBytes, ESC, WIDTH } from './escpos';
-import { rasterize, type Line } from './raster';
+import { rasterize, type Line, type Logo } from './raster';
+import { loadLogo } from './logo';
 
 const USB_VID = 0x1FC9;
 const USB_PID = 0x2016;
@@ -121,9 +122,9 @@ function itemLines(order: Order): Line[] {
   });
 }
 
-async function send(lines: Line[]): Promise<boolean> {
+async function send(lines: Line[], logo?: Logo | null): Promise<boolean> {
   const prefix = new Uint8Array(stringToBytes(ESC.INIT + ESC.LEFT));
-  const image = rasterize(lines, WIDTH);
+  const image = rasterize(lines, WIDTH, logo);
   const tail = new Uint8Array(stringToBytes('\n\n\n' + ESC.CUT));
   const out = new Uint8Array(prefix.length + image.length + tail.length);
   out.set(prefix, 0);
@@ -137,8 +138,9 @@ async function send(lines: Line[]): Promise<boolean> {
 // taken yet, so there is no cash/card split, no change and no thank-you — only
 // what was eaten and what it comes to. "HESAB" at the top is what stops a
 // customer from treating it as proof of payment.
-export async function printBill(order: Order, companyName: string): Promise<boolean> {
+export async function printBill(order: Order, companyName: string, logoUrl?: string | null): Promise<boolean> {
   try {
+    const logo = await loadLogo(logoUrl);
     const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
     const discount = order.discountAmount ?? 0;
 
@@ -154,15 +156,16 @@ export async function printBill(order: Order, companyName: string): Promise<bool
     lines.push({ text: row('ÖDƏNİLƏCƏK:', money(gross - discount)), big: true });
     lines.push({ text: '-'.repeat(WIDTH), center: true });
 
-    return await send(lines);
+    return await send(lines, logo);
   } catch (err) {
     console.error('[Printer] Hesab cap alinmadi:', err);
     return false;
   }
 }
 
-export async function printReceipt(order: Order, companyName: string): Promise<boolean> {
+export async function printReceipt(order: Order, companyName: string, logoUrl?: string | null): Promise<boolean> {
   try {
+    const logo = await loadLogo(logoUrl);
     const total = (order.cashAmount ?? 0) + (order.cardAmount ?? 0) + (order.discountAmount ?? 0);
     const paid = (order.cashAmount ?? 0) + (order.cardAmount ?? 0);
 
@@ -189,7 +192,7 @@ export async function printReceipt(order: Order, companyName: string): Promise<b
     lines.push({ text: '-'.repeat(WIDTH), center: true });
     lines.push({ text: 'Təşəkkürlər!', center: true });
 
-    return await send(lines);
+    return await send(lines, logo);
   } catch (err) {
     console.error('[Printer] Cap alinmadi:', err);
     return false;

@@ -991,10 +991,34 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
         // the waiter closed it on purpose and doesn't need an alert about it.
         if (!ready) return;
       }
-      const ok = await printBill(order, overrideCompanyName || getSession()?.companyName || '');
+      const ok = await printBill(order, overrideCompanyName || getSession()?.companyName || '', logoUrl);
       if (!ok) {
         setPrinterConnected(false);
         alert('Hesab çap olunmadı — yazıcı bağlantısını yoxlayın.');
+      }
+    } finally {
+      setPrintBillBusy(null);
+    }
+  }
+
+  // The same paper the customer got when they paid, printed again from Tarixçə —
+  // for the receipt that jammed, tore, or was thrown away before anyone read it.
+  // Like the bill, this writes nothing: the order was closed once and stays closed,
+  // so the second copy is identical to the first rather than a fresh event.
+  async function handleReprintReceipt(order: Order) {
+    if (printBillBusy) return;
+    setPrintBillBusy(order.id);
+    try {
+      let ready = printerConnected;
+      if (!ready) {
+        ready = await selectPrinter();
+        setPrinterConnected(ready);
+        if (!ready) return;
+      }
+      const ok = await printReceipt(order, overrideCompanyName || getSession()?.companyName || '', logoUrl);
+      if (!ok) {
+        setPrinterConnected(false);
+        alert('Qəbz çap olunmadı — yazıcı bağlantısını yoxlayın.');
       }
     } finally {
       setPrintBillBusy(null);
@@ -1042,8 +1066,11 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
         // The public terminal link has no session, so the name has to come off
         // the props there or the receipt prints with a blank header.
         const cName = overrideCompanyName || getSession()?.companyName || '';
-        if (shouldPrintReceipt) printReceipt(paidOrder, cName);
-        if (cashKept > 0) openCashDrawer();
+        if (shouldPrintReceipt) printReceipt(paidOrder, cName, logoUrl);
+        // Every closed bill, not just the ones that put notes in the till: a card
+        // payment still needs the drawer for change owed from an earlier round,
+        // and a cashier who has to open it by key stops trusting the button.
+        openCashDrawer();
       }
     } else {
       refreshOrders();
@@ -1887,6 +1914,15 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                                         Ödənişsiz bağla
                                       </button>
                                     </>
+                                  )}
+                                  {order.status === 'ödənilib' && (
+                                    <button
+                                      onClick={() => handleReprintReceipt(order)}
+                                      disabled={printBillBusy === order.id}
+                                      className="text-xs font-semibold text-stone-600 border border-stone-300 hover:bg-white rounded-lg px-2.5 py-1 transition-colors disabled:opacity-50"
+                                    >
+                                      {printBillBusy === order.id ? 'Çap olunur...' : 'Qəbzi çap et'}
+                                    </button>
                                   )}
                                   {(order.cashAmount || order.cardAmount) && (
                                     <span className="text-xs text-stone-500">

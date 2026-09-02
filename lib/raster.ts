@@ -11,6 +11,12 @@ const BYTES_PER_ROW = DOTS / 8;
 const NORMAL_H = 28;       // ~20px glyphs need the leading to stay readable
 const BIG_H = 42;          // 1.5x, matching what ESC.BIG did vertically
 const PAD_TOP = 4;
+// The logo is a guest on a page laid out in text rows: give it a generous but
+// bounded box so a tall or square file can't push the order itself off the
+// first hand-span of paper.
+const LOGO_MAX_W = 240;
+const LOGO_MAX_H = 160;
+const LOGO_GAP = 10;
 // A raster command's height field is one byte in practice on these clones, so
 // tall receipts go out as a series of bands rather than one oversized image.
 const BAND_ROWS = 128;
@@ -38,8 +44,20 @@ function fitFont(ctx: CanvasRenderingContext2D, cols: number): string {
   return `${WEIGHT} ${Math.floor((probe * DOTS) / width)}px ${STACK}`;
 }
 
-export function rasterize(lines: Line[], cols: number): Uint8Array {
-  const height = lines.reduce((h, l) => h + (l.big ? BIG_H : NORMAL_H), PAD_TOP * 2);
+// What a logo costs in paper, decided before the canvas is sized: the file is
+// scaled down to fit the box and never up, so a small mark stays small rather
+// than being blown into a mess of stair-stepped edges.
+function logoBox(logo: Logo): { w: number; h: number } {
+  const scale = Math.min(LOGO_MAX_W / logo.width, LOGO_MAX_H / logo.height, 1);
+  return { w: Math.round(logo.width * scale), h: Math.round(logo.height * scale) };
+}
+
+export type Logo = CanvasImageSource & { width: number; height: number };
+
+export function rasterize(lines: Line[], cols: number, logo?: Logo | null): Uint8Array {
+  const box = logo ? logoBox(logo) : null;
+  const height = lines.reduce((h, l) => h + (l.big ? BIG_H : NORMAL_H), PAD_TOP * 2)
+    + (box ? box.h + LOGO_GAP : 0);
 
   const canvas = document.createElement('canvas');
   canvas.width = DOTS;
@@ -54,6 +72,14 @@ export function rasterize(lines: Line[], cols: number): Uint8Array {
   ctx.font = fitFont(ctx, cols);
 
   let y = PAD_TOP;
+
+  // Centred above everything, on the same white ground as the text, so the one
+  // threshold in toRaster() decides its dots too.
+  if (logo && box) {
+    ctx.drawImage(logo, Math.round((DOTS - box.w) / 2), y, box.w, box.h);
+    y += box.h + LOGO_GAP;
+  }
+
   for (const line of lines) {
     const x = line.center ? Math.max(0, (DOTS - ctx.measureText(line.text).width) / 2) : 0;
     if (line.big) {
