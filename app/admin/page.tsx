@@ -38,7 +38,7 @@ import {
   fetchAllUsers, createEmployee, updateEmployee, deleteUser, toggleUserActive,
 } from '@/lib/store';
 import { applyBrand, BRAND_PRESETS, DEFAULT_BRAND } from '@/lib/branding';
-import { orderClosedAt } from '@/lib/order-items';
+import { orderClosedAt, orderSuspicion, isSuspiciousOrder } from '@/lib/order-items';
 import {
   CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc,
   addDays, dayDiff, dayOfWeek, dayToDate, tzHour, cutoffMinutes,
@@ -590,6 +590,9 @@ function AdminPageContent() {
   const [totalOrders, setTotalOrders] = useState(0);
   const [orderSearch, setOrderSearch] = useState('');
   const [ordersPreset, setOrdersPreset] = useState<'all' | 'bugün' | 'bu həftə'>('all');
+  // Narrows whatever period is selected down to the receipts an owner audits —
+  // removed lines, discounts, free closes. See isSuspiciousOrder.
+  const [onlySuspicious, setOnlySuspicious] = useState(false);
   // Date range for the orders tab. The presets above only filter the loaded page,
   // so a picked range is fetched from the server instead — that's the only way to
   // reach orders older than the last 200.
@@ -1753,9 +1756,14 @@ function AdminPageContent() {
     : ordersPreset === 'bu həftə'
     ? orders.filter(o => businessDay(o.createdAt, bizSettings) >= weekStart)
     : orders;
+  // The audit filter sits between the period and the search box, so it narrows
+  // whichever period is in charge — preset or fetched range — and the Excel export
+  // (which takes visibleOrders) carries it for free.
+  const ordersSuspicious = ordersDateFiltered.filter(isSuspiciousOrder);
+  const ordersAudited = onlySuspicious ? ordersSuspicious : ordersDateFiltered;
   const visibleOrders = orderQuery
-    ? ordersDateFiltered.filter(o => String(o.orderNumber).includes(orderQuery) || (o.sellerName ?? '').toLowerCase().includes(orderQuery))
-    : ordersDateFiltered;
+    ? ordersAudited.filter(o => String(o.orderNumber).includes(orderQuery) || (o.sellerName ?? '').toLowerCase().includes(orderQuery))
+    : ordersAudited;
 
   const menuCostMap: Record<string, number> = {};
   menu.forEach(m => {
@@ -2703,6 +2711,15 @@ function AdminPageContent() {
                   </button>
                 )}
 
+                {/* Amber, not primary — this is an audit filter, not another period preset. */}
+                <button
+                  onClick={() => setOnlySuspicious(v => !v)}
+                  title="Silinmiş məhsulu olan, endirimli və ödənişsiz bağlanan qəbzlər"
+                  className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${onlySuspicious ? 'bg-amber-500 text-white' : 'bg-white border border-amber-200 text-amber-700 hover:bg-amber-50'}`}
+                >
+                  Şübhəli qəbzlər{ordersSuspicious.length > 0 ? ` (${ordersSuspicious.length})` : ''}
+                </button>
+
                 {rangeLoading && <span className="w-3.5 h-3.5 border-2 border-primary-200 border-t-primary-800 rounded-full animate-spin" />}
               </div>
 
@@ -2723,9 +2740,17 @@ function AdminPageContent() {
                 </div>
               )}
 
-              {ordersDateFiltered.length > 0 && visibleOrders.length === 0 && (
+              {/* Nothing suspicious is good news, so it gets its own message rather than
+                  reading as a failed search. */}
+              {ordersDateFiltered.length > 0 && ordersAudited.length === 0 && (
                 <div className="bg-white rounded-xl border border-stone-100 card p-10 text-center">
-                  <p className="text-sm text-stone-500">Axtarışa uyğun sifariş tapılmadı ({ordersDateFiltered.length} sifariş arasında)</p>
+                  <p className="text-sm text-stone-500">Seçilmiş dövrdə şübhəli qəbz yoxdur ({ordersDateFiltered.length} sifariş yoxlanıldı)</p>
+                </div>
+              )}
+
+              {ordersAudited.length > 0 && visibleOrders.length === 0 && (
+                <div className="bg-white rounded-xl border border-stone-100 card p-10 text-center">
+                  <p className="text-sm text-stone-500">Axtarışa uyğun sifariş tapılmadı ({ordersAudited.length} sifariş arasında)</p>
                 </div>
               )}
 
@@ -2733,12 +2758,17 @@ function AdminPageContent() {
                 {visibleOrders.map((order, i) => {
                   const isExpanded = expandedOrderId === order.id;
                   const closedAt = orderClosedAt(order);
+                  // Yellow marks the one signal that is otherwise invisible from the list:
+                  // a line taken off after the order was placed. A discount already shows as
+                  // its own badge and a free close as its status pill, so neither is tinted.
+                  const removedCount = order.removedItems?.length ?? 0;
+                  const flagged = orderSuspicion(order).hasRemovals;
                   return (
-                    <div key={order.id} className={i < visibleOrders.length - 1 ? 'border-b border-stone-50' : ''}>
+                    <div key={order.id} className={`${flagged ? 'bg-amber-50 ' : ''}${i < visibleOrders.length - 1 ? 'border-b border-stone-50' : ''}`}>
                       {/* Row */}
                       <button
                         onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors text-left"
+                        className={`w-full flex items-center gap-3 px-4 py-3 transition-colors text-left ${flagged ? 'hover:bg-amber-100' : 'hover:bg-stone-50'}`}
                       >
                         <ChevronDown className={`w-4 h-4 text-stone-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                         <span className="w-14 text-xs font-bold text-primary-900 flex-shrink-0">#{order.orderNumber}</span>
@@ -2762,6 +2792,11 @@ function AdminPageContent() {
                             🏷️ -{order.discountAmount!.toFixed(2)} ₼
                           </span>
                         )}
+                        {removedCount > 0 && (
+                          <span className="text-xs font-semibold text-amber-700 bg-amber-100 border border-amber-300 rounded-lg px-1.5 py-0.5 flex-shrink-0 hidden sm:inline">
+                            🗑 {removedCount} silinib
+                          </span>
+                        )}
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 text-center ${STATUS_COLORS[order.status]}`}>{STATUS_LABELS[order.status]}</span>
                       </button>
 
@@ -2775,6 +2810,19 @@ function AdminPageContent() {
                             <OrderItemHistory order={order} tz={bizSettings.timezone} />
                           </div>
                           {order.note && <p className="text-xs text-stone-500 italic mb-3">Qeyd: {order.note}</p>}
+                          {/* The struck-through lines above already carry who and when; this
+                              saves scanning a long receipt to find them. */}
+                          {removedCount > 0 && (
+                            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                              Sifarişdən {removedCount} sətir silinib
+                              {(() => {
+                                const by = [...new Set(order.removedItems!.map(oi => oi.removedBy).filter(Boolean))];
+                                return by.length > 0 ? ` — ${by.join(', ')}` : '';
+                              })()}
+                              {' · '}
+                              {order.removedItems!.map(oi => `${oi.menuItem.name} ×${oi.quantity}`).join(', ')}
+                            </p>
+                          )}
                           {order.status === 'ləğv edildi' && (
                             <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3">
                               Ödənişsiz bağlandı{order.cancelledBy ? ` — ${order.cancelledBy}` : ''}
@@ -2867,7 +2915,16 @@ function AdminPageContent() {
                 })}
               </div>
 
-              {!orderQuery && !rangeOrders && orders.length < totalOrders && (
+              {/* Paging while the audit filter is on would look like "these are all the
+                  suspicious receipts" when it is only the loaded page — point at the date
+                  range instead, which fetches from the server. */}
+              {onlySuspicious && !rangeOrders && orders.length < totalOrders && (
+                <p className="text-xs text-stone-500 text-center px-4">
+                  Yalnız son {orders.length} sifariş yoxlanılıb. Daha köhnə qəbzlər üçün yuxarıdan tarix aralığı seçin.
+                </p>
+              )}
+
+              {!orderQuery && !onlySuspicious && !rangeOrders && orders.length < totalOrders && (
                 <button
                   onClick={loadMoreOrders}
                   disabled={loadingMore}

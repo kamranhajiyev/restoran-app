@@ -52,6 +52,25 @@ export function splitOrderItems(rows: OrderItemRow[] | null | undefined): {
   return { items, removedItems };
 }
 
+// ── Auditing a receipt ───────────────────────────────────────────────────────
+
+// Three things worth a second look on a closed receipt: a line taken off after the
+// order was placed, a discount, and a free close. Each is legitimate on its own —
+// together on one admin list they are what an owner audits, because the classic
+// theft is print the order, serve the food, delete the line, keep the cash.
+export function orderSuspicion(o: Pick<Order, 'removedItems' | 'discountAmount' | 'status'>) {
+  return {
+    hasRemovals: (o.removedItems?.length ?? 0) > 0,
+    discounted:  (o.discountAmount ?? 0) > 0,
+    freeClosed:  o.status === 'ləğv edildi',
+  };
+}
+
+export function isSuspiciousOrder(o: Pick<Order, 'removedItems' | 'discountAmount' | 'status'>): boolean {
+  const s = orderSuspicion(o);
+  return s.hasRemovals || s.discounted || s.freeClosed;
+}
+
 // When the order was closed — paid or cancelled. Undefined while it is still open.
 // An order can only take one of those two exits, so the order of the fallback
 // never decides anything.
