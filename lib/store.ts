@@ -1,4 +1,4 @@
-import { CashShift, Category, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
+import { CashShift, Category, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
 import { supabase } from './supabase';
@@ -1808,7 +1808,7 @@ function mapShift(r: {
   id: string; opened_at: string; opened_by: string; opening_cash: number;
   closed_at: string | null; closed_by: string | null;
   expected_cash: number | null; counted_cash: number | null;
-  card_sales: number | null; counted_card: number | null; movements: unknown;
+  card_sales: number | null; counted_card: number | null; movements: unknown; edits?: unknown;
 }): CashShift {
   return {
     id: r.id,
@@ -1822,6 +1822,7 @@ function mapShift(r: {
     cardSales: r.card_sales !== null ? Number(r.card_sales) : undefined,
     countedCard: r.counted_card !== null ? Number(r.counted_card) : undefined,
     movements: Array.isArray(r.movements) ? (r.movements as ShiftMovement[]) : [],
+    edits: Array.isArray(r.edits) ? (r.edits as ShiftEdit[]) : [],
   };
 }
 
@@ -1868,6 +1869,45 @@ export async function addShiftMovement(shiftId: string, movement: ShiftMovement)
   // Atomic jsonb append in the DB — concurrent movements can't overwrite each other
   const { error } = await supabase.rpc('append_shift_movement', { shift_id: shiftId, movement });
   if (error) console.error('[addShiftMovement]', error);
+}
+
+// ── Admin corrections ────────────────────────────────────────────────────────
+// Each RPC applies the change and appends its audit entry in one statement, so
+// a shift can never be edited without a trail. These return the error text
+// instead of swallowing it: a correction that silently fails would leave the
+// admin believing the books are fixed when they aren't.
+
+export async function updateShiftMovement(
+  shiftId: string, movementId: string, amount: number, reason: string, by: string,
+): Promise<string | null> {
+  const { error } = await supabase.rpc('update_shift_movement', {
+    shift_id: shiftId, movement_id: movementId,
+    new_amount: amount, new_reason: reason, by_name: by,
+  });
+  if (error) { console.error('[updateShiftMovement]', error); return error.message; }
+  return null;
+}
+
+export async function deleteShiftMovement(
+  shiftId: string, movementId: string, by: string,
+): Promise<string | null> {
+  const { error } = await supabase.rpc('delete_shift_movement', {
+    shift_id: shiftId, movement_id: movementId, by_name: by,
+  });
+  if (error) { console.error('[deleteShiftMovement]', error); return error.message; }
+  return null;
+}
+
+// Closed shifts only — expected_cash stays derived and is never passed in.
+export async function correctShiftTotals(
+  shiftId: string, countedCash: number, countedCard: number | null, by: string,
+): Promise<string | null> {
+  const { error } = await supabase.rpc('correct_shift_totals', {
+    shift_id: shiftId,
+    new_counted_cash: countedCash, new_counted_card: countedCard, by_name: by,
+  });
+  if (error) { console.error('[correctShiftTotals]', error); return error.message; }
+  return null;
 }
 
 export async function closeShift(

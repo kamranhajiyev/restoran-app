@@ -20,6 +20,7 @@ import { getSession, logout, validateSession, clearLocalSession, updateSession, 
 import {
   fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, editOrderPayment, deleteOrder, restoreOrder,
   fetchShifts, fetchShiftSales, closeShift, fetchOpenShift,
+  updateShiftMovement, deleteShiftMovement, correctShiftTotals,
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash, emptyTrash,
   setCompanyContext, updateUser,
@@ -44,7 +45,7 @@ import {
   addDays, dayDiff, dayOfWeek, dayToDate, tzHour, cutoffMinutes,
 } from '@/lib/business-day';
 import { supabase } from '@/lib/supabase';
-import { CashShift, Category, Hall, MenuItem, MenuItemVariant, ModifierGroup, Order, OrderStatus, RestaurantTable, Staff, Station, TrashItem, isOrderOpen } from '@/types';
+import { CashShift, Category, Hall, MenuItem, MenuItemVariant, ModifierGroup, Order, OrderStatus, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, TrashItem, isOrderOpen } from '@/types';
 import AppDialog, { DialogState } from '@/components/AppDialog';
 import AnbarPanel from '@/components/AnbarPanel';
 import StationsPanel from '@/components/StationsPanel';
@@ -585,6 +586,22 @@ function AdminPageContent() {
   const [adminCountedInput, setAdminCountedInput] = useState('');
   const [adminTerminalInput, setAdminTerminalInput] = useState('');
   const [closingShift, setClosingShift] = useState(false);
+  // Kassa corrections. The unlock is deliberately component state, not localStorage:
+  // it lapses on reload, so a terminal left open doesn't stay editable.
+  const [kassaEditUnlocked, setKassaEditUnlocked] = useState(false);
+  const [kassaPwPrompt, setKassaPwPrompt] = useState<null | (() => void)>(null);
+  const [kassaPwInput, setKassaPwInput] = useState('');
+  const [kassaPwError, setKassaPwError] = useState<string | null>(null);
+  const [kassaPwBusy, setKassaPwBusy] = useState(false);
+  const [editingMovement, setEditingMovement] = useState<{ shiftId: string; movementId: string } | null>(null);
+  const [movEditAmount, setMovEditAmount] = useState('');
+  const [movEditReason, setMovEditReason] = useState('');
+  const [movEditOut, setMovEditOut] = useState(true);
+  const [editingTotalsId, setEditingTotalsId] = useState<string | null>(null);
+  const [totalsCashInput, setTotalsCashInput] = useState('');
+  const [totalsCardInput, setTotalsCardInput] = useState('');
+  const [kassaEditBusy, setKassaEditBusy] = useState(false);
+  const [kassaEditError, setKassaEditError] = useState<string | null>(null);
 
   // orders tab
   const [totalOrders, setTotalOrders] = useState(0);
@@ -969,6 +986,210 @@ function AdminPageContent() {
       setAdminCountedInput(''); setAdminTerminalInput('');
       setShifts(await fetchShifts());
     } finally { setClosingShift(false); }
+  }
+
+  // ── Kassa corrections ──────────────────────────────────────────────────────
+  // Every correction goes through here first: the owner's own password, once per
+  // session. A cashier left alone at an admin screen shouldn't be able to rewrite
+  // yesterday's takings.
+  function requireKassaUnlock(action: () => void) {
+    if (kassaEditUnlocked) { action(); return; }
+    setKassaPwInput(''); setKassaPwError(null);
+    setKassaPwPrompt(() => action);
+  }
+
+  async function handleKassaUnlock(e: React.FormEvent) {
+    e.preventDefault();
+    const session = getSession();
+    if (!session) { router.replace('/login'); return; }
+    setKassaPwBusy(true); setKassaPwError(null);
+    const ok = await verifyPassword(session.id, kassaPwInput);
+    setKassaPwBusy(false);
+    if (!ok) { setKassaPwError('Şifrə səhvdir'); setKassaPwInput(''); return; }
+    const pending = kassaPwPrompt;
+    setKassaEditUnlocked(true);
+    setKassaPwPrompt(null);
+    setKassaPwInput('');
+    pending?.();
+  }
+
+  function startMovementEdit(shiftId: string, m: ShiftMovement) {
+    if (!m.id) return;
+    requireKassaUnlock(() => {
+      setKassaEditError(null);
+      setEditingTotalsId(null);
+      setEditingMovement({ shiftId, movementId: m.id! });
+      setMovEditAmount(Math.abs(m.amount).toString());
+      setMovEditReason(m.reason);
+      setMovEditOut(m.amount < 0);
+    });
+  }
+
+  function cancelMovementEdit() {
+    setEditingMovement(null);
+    setMovEditAmount(''); setMovEditReason('');
+    setKassaEditError(null);
+  }
+
+  async function saveMovementEdit() {
+    if (!editingMovement) return;
+    const raw = parseFloat(movEditAmount) || 0;
+    if (raw <= 0 || !movEditReason.trim()) return;
+    setKassaEditBusy(true); setKassaEditError(null);
+    const err = await updateShiftMovement(
+      editingMovement.shiftId, editingMovement.movementId,
+      movEditOut ? -raw : raw, movEditReason.trim(), adminName,
+    );
+    setKassaEditBusy(false);
+    if (err) { setKassaEditError('Düzəliş yadda saxlanılmadı. Yenidən cəhd edin.'); return; }
+    cancelMovementEdit();
+    await refreshKassa();
+  }
+
+  async function handleDeleteMovement(shiftId: string, m: ShiftMovement) {
+    if (!m.id) return;
+    requireKassaUnlock(async () => {
+      if (!confirm(`"${m.reason}" (${m.amount.toFixed(2)} ₼) silinsin?\n\nSilinmiş hərəkət düzəliş tarixçəsində qalır.`)) return;
+      setKassaEditBusy(true); setKassaEditError(null);
+      const err = await deleteShiftMovement(shiftId, m.id!, adminName);
+      setKassaEditBusy(false);
+      if (err) { setKassaEditError('Hərəkət silinmədi. Yenidən cəhd edin.'); return; }
+      await refreshKassa();
+    });
+  }
+
+  function startTotalsEdit(s: CashShift) {
+    requireKassaUnlock(() => {
+      setKassaEditError(null);
+      setEditingMovement(null);
+      setEditingTotalsId(s.id);
+      setTotalsCashInput((s.countedCash ?? 0).toString());
+      setTotalsCardInput(s.countedCard !== undefined ? s.countedCard.toString() : '');
+    });
+  }
+
+  async function saveTotalsEdit(s: CashShift) {
+    if (totalsCashInput === '') return;
+    setKassaEditBusy(true); setKassaEditError(null);
+    const err = await correctShiftTotals(
+      s.id,
+      parseFloat(totalsCashInput) || 0,
+      totalsCardInput === '' ? null : parseFloat(totalsCardInput) || 0,
+      adminName,
+    );
+    setKassaEditBusy(false);
+    if (err) { setKassaEditError('Düzəliş yadda saxlanılmadı. Yenidən cəhd edin.'); return; }
+    setEditingTotalsId(null);
+    await refreshKassa();
+  }
+
+  // Movements render identically on an open and a closed shift, so both lists go
+  // through here — an edit control that exists in one place and not the other is
+  // how the two drift apart.
+  function renderMovements(shift: CashShift) {
+    if (shift.movements.length === 0) return null;
+    return (
+      <ul className="border-t pt-2.5 space-y-1">
+        {shift.movements.map((m, i) => {
+          const isEditing = editingMovement?.shiftId === shift.id && editingMovement.movementId === m.id;
+          if (isEditing) {
+            return (
+              <li key={m.id ?? i} className="bg-stone-50 border border-stone-200 rounded-lg p-2 space-y-2">
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => setMovEditOut(true)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${movEditOut ? 'bg-red-500 text-white' : 'bg-white border border-stone-200 text-stone-500'}`}
+                  >− Məxaric</button>
+                  <button
+                    onClick={() => setMovEditOut(false)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${!movEditOut ? 'bg-green-600 text-white' : 'bg-white border border-stone-200 text-stone-500'}`}
+                  >+ Mədaxil</button>
+                </div>
+                <div className="flex gap-1.5">
+                  <input
+                    type="number" min="0" step="0.01" placeholder="Məbləğ"
+                    value={movEditAmount}
+                    onChange={e => setMovEditAmount(e.target.value)}
+                    className="w-24 border border-stone-200 rounded-lg px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
+                  />
+                  <input
+                    type="text" placeholder="Səbəb"
+                    value={movEditReason}
+                    onChange={e => setMovEditReason(e.target.value)}
+                    className="flex-1 min-w-0 border border-stone-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-primary-700"
+                  />
+                </div>
+                <div className="flex gap-1.5 justify-end">
+                  <button onClick={cancelMovementEdit} className="text-xs font-semibold text-stone-500 px-2.5 py-1 rounded-lg hover:bg-stone-100 transition-colors">Ləğv et</button>
+                  <button
+                    onClick={saveMovementEdit}
+                    disabled={kassaEditBusy || movEditAmount === '' || !movEditReason.trim()}
+                    className="bg-stone-900 hover:bg-stone-800 disabled:opacity-40 text-white text-xs font-semibold px-3 py-1 rounded-lg transition-colors"
+                  >Saxla</button>
+                </div>
+              </li>
+            );
+          }
+          return (
+            <li key={m.id ?? i} className="group flex items-center justify-between text-xs text-stone-600">
+              <span className="truncate mr-3">{m.reason} · {m.by}</span>
+              <span className="flex items-center gap-1.5 shrink-0">
+                <span className={`font-semibold ${m.amount < 0 ? 'text-red-500' : 'text-green-600'}`}>
+                  {m.amount > 0 ? '+' : ''}{m.amount.toFixed(2)} ₼
+                </span>
+                {/* Movements written before ids existed can't be addressed, so they stay read-only. */}
+                {m.id && (
+                  <span className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => startMovementEdit(shift.id, m)}
+                      title="Düzəliş et"
+                      className="p-1 rounded hover:bg-stone-100 text-stone-400 hover:text-stone-600 transition-colors"
+                    ><Pencil className="w-3 h-3" /></button>
+                    <button
+                      onClick={() => handleDeleteMovement(shift.id, m)}
+                      title="Sil"
+                      className="p-1 rounded hover:bg-red-50 text-stone-400 hover:text-red-500 transition-colors"
+                    ><Trash2 className="w-3 h-3" /></button>
+                  </span>
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
+
+  // An edit nobody can see is indistinguishable from theft, so the trail is
+  // always on screen next to the numbers it explains.
+  function renderEditTrail(shift: CashShift) {
+    if (shift.edits.length === 0) return null;
+    const money = (v: ShiftEdit['from']) =>
+      v === null || v === undefined ? '—'
+      : typeof v === 'number' ? `${v.toFixed(2)} ₼`
+      : `${v.amount.toFixed(2)} ₼ · ${v.reason}`;
+    const label = (e: ShiftEdit) =>
+      e.action === 'movement_delete' ? 'Hərəkət silindi'
+      : e.action === 'movement_edit' ? 'Hərəkət düzəldildi'
+      : e.field === 'countedCard' ? 'Terminal düzəldildi'
+      : 'Sayılan nağd düzəldildi';
+    return (
+      <div className="pt-2.5 border-t border-stone-200 space-y-1">
+        <p className="text-[11px] font-semibold text-stone-400 uppercase tracking-wide">Düzəliş tarixçəsi</p>
+        {shift.edits.map((e, i) => (
+          <div key={i} className="text-xs text-stone-500">
+            <span className="font-medium text-stone-600">{label(e)}</span>
+            {': '}
+            <span className="line-through">{money(e.from)}</span>
+            {e.action !== 'movement_delete' && <> → <span className="text-stone-700 font-medium">{money(e.to)}</span></>}
+            <span className="text-stone-400">
+              {' · '}{e.by}{' · '}
+              {new Date(e.at).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
   }
 
   function invalidateTodayStatsCache() {
@@ -3009,17 +3230,10 @@ function AdminPageContent() {
                           <span>💳 Terminal (kart satışı)</span><span className="text-primary-800">{openShiftSales.card.toFixed(2)} ₼</span>
                         </div>
                         <p className="text-xs text-stone-500 -mt-1.5">Kassaya daxil deyil — bank terminalından keçir</p>
-                        {open.movements.length > 0 && (
-                          <ul className="border-t pt-2.5 space-y-1">
-                            {open.movements.map((m, i) => (
-                              <li key={i} className="flex justify-between text-xs text-stone-600">
-                                <span className="truncate mr-3">{m.reason} · {m.by}</span>
-                                <span className={`font-semibold shrink-0 ${m.amount < 0 ? 'text-red-500' : 'text-green-600'}`}>
-                                  {m.amount > 0 ? '+' : ''}{m.amount.toFixed(2)} ₼
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
+                        {renderMovements(open)}
+                        {renderEditTrail(open)}
+                        {kassaEditError && (
+                          <p className="text-xs font-semibold text-red-500">{kassaEditError}</p>
                         )}
                         {activeOrders.length > 0 && (
                           <p className="text-xs font-semibold text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
@@ -3093,6 +3307,11 @@ function AdminPageContent() {
                                     –{s.closedAt ? new Date(s.closedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone }) : ''}
                                   </span>
                                 </span>
+                                {s.edits.length > 0 && (
+                                  <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold shrink-0 bg-amber-50 text-amber-700 border border-amber-100">
+                                    Düzəliş edilib
+                                  </span>
+                                )}
                                 <span className="text-sm font-semibold text-stone-700 shrink-0">{(s.countedCash ?? 0).toFixed(2)} ₼</span>
                                 <span className={`text-xs px-2 py-0.5 rounded-full font-semibold shrink-0 w-20 text-center ${
                                   Math.abs(diff) < 0.005 ? 'bg-green-50 text-green-600'
@@ -3105,31 +3324,72 @@ function AdminPageContent() {
                                 <div className="px-11 pb-4 text-sm text-stone-600 space-y-1.5 bg-stone-50 pt-3 border-t border-stone-100">
                                   <div className="flex justify-between"><span>Açdı / bağladı</span><span>{s.openedBy} / {s.closedBy}</span></div>
                                   <div className="flex justify-between"><span>Başlanğıc</span><span>{s.openingCash.toFixed(2)} ₼</span></div>
+                                  {/* Never editable: it's derived from opening + sales + movements.
+                                      If it could be typed, the difference could be made to look clean. */}
                                   <div className="flex justify-between"><span>Olmalı idi</span><span>{(s.expectedCash ?? 0).toFixed(2)} ₼</span></div>
-                                  <div className="flex justify-between"><span>Sayıldı</span><span>{(s.countedCash ?? 0).toFixed(2)} ₼</span></div>
-                                  {s.cardSales !== undefined && (
-                                    <div className="flex justify-between"><span>💳 Kart satışı</span><span>{s.cardSales.toFixed(2)} ₼</span></div>
+                                  {editingTotalsId === s.id ? (
+                                    <>
+                                      <div className="flex justify-between items-center gap-3">
+                                        <span>Sayıldı</span>
+                                        <input
+                                          type="number" min="0" step="0.01"
+                                          value={totalsCashInput}
+                                          onChange={e => setTotalsCashInput(e.target.value)}
+                                          className="w-28 border border-stone-200 rounded-lg px-2 py-1 text-sm font-semibold text-right focus:outline-none focus:ring-2 focus:ring-primary-700"
+                                        />
+                                      </div>
+                                      {s.cardSales !== undefined && (
+                                        <div className="flex justify-between"><span>💳 Kart satışı</span><span>{s.cardSales.toFixed(2)} ₼</span></div>
+                                      )}
+                                      <div className="flex justify-between items-center gap-3">
+                                        <span>💳 Terminal (Z-hesabat)</span>
+                                        <input
+                                          type="number" min="0" step="0.01" placeholder="—"
+                                          value={totalsCardInput}
+                                          onChange={e => setTotalsCardInput(e.target.value)}
+                                          className="w-28 border border-stone-200 rounded-lg px-2 py-1 text-sm font-semibold text-right focus:outline-none focus:ring-2 focus:ring-primary-700"
+                                        />
+                                      </div>
+                                      <div className="flex gap-1.5 justify-end pt-1">
+                                        <button onClick={() => setEditingTotalsId(null)} className="text-xs font-semibold text-stone-500 px-2.5 py-1 rounded-lg hover:bg-stone-200 transition-colors">Ləğv et</button>
+                                        <button
+                                          onClick={() => saveTotalsEdit(s)}
+                                          disabled={kassaEditBusy || totalsCashInput === ''}
+                                          className="bg-stone-900 hover:bg-stone-800 disabled:opacity-40 text-white text-xs font-semibold px-3 py-1 rounded-lg transition-colors"
+                                        >Saxla</button>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div className="flex justify-between items-center">
+                                        <span>Sayıldı</span>
+                                        <span className="flex items-center gap-1.5">
+                                          {(s.countedCash ?? 0).toFixed(2)} ₼
+                                          <button
+                                            onClick={() => startTotalsEdit(s)}
+                                            title="Sayılan məbləğlərə düzəliş et"
+                                            className="p-1 rounded hover:bg-stone-200 text-stone-400 hover:text-stone-600 transition-colors"
+                                          ><Pencil className="w-3 h-3" /></button>
+                                        </span>
+                                      </div>
+                                      {s.cardSales !== undefined && (
+                                        <div className="flex justify-between"><span>💳 Kart satışı</span><span>{s.cardSales.toFixed(2)} ₼</span></div>
+                                      )}
+                                      {s.countedCard !== undefined && (
+                                        <div className="flex justify-between">
+                                          <span>💳 Terminal (Z-hesabat)</span>
+                                          <span className={
+                                            Math.abs(s.countedCard - (s.cardSales ?? 0)) < 0.005 ? 'text-green-600'
+                                            : s.countedCard < (s.cardSales ?? 0) ? 'text-red-500' : 'text-primary-600'
+                                          }>{s.countedCard.toFixed(2)} ₼</span>
+                                        </div>
+                                      )}
+                                    </>
                                   )}
-                                  {s.countedCard !== undefined && (
-                                    <div className="flex justify-between">
-                                      <span>💳 Terminal (Z-hesabat)</span>
-                                      <span className={
-                                        Math.abs(s.countedCard - (s.cardSales ?? 0)) < 0.005 ? 'text-green-600'
-                                        : s.countedCard < (s.cardSales ?? 0) ? 'text-red-500' : 'text-primary-600'
-                                      }>{s.countedCard.toFixed(2)} ₼</span>
-                                    </div>
-                                  )}
-                                  {s.movements.length > 0 && (
-                                    <ul className="pt-1.5 border-t border-stone-200 space-y-1">
-                                      {s.movements.map((m, j) => (
-                                        <li key={j} className="flex justify-between text-xs text-stone-600">
-                                          <span className="truncate mr-3">{m.reason} · {m.by}</span>
-                                          <span className={m.amount < 0 ? 'text-red-500' : 'text-green-600'}>
-                                            {m.amount > 0 ? '+' : ''}{m.amount.toFixed(2)} ₼
-                                          </span>
-                                        </li>
-                                      ))}
-                                    </ul>
+                                  {renderMovements(s)}
+                                  {renderEditTrail(s)}
+                                  {kassaEditError && (
+                                    <p className="text-xs font-semibold text-red-500">{kassaEditError}</p>
                                   )}
                                 </div>
                               )}
@@ -4320,6 +4580,38 @@ function AdminPageContent() {
               </button>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* ── Kassa correction password gate ─────────────────────────────── */}
+      {kassaPwPrompt && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <form onSubmit={handleKassaUnlock} className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-xl">
+            <div className="flex items-center gap-2 mb-1">
+              <Lock className="w-4 h-4 text-stone-400" />
+              <h3 className="font-bold text-stone-800">Kassa düzəlişi</h3>
+            </div>
+            <p className="text-xs text-stone-500 mb-4">Kassa qeydlərinə düzəliş etmək üçün öz şifrənizi daxil edin. Hər düzəliş kim və nə vaxt etdiyi ilə birlikdə yazılır.</p>
+            <input
+              type="password" autoFocus placeholder="Şifrə"
+              value={kassaPwInput}
+              onChange={e => setKassaPwInput(e.target.value)}
+              className="w-full border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700"
+            />
+            {kassaPwError && <p className="text-xs font-semibold text-red-500 mt-2">{kassaPwError}</p>}
+            <div className="flex gap-2 justify-end mt-4">
+              <button
+                type="button"
+                onClick={() => { setKassaPwPrompt(null); setKassaPwInput(''); setKassaPwError(null); }}
+                className="text-sm font-semibold text-stone-500 px-3 py-2 rounded-xl hover:bg-stone-100 transition-colors"
+              >Ləğv et</button>
+              <button
+                type="submit"
+                disabled={kassaPwBusy || !kassaPwInput}
+                className="bg-stone-900 hover:bg-stone-800 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
+              >Təsdiqlə</button>
+            </div>
+          </form>
         </div>
       )}
 

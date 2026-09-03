@@ -122,6 +122,18 @@ export interface ShiftMovement {
   amount: number; // positive = into drawer, negative = out
   reason: string;
   by: string;
+  id?: string; // optional: movements written before the backfill have none, and can't be edited
+}
+
+// One admin correction to a shift. Written by the same SQL statement that makes
+// the change, so a shift can't be edited without saying who did it and what moved.
+export interface ShiftEdit {
+  at: string;
+  by: string;
+  action: 'movement_edit' | 'movement_delete' | 'totals_edit';
+  field?: 'countedCash' | 'countedCard'; // totals_edit only
+  from?: ShiftMovement | number | null;
+  to?: ShiftMovement | number | null;
 }
 
 export interface CashShift {
@@ -136,6 +148,7 @@ export interface CashShift {
   cardSales?: number;   // card sales recorded in the app, snapshot at close
   countedCard?: number; // terminal Z-report total entered at close
   movements: ShiftMovement[];
+  edits: ShiftEdit[];
 }
 
 // Poster-style floor staff: identified by a 4-digit PIN on a logged-in

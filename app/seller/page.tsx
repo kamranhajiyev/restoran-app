@@ -1177,7 +1177,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ companyId: overrideCompanyId, openingCash: cash, openedBy: effectiveSeller, token: overrideToken }),
       }).then(r => r.json()).catch(() => ({ shift: null }));
-      if (d.shift) s = { id: d.shift.id, openedAt: d.shift.opened_at, openedBy: d.shift.opened_by, openingCash: Number(d.shift.opening_cash), closedAt: d.shift.closed_at ?? undefined, movements: Array.isArray(d.shift.movements) ? d.shift.movements : [] };
+      if (d.shift) s = { id: d.shift.id, openedAt: d.shift.opened_at, openedBy: d.shift.opened_by, openingCash: Number(d.shift.opening_cash), closedAt: d.shift.closed_at ?? undefined, movements: Array.isArray(d.shift.movements) ? d.shift.movements : [], edits: [] };
     } else {
       s = await openShift(cash, effectiveSeller);
     }
@@ -1189,7 +1189,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     if (!shift) return;
     const raw = parseFloat(movAmount) || 0;
     if (raw <= 0 || !movReason.trim()) return;
-    const mv: ShiftMovement = { at: new Date().toISOString(), amount: movOut ? -raw : raw, reason: movReason.trim(), by: effectiveSeller };
+    // The id is what lets an admin correct this entry later — generate it here so
+    // the optimistic row and the stored one are the same movement.
+    const mv: ShiftMovement = { id: crypto.randomUUID(), at: new Date().toISOString(), amount: movOut ? -raw : raw, reason: movReason.trim(), by: effectiveSeller };
     const prevShift = shift;
     setShift({ ...shift, movements: [...shift.movements, mv] });
     setShowMovForm(false); setMovAmount(''); setMovReason('');
