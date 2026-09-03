@@ -146,12 +146,21 @@ function keepTryingWhenOffline(win: BrowserWindow): void {
   // Chromium reports its own error page as a finished load. Without this the
   // address of a page that failed would be remembered as a good one.
   let failed = false;
+  // Whether a real page has ever been on screen in this window.
+  let loadedOnce = false;
 
   win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     // Sub-resources fail for their own reasons, and -3 is a navigation the app
     // itself cancelled — neither means the restaurant is offline.
     if (!isMainFrame || code === -3) return;
     failed = true;
+
+    // The notice is for a window with nothing in it. Once the till is up it
+    // handles an outage itself — queueing writes, serving its own screens from
+    // the cache — and overwriting the document here would throw away the open
+    // orders on it to announce a condition the till is already handling. That
+    // is the whole feature failing at the one moment it exists for.
+    if (loadedOnce) return;
 
     void win.webContents.executeJavaScript(
       `document.documentElement.innerHTML = ${JSON.stringify(offlineNotice(code, desc, url || APP_URL))}`,
@@ -164,7 +173,10 @@ function keepTryingWhenOffline(win: BrowserWindow): void {
 
   win.webContents.on('did-finish-load', () => {
     if (retry) { clearTimeout(retry); retry = undefined; }
-    if (!failed) rememberUrl(win.webContents.getURL());
+    if (!failed) {
+      loadedOnce = true;
+      rememberUrl(win.webContents.getURL());
+    }
     failed = false;
   });
 
