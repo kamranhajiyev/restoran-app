@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "main": "dist-electron/electron/main.js",
-  "// posUrl": "Site the desktop app opens. Currently the development deploy — testing kitchen printing against a live restaurant is not an option. Change to https://www.possiblle.com when it ships.",
-  "posUrl": "https://restoran-app-git-development-p-f968e3-kamrans-projects-11d6b816.vercel.app",
+  "// posUrl": "Site the desktop app opens. Point this at a preview deploy only while testing — an installer built from main must open production, or a restaurant's till ends up driving the wrong database.",
+  "posUrl": "https://www.possiblle.com",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
