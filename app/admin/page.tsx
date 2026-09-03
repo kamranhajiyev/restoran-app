@@ -55,7 +55,7 @@ import { validatePassword } from '@/lib/password';
 import { exportMenuExcel, exportOrdersExcel, exportAnalizExcel, parseMenuFile, ImportPreview, AnalizRow } from '@/lib/excel';
 import QRCode from 'react-qr-code';
 import InstallPWA from '@/components/InstallPWA';
-import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt, openCashDrawer } from '@/lib/printer';
+import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt } from '@/lib/printer';
 import { isDesktop } from '@/lib/desktopPrint';
 
 // RPC raise messages are machine codes — translated here for display
@@ -2222,17 +2222,6 @@ function AdminPageContent() {
         )}
 
         <InstallPWA />
-
-        {printerConnected && (
-          <button
-            onClick={openCashDrawer}
-            title="Pul çəkməcəsini aç"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl hover:border-emerald-300 hover:bg-emerald-50 transition-colors mr-2"
-          >
-            <Printer className="w-4 h-4 text-emerald-600" />
-            <span className="hidden sm:inline text-xs font-semibold text-emerald-700">Pul çəkməcəsi</span>
-          </button>
-        )}
 
         <button
           onClick={openProfile}

@@ -1578,6 +1578,25 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
             <span className="hidden sm:inline">Admin</span>
           </button>
         )}
+        {/* The drawer belongs to whoever is standing at the machine, not to the
+            admin panel: change is handed over here, and a note goes in here. Kept
+            usable with no printer paired — the drawer opens through the printer
+            cable, so an unpaired till pairs first and then kicks it. */}
+        <button
+          onClick={async () => {
+            let ready = printerConnected;
+            if (!ready) {
+              ready = await selectPrinter();
+              setPrinterConnected(ready);
+            }
+            if (ready) openCashDrawer();
+          }}
+          title="Pul çəkməcəsini aç"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl hover:border-emerald-300 hover:bg-emerald-50 transition-colors"
+        >
+          <Printer className="w-4 h-4 text-emerald-600" />
+          <span className="hidden sm:inline text-xs font-semibold text-emerald-700">Pul çəkməcəsi</span>
+        </button>
         <div className="flex items-center gap-2 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl">
           <div className="w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold">
             {effectiveSeller[0]?.toUpperCase()}
