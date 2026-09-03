@@ -84,7 +84,11 @@ function createWindow(): void {
 // restaurant sees a dead app. Rather than leave them there, say what is
 // happening in their own language and keep retrying, so the till comes back by
 // itself the moment the line does.
-const OFFLINE_NOTICE = `
+// The cause is printed small at the bottom. A waiter has no use for it, but
+// "no connection" covers a dead router, a blocked domain and a certificate the
+// PC refuses alike — without the code there is nothing to tell them apart from
+// a support call.
+const offlineNotice = (code: number, desc: string, url: string) => `
   <style>
     body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
            font-family:system-ui,-apple-system,Segoe UI,sans-serif; background:#faf9f7; color:#44403c; }
@@ -94,23 +98,25 @@ const OFFLINE_NOTICE = `
     .dot { display:inline-block; width:.5rem; height:.5rem; border-radius:50%;
            background:#f59e0b; margin-right:.4rem; animation:p 1.4s infinite; }
     @keyframes p { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .why { margin-top:1.5rem; color:#a8a29e; font-size:.7rem; word-break:break-all; }
   </style>
   <div class="box">
     <h1><span class="dot"></span>İnternet bağlantısı yoxdur</h1>
     <p>Proqram bağlantı bərpa olunan kimi özü açılacaq.<br>Pəncərəni bağlamayın.</p>
+    <p class="why">${code} ${desc}<br>${url}</p>
   </div>
 `;
 
 function keepTryingWhenOffline(win: BrowserWindow): void {
   let retry: ReturnType<typeof setTimeout> | undefined;
 
-  win.webContents.on('did-fail-load', (_e, code, _desc, url, isMainFrame) => {
+  win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     // Sub-resources fail for their own reasons, and -3 is a navigation the app
     // itself cancelled — neither means the restaurant is offline.
     if (!isMainFrame || code === -3) return;
 
     void win.webContents.executeJavaScript(
-      `document.documentElement.innerHTML = ${JSON.stringify(OFFLINE_NOTICE)}`,
+      `document.documentElement.innerHTML = ${JSON.stringify(offlineNotice(code, desc, url || APP_URL))}`,
     ).catch(() => {});
     win.show();
 
