@@ -30,6 +30,14 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+
+    # Creating a Release is a write to the repository. Without this the token is
+    # read-only by default and the "Attach to release" step below dies on a 403
+    # "Resource not accessible by integration" — after a successful two-minute
+    # build, which makes it look like a build failure rather than a permission.
+    permissions:
+      contents: write
+
     steps:
       - uses: actions/checkout@v4
 
