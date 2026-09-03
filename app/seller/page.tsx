@@ -39,7 +39,7 @@ import { orderLabel, orderSearchText } from '@/lib/order-label';
 import { flushQueue, pendingOrderIds, ADD_ORDER } from '@/lib/sync';
 import { verifyPinOffline, rememberPin, forgetPins } from '@/lib/offline-pin';
 import { queueSize, enqueue } from '@/lib/offline-queue';
-import { pendingWrites, tillPost } from '@/lib/till-write';
+import { onLocalWrite, pendingWrites, tillPost } from '@/lib/till-write';
 
 // How many writes the server has not seen. Two stores answer that question — the
 // browser till's IndexedDB queue and the desktop till's SQLite outbox — but only
@@ -504,7 +504,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     void pendingTotal().then(setPendingCount);
     void pendingOrderIds().then(setUnsent);
 
-    const drain = async () => {
+    const drain = async (pull = true) => {
       setSending(true);
       try {
         await flushQueue(overrideCompanyId ?? null);
@@ -514,7 +514,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       const left = await pendingTotal();
       setPendingCount(left);
       setUnsent(await pendingOrderIds());
-      if (left !== 0) return;
+      if (left !== 0 || !pull) return;
 
       // Push before pull, always. The desktop till reads from its own database,
       // so re-reading after a flush would only show it its own copy back. What
@@ -543,7 +543,22 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     // sending: everything in it was taken while nobody could reach the server.
     void drain();
 
-    return () => { stop(); off(); };
+    // And whenever the waiter does something. The sweep above is a safety net,
+    // not the mechanism: waiting for it meant an order taken on a machine with a
+    // perfectly good line reached the database three minutes later, which to
+    // anyone watching the admin panel is indistinguishable from a lost sale.
+    //
+    // Debounced, because a waiter builds an order in bursts — five dishes and a
+    // payment is six writes in as many seconds, and each one is already safely on
+    // the disk. No pull afterwards either: that is a refresh of the whole
+    // restaurant, and it belongs to the timer above rather than to every tap.
+    let kick: ReturnType<typeof setTimeout> | undefined;
+    const offWrite = onLocalWrite(() => {
+      clearTimeout(kick);
+      kick = setTimeout(() => void drain(false), 1200);
+    });
+
+    return () => { stop(); off(); offWrite(); clearTimeout(kick); };
   }, [overrideCompanyId, refreshOrders]);
 
   // While the line stays up nothing above ever fires again — onConnectivityChange

@@ -42,6 +42,21 @@ export interface LocalWrite {
  * no company to scope the write to. Null means "not my job": the caller falls
  * through to the network path it used before, unchanged.
  */
+/**
+ * Called after every write that lands on the disk.
+ *
+ * One listener, replaced rather than accumulated: the till has one screen, and a
+ * list here would quietly keep the old page's handler alive across a remount.
+ */
+let _onWrite: (() => void) | null = null;
+
+export function onLocalWrite(fn: () => void): () => void {
+  _onWrite = fn;
+  return () => {
+    if (_onWrite === fn) _onWrite = null;
+  };
+}
+
 export async function localWrite(
   id: string,
   kind: string,
@@ -52,7 +67,13 @@ export async function localWrite(
   if (!till || !companyId) return null;
 
   try {
-    return await till.write(id, kind, body, companyId);
+    const result = await till.write(id, kind, body, companyId);
+    // Tell whoever is watching that there is something new to send. Without it
+    // the outbox waits for the next sweep, and a sale taken on a machine with a
+    // perfectly good line took three minutes to appear in the database — long
+    // enough for an owner watching the admin panel to conclude it had been lost.
+    _onWrite?.();
+    return result;
   } catch (e) {
     // An IPC failure is the database refusing, not the network — there is no
     // network in this path. Surfacing it is right: the waiter must not be told
