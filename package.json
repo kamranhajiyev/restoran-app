@@ -5,6 +5,7 @@
   "main": "dist-electron/electron/main.js",
   "// posUrl": "Site the desktop app opens. Point this at a preview deploy only while testing — an installer built from main must open production, or a restaurant's till ends up driving the wrong database.",
   "posUrl": "https://www.possiblle.com",
+  "// build.win.artifactName": "The installer filename carries no ${version} on purpose: /yukle links to releases/latest/download/PossibllePOS-Setup.exe, a permanent address that always serves the newest release. Put the version back and that link breaks on the next bump. This note lives out here because electron-builder validates the build block against a schema and rejects any key it does not know — a comment inside it fails the build.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -36,7 +37,6 @@
           ]
         }
       ],
-      "// artifactName": "No ${version} here on purpose. The download page links to releases/latest/download/PossibllePOS-Setup.exe — a permanent address that always serves the newest release. Put the version back in the filename and that link breaks the next time it is bumped.",
       "artifactName": "PossibllePOS-Setup.exe",
       "icon": "electron/icon.png"
     },
