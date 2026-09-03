@@ -9,16 +9,14 @@
 //     a dish or changed a price; the till picks it up and nobody notices. If
 //     the line is down it is skipped entirely — the local copy is still good.
 //
-// The queries are the ones lib/store.ts already makes, under the waiter's own
-// session and RLS. Nothing here holds a key, and nothing here is allowed to
-// reach another company's data: that is enforced by the database, not by this
-// file remembering to filter.
+// Every read here goes to the site's /api/public-* routes — the same ones the
+// web terminal has always used — rather than to Supabase directly. A till set up
+// from a terminal link has no login session, so a direct query is refused by RLS
+// on every row, and the setup screen fills with failures on a machine whose
+// connection is fine. The routes answer for one companyId and the server holds
+// the key; nothing here does, and nothing here can reach another company's data.
 
-import {
-  fetchMenu, fetchCategories, fetchTables, fetchHalls, fetchModifierGroups,
-  fetchStations, fetchStaff, fetchOrders, fetchStationReady, fetchOpenShift,
-  setCompanyContext,
-} from "@/lib/store";
+import { setCompanyContext } from "@/lib/store";
 import type { MenuItem, ModifierGroup } from "@/types";
 import type { PosNative } from "./desktopPrint";
 import { cacheImages } from "./till-image";
@@ -27,11 +25,6 @@ function till(): NonNullable<PosNative["till"]> | null {
   if (typeof window === "undefined") return null;
   return window.posNative?.till ?? null;
 }
-
-// Every read below must go past the local copy to Supabase — this is the code
-// that writes that copy, and a read served from it would sync the till with
-// itself and call the result success.
-const SERVER = { server: true } as const;
 
 /** How many orders a fresh machine pulls down. The room, not the archive. */
 const ORDER_WINDOW = 200;
@@ -48,6 +41,38 @@ export interface StepProgress {
   /** How many rows landed — the proof the step actually did something. */
   count?: number;
   error?: string;
+}
+
+/**
+ * Read one of the site's public routes, through the main process.
+ *
+ * Not lib/store.ts. Those helpers query Supabase directly under the reader's own
+ * session, and a till set up from a terminal link has no session at all — RLS
+ * refuses every row, and the setup screen fills with "alınmadı" on a machine
+ * with a perfectly good connection. The /api/public-* routes are how the web
+ * terminal has always read this same data: the server holds the key, the caller
+ * supplies only a companyId, and the answer is the same shape either way.
+ *
+ * It goes out through the main process because the page is served from
+ * app://till and a fetch to the site is cross-origin. See electron/till-ipc.ts.
+ */
+async function serverRead<T>(
+  db: NonNullable<PosNative["till"]>,
+  route: string,
+  companyId: string,
+  params: Record<string, string> = {},
+): Promise<T> {
+  const q = new URLSearchParams({ companyId, ...params });
+  const res = await db.api(`/api/${route}?${q}`);
+  // Loud on failure, deliberately. A step that swallowed an error would report
+  // success and leave the till holding an empty menu — see replace() below for
+  // why an empty answer is the dangerous one.
+  if (!res.ok) throw new Error(`${route}: ${res.status}`);
+  try {
+    return JSON.parse(res.body) as T;
+  } catch {
+    throw new Error(`${route}: cavab oxunmadı`);
+  }
 }
 
 /**
@@ -88,54 +113,75 @@ const STEPS: Step[] = [
   {
     id: "menu",
     label: "Menyu",
-    run: async (companyId, db) => replace(db, "menu_items", companyId, await fetchMenu(SERVER), true),
+    run: async (companyId, db) => {
+      const { items } = await serverRead<{ items: MenuItem[] }>(db, "public-menu", companyId);
+      return replace(db, "menu_items", companyId, items ?? [], true);
+    },
   },
   {
     id: "categories",
     label: "Kateqoriyalar",
-    run: async (companyId, db) => replace(db, "categories", companyId, await fetchCategories(SERVER), true),
+    run: async (companyId, db) => {
+      const { categories } = await serverRead<{ categories: unknown[] }>(db, "public-categories", companyId);
+      return replace(db, "categories", companyId, categories ?? [], true);
+    },
   },
   {
     id: "modifiers",
     label: "Əlavələr",
-    run: async (companyId, db) => replace(db, "modifier_groups", companyId, await fetchModifierGroups(SERVER)),
+    run: async (companyId, db) => {
+      const { groups } = await serverRead<{ groups: unknown[] }>(db, "public-modifiers", companyId);
+      return replace(db, "modifier_groups", companyId, groups ?? []);
+    },
   },
   {
     id: "stations",
     label: "Sexlər",
-    run: async (companyId, db) => replace(db, "stations", companyId, await fetchStations(SERVER)),
+    run: async (companyId, db) => {
+      const { stations } = await serverRead<{ stations: unknown[] }>(db, "public-stations", companyId);
+      return replace(db, "stations", companyId, stations ?? []);
+    },
   },
   {
     id: "tables",
     label: "Masalar",
     run: async (companyId, db) => {
-      // Halls before tables: a table carries its hall, and a screen that drew
-      // the room before it knew the halls would put every table in one place.
-      await replace(db, "halls", companyId, await fetchHalls(SERVER));
-      return replace(db, "tables", companyId, await fetchTables(SERVER), true);
+      // One request: the route returns both, and a table carries its hall — a
+      // screen that drew the room before it knew the halls would put every
+      // table in one place.
+      const { tables, halls } = await serverRead<{ tables: unknown[]; halls: unknown[] }>(
+        db, "public-tables", companyId,
+      );
+      await replace(db, "halls", companyId, halls ?? []);
+      return replace(db, "tables", companyId, tables ?? [], true);
     },
   },
   {
     id: "staff",
     label: "İşçilər",
-    run: async (companyId, db) => replace(db, "staff", companyId, await fetchStaff(SERVER)),
+    run: async (companyId, db) => {
+      const { staff } = await serverRead<{ staff: unknown[] }>(db, "public-staff", companyId);
+      return replace(db, "staff", companyId, staff ?? []);
+    },
   },
   {
     id: "orders",
     label: "Açıq sifarişlər",
     run: async (companyId, db) => {
-      const orders = await fetchOrders({ limit: ORDER_WINDOW, ...SERVER });
-      await db.putOrders(companyId, orders);
-      const ready = await fetchStationReady(undefined, SERVER);
-      await db.putStationReady(companyId, ready);
-      return orders.length;
+      const { orders } = await serverRead<{ orders: unknown[] }>(
+        db, "public-orders", companyId, { limit: String(ORDER_WINDOW) },
+      );
+      await db.putOrders(companyId, orders ?? []);
+      const { ready } = await serverRead<{ ready: unknown[] }>(db, "public-station-ready", companyId);
+      await db.putStationReady(companyId, ready ?? []);
+      return (orders ?? []).length;
     },
   },
   {
     id: "shift",
     label: "Növbə",
     run: async (companyId, db) => {
-      const shift = await fetchOpenShift(SERVER);
+      const { shift } = await serverRead<{ shift: unknown | null }>(db, "public-shift", companyId);
       if (!shift) return 0;
       await db.putShift(companyId, shift);
       return 1;

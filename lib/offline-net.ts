@@ -40,13 +40,28 @@ function setOnline(next: boolean): void {
  * till permanently reporting an outage.
  */
 async function probe(): Promise<boolean> {
-  const url = hasLocalDb()
-    ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/health`
-    : "/api/health";
+  const till = typeof window === "undefined" ? null : window.posNative?.till;
+
+  // The desktop till asks through the main process. Its page is served from
+  // app://till, so every request it makes itself is cross-origin and refused by
+  // the browser before it is sent — which reads here as a dead uplink on a
+  // machine with a perfectly good connection, and leaves the PIN pad saying
+  // "sign in online first" to someone standing in front of a working router.
+  //
+  // It asks the *site*, not Supabase directly: the site is what the outbox
+  // replays to, so that is the connection whose absence actually matters.
+  if (till) {
+    try {
+      const res = await till.api("/api/health");
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
 
   try {
-    const res = await fetch(url, {
-      method: hasLocalDb() ? "GET" : "HEAD",
+    const res = await fetch("/api/health", {
+      method: "HEAD",
       cache: "no-store",
       signal: AbortSignal.timeout(4000),
     });

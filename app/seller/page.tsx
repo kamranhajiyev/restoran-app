@@ -5,7 +5,7 @@ import {
   PanelLeftClose, PanelLeftOpen, LogOut, X,
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
   ShoppingCart, ChevronLeft, ChevronRight, ChevronDown, Minus, Plus, Wallet,
-  History, Search, Delete, KeyRound, Trash2, Check, Bell, BellOff, AlertTriangle, Printer,
+  History, Search, Delete, KeyRound, Trash2, Check, Bell, BellOff, AlertTriangle, Printer, CloudOff,
 } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
@@ -31,14 +31,15 @@ import { tillFetch, hasLocalDb } from '@/lib/till-data';
 import { hasLocalData, pullAll } from '@/lib/till-sync';
 import TillSetup from '@/components/TillSetup';
 import SyncStatus from '@/components/SyncStatus';
+import OrderSyncDot from '@/components/OrderSyncDot';
 import TillLink from '@/components/TillLink';
 import { canLink, checkLink, clearLink, readLink, saveLink, type Terminal } from '@/lib/terminal-link';
 import { tillImage } from '@/lib/till-image';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
-import { flushQueue, ADD_ORDER } from '@/lib/sync';
+import { flushQueue, pendingOrderIds, ADD_ORDER } from '@/lib/sync';
 import { verifyPinOffline, rememberPin, forgetPins } from '@/lib/offline-pin';
 import { queueSize, enqueue } from '@/lib/offline-queue';
-import { pendingWrites } from '@/lib/till-write';
+import { pendingWrites, tillPost } from '@/lib/till-write';
 
 // How many writes the server has not seen. Two stores answer that question — the
 // browser till's IndexedDB queue and the desktop till's SQLite outbox — but only
@@ -223,6 +224,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   // (`online` above already drives the Oflayn badge; the watch below keeps it
   // honest instead of leaving it stuck on the last page load's result.)
   const [pendingCount, setPendingCount] = useState(0);
+  // Which orders are still only on this machine. Keyed by order id so a row can
+  // say it about itself — the count in the corner cannot answer "is my bill in?"
+  const [unsent, setUnsent] = useState<Set<string>>(() => new Set());
   // A flush is on the wire right now. Only the badge cares — nothing waits on it.
   const [sending, setSending] = useState(false);
 
@@ -268,22 +272,33 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     if (next.length < 4) return;
     setPinBusy(true);
     const deviceId = getDeviceId();
+    // What the PIN check can answer, from the server or from this machine. The
+    // fields are optional because a refusal carries none of the success ones.
+    type PinReply = {
+      ok: boolean; id?: string; name?: string;
+      error?: string; attemptsLeft?: number; locked_until?: string;
+    };
     // Public terminal has no Supabase session — verify via server-side API route
-    const res = overrideCompanyId
+    const res = (overrideCompanyId
       ? isOnline()
-        ? await fetch('/api/verify-pin', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ companyId: overrideCompanyId, pin: next, token: overrideToken, deviceId }),
-          }).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }))
+        // Through the main process on the desktop till: a relative fetch here
+        // resolves against app://till, which has no server behind it, and the
+        // PIN pad would tell a waiter to "sign in online first" on a machine
+        // with a working connection. See electron/till-ipc.ts.
+        ? await tillPost<PinReply>('/api/verify-pin', {
+            companyId: overrideCompanyId, pin: next, token: overrideToken, deviceId,
+          })
         // Nobody to ask. Fall back to what this machine remembers from a
         // successful unlock earlier — see lib/offline-pin.ts for what that
         // does and does not protect.
         : await verifyPinOffline(next, overrideCompanyId)
-      : await verifyStaffPin(next, deviceId);
+      : await verifyStaffPin(next, deviceId)) as PinReply;
     setPinBusy(false);
     setPinInput('');
-    if (res.ok) {
+    // An "ok" with no staff on it is not an unlock. It cannot happen from either
+    // checker, but this is the door to the till, and a malformed answer must
+    // close it rather than open it with an unnamed waiter.
+    if (res.ok && res.id && res.name) {
       const staff = { id: res.id, name: res.name };
       // Only the server's word is worth remembering; re-storing an offline
       // unlock would let a cached record refresh itself indefinitely.
@@ -291,7 +306,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       sessionStorage.setItem('activeStaff', JSON.stringify(staff));
       setActiveStaff(staff);
     } else if (res.error === 'wrong') {
-      setPinMsg(`Yanlış PIN${res.attemptsLeft > 0 ? ` · ${res.attemptsLeft} cəhd qaldı` : ''}`);
+      const left = res.attemptsLeft ?? 0;
+      setPinMsg(`Yanlış PIN${left > 0 ? ` · ${left} cəhd qaldı` : ''}`);
     } else if (res.error === 'unavailable') {
       // Offline and this waiter has not unlocked on this machine before, so
       // there is nothing to check against. Say that, rather than "wrong PIN".
@@ -486,10 +502,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   useEffect(() => {
     const stop = startConnectivityWatch();
     void pendingTotal().then(setPendingCount);
+    void pendingOrderIds().then(setUnsent);
 
-    const off = onConnectivityChange(async up => {
-      setOnline(up);
-      if (!up) return;
+    const drain = async () => {
       setSending(true);
       try {
         await flushQueue(overrideCompanyId ?? null);
@@ -498,6 +513,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       }
       const left = await pendingTotal();
       setPendingCount(left);
+      setUnsent(await pendingOrderIds());
       if (left !== 0) return;
 
       // Push before pull, always. The desktop till reads from its own database,
@@ -512,7 +528,20 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         setDataVersion(v => v + 1);
       }
       void refreshOrders({ silent: true });
+    };
+
+    const off = onConnectivityChange(up => {
+      setOnline(up);
+      if (up) void drain();
     });
+
+    // Once on open, too. onConnectivityChange reports *changes*, and a till that
+    // starts up with the line already good never sees one — so a machine closed
+    // mid-outage and reopened the next morning would hold last night's orders
+    // until the connection happened to flap, or until the five-minute refresh
+    // below got round to it. That is the exact moment the queue most needs
+    // sending: everything in it was taken while nobody could reach the server.
+    void drain();
 
     return () => { stop(); off(); };
   }, [overrideCompanyId, refreshOrders]);
@@ -537,6 +566,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       }
       const left = await pendingTotal();
       setPendingCount(left);
+      setUnsent(await pendingOrderIds());
       if (left !== 0) return;
       await pullAll(companyId);
       setDataVersion(v => v + 1);
@@ -550,7 +580,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   // watching a stale "3 waiting" while the queue drains.
   useEffect(() => {
     if (online && pendingCount === 0) return;
-    const t = setInterval(() => void pendingTotal().then(setPendingCount), 3000);
+    const t = setInterval(() => {
+      void pendingTotal().then(setPendingCount);
+      void pendingOrderIds().then(setUnsent);
+    }, 3000);
     return () => clearInterval(t);
   }, [online, pendingCount]);
 
@@ -1899,6 +1932,23 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         </div>
       )}
 
+      {/* Offline, said once and plainly, across the top of the till.
+          The corner badge answers "how much is waiting"; it does not answer the
+          question a waiter has the moment the wifi drops, which is "is this
+          thing still working?" — and the honest answer is yes, so the strip is
+          amber rather than red and says what still works rather than what does
+          not. A red banner would stop a room full of staff taking orders at
+          exactly the moment the design says they should carry on. */}
+      {!online && (
+        <div className="sticky top-0 z-[60] bg-amber-100 border-b border-amber-200 px-4 py-1.5 flex items-center justify-center gap-2 text-amber-900 text-xs font-medium">
+          <CloudOff className="w-3.5 h-3.5 shrink-0" />
+          <span>İnternet yoxdur — işləməyə davam edin. Sifarişlər saxlanılır və qayıdanda öz-özünə göndəriləcək.</span>
+          {pendingCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full bg-amber-200 tabular-nums">{pendingCount}</span>
+          )}
+        </div>
+      )}
+
       {/* Header */}
       <header className="sticky top-0 z-50 h-14 border-b border-stone-100/60 bg-white/90 backdrop-blur-sm flex items-center gap-3 px-4">
         <div className="flex items-center gap-2">
@@ -1912,6 +1962,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
           <span className="font-semibold text-stone-800 text-sm md:hidden truncate max-w-[160px]">{overrideCompanyName || getSession()?.companyName || 'Kafe'}</span>
         </div>
         <div className="flex-1" />
+        {/* Whether the server has tonight's service. Green when it does, amber
+            with a count while it is catching up, grey when there is nothing to
+            catch up with. Here rather than only in the sidebar footer, which is
+            collapsed on a small screen and easy to never look at. */}
+        <SyncStatus online={online} pending={pendingCount} sending={sending} />
         {/* The desktop shell has no browser chrome, so a till opened from admin
             would be a room with no door. Only shown to a machine that is actually
             signed in — on a waiter's tablet there is no admin to go back to. */}
@@ -2097,13 +2152,13 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                 {prevOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
-                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
-                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
               </div>
@@ -2208,6 +2263,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                           >
                             <ChevronDown className={`w-4 h-4 text-stone-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                             <span className="w-12 text-xs font-bold text-primary-900 flex-shrink-0">№{orderLabel(order)}</span>
+                            <OrderSyncDot unsent={unsent.has(order.id)} />
                             <span className="flex-1 text-sm text-stone-700 truncate">
                               {[tLabel, order.sellerName].filter(Boolean).join(' · ')}
                             </span>
@@ -3295,11 +3351,13 @@ function ReadyBadge({ progress, allReady }: { progress: { done: number; total: n
 
 // ── OrderRow — mobile card + desktop table row ────────────────────────────
 
-function OrderRow({ order, tableLabel, tz, printFailed, progress, isItemReady, onReprint, onPay, onCancel, onAppend, onMove, onPrintBill, billBusy, onStatusChange }: {
+function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItemReady, onReprint, onPay, onCancel, onAppend, onMove, onPrintBill, billBusy, onStatusChange }: {
   order: Order;
   tableLabel: string;
   tz: string;
   printFailed: boolean;
+  /** Still only on this machine — the server has not been told about it yet. */
+  unsent: boolean;
   progress: { done: number; total: number };
   isItemReady: (item: OrderItem) => boolean;
   onReprint: () => void;
@@ -3338,6 +3396,7 @@ function OrderRow({ order, tableLabel, tz, printFailed, progress, isItemReady, o
               <div className="flex items-center gap-2 mb-0.5">
                 <ChevronDown className={`w-3.5 h-3.5 text-stone-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
                 <span className="text-primary-700 font-bold text-sm">№{orderLabel(order)}</span>
+                <OrderSyncDot unsent={unsent} />
                 {tableLabel && <span className="text-stone-800 font-semibold text-sm">{tableLabel}</span>}
               </div>
               <p className="text-xs text-stone-500 pl-5">
@@ -3438,7 +3497,8 @@ function OrderRow({ order, tableLabel, tz, printFailed, progress, isItemReady, o
           <div>
             <p className="text-sm font-medium text-stone-800 flex items-center gap-1">
               <ChevronDown className={`w-3.5 h-3.5 text-stone-400 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-              <span className="text-primary-700">№{orderLabel(order)}</span>{tableLabel && <>{' › '}<span>{tableLabel}</span></>}
+              <span className="text-primary-700">№{orderLabel(order)}</span>
+              <OrderSyncDot unsent={unsent} />{tableLabel && <>{' › '}<span>{tableLabel}</span></>}
             </p>
             {!expanded && <p className="text-xs text-stone-500 truncate max-w-xs pl-5">{itemsPreview}</p>}
           </div>

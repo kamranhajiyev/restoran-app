@@ -24,6 +24,17 @@ export interface TillDb {
   setLink(value: string | null): Promise<unknown>;
   /** Pull menu photographs onto the disk so they render offline. See lib/till-image.ts. */
   cacheImages(urls: string[]): Promise<{ cached: number }>;
+  /**
+   * A request to the site, made by the main process.
+   *
+   * The page is served from app://till, so a fetch to possiblle.com is
+   * cross-origin and the browser refuses it before it leaves. This is the only
+   * way out; see the handler in electron/till-ipc.ts.
+   */
+  api(
+    path: string,
+    init?: { method?: string; headers?: Record<string, string>; body?: string },
+  ): Promise<{ ok: boolean; status: number; body: string }>;
   menu(companyId: string): Promise<unknown>;
   categories(companyId: string): Promise<unknown>;
   tables(companyId: string): Promise<unknown>;

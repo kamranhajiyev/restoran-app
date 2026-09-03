@@ -140,6 +140,27 @@ function resolveAppUrl(): string {
 
 const APP_URL = resolveAppUrl();
 
+// Which site the till's /api routes live on.
+//
+// Normally the same site the app would have opened. They are separate settings
+// because the bundled till does not open a site at all, and the two questions
+// stopped being the same one: the page comes from the disk, while the outbox and
+// the terminal-link check still have to reach a real server — and it must be the
+// server backed by the same database the till was built against. A till built
+// with the testing project and syncing to production would check a terminal link
+// against a company that only exists in the other database, and report a
+// perfectly good link as wrong.
+//
+//   1. --api=…        a shortcut's arguments, per machine
+//   2. POS_API_URL=…  development, and how a bundled till is pointed at a preview
+//   3. whatever site this build would otherwise have opened
+function resolveApiUrl(): string {
+  const flag = process.argv.find(a => a.startsWith('--api='))?.slice('--api='.length);
+  return flag ?? process.env.POS_API_URL ?? APP_URL;
+}
+
+const API_URL = resolveApiUrl();
+
 // Serve the bundled till unless told otherwise. `--url=` and POS_APP_URL stay
 // the way to point this shell at a preview deploy, which is how kitchen
 // printing gets tested without a build; and a shell that somehow ships without
@@ -368,9 +389,10 @@ if (!app.requestSingleInstanceLock()) {
       // API routes — its Supabase project may not even be the one this machine
       // synced from.
       openDb(app.getPath('userData'));
-      registerTillHandlers(APP_URL);
+      registerTillHandlers(API_URL);
     }
     console.log(BUNDLED ? `[pos] serving the bundled till from ${BUNDLE}` : `[pos] loading ${APP_URL}`);
+    if (BUNDLED) console.log(`[pos] syncing with ${API_URL}`);
 
     ipcMain.handle('printer:send', async (_event, ip: unknown, port: unknown, bytes: unknown) => {
       // The renderer is a remote page. Validate rather than trust it: this

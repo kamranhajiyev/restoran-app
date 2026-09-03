@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('posNative', {
     link: () => invoke('till:link'),
     setLink: (value: string | null) => invoke('till:setLink', value),
     cacheImages: (urls: string[]) => invoke('till:cacheImages', urls),
+    api: (path: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) =>
+      invoke('till:api', path, init),
     menu: (companyId: string) => invoke('till:menu', companyId),
     categories: (companyId: string) => invoke('till:categories', companyId),
     tables: (companyId: string) => invoke('till:tables', companyId),

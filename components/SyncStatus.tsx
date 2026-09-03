@@ -79,23 +79,29 @@ export default function SyncStatus({
   }, [open, pending]);
 
   const synced = pending === 0;
-  const tone = synced
-    ? 'bg-emerald-50 text-emerald-700'
-    : sending
-      ? 'bg-amber-100 text-amber-800'
-      : 'bg-stone-100 text-stone-600';
-
-  const icon = sending && !synced
-    ? <RefreshCw className="w-3 h-3 animate-spin" />
+  const tone = !online
+    ? 'bg-stone-200 text-stone-700'
     : synced
-      ? <Check className="w-3 h-3" />
-      : <CloudOff className="w-3 h-3" />;
+      ? 'bg-emerald-50 text-emerald-700'
+      : 'bg-amber-100 text-amber-800';
 
+  const icon = !online
+    ? <CloudOff className="w-3 h-3" />
+    : sending && !synced
+      ? <RefreshCw className="w-3 h-3 animate-spin" />
+      : synced
+        ? <Check className="w-3 h-3" />
+        : <RefreshCw className="w-3 h-3" />;
+
+  // Two facts in one line, because a waiter asks two questions and they have
+  // different answers: is the line up, and does the server have tonight's
+  // service. "Everything sent" while the cable is out is perfectly possible —
+  // it just means nothing new has happened since it dropped.
   const text = synced
-    ? 'Göndərildi'
+    ? online ? 'Onlayn · göndərildi' : 'Oflayn · hamısı göndərilib'
     : sending
       ? `Göndərilir · ${pending}`
-      : `Gözləyir · ${pending}`;
+      : `Oflayn · gözləyir ${pending}`;
 
   return (
     <div className="relative">
@@ -110,10 +116,6 @@ export default function SyncStatus({
       >
         {icon}
         {!compact && <span>{text}</span>}
-        {/* Offline with nothing waiting is worth saying once — otherwise the
-            green tick reads as "the server has it", which is true, and the
-            waiter has no idea the line is down at all. */}
-        {!compact && !online && <span className="opacity-60">· oflayn</span>}
       </button>
 
       {open && (

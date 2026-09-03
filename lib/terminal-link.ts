@@ -136,12 +136,22 @@ export async function checkLink(
    */
   tillNumber = 1,
 ): Promise<LinkCheck> {
-  const base = await apiBase();
-  let res: Response;
+  const path = `/api/seller-token?slug=${encodeURIComponent(slug)}&token=${encodeURIComponent(token)}`;
+
+  // On the desktop till this goes out through the main process. The page is
+  // served from app://till, so a fetch straight to possiblle.com is cross-origin
+  // and the browser refuses it before it is sent — which arrives here as a
+  // thrown fetch, indistinguishable from a real outage. That is exactly what it
+  // looked like: "İnternet yoxdur" on a machine with a working connection.
+  const db = till();
+  let res: { ok: boolean; status: number; body: string };
   try {
-    res = await fetch(
-      `${base}/api/seller-token?slug=${encodeURIComponent(slug)}&token=${encodeURIComponent(token)}`,
-    );
+    if (db) {
+      res = await db.api(path);
+    } else {
+      const r = await fetch(`${await apiBase()}${path}`);
+      res = { ok: r.ok, status: r.status, body: await r.text() };
+    }
   } catch {
     return { status: "offline" };
   }
@@ -151,10 +161,20 @@ export async function checkLink(
   if (res.status === 404) return { status: "invalid" };
   if (!res.ok) return { status: "offline" };
 
-  const d = (await res.json().catch(() => null)) as {
+  type Answer = {
     companyId?: string; companyName?: string;
     logoUrl?: string | null; brandColor?: string | null; expiresAt?: string | null;
-  } | null;
+  };
+
+  let d: Answer | null;
+  try {
+    d = JSON.parse(res.body) as Answer;
+  } catch {
+    // A 200 that is not JSON is a login page or a proxy notice, not an answer.
+    // Treating it as "invalid" would clear a working till's setup over what is
+    // almost certainly a captive portal, so it counts as no answer at all.
+    return { status: "offline" };
+  }
 
   if (!d?.companyId) return { status: "invalid" };
 

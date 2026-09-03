@@ -7,7 +7,7 @@
 // remote page. Keeping the surface enumerable means the worst a compromised
 // renderer can do is read its own restaurant's menu.
 
-import { ipcMain } from 'electron';
+import { ipcMain, net } from 'electron';
 import type { CashShift, Order } from '../types';
 import { db, getMeta, setMeta } from './db';
 import { cacheImages } from './images';
@@ -64,6 +64,38 @@ export function registerTillHandlers(appUrl: string): void {
     // nothing" — store the literal so clearing is unambiguous.
     setMeta(db(), LINK_KEY, value === null ? '' : value);
     return { ok: true };
+  });
+
+  // ── The one way out to the site ────────────────────────────────────────────
+  //
+  // The till's page is served from app://till, and the site it syncs with is
+  // https://www.possiblle.com — a different origin, so a fetch from the page is
+  // a cross-origin request the browser refuses before it is ever sent. The
+  // routes send no CORS headers, and giving them some would open them to every
+  // website on the internet, to solve a problem only this app has.
+  //
+  // The main process has no such rule, so the request is made here. Deliberately
+  // not a general "fetch this URL" bridge: the path must be one of the routes
+  // the till actually replays to, and the origin is the one this build was
+  // pointed at — never one the renderer supplies.
+  ipcMain.handle('till:api', async (_e, path, init) => {
+    if (typeof path !== 'string' || !path.startsWith('/api/')) throw new Error('bad path');
+    // A path is a path. Anything that could re-point the request at another host
+    // — a scheme, a protocol-relative "//evil.test", a traversal — is refused.
+    if (path.includes('..') || path.startsWith('//') || /[\r\n]/.test(path)) throw new Error('bad path');
+
+    const opts = init && typeof init === 'object' ? (init as Record<string, unknown>) : {};
+    const method = typeof opts.method === 'string' ? opts.method : 'GET';
+    const headers = opts.headers && typeof opts.headers === 'object'
+      ? (opts.headers as Record<string, string>)
+      : undefined;
+    const body = typeof opts.body === 'string' ? opts.body : undefined;
+
+    const res = await net.fetch(`${appUrl.replace(/\/$/, '')}${path}`, { method, headers, body });
+    // The status is carried back rather than thrown on, because the difference
+    // between "the server refused this" and "there was no server" is the whole
+    // of the replay's stop-or-drop decision (lib/sync.ts).
+    return { ok: res.ok, status: res.status, body: await res.text() };
   });
 
   // ── Reads ──────────────────────────────────────────────────────────────────

@@ -119,3 +119,44 @@ export async function apiBase(): Promise<string> {
   }
   return _base;
 }
+
+/**
+ * POST one of the site's routes, from wherever the till happens to be running.
+ *
+ * In a browser it is an ordinary same-origin fetch. Inside the Windows app the
+ * page is served from app://till, so the same call would resolve against a
+ * scheme with no server behind it — the request never leaves, and the screen
+ * reports a network problem on a machine that is perfectly connected. There it
+ * goes out through the main process instead (electron/till-ipc.ts).
+ *
+ * Always resolves. Callers read `ok` and `error`, exactly as they did when this
+ * was a fetch with a .catch on the end.
+ */
+export async function tillPost<T>(
+  route: string,
+  body: Record<string, unknown>,
+): Promise<T> {
+  const till = local();
+  try {
+    if (till) {
+      const res = await till.api(route, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      try {
+        return JSON.parse(res.body) as T;
+      } catch {
+        return { ok: false, error: "network" } as T;
+      }
+    }
+    const res = await fetch(route, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return (await res.json()) as T;
+  } catch {
+    return { ok: false, error: "network" } as T;
+  }
+}

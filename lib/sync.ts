@@ -28,6 +28,13 @@ import { getAllQueued, dequeue, incrementAttempts, queueSize } from "@/lib/offli
 import {
   apiBase, attemptedWrite, dropWrite, hasLocalDb, pendingList, pendingWrites,
 } from "@/lib/till-write";
+import type { PosNative } from "@/lib/desktopPrint";
+
+/** The machine's own bridge, or null in a browser. */
+function tillDb(): NonNullable<PosNative["till"]> | null {
+  if (typeof window === "undefined") return null;
+  return window.posNative?.till ?? null;
+}
 
 export type SyncResult = { synced: number; failed: number; stillQueued: number };
 
@@ -86,12 +93,28 @@ async function replay(item: Pending, base: string, local: boolean): Promise<stri
     return error;
   }
 
-  const res = await fetch(`${base}${item.kind}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Idempotency-Key": item.id },
-    body: JSON.stringify(item.body),
-  });
-  const data = await res.json().catch(() => ({ ok: res.ok }));
+  const headers = { "Content-Type": "application/json", "Idempotency-Key": item.id };
+  const body = JSON.stringify(item.body);
+
+  // Out through the main process on the desktop till. The page is served from
+  // app://till, so this fetch is cross-origin and the browser refuses it before
+  // it is sent — which arrives here as a network failure, and a network failure
+  // is the one answer that makes the replay stop and keep the entry. The queue
+  // would grow all night on a machine with a working connection, and the badge
+  // would sit at "waiting" with nothing to wait for.
+  const till = tillDb();
+  const res = till
+    ? await till.api(item.kind, { method: "POST", headers, body })
+    : await (async () => {
+        const r = await fetch(`${base}${item.kind}`, { method: "POST", headers, body });
+        return { ok: r.ok, status: r.status, body: await r.text() };
+      })();
+
+  const data = ((): { ok?: boolean; error?: unknown } => {
+    try { return JSON.parse(res.body) as { ok?: boolean; error?: unknown }; }
+    catch { return { ok: res.ok }; }
+  })();
+
   if (res.ok && data.ok !== false) return null;
   return data.error ? String(data.error) : `http ${res.status}`;
 }
@@ -147,4 +170,27 @@ export async function flushQueue(currentCompanyId: string | null): Promise<SyncR
   }
 
   return { synced, failed, stillQueued: await q.size() };
+}
+
+/**
+ * Which orders the server has not been told about yet.
+ *
+ * The badge answers "how many writes are waiting"; this answers the question a
+ * waiter actually asks, which is about one order in front of them: is *this*
+ * bill safe if the machine dies tonight. An order counts as unsent while
+ * anything touching it is still in the queue — the order itself, a line added
+ * to it, a quantity changed, the payment.
+ *
+ * Read-only. Nothing here sends.
+ */
+export async function pendingOrderIds(): Promise<Set<string>> {
+  const ids = new Set<string>();
+  for (const entry of await queue().all()) {
+    const body = entry.body as { id?: unknown; orderId?: unknown } | null;
+    if (!body || typeof body !== "object") continue;
+    // The new-order entry carries the order itself; every other kind names it.
+    const id = entry.kind === ADD_ORDER ? body.id : body.orderId;
+    if (typeof id === "string" && id) ids.add(id);
+  }
+  return ids;
 }
