@@ -51,6 +51,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@supabase/supabase-js": "^2.108.0",
+    "idb": "^8.0.3",
     "lucide-react": "^1.17.0",
     "next": "16.2.7",
     "qz-tray": "^2.2.6",

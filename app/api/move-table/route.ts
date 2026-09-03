@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
+import { claim, idempotencyKey } from '@/lib/idempotency';
 
 export async function POST(req: NextRequest) {
   const { orderId, tableId, companyId, token } = await req.json();
@@ -7,6 +8,12 @@ export async function POST(req: NextRequest) {
   if (!(await verifySellerToken(companyId, token))) return Response.json({ ok: false, error: 'revoked' }, { status: 403 });
 
   const db = createServerClient();
+
+  // A move queued offline may be followed by a second move made online. Replaying
+  // the first one afterwards would drag the party back to the old table.
+  const held = await claim(db, idempotencyKey(req), companyId, 'move-table');
+  if (held.applied) return Response.json(held.result);
+
   // The FK only proves the table exists — this endpoint is public, so the table
   // must also be proven to belong to the caller's company.
   const { data: table } = await db
@@ -27,5 +34,7 @@ export async function POST(req: NextRequest) {
     .neq('status', 'silinib')
     .select('id');
   if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
-  return Response.json({ ok: (data?.length ?? 0) > 0 });
+  const result = { ok: (data?.length ?? 0) > 0 };
+  await held.commit(result);
+  return Response.json(result);
 }

@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
+import { claim, idempotencyKey } from '@/lib/idempotency';
 import type { SelectedModifier } from '@/types';
 
 interface IncomingItem {
@@ -25,6 +26,10 @@ export async function POST(req: NextRequest) {
   if (!(await verifySellerToken(companyId, token ?? ''))) return Response.json({ ok: false, error: 'revoked' }, { status: 403 });
 
   const db = createServerClient();
+
+  // Replaying a queued append would put the same dishes on the bill twice.
+  const held = await claim(db, idempotencyKey(req), companyId, 'add-order-items');
+  if (held.applied) return Response.json(held.result);
 
   // Only allow appending to an order that belongs to this company and is still open.
   const { data: order, error: orderErr } = await db
@@ -56,5 +61,6 @@ export async function POST(req: NextRequest) {
     const { error: noteError } = await db.from('orders').update({ note: note || null }).eq('id', orderId).eq('company_id', companyId);
     if (noteError) return Response.json({ ok: false, error: noteError.message }, { status: 500 });
   }
+  await held.commit({ ok: true });
   return Response.json({ ok: true });
 }

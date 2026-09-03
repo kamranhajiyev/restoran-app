@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
+import { claim, idempotencyKey } from '@/lib/idempotency';
 
 // Public terminal: change the quantity of one line on an open (unpaid) order. Token-gated; scoped
 // to the order and company so a stale/forged token or wrong company can't touch it. A quantity of
@@ -18,6 +19,11 @@ export async function POST(req: NextRequest) {
   if (!(await verifySellerToken(companyId, token ?? ''))) return Response.json({ ok: false, error: 'revoked' }, { status: 403 });
 
   const db = createServerClient();
+
+  // The ghost row below is an insert: replaying a queued decrement would print a
+  // second "cancel 1 Cola" slip and double the struck-through line on the card.
+  const held = await claim(db, idempotencyKey(req), companyId, 'update-order-item-qty');
+  if (held.applied) return Response.json(held.result);
 
   // Only allow editing an order that belongs to this company and is still open.
   const { data: order, error: orderErr } = await db
@@ -40,6 +46,7 @@ export async function POST(req: NextRequest) {
       .eq('id', orderItemId).eq('order_id', orderId)
       .is('removed_at', null);          // never re-stamp an already-removed line
     if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
+    await held.commit({ ok: true });
     return Response.json({ ok: true });
   }
 
@@ -76,5 +83,6 @@ export async function POST(req: NextRequest) {
     if (ghostErr) console.error('[update-order-item-qty ghost]', ghostErr.message);
   }
 
+  await held.commit({ ok: true });
   return Response.json({ ok: true });
 }
