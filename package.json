@@ -36,7 +36,8 @@
           ]
         }
       ],
-      "artifactName": "PossibllePOS-Setup-${version}.exe"
+      "artifactName": "PossibllePOS-Setup-${version}.exe",
+      "icon": "electron/icon.png"
     },
     "nsis": {
       "perMachine": false,
