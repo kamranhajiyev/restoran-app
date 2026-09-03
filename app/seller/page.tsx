@@ -28,6 +28,7 @@ import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printRecei
 import { isDesktop, startKitchenPrinting } from '@/lib/desktopPrint';
 import { postOrQueue, isOnline, startConnectivityWatch, onConnectivityChange } from '@/lib/offline-net';
 import { flushQueue, ADD_ORDER } from '@/lib/sync';
+import { verifyPinOffline, rememberPin, forgetPins } from '@/lib/offline-pin';
 import { queueSize, enqueue } from '@/lib/offline-queue';
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
@@ -139,20 +140,32 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     const deviceId = getDeviceId();
     // Public terminal has no Supabase session — verify via server-side API route
     const res = overrideCompanyId
-      ? await fetch('/api/verify-pin', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ companyId: overrideCompanyId, pin: next, token: overrideToken, deviceId }),
-        }).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }))
+      ? isOnline()
+        ? await fetch('/api/verify-pin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ companyId: overrideCompanyId, pin: next, token: overrideToken, deviceId }),
+          }).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }))
+        // Nobody to ask. Fall back to what this machine remembers from a
+        // successful unlock earlier — see lib/offline-pin.ts for what that
+        // does and does not protect.
+        : await verifyPinOffline(next, overrideCompanyId)
       : await verifyStaffPin(next, deviceId);
     setPinBusy(false);
     setPinInput('');
     if (res.ok) {
       const staff = { id: res.id, name: res.name };
+      // Only the server's word is worth remembering; re-storing an offline
+      // unlock would let a cached record refresh itself indefinitely.
+      if (overrideCompanyId && isOnline()) void rememberPin(next, staff, overrideCompanyId);
       sessionStorage.setItem('activeStaff', JSON.stringify(staff));
       setActiveStaff(staff);
     } else if (res.error === 'wrong') {
       setPinMsg(`Yanlış PIN${res.attemptsLeft > 0 ? ` · ${res.attemptsLeft} cəhd qaldı` : ''}`);
+    } else if (res.error === 'unavailable') {
+      // Offline and this waiter has not unlocked on this machine before, so
+      // there is nothing to check against. Say that, rather than "wrong PIN".
+      setPinMsg('Oflayn — bu cihazda əvvəlcə onlayn daxil olun');
     } else if (res.error === 'locked') {
       const until = res.locked_until ? new Date(res.locked_until) : null;
       const mins = until ? Math.ceil((until.getTime() - Date.now()) / 60000) : '?';
@@ -1491,7 +1504,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
               )}
             </div>
             {!overrideCompanyId && (
-              <button onClick={() => { logout(); router.push('/login'); }} className="flex items-center gap-2 text-xs text-stone-500 hover:text-red-500 transition-colors">
+              <button onClick={() => { forgetPins(); logout(); router.push("/login"); }} className="flex items-center gap-2 text-xs text-stone-500 hover:text-red-500 transition-colors">
                 <LogOut className="w-3.5 h-3.5" /> Çıxış
               </button>
             )}
@@ -1502,7 +1515,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
               {effectiveSeller[0]?.toUpperCase()}
             </div>
             {!overrideCompanyId && (
-              <button onClick={() => { logout(); router.push('/login'); }} title="Çıxış" className="text-stone-500 hover:text-red-500 transition-colors">
+              <button onClick={() => { forgetPins(); logout(); router.push("/login"); }} title="Çıxış" className="text-stone-500 hover:text-red-500 transition-colors">
                 <LogOut className="w-4 h-4" />
               </button>
             )}
@@ -1564,7 +1577,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
               <p className="text-sm text-stone-500 mb-5">Hesabdan tam çıxış olacaq. Davam etmək üçün sahibkarın yenidən daxil olması tələb olunacaq.</p>
               <div className="flex gap-3">
                 <button onClick={() => setLogoutConfirm(false)} className="flex-1 py-2.5 rounded-xl border border-stone-200 text-sm font-semibold text-stone-600 hover:bg-stone-50 transition-colors">Ləğv et</button>
-                <button onClick={() => { logout(); router.push('/login'); }} className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition-colors">Çıxış</button>
+                <button onClick={() => { forgetPins(); logout(); router.push("/login"); }} className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-semibold transition-colors">Çıxış</button>
               </div>
             </div>
           </div>
@@ -1612,7 +1625,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
           </button>
           {!overrideCompanyId && (
             <button
-              onClick={() => { logout(); router.push('/login'); }}
+              onClick={() => { forgetPins(); logout(); router.push("/login"); }}
               className="w-full mt-3 text-sm text-stone-500 hover:text-red-500 transition-colors flex items-center justify-center gap-1.5"
             >
               <LogOut className="w-3.5 h-3.5" /> Çıxış
