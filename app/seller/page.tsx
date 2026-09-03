@@ -1261,12 +1261,24 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     setShiftBusy(true);
     let s = null;
     if (overrideCompanyId) {
-      const d = await fetch('/api/open-shift', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companyId: overrideCompanyId, openingCash: cash, openedBy: effectiveSeller, token: overrideToken }),
-      }).then(r => r.json()).catch(() => ({ shift: null }));
-      if (d.shift) s = { id: d.shift.id, openedAt: d.shift.opened_at, openedBy: d.shift.opened_by, openingCash: Number(d.shift.opening_cash), closedAt: d.shift.closed_at ?? undefined, movements: Array.isArray(d.shift.movements) ? d.shift.movements : [], edits: [] };
+      // The till chooses the id and the opening time, so a shift can be opened
+      // with no line at all: cash movements and receipts reference this id
+      // straight away, and the insert carrying it is replayed later.
+      const shiftId = crypto.randomUUID();
+      const openedAt = new Date().toISOString();
+      const body = { companyId: overrideCompanyId, openingCash: cash, openedBy: effectiveSeller, token: overrideToken, shiftId, openedAt };
+
+      if (isOnline()) {
+        const d = await fetch('/api/open-shift', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `shift:${shiftId}` },
+          body: JSON.stringify(body),
+        }).then(r => r.json()).catch(() => ({ shift: null }));
+        if (d.shift) s = { id: d.shift.id, openedAt: d.shift.opened_at, openedBy: d.shift.opened_by, openingCash: Number(d.shift.opening_cash), closedAt: d.shift.closed_at ?? undefined, movements: Array.isArray(d.shift.movements) ? d.shift.movements : [], edits: [] };
+      } else {
+        await enqueue(`shift:${shiftId}`, '/api/open-shift', body, overrideCompanyId);
+        s = { id: shiftId, openedAt, openedBy: effectiveSeller, openingCash: cash, movements: [], edits: [] };
+      }
     } else {
       s = await openShift(cash, effectiveSeller);
     }
@@ -1306,6 +1318,22 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
 
   async function handleCloseShift() {
     if (!shift || countedInput === '') return;
+
+    // The one thing the till must not do offline. Closing reconciles the drawer
+    // against the day's sales, and those come from the server — offline that
+    // request fails and the sales read as zero, so the shift would be recorded
+    // as short by exactly a full day's takings. The same applies while writes
+    // are still queued: the sales figure would be missing whatever has not
+    // landed yet. Better to make them wait than to write a false record.
+    if (!online || pendingCount > 0) {
+      alert(
+        !online
+          ? 'İnternet yoxdur — növbəni bağlamaq olmaz.\n\nBağlantı bərpa olunanda yenidən cəhd edin.'
+          : `Hələ ${pendingCount} əməliyyat serverə göndərilməyib.\n\nGözləyin, sonra növbəni bağlayın.`,
+      );
+      return;
+    }
+
     const counted = parseFloat(countedInput) || 0;
     const countedCard = terminalInput === '' ? undefined : parseFloat(terminalInput) || 0;
     setShiftBusy(true);
