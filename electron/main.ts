@@ -43,6 +43,40 @@ function resolveAppUrl(): string {
 
 const APP_URL = resolveAppUrl();
 
+// Where the till was last time, so a cold start during an outage opens the till
+// rather than the home page.
+//
+// The service worker caches the till's own address — /seller, or /s/<slug>/<token>
+// for the terminal this app runs — and deliberately not the home page: caching a
+// marketing page would only let someone stare at a screen with no way in. So on a
+// morning when the line is already down, loading APP_URL lands on nothing, while
+// the till the waiter used yesterday is sitting in the cache unreachable.
+//
+// Remembering the last address closes that. Only same-origin addresses are kept:
+// a build pointed at production must never reopen a preview.
+function lastUrlFile(): string {
+  return path.join(app.getPath('userData'), 'last-url.txt');
+}
+
+function rememberUrl(url: string): void {
+  try {
+    if (new URL(url).origin !== new URL(APP_URL).origin) return;
+    fs.writeFileSync(lastUrlFile(), url, 'utf8');
+  } catch {
+    // Unparseable URL, or a read-only profile. Next start just uses APP_URL.
+  }
+}
+
+function startUrl(): string {
+  try {
+    const saved = fs.readFileSync(lastUrlFile(), 'utf8').trim();
+    if (saved && new URL(saved).origin === new URL(APP_URL).origin) return saved;
+  } catch {
+    // Nothing remembered yet — the first run, which is necessarily online.
+  }
+  return APP_URL;
+}
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1280,
@@ -61,7 +95,7 @@ function createWindow(): void {
   // Painting a half-loaded page looks like a crash on a slow restaurant
   // connection. Wait until there is something to show.
   win.once('ready-to-show', () => win.show());
-  void win.loadURL(APP_URL);
+  void win.loadURL(startUrl());
 
   keepTryingWhenOffline(win);
 
@@ -109,11 +143,15 @@ const offlineNotice = (code: number, desc: string, url: string) => `
 
 function keepTryingWhenOffline(win: BrowserWindow): void {
   let retry: ReturnType<typeof setTimeout> | undefined;
+  // Chromium reports its own error page as a finished load. Without this the
+  // address of a page that failed would be remembered as a good one.
+  let failed = false;
 
   win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     // Sub-resources fail for their own reasons, and -3 is a navigation the app
     // itself cancelled — neither means the restaurant is offline.
     if (!isMainFrame || code === -3) return;
+    failed = true;
 
     void win.webContents.executeJavaScript(
       `document.documentElement.innerHTML = ${JSON.stringify(offlineNotice(code, desc, url || APP_URL))}`,
@@ -126,6 +164,15 @@ function keepTryingWhenOffline(win: BrowserWindow): void {
 
   win.webContents.on('did-finish-load', () => {
     if (retry) { clearTimeout(retry); retry = undefined; }
+    if (!failed) rememberUrl(win.webContents.getURL());
+    failed = false;
+  });
+
+  // The app routes on the client, so walking from the home page into the till
+  // never reloads and never fires did-finish-load. Without this the address
+  // remembered would only ever be the one the window opened on.
+  win.webContents.on('did-navigate-in-page', (_e, url, isMainFrame) => {
+    if (isMainFrame) rememberUrl(url);
   });
 
   win.on('closed', () => { if (retry) clearTimeout(retry); });
