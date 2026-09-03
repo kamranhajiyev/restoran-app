@@ -2,6 +2,7 @@ import type { Order } from '@/types';
 import { stringToBytes, ESC, WIDTH } from './escpos';
 import { rasterize, type Line, type Logo } from './raster';
 import { loadLogo } from './logo';
+import { orderLabel } from './order-label';
 
 const USB_VID = 0x1FC9;
 const USB_PID = 0x2016;
@@ -101,7 +102,9 @@ function head(order: Order, companyName: string, heading?: string): Line[] {
   ];
   if (heading) lines.push({ text: heading, big: true, center: true });
   lines.push(
-    { text: `Sifariş #${order.orderNumber}`, center: true },
+    // The label, not the bare number: on a second till these are the only two
+    // characters telling this receipt apart from the other №45 in the room.
+    { text: `Sifariş #${orderLabel(order)}`, center: true },
     { text: `Masa: ${order.tableNumber === 0 ? 'Takeaway' : order.tableNumber}`, center: true },
     { text: date, center: true },
     { text: `Ofisiant: ${order.sellerName}`, center: true },

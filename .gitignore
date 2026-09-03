@@ -52,3 +52,10 @@ supabase/.temp/
 # Electron build output
 dist-electron/
 release/
+
+# Desktop till: the staging copy of the repo and the static export it produces.
+# Both are build artefacts of scripts/build-desktop.mjs and are rebuilt from
+# source every time; committing either would also commit a bundle with a
+# Supabase project baked into it.
+.desktop-build/
+out-desktop/

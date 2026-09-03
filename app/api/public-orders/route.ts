@@ -34,6 +34,7 @@ export async function GET(req: NextRequest) {
   const orders = (data ?? []).map((o: Record<string, unknown>, i: number) => ({
     id: o.id,
     orderNumber: (o.order_number as number) ?? 0,
+    tillNumber: (o.till_number as number) ?? undefined,
     tableNumber: o.table_id ?? 0,
     sellerName: o.waiter_name,
     staffId: o.staff_id ?? undefined,

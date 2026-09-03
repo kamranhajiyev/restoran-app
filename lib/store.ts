@@ -2,6 +2,7 @@ import { CashShift, Category, Hall, MenuItem, ModifierGroup, ModifierOption, Ord
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
 import { supabase } from './supabase';
+import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
 
 async function authHeaders(): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -17,6 +18,78 @@ export function setCompanyContext(id: string | null) {
   _companyId = id;
 }
 
+// ─── The desktop till's local copy ────────────────────────────────────────────
+//
+// Inside the Windows app these reads are answered by SQLite on the machine
+// instead of by Supabase, so the till keeps working with the cable unplugged
+// and a reload during an outage comes back with the room still on it.
+//
+// Done here rather than in app/seller/page.tsx because the till reaches its data
+// two ways — a signed-in waiter goes through these functions, a terminal link
+// goes through /api/public-* — and a fix in only one of them leaves whichever
+// half the restaurant actually uses still talking to the network.
+//
+// `server: true` is how lib/till-sync.ts asks for the real thing: it is the code
+// that FILLS the local copy, and would otherwise read back what it just wrote.
+// An explicit argument rather than a module flag, because a flag set around an
+// await would also divert whatever the page happened to request meanwhile.
+
+export interface ReadOpts {
+  /** Skip the local copy and ask Supabase. Only the sync has any business here. */
+  server?: boolean;
+  /**
+   * Insert the order under the number it already carries instead of letting the
+   * server's counter pick one.
+   *
+   * Only the desktop till's replay may ask for this, and only because that till
+   * numbered the order on its own machine and printed the number on a receipt
+   * hours ago. A browser's queued order carries an optimistic guess instead —
+   * for that one the server's counter is still the authority.
+   */
+  keepOrderNumber?: boolean;
+}
+
+function localTill(opts?: ReadOpts) {
+  if (opts?.server) return null;
+  if (typeof window === 'undefined') return null;
+  return window.posNative?.till ?? null;
+}
+
+/** The local copy's answer, or null when there is no local copy to ask. */
+async function fromLocal<T>(
+  opts: ReadOpts | undefined,
+  read: (till: NonNullable<NonNullable<Window['posNative']>['till']>, companyId: string) => Promise<T>,
+): Promise<T | null> {
+  const till = localTill(opts);
+  if (!till || !_companyId) return null;
+  try {
+    return await read(till, _companyId);
+  } catch {
+    // The database is on the same disk as the app; a failure here is not an
+    // outage to ride out, it is a broken install. Fall through to the network
+    // so the till still works while somebody looks at it.
+    return null;
+  }
+}
+
+// The same inversion for writes. A signed-in waiter on the desktop till reaches
+// these functions directly, so without this the terminal-link half of the app
+// would be offline-capable and the logged-in half would not — the harder failure
+// to spot, because it only shows up on the machine the restaurant actually uses.
+//
+// Returns null when there is no local database, which sends the caller down the
+// Supabase path it has always taken. See lib/till-write.ts for the vocabulary of
+// `kind`, and electron/till-write.ts for what each one does to the row.
+async function toLocal(
+  opts: ReadOpts | undefined,
+  id: string,
+  kind: string,
+  body: Record<string, unknown>,
+): Promise<LocalWrite | null> {
+  if (opts?.server) return null;
+  return localWrite(id, kind, body, _companyId);
+}
+
 function isValidUUID(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }
@@ -28,7 +101,11 @@ function isValidUUID(id: string): boolean {
 let _menuLoaded = false;
 let _categoriesLoaded = false;
 
-export async function fetchMenu(): Promise<MenuItem[]> {
+export async function fetchMenu(opts?: ReadOpts): Promise<MenuItem[]> {
+  const local = await fromLocal(opts, async (till, companyId) =>
+    ((await till.menu(companyId)) as { items: MenuItem[] }).items);
+  if (local) return local;
+
   try {
     const { data, error } = await supabase.from('menu_items').select('*').order('position');
     if (error || !data) return [];
@@ -146,7 +223,11 @@ export async function setMenuItemAvailable(id: string, available: boolean): Prom
 // until a fetch has succeeded at least once.
 let _modifiersLoaded = false;
 
-export async function fetchModifierGroups(): Promise<ModifierGroup[]> {
+export async function fetchModifierGroups(opts?: ReadOpts): Promise<ModifierGroup[]> {
+  const local = await fromLocal(opts, async (till, companyId) =>
+    ((await till.modifiers(companyId)) as { groups: ModifierGroup[] }).groups);
+  if (local) return local;
+
   try {
     const [{ data: groups, error: gError }, { data: options, error: oError }] = await Promise.all([
       supabase.from('modifier_groups').select('*').order('position'),
@@ -244,7 +325,11 @@ export async function saveModifierGroups(groups: ModifierGroup[]): Promise<strin
 // No placeholder fallback: a company with no categories sees an empty list and
 // creates its own. The old default list ("Çay", "Snack", …) looked like real
 // data and got persisted by the next save, polluting the company's categories.
-export async function fetchCategories(): Promise<Category[]> {
+export async function fetchCategories(opts?: ReadOpts): Promise<Category[]> {
+  const local = await fromLocal(opts, async (till, companyId) =>
+    ((await till.categories(companyId)) as { categories: Category[] }).categories);
+  if (local) return local;
+
   try {
     const { data, error } = await supabase.from('categories').select('name, available, qr_visible').order('position');
     if (error || !data) return [];
@@ -287,7 +372,11 @@ export async function saveCategories(categories: Category[]): Promise<string | n
 
 let _stationsLoaded = false;
 
-export async function fetchStations(): Promise<Station[]> {
+export async function fetchStations(opts?: ReadOpts): Promise<Station[]> {
+  const local = await fromLocal(opts, async (till, companyId) =>
+    ((await till.stations(companyId)) as { stations: Station[] }).stations);
+  if (local) return local;
+
   try {
     // position, then created_at — the same order the print_jobs triggers use to pick
     // the fallback "first station". position defaults to 0, so without the tiebreak
@@ -448,7 +537,13 @@ export async function fetchOrdersCount(): Promise<number> {
   } catch { return 0; }
 }
 
-export async function fetchOrders(opts?: { from?: string; to?: string; limit?: number; offset?: number }): Promise<Order[]> {
+export async function fetchOrders(opts?: { from?: string; to?: string; limit?: number; offset?: number } & ReadOpts): Promise<Order[]> {
+  const local = await fromLocal(opts, async (till, companyId) =>
+    ((await till.orders(companyId, {
+      from: opts?.from, to: opts?.to, limit: opts?.limit, offset: opts?.offset,
+    })) as { orders: Order[] }).orders);
+  if (local) return local;
+
   try {
     const PAGE = 1000;
     const offset = opts?.offset ?? 0;
@@ -476,6 +571,7 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
     return all.map((o) => ({
       id: o.id,
       orderNumber: o.order_number ?? 0,
+      tillNumber: o.till_number ?? undefined,
       tableNumber: o.table_id ?? 0,
       sellerName: o.waiter_name,
       staffId: o.staff_id ?? undefined,
@@ -505,7 +601,13 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
 
 export type StationReady = { orderId: string; stationId: string; readyAt: string; readyBy: string | null };
 
-export async function fetchStationReady(orderIds?: string[]): Promise<StationReady[]> {
+export async function fetchStationReady(orderIds?: string[], opts?: ReadOpts): Promise<StationReady[]> {
+  const local = await fromLocal(opts, async (till, companyId) => {
+    const { ready } = (await till.stationReady(companyId)) as { ready: StationReady[] };
+    return orderIds ? ready.filter(r => orderIds.includes(r.orderId)) : ready;
+  });
+  if (local) return local;
+
   try {
     let q = supabase.from('order_station_ready').select('order_id, station_id, ready_at, ready_by');
     if (orderIds) {
@@ -565,10 +667,23 @@ export async function unmarkStationReady(orderId: string, stationId: string): Pr
   }
 }
 
-export async function addOrder(order: Order): Promise<string | null> {
+export async function addOrder(order: Order, opts?: ReadOpts): Promise<string | null> {
+  // `server: true` is how the replay in lib/sync.ts asks for the real insert —
+  // without it a queued order would be "sent" straight back into the machine it
+  // came from and never reach Supabase at all.
+  const local = await toLocal(opts, `order:${order.id}`, ADD_ORDER, order as unknown as Record<string, unknown>);
+  if (local) return local.ok ? null : local.error ?? 'failed';
+
   try {
     const { error: orderError } = await supabase.from('orders').insert({
       id: order.id,
+      // Absent on every other path, where the assign_order_number trigger fills
+      // it in. Supplied, the trigger keeps it and moves the counter past it.
+      ...(opts?.keepOrderNumber && order.orderNumber ? { order_number: order.orderNumber } : {}),
+      // Travels with the number it qualifies, and only then: an order the server
+      // numbered belongs to no till and must stay null, or the report would
+      // start labelling web-till orders as coming from a counter.
+      ...(opts?.keepOrderNumber && order.tillNumber ? { till_number: order.tillNumber } : {}),
       table_id: order.tableNumber === 0 ? null : order.tableNumber,
       waiter_name: order.sellerName,
       staff_id: order.staffId ?? null,
@@ -580,6 +695,11 @@ export async function addOrder(order: Order): Promise<string | null> {
     if (orderError) { console.error('[addOrder orders]', orderError); return orderError.message; }
     if (order.items.length === 0) return null;
     const rows = order.items.map(oi => ({
+      // An order taken on the desktop till named its own lines before Supabase
+      // ever heard of them, and the till has been referring to them by those
+      // names since — "remove one Cola" carries the id it minted. Letting the
+      // server generate its own here would orphan every one of those edits.
+      ...(oi.id ? { id: oi.id } : {}),
       order_id: order.id,
       menu_item_id: String(oi.menuItem.id),
       menu_item_name: String(oi.menuItem.name),
@@ -601,6 +721,13 @@ export async function addOrder(order: Order): Promise<string | null> {
 }
 
 export async function addItemsToOrder(orderId: string, items: OrderItem[], note?: string | null): Promise<string | null> {
+  // A fresh key per append: the same dish added twice to one order is two
+  // legitimate writes, not a retry of one.
+  const local = await toLocal(undefined, `append:${crypto.randomUUID()}`, '/api/add-order-items', {
+    orderId, items, note: note ?? undefined,
+  });
+  if (local) return local.ok ? null : local.error ?? 'failed';
+
   try {
     // Refuse to append to an order that's already closed (paid/cancelled/deleted) —
     // matches the public API route and the conditional pay/cancel flows.
@@ -611,6 +738,7 @@ export async function addItemsToOrder(orderId: string, items: OrderItem[], note?
 
     if (items.length > 0) {
       const rows = items.map(oi => ({
+        ...(oi.id ? { id: oi.id } : {}),   // see addOrder: the till names its own lines
         order_id: orderId,
         menu_item_id: String(oi.menuItem.id),
         menu_item_name: String(oi.menuItem.name),
@@ -643,6 +771,17 @@ export async function updateOrderStatus(
   discountAmount?: number,
   discountType?: '%' | '₼',
 ): Promise<boolean> {
+  // One key per order for a payment, one per target status otherwise: a payment
+  // must be applied exactly once however many times it is retried, while
+  // "gözləyir → hazırlanır → hazırdır" is three distinct steps.
+  const local = await toLocal(
+    undefined,
+    status === 'ödənilib' ? `pay:${orderId}` : `status:${orderId}:${status}`,
+    '/api/update-order-status',
+    { orderId, status, cashAmount, cardAmount, changeAmount, discountAmount, discountType },
+  );
+  if (local) return local.ok;
+
   const updates: Record<string, unknown> = { status };
   // Plain status changes must not touch payment data
   const hasAmounts = cashAmount !== undefined || cardAmount !== undefined || changeAmount !== undefined;
@@ -670,6 +809,11 @@ export async function updateOrderStatus(
 // The stations that already hold a ticket get a notice slip from the
 // orders_enqueue_table_move trigger.
 export async function moveOrderTable(orderId: string, tableId: number): Promise<boolean> {
+  // The target is in the key: moving a party twice during an outage is two
+  // separate writes, and both must land in the order they were made.
+  const local = await toLocal(undefined, `move:${orderId}:${tableId}`, '/api/move-table', { orderId, tableId });
+  if (local) return local.ok;
+
   const { data, error } = await supabase.from('orders')
     .update({ table_id: tableId })
     .eq('id', orderId)
@@ -685,6 +829,9 @@ export async function moveOrderTable(orderId: string, tableId: number): Promise<
 // Only unpaid orders can be cancelled — a paid order is final, mistakes after
 // payment are for the owner to sort out manually.
 export async function cancelOrder(orderId: string, reason: string, by: string): Promise<boolean> {
+  const local = await toLocal(undefined, `cancel:${orderId}`, '/api/cancel-order', { orderId, reason, by });
+  if (local) return local.ok;
+
   const { data, error } = await supabase.from('orders')
     .update({
       status: 'ləğv edildi',
@@ -717,7 +864,16 @@ export async function restoreOrder(orderId: string, status: 'ödənilib' | 'lə�
 // kitchen's LEGV slip has something to print. Every total filters it out via
 // splitOrderItems, and apply_stock_on_payment() skips it, so the guest is never
 // charged and the warehouse never drains for a dish that wasn't made.
-export async function removeOrderItem(orderItemId: string, removedBy: string): Promise<boolean> {
+export async function removeOrderItem(orderItemId: string, removedBy: string, orderId?: string): Promise<boolean> {
+  // orderId is optional only because Supabase does not need it — the row id is
+  // enough there. The till's copy stores an order whole, so locally it is the
+  // only way to find the line at all; a caller that omits it on the desktop gets
+  // the network path, which is the honest failure rather than a silent no-op.
+  const local = orderId
+    ? await toLocal(undefined, `remove:${orderItemId}`, '/api/remove-order-item', { orderItemId, orderId, removedBy })
+    : null;
+  if (local) return local.ok;
+
   const { error } = await supabase.from('order_items')
     .update({ removed_at: new Date().toISOString(), removed_by: removedBy })
     .eq('id', orderItemId)
@@ -732,8 +888,17 @@ export async function removeOrderItem(orderItemId: string, removedBy: string): P
 // its new quantity and a ghost row carrying the difference is inserted, already
 // removed. That ghost is what the card strikes through and what the kitchen's
 // "cancel 1 Cola" slip is built from.
-export async function setOrderItemQuantity(orderItemId: string, quantity: number, removedBy: string): Promise<boolean> {
-  if (quantity <= 0) return removeOrderItem(orderItemId, removedBy);
+export async function setOrderItemQuantity(orderItemId: string, quantity: number, removedBy: string, orderId?: string): Promise<boolean> {
+  if (quantity <= 0) return removeOrderItem(orderItemId, removedBy, orderId);
+
+  // Keyed by the quantity it lands on, so two taps of "−" are two distinct
+  // steps while a retry of either stays one.
+  const local = orderId
+    ? await toLocal(undefined, `qty:${orderItemId}:${quantity}`, '/api/update-order-item-qty', {
+        orderItemId, orderId, quantity, removedBy,
+      })
+    : null;
+  if (local) return local.ok;
 
   const { data: row, error: readError } = await supabase
     .from('order_items')
@@ -784,7 +949,11 @@ export async function editOrderPayment(orderId: string, cashAmount: number, card
 // themselves with a 4-digit PIN. All writes go through owner-only RPCs; the
 // PIN is verified server-side (hashed, company-wide lockout on brute force).
 
-export async function fetchStaff(): Promise<Staff[]> {
+export async function fetchStaff(opts?: ReadOpts): Promise<Staff[]> {
+  const local = await fromLocal(opts, async (till, companyId) =>
+    ((await till.staff(companyId)) as { staff: Staff[] }).staff);
+  if (local) return local;
+
   try {
     const { data, error } = await supabase.from('staff')
       .select('id, name, active, created_at')
@@ -1434,7 +1603,11 @@ export async function setKassaEnabled(enabled: boolean): Promise<{ error?: strin
   return {};
 }
 
-export async function fetchTables(): Promise<RestaurantTable[]> {
+export async function fetchTables(opts?: ReadOpts): Promise<RestaurantTable[]> {
+  const local = await fromLocal(opts, async (till, companyId) =>
+    ((await till.tables(companyId)) as { tables: RestaurantTable[] }).tables);
+  if (local) return local;
+
   try {
     const { data, error } = await supabase.from('restaurant_tables').select('id, name, capacity, x, y, w, h, shape, hall_id').order('id');
     if (error || !data) return [];
@@ -1488,7 +1661,11 @@ export async function moveTableToHall(id: number, hallId: string): Promise<void>
 
 // ─── Zallar ───────────────────────────────────────────────────────────────────
 
-export async function fetchHalls(): Promise<Hall[]> {
+export async function fetchHalls(opts?: ReadOpts): Promise<Hall[]> {
+  const local = await fromLocal(opts, async (till, companyId) =>
+    ((await till.tables(companyId)) as { halls: Hall[] }).halls);
+  if (local) return local;
+
   try {
     const { data, error } = await supabase.from('halls').select('id, name, position').order('position').order('name');
     if (error || !data) return [];
@@ -1826,7 +2003,16 @@ function mapShift(r: {
   };
 }
 
-export async function fetchOpenShift(): Promise<CashShift | null> {
+export async function fetchOpenShift(opts?: ReadOpts): Promise<CashShift | null> {
+  // A null shift is a real answer here — most of the day there is no open shift
+  // — so this cannot use the `?? fall through` shape the others do.
+  const till = localTill(opts);
+  if (till && _companyId) {
+    try {
+      return ((await till.shift(_companyId)) as { shift: CashShift | null }).shift;
+    } catch { /* broken local copy: ask the server */ }
+  }
+
   try {
     const { data, error } = await supabase
       .from('cash_shifts').select('*')
@@ -1850,6 +2036,19 @@ export async function fetchShifts(limit = 60): Promise<CashShift[]> {
 }
 
 export async function openShift(openingCash: number, openedBy: string): Promise<CashShift | null> {
+  // The till chooses the id and the opening time so a shift can begin with no
+  // line at all: receipts and cash movements reference this id straight away,
+  // and app/api/open-shift honours both when the insert is finally replayed.
+  const shiftId = crypto.randomUUID();
+  const openedAt = new Date().toISOString();
+  const local = await toLocal(undefined, `shift:${shiftId}`, '/api/open-shift', {
+    openingCash, openedBy, shiftId, openedAt,
+  });
+  if (local) {
+    if (!local.ok) return fetchOpenShift();   // someone already opened one
+    return { id: shiftId, openedAt, openedBy, openingCash, movements: [], edits: [] };
+  }
+
   const { data, error } = await supabase
     .from('cash_shifts')
     .insert({ company_id: _companyId, opening_cash: openingCash, opened_by: openedBy })
@@ -1866,6 +2065,14 @@ export async function openShift(openingCash: number, openedBy: string): Promise<
 }
 
 export async function addShiftMovement(shiftId: string, movement: ShiftMovement): Promise<void> {
+  // The movement already carries the id an admin uses to correct it later, which
+  // makes it exactly the right idempotency key — append_shift_movement appends
+  // unconditionally, so a replay without one leaves the drawer short at close.
+  const local = movement.id
+    ? await toLocal(undefined, `movement:${movement.id}`, '/api/add-shift-movement', { shiftId, movement })
+    : null;
+  if (local) return;
+
   // Atomic jsonb append in the DB — concurrent movements can't overwrite each other
   const { error } = await supabase.rpc('append_shift_movement', { shift_id: shiftId, movement });
   if (error) console.error('[addShiftMovement]', error);
@@ -1914,6 +2121,15 @@ export async function closeShift(
   shiftId: string, expectedCash: number, countedCash: number, closedBy: string,
   cardSales?: number, countedCard?: number,
 ): Promise<void> {
+  // The seller screen already refuses to close while the line is down or the
+  // outbox is not empty — see handleCloseShift — so this lands locally and is
+  // replayed within seconds, keeping the till's own record in step with what
+  // was sent rather than a shift that reads open until the next pull.
+  const local = await toLocal(undefined, `close:${shiftId}`, '/api/close-shift', {
+    shiftId, expectedCash, countedCash, closedBy, cardSales, countedCard,
+  });
+  if (local) return;
+
   const { error } = await supabase
     .from('cash_shifts')
     .update({
@@ -1928,7 +2144,14 @@ export async function closeShift(
 // Cash/card taken since the shift opened (paid orders only, by payment time —
 // an order created yesterday but paid during this shift counts). cash_amount is
 // net of change — i.e. exactly what went into the drawer.
-export async function fetchShiftSales(openedAt: string): Promise<{ cash: number; card: number }> {
+export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promise<{ cash: number; card: number }> {
+  // Payments made during an outage exist only on this machine until they sync,
+  // so a drawer reconciled against the server would read short by exactly what
+  // the till took while the line was down.
+  const local = await fromLocal(opts, (till, companyId) =>
+    till.shiftSales(companyId, openedAt) as Promise<{ cash: number; card: number }>);
+  if (local) return local;
+
   try {
     const { data, error } = await supabase
       .from('orders')

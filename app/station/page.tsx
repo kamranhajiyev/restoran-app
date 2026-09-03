@@ -20,6 +20,7 @@ import { itemBatches } from '@/lib/order-items';
 import { snapshotOrders, diffOrderAlerts, OrdersSnapshot } from '@/lib/orderAlerts';
 import { unlockSound, playNewOrder, playItemRemoved } from '@/lib/sound';
 import { MenuItem, Order, OrderItem, Station, isOrderOpen } from '@/types';
+import { orderLabel } from '@/lib/order-label';
 
 // A card older than this is late. Newest-first puts the oldest at the BOTTOM, so
 // the colour is what stops it being forgotten — the sort can't be relied on to
@@ -277,7 +278,7 @@ export default function StationPage() {
   async function notifyWaiters(orderId: string) {
     const order = orders.find(o => o.id === orderId);
     const where = order?.tableNumber ? `Masa ${order.tableNumber}` : 'Sifariş';
-    const num = order ? ` #${order.orderNumber}` : '';
+    const num = order ? ` #${orderLabel(order)}` : '';
     try {
       const { data: { session } } = await supabase.auth.getSession();
       await fetch('/api/notify-ready', {
@@ -428,7 +429,7 @@ function StationCard({
       : 'bg-white border-stone-100'
     }`}>
       <div className="flex items-baseline justify-between gap-2 px-4 pt-3">
-        <span className="text-lg font-bold">#{order.orderNumber}</span>
+        <span className="text-lg font-bold">#{orderLabel(order)}</span>
         <span className="text-sm text-stone-500">
           {order.tableNumber ? `Masa ${order.tableNumber}` : 'Özü ilə'}
         </span>

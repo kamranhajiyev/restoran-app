@@ -58,6 +58,7 @@ import QRCode from 'react-qr-code';
 import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt } from '@/lib/printer';
 import { isDesktop } from '@/lib/desktopPrint';
+import { orderLabel, orderSearchText } from '@/lib/order-label';
 
 // RPC raise messages are machine codes — translated here for display
 const STAFF_ERRORS: Record<string, string> = {
@@ -1983,7 +1984,7 @@ function AdminPageContent() {
   const ordersSuspicious = ordersDateFiltered.filter(isSuspiciousOrder);
   const ordersAudited = onlySuspicious ? ordersSuspicious : ordersDateFiltered;
   const visibleOrders = orderQuery
-    ? ordersAudited.filter(o => String(o.orderNumber).includes(orderQuery) || (o.sellerName ?? '').toLowerCase().includes(orderQuery))
+    ? ordersAudited.filter(o => orderSearchText(o).includes(orderQuery) || (o.sellerName ?? '').toLowerCase().includes(orderQuery))
     : ordersAudited;
 
   const menuCostMap: Record<string, number> = {};
@@ -2981,7 +2982,7 @@ function AdminPageContent() {
                         className={`w-full flex items-center gap-3 px-4 py-3 transition-colors text-left ${flagged ? 'hover:bg-amber-100' : 'hover:bg-stone-50'}`}
                       >
                         <ChevronDown className={`w-4 h-4 text-stone-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                        <span className="w-14 text-xs font-bold text-primary-900 flex-shrink-0">#{order.orderNumber}</span>
+                        <span className="w-14 text-xs font-bold text-primary-900 flex-shrink-0">#{orderLabel(order)}</span>
                         <span className="flex-1 text-sm text-stone-700 truncate">{order.sellerName}</span>
                         <span className="text-xs text-stone-500 flex-shrink-0 hidden sm:block">
                           {new Date(order.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
@@ -3084,7 +3085,7 @@ function AdminPageContent() {
                               )}
                               {order.status !== 'silinib' && (
                                 <button
-                                  onClick={() => setDialog({ title: 'Sifarişi sil?', message: <>№{order.orderNumber} silinib statusuna keçəcək. Bərpa edə bilərsiniz.</>, onConfirm: async () => {
+                                  onClick={() => setDialog({ title: 'Sifarişi sil?', message: <>№{orderLabel(order)} silinib statusuna keçəcək. Bərpa edə bilərsiniz.</>, onConfirm: async () => {
                                     const ok = await deleteOrder(order.id);
                                     if (ok) patchOrder(order.id, o => ({ ...o, status: 'silinib' as OrderStatus }));
                                   }})}
@@ -4328,7 +4329,7 @@ function AdminPageContent() {
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
             <h3 className="font-bold text-lg text-stone-800 mb-1">Ödənişi düzəlt</h3>
             <p className="text-sm text-stone-600 mb-4">
-              №{editingPaymentOrder.orderNumber} · {editingPaymentOrder.sellerName} · {orderTotal(editingPaymentOrder).toFixed(2)} ₼
+              №{orderLabel(editingPaymentOrder)} · {editingPaymentOrder.sellerName} · {orderTotal(editingPaymentOrder).toFixed(2)} ₼
             </p>
             <div className="space-y-3 mb-5">
               <div>
@@ -4415,7 +4416,7 @@ function AdminPageContent() {
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
             <h3 className="font-bold text-lg text-stone-800 mb-1">Sifarişi ödənişsiz bağla</h3>
             <p className="text-sm text-stone-600 mb-4">
-              №{cancellingOrder.orderNumber} · {cancellingOrder.sellerName} · {orderTotal(cancellingOrder).toFixed(2)} ₼
+              №{orderLabel(cancellingOrder)} · {cancellingOrder.sellerName} · {orderTotal(cancellingOrder).toFixed(2)} ₼
             </p>
             <p className="text-xs font-semibold text-stone-600 uppercase tracking-wide mb-2">Səbəb</p>
             <div className="flex flex-wrap gap-2 mb-4">

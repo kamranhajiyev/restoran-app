@@ -27,11 +27,34 @@ import OrderItemHistory from '@/components/OrderItemHistory';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, openCashDrawer } from '@/lib/printer';
 import { isDesktop, startKitchenPrinting } from '@/lib/desktopPrint';
 import { postOrQueue, isOnline, startConnectivityWatch, onConnectivityChange } from '@/lib/offline-net';
+import { tillFetch, hasLocalDb } from '@/lib/till-data';
+import { hasLocalData, pullAll } from '@/lib/till-sync';
+import TillSetup from '@/components/TillSetup';
+import SyncStatus from '@/components/SyncStatus';
+import TillLink from '@/components/TillLink';
+import { canLink, checkLink, clearLink, readLink, saveLink, type Terminal } from '@/lib/terminal-link';
+import { tillImage } from '@/lib/till-image';
+import { orderLabel, orderSearchText } from '@/lib/order-label';
 import { flushQueue, ADD_ORDER } from '@/lib/sync';
 import { verifyPinOffline, rememberPin, forgetPins } from '@/lib/offline-pin';
 import { queueSize, enqueue } from '@/lib/offline-queue';
+import { pendingWrites } from '@/lib/till-write';
 
-const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
+// How many writes the server has not seen. Two stores answer that question — the
+// browser till's IndexedDB queue and the desktop till's SQLite outbox — but only
+// one of them exists on any given machine, and the badge and the shift-close
+// guard want a single number either way.
+async function pendingTotal(): Promise<number> {
+  return hasLocalDb() ? pendingWrites() : queueSize();
+}
+
+// How often the desktop till refreshes its copy of the restaurant. Long, because
+// it is a full re-read of the menu and the room: the things it catches — a price
+// edited in the office, a table another terminal seated — are not things a waiter
+// is standing there waiting for.
+const PULL_EVERY_MS = 5 * 60_000;
+
+const CANCEL_REASONS =['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
 const AZ_CHARS: Record<string, string> = { 'ç': 'c', 'ə': 'e', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u' };
 function azNormalize(s: string): string {
@@ -81,7 +104,94 @@ function tableHasActive(n: number, orders: Order[]): boolean {
   return orders.some(o => o.tableNumber === n && isOrderOpen(o));
 }
 
-export default function SellerPage({ overrideCompanyId, overrideCompanyName, overrideToken, overrideLogoUrl, overrideBrandColor, overrideExpiresAt }: { overrideCompanyId?: string; overrideCompanyName?: string; overrideToken?: string; overrideLogoUrl?: string | null; overrideBrandColor?: string | null; overrideExpiresAt?: string | null } = {}) {
+export interface SellerProps {
+  overrideCompanyId?: string;
+  overrideCompanyName?: string;
+  overrideToken?: string;
+  overrideLogoUrl?: string | null;
+  overrideBrandColor?: string | null;
+  overrideExpiresAt?: string | null;
+}
+
+// ── How this page is entered ─────────────────────────────────────────────────
+// Three ways, and the till below is identical in all three:
+//
+//   · /seller in a browser, signed in as a waiter — no props.
+//   · /s/<slug>/<token>, a terminal with no account — that route resolves the
+//     link and passes it down as props.
+//   · the Windows app, which has no address bar. It opens app://till/seller
+//     every time and asks the machine which terminal it was set up as, which is
+//     the same two values from the same link, pasted once (components/TillLink).
+//
+// The wrapper exists to keep the third case out of the till: resolving a link
+// is asynchronous, and the props below are read by state initialisers that run
+// once. Deciding before the till mounts is what makes an outage open at the PIN
+// pad instead of at a setup screen.
+export default function SellerRoute(props: SellerProps = {}) {
+  const [terminal, setTerminal] = useState<Terminal | null>(null);
+  // undefined until the machine has been asked. Both the server render and the
+  // first client render see it, so there is nothing to mismatch on hydration.
+  const [linked, setLinked] = useState<boolean | undefined>(undefined);
+
+  useEffect(() => {
+    let live = true;
+    // A browser, or a route that already knows its terminal: nothing to look up.
+    // A machine someone has signed into with an account is also already answered
+    // — the link is the way in for a till that has no account, not a replacement
+    // for the one it has.
+    const skip = Boolean(props.overrideCompanyId) || !canLink() || getSession() !== null;
+
+    void (skip ? Promise.resolve(null) : readLink()).then(stored => {
+      if (!live) return;
+      setTerminal(stored);
+      setLinked(skip || stored !== null);
+      if (!stored) return;
+
+      // Revalidate in the background — the till is already open by then. A
+      // revoked link stops this machine the moment the server can say so; an
+      // outage changes nothing, which is the whole point of storing the answer.
+      // The till's own number is carried in, not fetched: it is a fact about
+      // which counter this machine sits on, which the server has no way to know.
+      // Omitting it here would quietly reset every second till to 1 on the first
+      // refresh after it was set up.
+      void checkLink(stored.slug, stored.token, stored.tillNumber).then(async result => {
+        if (result.status === 'offline') return;
+        if (result.status === 'invalid') {
+          await clearLink();
+          if (!live) return;
+          setTerminal(null);
+          setLinked(false);
+          return;
+        }
+        await saveLink(result.terminal);
+      });
+    });
+
+    return () => { live = false; };
+  }, [props.overrideCompanyId]);
+
+  // One frame, on the desktop only, while SQLite answers.
+  if (linked === undefined) return null;
+
+  if (!linked) {
+    return <TillLink onLinked={t => { setTerminal(t); setLinked(true); }} />;
+  }
+
+  return terminal
+    ? (
+      <SellerPage
+        overrideCompanyId={terminal.companyId}
+        overrideCompanyName={terminal.companyName}
+        overrideToken={terminal.token}
+        overrideLogoUrl={terminal.logoUrl}
+        overrideBrandColor={terminal.brandColor}
+        overrideExpiresAt={terminal.expiresAt}
+      />
+    )
+    : <SellerPage {...props} />;
+}
+
+export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideToken, overrideLogoUrl, overrideBrandColor, overrideExpiresAt }: SellerProps = {}) {
   const router = useRouter();
   const [logoUrl, setLogoUrl] = useState<string | null>(overrideLogoUrl ?? null);
   const [view, setView]             = useState<View>('orders');
@@ -113,6 +223,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   // (`online` above already drives the Oflayn badge; the watch below keeps it
   // honest instead of leaving it stuck on the last page load's result.)
   const [pendingCount, setPendingCount] = useState(0);
+  // A flush is on the wire right now. Only the badge cares — nothing waits on it.
+  const [sending, setSending] = useState(false);
 
   // Poster-style PIN lock
   const [pinStaffList, setPinStaffList] = useState<Staff[]>([]);
@@ -125,6 +237,24 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const [pinInput, setPinInput]         = useState('');
   const [pinBusy, setPinBusy]           = useState(false);
   const [pinMsg, setPinMsg]             = useState('');
+
+  // ── First run on a new machine ──────────────────────────────────────────────
+  // Only the desktop build has a local database, and only an empty one needs
+  // filling. In a browser tab needsSetup never becomes true and none of this
+  // costs anything.
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const [setupCompanyId, setSetupCompanyId] = useState<string | null>(null);
+  // Bumped when the pull finishes, to send the loader below back for the data
+  // that has just landed — it will have read an empty database a moment ago.
+  const [dataVersion, setDataVersion] = useState(0);
+
+  useEffect(() => {
+    if (!hasLocalDb()) return;
+    const companyId = overrideCompanyId ?? getSession()?.companyId ?? null;
+    if (!companyId) return;
+    setSetupCompanyId(companyId);
+    void hasLocalData(companyId).then(filled => setNeedsSetup(!filled));
+  }, [overrideCompanyId]);
 
   const pinEnabled = pinStaffList.some(s => s.active);
   const pinLocked  = pinEnabled && !activeStaff;
@@ -295,13 +425,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     try {
       if (overrideCompanyId) {
         const [m, o, c, tb, st, rd, mg] = await Promise.all([
-          fetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
-          fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
-          fetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
-          fetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => ({ tables: normalizeTables(d.tables ?? []), halls: (d.halls ?? []) as Hall[] })).catch(() => ({ tables: [], halls: [] })),
-          fetch(`/api/public-staff?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.staff ?? []).catch(() => null),
-          fetch(`/api/public-station-ready?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.ready ?? []).catch(() => null),
-          fetch(`/api/public-modifiers?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.groups ?? null).catch(() => null),
+          tillFetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
+          tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
+          tillFetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
+          tillFetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => ({ tables: normalizeTables(d.tables ?? []), halls: (d.halls ?? []) as Hall[] })).catch(() => ({ tables: [], halls: [] })),
+          tillFetch(`/api/public-staff?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.staff ?? []).catch(() => null),
+          tillFetch(`/api/public-station-ready?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.ready ?? []).catch(() => null),
+          tillFetch(`/api/public-modifiers?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.groups ?? null).catch(() => null),
         ]);
         setMenu(m); setOrders(o); setTables(tb.tables); setHalls(tb.halls);
         setAvailableCategories(c.filter((cat: { available: boolean }) => cat.available));
@@ -335,8 +465,8 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
           // null, not an empty list: offline these two are indistinguishable, and
           // treating a dead line as "this restaurant has no open orders" wipes
           // every occupied table off the screen mid-service.
-          fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).catch(() => null),
-          fetch(`/api/public-station-ready?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.ready ?? []).catch(() => null),
+          tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).catch(() => null),
+          tillFetch(`/api/public-station-ready?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.ready ?? []).catch(() => null),
         ]);
         if (d) { setOrders(d.orders ?? []); setTotalOrders(d.total ?? 0); }
         // null = the request failed. Keep the last known green rather than blanking
@@ -355,24 +485,72 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   // the server actually has rather than the till's optimistic copy of it.
   useEffect(() => {
     const stop = startConnectivityWatch();
-    void queueSize().then(setPendingCount);
+    void pendingTotal().then(setPendingCount);
 
     const off = onConnectivityChange(async up => {
       setOnline(up);
       if (!up) return;
-      const { stillQueued } = await flushQueue(overrideCompanyId ?? null);
-      setPendingCount(stillQueued);
-      if (stillQueued === 0) void refreshOrders({ silent: true });
+      setSending(true);
+      try {
+        await flushQueue(overrideCompanyId ?? null);
+      } finally {
+        setSending(false);
+      }
+      const left = await pendingTotal();
+      setPendingCount(left);
+      if (left !== 0) return;
+
+      // Push before pull, always. The desktop till reads from its own database,
+      // so re-reading after a flush would only show it its own copy back. What
+      // it actually needs is the server's — the price the owner changed, the
+      // table the other terminal seated — and pulling that on top of writes that
+      // have not left yet would overwrite them with the server's older answer.
+      // Hence the gate above: nothing is pulled until the outbox is empty.
+      const companyId = overrideCompanyId ?? getSession()?.companyId ?? null;
+      if (hasLocalDb() && companyId) {
+        await pullAll(companyId);
+        setDataVersion(v => v + 1);
+      }
+      void refreshOrders({ silent: true });
     });
 
     return () => { stop(); off(); };
+  }, [overrideCompanyId, refreshOrders]);
+
+  // While the line stays up nothing above ever fires again — onConnectivityChange
+  // reports transitions, and a till that opens online and stays online would run
+  // on the copy it pulled this morning. A quiet refresh on a timer is what keeps
+  // a price change and another terminal's orders arriving during service.
+  useEffect(() => {
+    if (!hasLocalDb()) return;
+    const companyId = overrideCompanyId ?? getSession()?.companyId ?? null;
+    if (!companyId) return;
+
+    const t = setInterval(async () => {
+      if (!isOnline()) return;
+      // Same rule as above: never pull over writes that have not been sent.
+      setSending(true);
+      try {
+        await flushQueue(companyId);
+      } finally {
+        setSending(false);
+      }
+      const left = await pendingTotal();
+      setPendingCount(left);
+      if (left !== 0) return;
+      await pullAll(companyId);
+      setDataVersion(v => v + 1);
+      void refreshOrders({ silent: true });
+    }, PULL_EVERY_MS);
+
+    return () => clearInterval(t);
   }, [overrideCompanyId, refreshOrders]);
 
   // The badge would otherwise only move on a connection change, leaving a waiter
   // watching a stale "3 waiting" while the queue drains.
   useEffect(() => {
     if (online && pendingCount === 0) return;
-    const t = setInterval(() => void queueSize().then(setPendingCount), 3000);
+    const t = setInterval(() => void pendingTotal().then(setPendingCount), 3000);
     return () => clearInterval(t);
   }, [online, pendingCount]);
 
@@ -542,27 +720,27 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       // route. Without it the terminal is the one screen that never warns.
       setExpiresAt(overrideExpiresAt ?? null);
       fetchCompanySettings(overrideCompanyId).then(setBizSettings);
-      fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=1`)
+      tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=1`)
         .then(r => r.json()).then(d => setTotalOrders(d.total ?? 0)).catch(() => {});
       // Sexes change about once a year — fetched once at boot, not per refresh.
-      fetch(`/api/public-stations?companyId=${overrideCompanyId}`)
+      tillFetch(`/api/public-stations?companyId=${overrideCompanyId}`)
         .then(r => r.json()).then(d => setStations(d.stations ?? [])).catch(() => {});
       // Fetch staff and shift together via server-side routes (bypass RLS — no auth session).
       Promise.all([
-        fetch(`/api/public-staff?companyId=${overrideCompanyId}`).then(r => r.json()).catch(() => ({ staff: [] })),
-        fetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).catch(() => ({ shift: null })),
+        tillFetch(`/api/public-staff?companyId=${overrideCompanyId}`).then(r => r.json()).catch(() => ({ staff: [] })),
+        tillFetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).catch(() => ({ shift: null })),
       ]).then(([staffData, shiftData]) => {
         setPinStaffList(staffData.staff ?? []);
         setShift(shiftData.shift ?? null);
         setShiftChecked(true);
       });
-      fetch(`/api/public-modifiers?companyId=${overrideCompanyId}`)
+      tillFetch(`/api/public-modifiers?companyId=${overrideCompanyId}`)
         .then(r => r.json()).then(d => setModifierGroups(d.groups ?? [])).catch(() => {});
       Promise.all([
-        fetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
-        fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
-        fetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
-        fetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => ({ tables: normalizeTables(d.tables ?? []), halls: (d.halls ?? []) as Hall[] })).catch(() => ({ tables: [], halls: [] })),
+        tillFetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
+        tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
+        tillFetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
+        tillFetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => ({ tables: normalizeTables(d.tables ?? []), halls: (d.halls ?? []) as Hall[] })).catch(() => ({ tables: [], halls: [] })),
         fetchTablesEnabled(),
         fetchKassaEnabled(),
       ]).then(([m, o, c, tb, te, ke]) => {
@@ -611,7 +789,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       if (cats.length > 0) setActiveCategory(cats[0]);
     }).catch(() => setOnline(false));
     return () => authSub.subscription.unsubscribe();
-  }, [router, overrideCompanyId, overrideCompanyName, overrideBrandColor, overrideExpiresAt]);
+  }, [router, overrideCompanyId, overrideCompanyName, overrideBrandColor, overrideExpiresAt, dataVersion]);
 
   // ── Kitchen printers ────────────────────────────────────────────────────────
   // Only inside the desktop shell, and only with a real login: claiming tickets
@@ -964,7 +1142,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
           { orderItemId: oi.id, orderId: order.id, quantity: newQty, companyId: overrideCompanyId, token: overrideToken, removedBy: effectiveSeller },
           overrideCompanyId,
         )).ok
-      : await setOrderItemQuantity(oi.id, newQty, effectiveSeller);
+      // The order id is only needed by the desktop till, which stores an order
+      // whole and has no other way to find the line.
+      : await setOrderItemQuantity(oi.id, newQty, effectiveSeller, order.id);
     if (!ok) { alert('Dəyişdirilmədi. Yenidən cəhd edin.'); return; }
 
     // Optimistically apply, then reconcile with the server. The removed line must move
@@ -1003,7 +1183,12 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     setSubmitting(true);
     const order: Order = {
       id: crypto.randomUUID(),
-      orderNumber: (orders[0]?.orderNumber ?? 0) + 1,
+      // A guess, from the orders this screen happens to be holding — the web
+      // till's optimistic number, replaced by the server's on the next read.
+      // The desktop till sends 0 instead and lets its own database number the
+      // order: that number is the one that gets printed, so it must come from
+      // the whole local table rather than from whatever is on screen.
+      orderNumber: hasLocalDb() ? 0 : (orders[0]?.orderNumber ?? 0) + 1,
       tableNumber: orderType === 'takeaway' ? 0 : selectedTable!,
       items: cart,
       status: 'gözləyir',
@@ -1015,7 +1200,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     // Offline the insert cannot go now, but the order still exists: it goes into
     // the queue under its own id, the kitchen ticket still prints over the LAN,
     // and the real order_number arrives when the line does.
-    const saveError = isOnline()
+    //
+    // On the desktop till the question does not arise — addOrder writes to the
+    // machine's own database and returns before a network could have answered —
+    // so isOnline() is asked only where there is nowhere else for the order to
+    // go. Asking it anyway would send a perfectly-saveable order to IndexedDB
+    // whenever the probe happened to be mid-flight.
+    const saveError = hasLocalDb() || isOnline()
       ? await addOrder(order)
       : (await enqueue(`order:${order.id}`, ADD_ORDER, order, overrideCompanyId ?? null), null);
     setSubmitting(false);
@@ -1224,7 +1415,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   useEffect(() => {
     if (view === 'kassa' && shift) {
       if (overrideCompanyId) {
-        fetch(`/api/public-shift-sales?companyId=${overrideCompanyId}&openedAt=${encodeURIComponent(shift.openedAt)}`)
+        tillFetch(`/api/public-shift-sales?companyId=${overrideCompanyId}&openedAt=${encodeURIComponent(shift.openedAt)}`)
           .then(r => r.json()).then(setShiftSales).catch(() => {});
       } else {
         fetchShiftSales(shift.openedAt).then(setShiftSales);
@@ -1236,7 +1427,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   useEffect(() => {
     const id = setInterval(async () => {
       const open = overrideCompanyId
-        ? await fetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.shift ?? null).catch(() => undefined)
+        ? await tillFetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.shift ?? null).catch(() => undefined)
         : await fetchOpenShift();
       if (open === null && shift) { setShift(null); setView('orders'); }
     }, 30_000);
@@ -1250,7 +1441,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     const to = new Date().toISOString();
     setHistoryLoading(true);
     const load = overrideCompanyId
-      ? fetch(`/api/public-orders?companyId=${overrideCompanyId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=500`)
+      ? tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=500`)
           .then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
       : fetchOrders({ from, to, limit: 500 });
     load.then(setHistoryOrders).finally(() => setHistoryLoading(false));
@@ -1268,7 +1459,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       const openedAt = new Date().toISOString();
       const body = { companyId: overrideCompanyId, openingCash: cash, openedBy: effectiveSeller, token: overrideToken, shiftId, openedAt };
 
-      if (isOnline()) {
+      if (hasLocalDb()) {
+        // The machine is the authority here: the shift opens on the disk and
+        // the insert follows. Nothing to wait for, and nothing to lose if the
+        // line never comes back before the drawer does.
+        const res = await postOrQueue(`shift:${shiftId}`, '/api/open-shift', body, overrideCompanyId);
+        if (res.ok) s = { id: shiftId, openedAt, openedBy: effectiveSeller, openingCash: cash, movements: [], edits: [] };
+      } else if (isOnline()) {
         const d = await fetch('/api/open-shift', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `shift:${shiftId}` },
@@ -1340,18 +1537,18 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     // re-fetch shift + sales right before closing so movements added elsewhere
     // and last-second payments are all in the snapshot
     const fresh = overrideCompanyId
-      ? await fetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.shift ?? shift).catch(() => shift)
+      ? await tillFetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.shift ?? shift).catch(() => shift)
       : (await fetchOpenShift()) ?? shift;
     const sales = overrideCompanyId
-      ? await fetch(`/api/public-shift-sales?companyId=${overrideCompanyId}&openedAt=${encodeURIComponent(fresh.openedAt)}`).then(r => r.json()).catch(() => ({ cash: 0, card: 0 }))
+      ? await tillFetch(`/api/public-shift-sales?companyId=${overrideCompanyId}&openedAt=${encodeURIComponent(fresh.openedAt)}`).then(r => r.json()).catch(() => ({ cash: 0, card: 0 }))
       : await fetchShiftSales(fresh.openedAt);
     const expected = fresh.openingCash + sales.cash + movementsTotal(fresh);
     if (overrideCompanyId) {
-      await fetch('/api/close-shift', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shiftId: fresh.id, expectedCash: expected, countedCash: counted, closedBy: effectiveSeller, cardSales: sales.card, countedCard, companyId: overrideCompanyId, token: overrideToken }),
-      });
+      const closeBody = { shiftId: fresh.id, expectedCash: expected, countedCash: counted, closedBy: effectiveSeller, cardSales: sales.card, countedCard, companyId: overrideCompanyId, token: overrideToken };
+      // Local-first on the desktop, so the till's own shift closes with the same
+      // figures it just sent rather than reading open until the next pull. The
+      // guard above already proved the line is up and the outbox empty.
+      await postOrQueue(`close:${fresh.id}`, '/api/close-shift', closeBody, overrideCompanyId);
     } else {
       await closeShift(fresh.id, expected, counted, effectiveSeller, sales.card, countedCard);
     }
@@ -1364,7 +1561,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     setLoadingMore(true);
     try {
       const more = overrideCompanyId
-        ? await fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200&offset=${orders.length}`).then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
+        ? await tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200&offset=${orders.length}`).then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
         : await fetchOrders({ limit: 200, offset: orders.length });
       setOrders(prev => [...prev, ...more.filter((m: { id: string }) => !prev.some(p => p.id === m.id))]);
     } finally { setLoadingMore(false); }
@@ -1436,7 +1633,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const historyQuery = historySearch.trim().toLowerCase();
   const filteredHistoryOrders = historyQuery
     ? historyOrders.filter(o =>
-        String(o.orderNumber).includes(historyQuery) ||
+        orderSearchText(o).includes(historyQuery) ||
         (o.sellerName ?? '').toLowerCase().includes(historyQuery) ||
         tableName(o.tableNumber).toLowerCase().includes(historyQuery))
     : historyOrders;
@@ -1520,16 +1717,9 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
               {/* Offline is not an error here — the till keeps working. What the
                   waiter needs to know is how much has not reached the server yet,
                   because that is what is lost if this machine dies. */}
-              {!online && (
-                <span className="ml-auto text-[10px] bg-primary-100 text-primary-700 px-1.5 py-0.5 rounded-full whitespace-nowrap">
-                  Oflayn{pendingCount > 0 ? ` · ${pendingCount}` : ''}
-                </span>
-              )}
-              {online && pendingCount > 0 && (
-                <span className="ml-auto text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full whitespace-nowrap">
-                  Göndərilir · {pendingCount}
-                </span>
-              )}
+              <div className="ml-auto">
+                <SyncStatus online={online} pending={pendingCount} sending={sending} />
+              </div>
             </div>
             {!overrideCompanyId && (
               <button onClick={() => { forgetPins(); logout(); router.push("/login"); }} className="flex items-center gap-2 text-xs text-stone-500 hover:text-red-500 transition-colors">
@@ -1542,6 +1732,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
             <div className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold">
               {effectiveSeller[0]?.toUpperCase()}
             </div>
+            <SyncStatus online={online} pending={pendingCount} sending={sending} compact />
             {!overrideCompanyId && (
               <button onClick={() => { forgetPins(); logout(); router.push("/login"); }} title="Çıxış" className="text-stone-500 hover:text-red-500 transition-colors">
                 <LogOut className="w-4 h-4" />
@@ -1554,6 +1745,19 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   }
 
   // ── render ────────────────────────────────────────────────────────────────
+
+  // A freshly installed desktop till has an empty database. Fill it before
+  // anything else: every screen below reads the local copy, and they would each
+  // render an empty version of themselves — no menu, no room, no staff, which
+  // also means no PIN pad and no way in.
+  if (needsSetup && setupCompanyId) {
+    return (
+      <TillSetup
+        companyId={setupCompanyId}
+        onDone={() => { setNeedsSetup(false); setDataVersion(v => v + 1); }}
+      />
+    );
+  }
 
   // No taking money without an open shift: until one exists, the only screen
   // a seller can see is the open-shift form.
@@ -1699,7 +1903,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       <header className="sticky top-0 z-50 h-14 border-b border-stone-100/60 bg-white/90 backdrop-blur-sm flex items-center gap-3 px-4">
         <div className="flex items-center gap-2">
           {logoUrl ? (
-            <img src={logoUrl} alt="" className="w-7 h-7 rounded-lg object-cover border border-stone-100" />
+            <img src={tillImage(logoUrl)} alt="" className="w-7 h-7 rounded-lg object-cover border border-stone-100" />
           ) : (
             <div className="w-7 h-7 rounded-lg bg-primary-800 flex items-center justify-center">
               <Coffee className="w-4 h-4 text-white" />
@@ -1923,7 +2127,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                     const to = new Date().toISOString();
                     setHistoryLoading(true);
                     const load = overrideCompanyId
-                      ? fetch(`/api/public-orders?companyId=${overrideCompanyId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=500`)
+                      ? tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=500`)
                           .then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
                       : fetchOrders({ from, to, limit: 500 });
                     load.then(setHistoryOrders).finally(() => setHistoryLoading(false));
@@ -2003,7 +2207,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                             className="w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 hover:bg-stone-50 transition-colors text-left"
                           >
                             <ChevronDown className={`w-4 h-4 text-stone-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                            <span className="w-12 text-xs font-bold text-primary-900 flex-shrink-0">№{order.orderNumber}</span>
+                            <span className="w-12 text-xs font-bold text-primary-900 flex-shrink-0">№{orderLabel(order)}</span>
                             <span className="flex-1 text-sm text-stone-700 truncate">
                               {[tLabel, order.sellerName].filter(Boolean).join(' · ')}
                             </span>
@@ -2460,7 +2664,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                             <span className="absolute top-2 right-2 z-10 bg-primary-800 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">{inCart}</span>
                           )}
                           {item.image
-                            ? <img src={item.image} alt={item.name} className="w-full aspect-[4/3] object-contain bg-white p-2" />
+                            ? <img src={tillImage(item.image)} alt={item.name} className="w-full aspect-[4/3] object-contain bg-white p-2" />
                             : <div className="w-full aspect-[4/3] bg-primary-50 flex items-center justify-center text-3xl">☕</div>
                           }
                           <div className="p-2.5">
@@ -2487,7 +2691,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                     <div className="flex items-center justify-between">
                       <div>
                         <h2 className="font-bold text-stone-800">{appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className="text-primary-700">({cartCount})</span>}</h2>
-                        <p className="text-xs text-stone-500">{appendOrder ? `№${appendOrder.orderNumber}-ə əlavə` : !tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                        <p className="text-xs text-stone-500">{appendOrder ? `№${orderLabel(appendOrder)}-ə əlavə` : !tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
                       </div>
                       {cart.length > 0 && (
                         <button onClick={() => setClearConfirm(true)} className="w-7 h-7 flex items-center justify-center rounded-lg text-stone-400 hover:text-red-500 hover:bg-red-50 transition-colors">
@@ -2606,7 +2810,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                     <h2 className="font-bold text-stone-800">
                       {appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className="text-primary-700">({cartCount})</span>}
                     </h2>
-                    <p className="text-xs text-stone-500">{appendOrder ? `№${appendOrder.orderNumber}-ə əlavə` : !tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                    <p className="text-xs text-stone-500">{appendOrder ? `№${orderLabel(appendOrder)}-ə əlavə` : !tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
                   </div>
                   <div className="flex items-center gap-1">
                     {cart.length > 0 && (
@@ -2660,7 +2864,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
             <h3 className="font-bold text-lg text-stone-800 mb-1">Sifarişi ödənişsiz bağla</h3>
             <p className="text-sm text-stone-600 mb-4">
-              №{cancellingOrder.orderNumber}{tableName(cancellingOrder.tableNumber) && ` · ${tableName(cancellingOrder.tableNumber)}`} · {orderTotal(cancellingOrder).toFixed(2)} ₼
+              №{orderLabel(cancellingOrder)}{tableName(cancellingOrder.tableNumber) && ` · ${tableName(cancellingOrder.tableNumber)}`} · {orderTotal(cancellingOrder).toFixed(2)} ₼
             </p>
             <p className="text-xs font-semibold text-stone-600 uppercase tracking-wide mb-2">Səbəb</p>
             <div className="flex flex-wrap gap-2 mb-4">
@@ -2706,7 +2910,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
             <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-md">
               <h3 className="font-bold text-lg text-stone-800 mb-1">Masanı dəyiş</h3>
               <p className="text-sm text-stone-600 mb-4">
-                №{movingOrder.orderNumber} · {tableName(movingOrder.tableNumber)} · {orderTotal(movingOrder).toFixed(2)} ₼
+                №{orderLabel(movingOrder)} · {tableName(movingOrder.tableNumber)} · {orderTotal(movingOrder).toFixed(2)} ₼
               </p>
               <p className="text-xs font-semibold text-stone-600 uppercase tracking-wide mb-2">Yeni masa</p>
               <div className="flex flex-wrap gap-2 mb-4 max-h-56 overflow-y-auto">
@@ -2774,7 +2978,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
             <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
               <h3 className="font-bold text-lg text-stone-800 mb-1">Ödəniş</h3>
               <p className="text-sm text-stone-600 mb-4">
-                №{payingOrder.orderNumber}{tableName(payingOrder.tableNumber) && ` · ${tableName(payingOrder.tableNumber)}`}
+                №{orderLabel(payingOrder)}{tableName(payingOrder.tableNumber) && ` · ${tableName(payingOrder.tableNumber)}`}
               </p>
               <ul className="text-sm space-y-2 mb-4 border-t pt-3 max-h-40 overflow-y-auto">
                 {payingOrder.items.map((oi, i) => (
@@ -2948,7 +3152,7 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                             onClick={() => toggleModOption(group, opt.id)}
                             className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${on ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 text-stone-600 hover:border-stone-300'}`}
                           >
-                            {opt.image && <img src={opt.image} alt="" className="w-6 h-6 rounded object-cover" />}
+                            {opt.image && <img src={tillImage(opt.image)} alt="" className="w-6 h-6 rounded object-cover" />}
                             <span>{opt.name}</span>
                             {/* A 0 price is a free choice — showing "+0.00 ₼" would only add noise. */}
                             {opt.price > 0 && (
@@ -3133,7 +3337,7 @@ function OrderRow({ order, tableLabel, tz, printFailed, progress, isItemReady, o
             <div>
               <div className="flex items-center gap-2 mb-0.5">
                 <ChevronDown className={`w-3.5 h-3.5 text-stone-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-                <span className="text-primary-700 font-bold text-sm">№{order.orderNumber}</span>
+                <span className="text-primary-700 font-bold text-sm">№{orderLabel(order)}</span>
                 {tableLabel && <span className="text-stone-800 font-semibold text-sm">{tableLabel}</span>}
               </div>
               <p className="text-xs text-stone-500 pl-5">
@@ -3234,7 +3438,7 @@ function OrderRow({ order, tableLabel, tz, printFailed, progress, isItemReady, o
           <div>
             <p className="text-sm font-medium text-stone-800 flex items-center gap-1">
               <ChevronDown className={`w-3.5 h-3.5 text-stone-400 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-              <span className="text-primary-700">№{order.orderNumber}</span>{tableLabel && <>{' › '}<span>{tableLabel}</span></>}
+              <span className="text-primary-700">№{orderLabel(order)}</span>{tableLabel && <>{' › '}<span>{tableLabel}</span></>}
             </p>
             {!expanded && <p className="text-xs text-stone-500 truncate max-w-xs pl-5">{itemsPreview}</p>}
           </div>

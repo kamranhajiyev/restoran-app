@@ -15,9 +15,58 @@ import { supabase } from './supabase';
 import { type TicketPayload } from './escpos';
 import { buildStationTicketRaster } from './station-ticket';
 
+/** The till's local database, present only in a build that ships the app. */
+export interface TillDb {
+  /** The site whose /api routes the outbox replays against. */
+  origin(): Promise<{ origin: string }>;
+  /** The terminal link this machine was set up with, as JSON. See lib/terminal-link.ts. */
+  link(): Promise<{ link: string | null }>;
+  setLink(value: string | null): Promise<unknown>;
+  /** Pull menu photographs onto the disk so they render offline. See lib/till-image.ts. */
+  cacheImages(urls: string[]): Promise<{ cached: number }>;
+  menu(companyId: string): Promise<unknown>;
+  categories(companyId: string): Promise<unknown>;
+  tables(companyId: string): Promise<unknown>;
+  staff(companyId: string): Promise<unknown>;
+  modifiers(companyId: string): Promise<unknown>;
+  stations(companyId: string): Promise<unknown>;
+  stationReady(companyId: string): Promise<unknown>;
+  orders(companyId: string, opts?: unknown): Promise<unknown>;
+  shift(companyId: string): Promise<unknown>;
+  shiftSales(companyId: string, openedAt: string): Promise<unknown>;
+
+  putReference(table: string, companyId: string, rows: unknown): Promise<unknown>;
+  putOrders(companyId: string, orders: unknown): Promise<unknown>;
+  putStationReady(companyId: string, rows: unknown): Promise<unknown>;
+  putShift(companyId: string, shift: unknown): Promise<unknown>;
+
+  /** Apply one write locally and record it for Supabase. See lib/till-write.ts. */
+  write(id: string, kind: string, body: unknown, companyId: string): Promise<{ ok: boolean; error?: string }>;
+  outbox(): Promise<{ pending: number }>;
+  /** Oldest first — the order Supabase has to see them in. */
+  outboxList(): Promise<{ entries: OutboxEntry[] }>;
+  outboxDrop(id: string): Promise<unknown>;
+  outboxAttempted(id: string): Promise<unknown>;
+}
+
+/** One write the till has made that Supabase has not seen. */
+export interface OutboxEntry {
+  id: string;
+  seq: number;
+  /** The API route that will replay it, or a `supabase:` marker. */
+  kind: string;
+  body: unknown;
+  companyId: string | null;
+  queuedAt: string;
+  attempts: number;
+}
+
 export interface PosNative {
   isDesktop: true;
   print(ip: string, port: number, bytes: Uint8Array): Promise<void>;
+  // Absent when the shell was pointed at a website with --url=: that build is
+  // the web app in a window and still reads through the API routes.
+  till?: TillDb;
 }
 
 declare global {

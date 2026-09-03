@@ -1,6 +1,9 @@
 'use client';
 import { use, useEffect, useState } from 'react';
-import SellerPage from '@/app/seller/page';
+// The till itself, not the /seller route's wrapper: this route has already
+// resolved the terminal from the address bar, and asking the machine which
+// terminal it is would be a second, contradictory answer.
+import { SellerPage } from '@/app/seller/page';
 
 type ReadyState = { status: 'ready'; companyId: string; companyName: string; logoUrl: string | null; brandColor: string | null; expiresAt: string | null };
 

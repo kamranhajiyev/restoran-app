@@ -313,6 +313,12 @@ export interface RecipeLineRow {
 export interface Order {
   id: string;
   orderNumber: number;
+  // Which desktop till issued that number, 1-9. Absent everywhere the server
+  // numbered the order — the web till, the QR menu — because a number the
+  // counter handed out cannot collide with anything. An offline till numbers
+  // its own orders, so two tills in one restaurant can both reach 45; this is
+  // what tells them apart. See lib/order-label.ts for how it is shown.
+  tillNumber?: number;
   tableNumber: number;
   items: OrderItem[];
   // Items the waiter pulled off the order. Kept OUT of `items` on purpose: every

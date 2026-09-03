@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { Category, MenuItem, MenuItemVariant, Order } from '@/types';
 import { orderClosedAt } from '@/lib/order-items';
+import { orderLabel } from './order-label';
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
@@ -51,7 +52,8 @@ export function exportOrdersExcel(orders: Order[], timezone: string): void {
     const total = gross - (o.discountAmount ?? 0);
     const closed = orderClosedAt(o);
     return {
-      'Sifariş №': o.orderNumber,
+      // The label, so two tills' 45s are two rows an owner can tell apart.
+      'Sifariş №': orderLabel(o),
       'Satıcı': o.sellerName,
       'Tarix': new Date(o.createdAt).toLocaleString('az-AZ', { timeZone: timezone, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
       // Blank while the order is still open — an empty cell reads better in Excel

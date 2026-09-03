@@ -4,6 +4,11 @@ import { claim, idempotencyKey } from '@/lib/idempotency';
 import type { SelectedModifier } from '@/types';
 
 interface IncomingItem {
+  // The desktop till names its own lines so it can edit them during an outage;
+  // honouring the id here is what makes those edits still mean something when
+  // the append finally replays. Absent from every other caller, where the
+  // column default mints one.
+  id?: string;
   // price already includes every selected modifier — the client folds them in.
   menuItem: { id: string | number; name: string; price: number };
   quantity: number;
@@ -44,6 +49,7 @@ export async function POST(req: NextRequest) {
   }
 
   const rows = items.map(oi => ({
+    ...(oi.id ? { id: String(oi.id) } : {}),
     order_id: orderId,
     menu_item_id: String(oi.menuItem.id),
     menu_item_name: String(oi.menuItem.name),

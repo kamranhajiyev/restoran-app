@@ -17,6 +17,11 @@ const eslintConfig = defineConfig([
     // source and wrong to reject in a build artifact.
     "dist-electron/**",
     "release/**",
+    // The till's static export and the staging copy of the repo it is built
+    // from (scripts/build-desktop.mjs). Linting these means linting minified
+    // bundles, and linting a copy of app/ twice.
+    "out-desktop/**",
+    ".desktop-build/**",
   ]),
 ]);
 

@@ -21,9 +21,18 @@ on:
     # way to build an installer before merging, which is exactly when it is
     # needed.
     branches: [main, development-printer-cash-drawer]
+    # The till now ships *inside* the exe (scripts/build-desktop.mjs), so the
+    # installer is stale the moment any of the app's own source changes — not
+    # just the Electron shell's. A filter that lists only electron/** would let
+    # a tagged release quietly hand a restaurant yesterday's till.
     paths:
+      - 'app/**'
+      - 'components/**'
+      - 'lib/**'
+      - 'types/**'
+      - 'scripts/**'
       - 'electron/**'
-      - 'lib/tcp-print.ts'
+      - 'next.config.ts'
       - 'package.json'
       - '.github/workflows/desktop.yml'
 
@@ -58,9 +67,17 @@ jobs:
       # needs. The lock is not committed from here, so nothing drifts.
       - run: npm install --no-audit --no-fund
 
-      # A blank url leaves posUrl unset and the app falls back to production.
-      # Passing a Vercel preview builds an installer for testing a branch
-      # against a real printer without pointing a live restaurant at it.
+      # Two different installers, and the difference is deliberate.
+      #
+      # Blank url (a tag, or the button left empty) → `desktop:dist`, which runs
+      # scripts/build-desktop.mjs first: the till is exported to out-desktop/ and
+      # shipped inside the exe. That app opens with no internet, which is the
+      # whole point of the offline work.
+      #
+      # A url → the old shell, a window onto a Vercel preview. No out-desktop/ is
+      # produced, so electron/main.ts finds no bundle and loads the site. That is
+      # how kitchen printing gets tested against a branch without building a till,
+      # and it is *not* what a restaurant should ever be given.
       - name: Build installer
         run: |
           if ("${{ inputs.url }}") {
@@ -73,6 +90,13 @@ jobs:
           # electron-builder would otherwise try to publish to GitHub on its own.
           # The release step below does that, and only for tags.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The till is exported with its Supabase project baked in, and there is
+          # no .env.local on a runner — without these the export stops with a
+          # named error rather than shipping a till that cannot reach anything.
+          # Only the two public values: the service-role key must never be near
+          # a build that produces a customer's exe.
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
 
       - uses: actions/upload-artifact@v4
         with:

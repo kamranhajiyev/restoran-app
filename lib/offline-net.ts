@@ -7,6 +7,8 @@
 // only as a hint to re-check sooner.
 
 import { enqueue } from "./offline-queue";
+import { hasLocalDb } from "./till-data";
+import { localWrite } from "./till-write";
 
 type Listener = (online: boolean) => void;
 
@@ -28,11 +30,23 @@ function setOnline(next: boolean): void {
   for (const fn of _listeners) fn(next);
 }
 
-/** A cheap request that proves the uplink, not just the wifi. */
+/**
+ * A cheap request that proves the uplink, not just the wifi.
+ *
+ * The desktop till has no server of its own to ask — it is served off the disk
+ * from app://, where /api/health is nothing. What it actually needs to know is
+ * whether Supabase is reachable, because that is the only thing its sync has to
+ * talk to. Asking the wrong question there would leave a perfectly connected
+ * till permanently reporting an outage.
+ */
 async function probe(): Promise<boolean> {
+  const url = hasLocalDb()
+    ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/health`
+    : "/api/health";
+
   try {
-    const res = await fetch("/api/health", {
-      method: "HEAD",
+    const res = await fetch(url, {
+      method: hasLocalDb() ? "GET" : "HEAD",
       cache: "no-store",
       signal: AbortSignal.timeout(4000),
     });
@@ -105,6 +119,13 @@ export async function postOrQueue(
   body: Record<string, unknown>,
   companyId: string | null,
 ): Promise<WriteResult> {
+  // The desktop till never asks this question. It has a database of its own, so
+  // the write lands there and the outbox carries it onward — which is why the
+  // waiter's screen updates at the speed of a disk rather than of a restaurant's
+  // uplink, and why an order taken during an outage is still an order.
+  const applied = await localWrite(id, route, body, companyId);
+  if (applied) return { ok: applied.ok, queued: true };
+
   if (_online) {
     try {
       const res = await fetch(route, {

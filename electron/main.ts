@@ -10,14 +10,105 @@
 // asks this process to put them on the wire. No key is ever shipped to a
 // customer's machine.
 
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, net, protocol, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { sendToPrinter } from '../lib/tcp-print';
+import { openDb } from './db';
+import { IMG_PATH, serveImage } from './images';
+import { registerTillHandlers } from './till-ipc';
 
-// Which site this build opens. Resolved at run time rather than hardcoded, so
-// the same shell can be pointed at production, a branch preview, or a laptop —
-// testing kitchen printing against the live restaurant is not an option.
+// ── The till, served off the disk ────────────────────────────────────────────
+// A restaurant's line goes down and the till has to keep taking orders. That is
+// impossible while the app's own HTML lives on possiblle.com: the first reload
+// after a dropout lands on nothing, and a browser cache is not something to bet
+// a service on — Windows may drop it, and a machine that has never been online
+// never had one.
+//
+// So the till ships inside the installer as static files (see
+// scripts/build-desktop.mjs) and is served from a scheme of our own. A custom
+// scheme rather than file:// because the till needs a real origin: localStorage
+// that survives a restart, and crypto.subtle for the offline PIN, both of which
+// a file:// page is refused.
+const SCHEME = 'app';
+const ORIGIN = `${SCHEME}://till`;
+
+// dist-electron/electron/main.js → the app root, packaged inside app.asar or the
+// repo when run from source.
+const BUNDLE = path.join(__dirname, '..', '..', 'out-desktop');
+
+function hasBundle(): boolean {
+  return fs.existsSync(path.join(BUNDLE, 'seller', 'index.html'));
+}
+
+// Without this the pages loaded over app:// are treated as neither secure nor
+// standard: no localStorage, no crypto.subtle, and the till cannot even hold a
+// session. Must run before app ready.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true },
+  },
+]);
+
+/** Map a request path onto a file in the export, or null if it escapes it. */
+function resolveBundleFile(pathname: string): string | null {
+  // Percent-escapes first, so an encoded traversal is not smuggled past the
+  // check below.
+  let rel: string;
+  try {
+    rel = decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+
+  // The export is built with trailingSlash, so a directory address is a page.
+  if (rel.endsWith('/')) rel += 'index.html';
+
+  const file = path.join(BUNDLE, rel);
+  // A page loaded from here can ask for any path it likes. Refuse anything that
+  // resolves outside the export — the rest of the disk is not ours to serve.
+  const within = path.relative(BUNDLE, file);
+  if (within.startsWith('..') || path.isAbsolute(within)) return null;
+
+  if (fs.existsSync(file) && fs.statSync(file).isFile()) return file;
+
+  // A client-side route arriving without its slash.
+  const asPage = path.join(BUNDLE, rel, 'index.html');
+  if (fs.existsSync(asPage)) return asPage;
+
+  return null;
+}
+
+function serveBundle(): void {
+  protocol.handle(SCHEME, req => {
+    const url = new URL(req.url);
+
+    // Menu photographs, served off the disk. Under the till's own origin rather
+    // than a scheme of their own, so an <img> in the page needs no permission
+    // and no CORS. See electron/images.ts.
+    if (url.pathname === IMG_PATH) return serveImage(url);
+
+    const file = resolveBundleFile(url.pathname);
+    if (!file) {
+      // Next writes a 404 page into the export; use it rather than a bare
+      // Chromium error, so a mistyped route still looks like the app.
+      const notFound = path.join(BUNDLE, '404.html');
+      if (fs.existsSync(notFound)) {
+        return net.fetch(pathToFileURL(notFound).toString(), { bypassCustomProtocolHandlers: true });
+      }
+      return new Response('Not found', { status: 404 });
+    }
+    return net.fetch(pathToFileURL(file).toString(), { bypassCustomProtocolHandlers: true });
+  });
+}
+
+// Which site this build opens when it is *not* serving the bundled till.
+//
+// Resolved at run time rather than hardcoded, so the same shell can be pointed
+// at production, a branch preview, or a laptop — testing kitchen printing
+// against the live restaurant is not an option.
 //
 //   1. --url=…              a shortcut's arguments, per machine
 //   2. POS_APP_URL=…        development
@@ -25,10 +116,16 @@ import { sendToPrinter } from '../lib/tcp-print';
 //   4. the production site
 const DEFAULT_URL = 'https://www.possiblle.com';
 
-function resolveAppUrl(): string {
+/** An explicit instruction to load a site instead of the bundle. */
+function remoteOverride(): string | null {
   const flag = process.argv.find(a => a.startsWith('--url='))?.slice('--url='.length);
   if (flag) return flag;
-  if (process.env.POS_APP_URL) return process.env.POS_APP_URL;
+  return process.env.POS_APP_URL ?? null;
+}
+
+function resolveAppUrl(): string {
+  const override = remoteOverride();
+  if (override) return override;
   try {
     // The packaged app.asar root, and the repo root when run from source.
     const meta = JSON.parse(
@@ -43,8 +140,18 @@ function resolveAppUrl(): string {
 
 const APP_URL = resolveAppUrl();
 
+// Serve the bundled till unless told otherwise. `--url=` and POS_APP_URL stay
+// the way to point this shell at a preview deploy, which is how kitchen
+// printing gets tested without a build; and a shell that somehow ships without
+// an export still opens the site rather than nothing.
+const BUNDLED = !remoteOverride() && hasBundle();
+
 // Where the till was last time, so a cold start during an outage opens the till
 // rather than the home page.
+//
+// Only the remote path needs this. A bundled till is on the disk: it opens at
+// /seller every time, and the page itself decides whether that means the PIN
+// pad or the login screen.
 //
 // The service worker caches the till's own address — /seller, or /s/<slug>/<token>
 // for the terminal this app runs — and deliberately not the home page: caching a
@@ -68,6 +175,7 @@ function rememberUrl(url: string): void {
 }
 
 function startUrl(): string {
+  if (BUNDLED) return `${ORIGIN}/seller/`;
   try {
     const saved = fs.readFileSync(lastUrlFile(), 'utf8').trim();
     if (saved && new URL(saved).origin === new URL(APP_URL).origin) return saved;
@@ -97,7 +205,9 @@ function createWindow(): void {
   win.once('ready-to-show', () => win.show());
   void win.loadURL(startUrl());
 
-  keepTryingWhenOffline(win);
+  // Only the remote path can fail to load. The bundled till is on the disk, so
+  // there is no outage for it to recover from.
+  if (!BUNDLED) keepTryingWhenOffline(win);
 
   // A misplaced target="_blank" must not open a second, chromeless copy of the
   // POS that the waiter cannot get out of. Send those to the real browser.
@@ -251,6 +361,17 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   void app.whenReady().then(() => {
+    if (BUNDLED) {
+      serveBundle();
+      // Only the bundled till has a local database. A shell pointed at a site
+      // with --url= is the web app in a window, and must keep going through the
+      // API routes — its Supabase project may not even be the one this machine
+      // synced from.
+      openDb(app.getPath('userData'));
+      registerTillHandlers(APP_URL);
+    }
+    console.log(BUNDLED ? `[pos] serving the bundled till from ${BUNDLE}` : `[pos] loading ${APP_URL}`);
+
     ipcMain.handle('printer:send', async (_event, ip: unknown, port: unknown, bytes: unknown) => {
       // The renderer is a remote page. Validate rather than trust it: this
       // handler opens sockets to arbitrary addresses on the local network.
