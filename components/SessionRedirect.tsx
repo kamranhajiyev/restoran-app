@@ -1,7 +1,7 @@
 'use client';
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { getSession, homeFor } from '@/lib/auth';
+import { getSession, homeFor, tillHome } from '@/lib/auth';
 
 // Sends an already-logged-in visitor to their own panel.
 //
@@ -15,7 +15,12 @@ export default function SessionRedirect() {
 
   useEffect(() => {
     const session = getSession();
-    if (session) router.replace(homeFor(session));
+    if (!session) return;
+    // A terminal left on the till reopens on the till. The desktop shell always
+    // launches at the site root, so without this an owner-signed machine walks
+    // back into /admin every morning and meets the lock's password box — when
+    // the person standing there is a waiter who only ever needed the PIN pad.
+    router.replace(tillHome() ?? homeFor(session));
   }, [router]);
 
   return null;

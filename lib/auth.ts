@@ -3,6 +3,7 @@ import { Role } from '@/types';
 
 const AUTH_KEY = 'restoran_auth';
 const ADMIN_LOCK_KEY = 'restoran_admin_locked';
+const TILL_KEY = 'restoran_till_url';
 
 // Stepping from admin down to the till locks the panel behind the owner's own
 // password, so a cashier left alone at the terminal cannot walk back up into it.
@@ -24,6 +25,34 @@ export function unlockAdmin() {
 
 export function isAdminLocked(): boolean {
   try { return localStorage.getItem(ADMIN_LOCK_KEY) === '1'; } catch { return false; }
+}
+
+// The till this machine was handed over to, remembered alongside the lock.
+//
+// The desktop shell always reopens the site root, and the root sends an owner to
+// /admin — which then meets the lock and asks for the password. A restaurant that
+// closed the night before on the till would rather find the PIN keypad in the
+// morning, so the terminal remembers which till screen it was left on and the
+// root sends it back there instead. The password still guards the way up: the
+// lock is untouched, and the till's "Admin" button walks straight into it.
+export function rememberTill(path: string) {
+  try { localStorage.setItem(TILL_KEY, path); } catch { /* private mode */ }
+}
+
+export function forgetTill() {
+  try { localStorage.removeItem(TILL_KEY); } catch { /* private mode */ }
+}
+
+// Only a locked terminal is still "on the till" — unlocking the panel, logging
+// out, or logging back in all hand the machine back to whoever owns it.
+export function tillHome(): string | null {
+  if (!isAdminLocked()) return null;
+  try {
+    const path = localStorage.getItem(TILL_KEY);
+    // A stored value that is not one of our own till paths is not something to
+    // navigate to — an absolute URL there would be an open redirect.
+    return path && /^\/s\/[^/]+\/[^/]+$/.test(path) ? path : null;
+  } catch { return null; }
 }
 
 export interface Session {
@@ -130,6 +159,7 @@ export function logout() {
   localStorage.removeItem(AUTH_KEY);
   // Signing in again is proof enough — don't make the next owner face the lock.
   unlockAdmin();
+  forgetTill();
 }
 
 // Use inside onAuthStateChange callbacks instead of logout().
@@ -137,6 +167,7 @@ export function logout() {
 export function clearLocalSession() {
   localStorage.removeItem(AUTH_KEY);
   unlockAdmin();
+  forgetTill();
 }
 
 export async function validateSession(session: Session): Promise<boolean> {

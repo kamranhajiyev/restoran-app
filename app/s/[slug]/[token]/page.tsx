@@ -1,9 +1,12 @@
 'use client';
 import { use, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import SellerPage from '@/app/seller/page';
+import { forgetTill } from '@/lib/auth';
 
 export default function PublicSellerPage({ params }: { params: Promise<{ slug: string; token: string }> }) {
   const { slug, token } = use(params);
+  const router = useRouter();
 
   const [state, setState] = useState<
     | { status: 'loading' }
@@ -69,6 +72,15 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
         <div className="text-center">
           <p className="text-stone-800 font-semibold mb-1">Bu keçid etibarsız</p>
           <p className="text-stone-500 text-sm">Admindən yeni link alın</p>
+          {/* A rotated link would otherwise leave the desktop shell — which has no
+              browser chrome and reopens this very page — stranded on this screen
+              for good. Forget the till and offer the way back to admin. */}
+          <button
+            onClick={() => { forgetTill(); router.replace('/admin'); }}
+            className="mt-5 px-4 py-2 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-100 transition-colors"
+          >
+            Admin panelinə keç
+          </button>
         </div>
       </div>
     );

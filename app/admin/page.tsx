@@ -16,7 +16,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getSession, logout, validateSession, clearLocalSession, updateSession, lockAdmin, unlockAdmin, isAdminLocked } from '@/lib/auth';
+import { getSession, logout, validateSession, clearLocalSession, updateSession, lockAdmin, unlockAdmin, isAdminLocked, rememberTill, forgetTill } from '@/lib/auth';
 import {
   fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, editOrderPayment, deleteOrder, restoreOrder,
   fetchShifts, fetchShiftSales, closeShift, fetchOpenShift,
@@ -839,6 +839,9 @@ function AdminPageContent() {
     setUnlockBusy(false);
     if (!ok) { setUnlockErr('Şifrə səhvdir'); setUnlockPw(''); return; }
     unlockAdmin();
+    // The owner has taken the machine back; it is no longer a till that a
+    // restart should return to.
+    forgetTill();
     setUnlockPw('');
     setLocked(false);
   }
@@ -2430,8 +2433,11 @@ function AdminPageContent() {
               if (!isDesktop()) return;
               e.preventDefault();
               // Same window, so the way back is the same window too — lock it
-              // behind the owner's password before handing the screen over.
+              // behind the owner's password before handing the screen over, and
+              // remember the till so tomorrow's launch reopens it instead of
+              // meeting the staff with that same password box.
               lockAdmin();
+              rememberTill(`/s/${companySlug}/${sellerToken}`);
               router.push(`/s/${companySlug}/${sellerToken}`);
             }}
             title="Satıcı terminalını aç"
