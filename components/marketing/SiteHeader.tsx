@@ -7,6 +7,7 @@ export default function SiteHeader() {
         <Link href="/" className="font-bold text-base tracking-tight">possiblle</Link>
         <nav className="hidden sm:flex items-center gap-6 text-xs text-gray-400 font-medium">
           <Link href="/xususiyyetler" className="hover:text-black transition-colors">Xüsusiyyətlər</Link>
+          <Link href="/yukle" className="hover:text-black transition-colors">Windows tətbiqi</Link>
           <Link href="/#faq" className="hover:text-black transition-colors">FAQ</Link>
         </nav>
         <Link

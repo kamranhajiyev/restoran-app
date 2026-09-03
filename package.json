@@ -36,7 +36,8 @@
           ]
         }
       ],
-      "artifactName": "PossibllePOS-Setup-${version}.exe",
+      "// artifactName": "No ${version} here on purpose. The download page links to releases/latest/download/PossibllePOS-Setup.exe — a permanent address that always serves the newest release. Put the version back in the filename and that link breaks the next time it is bumped.",
+      "artifactName": "PossibllePOS-Setup.exe",
       "icon": "electron/icon.png"
     },
     "nsis": {

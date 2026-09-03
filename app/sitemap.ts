@@ -8,6 +8,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     { url: SITE_URL, lastModified, changeFrequency: 'monthly', priority: 1 },
     { url: `${SITE_URL}/xususiyyetler`, lastModified, changeFrequency: 'monthly', priority: 0.8 },
+    { url: `${SITE_URL}/yukle`, lastModified, changeFrequency: 'monthly', priority: 0.8 },
     ...FEATURES.map(f => ({
       url: `${SITE_URL}/xususiyyetler/${f.slug}`,
       lastModified,
