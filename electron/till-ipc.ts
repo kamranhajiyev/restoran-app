@@ -66,6 +66,34 @@ export function registerTillHandlers(appUrl: string): void {
     return { ok: true };
   });
 
+  // ── The owner's switches ───────────────────────────────────────────────────
+  //
+  // Kassa on or off, tables on or off, whether a receipt prints. They belong to
+  // the company, not to the machine, but the machine has to obey them with the
+  // cable out — and until this existed the till could not read them at all
+  // without a session, so it fell back to "everything on" and a Kassa an owner
+  // had switched off went on selling.
+  //
+  // Kept per company: one machine re-pointed at another restaurant must not
+  // inherit the first one's settings.
+  const SETTINGS_KEY = (companyId: string) => `settings:${companyId}`;
+
+  ipcMain.handle('till:settings', (_e, companyId) => {
+    const raw = getMeta(db(), SETTINGS_KEY(asCompanyId(companyId)));
+    if (!raw) return { settings: null };
+    try {
+      return { settings: JSON.parse(raw) as unknown };
+    } catch {
+      return { settings: null };
+    }
+  });
+
+  ipcMain.handle('till:putSettings', (_e, companyId, settings) => {
+    if (!settings || typeof settings !== 'object') throw new Error('bad settings');
+    setMeta(db(), SETTINGS_KEY(asCompanyId(companyId)), JSON.stringify(settings));
+    return { ok: true };
+  });
+
   // ── The one way out to the site ────────────────────────────────────────────
   //
   // The till's page is served from app://till, and the site it syncs with is

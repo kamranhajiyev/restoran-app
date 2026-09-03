@@ -29,6 +29,7 @@ import {
   apiBase, attemptedWrite, dropWrite, hasLocalDb, pendingList, pendingWrites,
 } from "@/lib/till-write";
 import type { PosNative } from "@/lib/desktopPrint";
+import { readLink } from "@/lib/terminal-link";
 
 /** The machine's own bridge, or null in a browser. */
 function tillDb(): NonNullable<PosNative["till"]> | null {
@@ -81,13 +82,42 @@ export async function pendingEntries(): Promise<Pending[]> {
 /** Send one entry. Resolves to null on success, or a reason to keep it. */
 async function replay(item: Pending, base: string, local: boolean): Promise<string | null> {
   if (item.kind === ADD_ORDER) {
-    // Re-inserting an order the server already has trips the primary key on the
-    // till-generated id, which is the same answer as success.
-    //
     // `keepOrderNumber` only where the number is real. The desktop till assigned
     // it from its own database and has already printed it; a browser's queued
     // order carries the guess the screen made from the orders it could see, and
     // making that authoritative would hand out duplicates.
+    const till = tillDb();
+
+    // The desktop till posts it like every other write. It used to insert
+    // straight into Supabase from the page, which made this the one write that
+    // needed the anon key baked into the build to be right and RLS to admit an
+    // unauthenticated terminal. When it was not, the sale was refused and
+    // dropped, and the payment behind it then updated an order the server had
+    // never seen — three of them, answering ok:false to a till showing green.
+    if (till) {
+      const link = await readLink();
+      if (!link) return "link yoxdur";
+      const res = await till.api("/api/add-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": item.id },
+        body: JSON.stringify({
+          order: item.body,
+          companyId: item.companyId,
+          token: link.token,
+          keepOrderNumber: true,
+        }),
+      });
+      const data = ((): { ok?: boolean; error?: unknown } => {
+        try { return JSON.parse(res.body) as { ok?: boolean; error?: unknown }; }
+        catch { return { ok: res.ok }; }
+      })();
+      if (res.ok && data.ok !== false) return null;
+      return data.error ? String(data.error) : `http ${res.status}`;
+    }
+
+    // A browser tab still has the waiter's own session, so it inserts as itself.
+    // Re-inserting an order the server already has trips the primary key on the
+    // till-generated id, which is the same answer as success.
     const error = await addOrder(item.body as Order, { server: true, keepOrderNumber: local });
     if (error === null || ALREADY_APPLIED.test(error)) return null;
     return error;
@@ -155,8 +185,22 @@ export async function flushQueue(currentCompanyId: string | null): Promise<SyncR
         break;
       }
 
-      // The server understood and refused. Replaying will not change its mind,
-      // and holding the entry blocks every write behind it.
+      // A refused sale is kept. Everything else is dropped: the server
+      // understood and said no, replaying will not change its mind, and holding
+      // the entry blocks every write behind it.
+      //
+      // An order is the exception because it is the money, and because losing
+      // one is silent — the till has it, the screen shows it, the badge goes
+      // green, and only the end-of-day total disagrees. Nothing else in the
+      // queue means anything without it either: the payment behind a dropped
+      // order updates a row the server does not have. Better a queue that
+      // visibly stops than a night of sales that quietly did not happen.
+      if (item.kind === ADD_ORDER) {
+        console.error("[sync] order rejected, keeping:", item.id, error);
+        failed++;
+        break;
+      }
+
       console.error("[sync] rejected, dropping:", item.kind, item.id, error);
       await q.drop(item.id);
       failed++;

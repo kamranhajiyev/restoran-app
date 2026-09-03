@@ -18,7 +18,7 @@
 
 import { setCompanyContext } from "@/lib/store";
 import type { MenuItem, ModifierGroup } from "@/types";
-import type { PosNative } from "./desktopPrint";
+import type { PosNative, TillSettings } from "./desktopPrint";
 import { cacheImages } from "./till-image";
 
 function till(): NonNullable<PosNative["till"]> | null {
@@ -31,7 +31,7 @@ const ORDER_WINDOW = 200;
 
 export type StepId =
   | "menu" | "categories" | "modifiers" | "stations"
-  | "tables" | "staff" | "orders" | "shift" | "images";
+  | "tables" | "staff" | "orders" | "settings" | "shift" | "images";
 
 export interface StepProgress {
   id: StepId;
@@ -175,6 +175,20 @@ const STEPS: Step[] = [
       const { ready } = await serverRead<{ ready: unknown[] }>(db, "public-station-ready", companyId);
       await db.putStationReady(companyId, ready ?? []);
       return (orders ?? []).length;
+    },
+  },
+  {
+    // Kassa on or off, tables on or off, whether a receipt prints. Small, and
+    // the till obeyed none of it before: every one of these was read straight
+    // off the companies row, RLS refused a session-less terminal, and each
+    // helper answered its own failure with "on".
+    id: "settings",
+    label: "Parametrlər",
+    run: async (companyId, db) => {
+      const { settings } = await serverRead<{ settings: TillSettings }>(db, "public-settings", companyId);
+      if (!settings) throw new Error("boş cavab");
+      await db.putSettings(companyId, settings);
+      return 1;
     },
   },
   {

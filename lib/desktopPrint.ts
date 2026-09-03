@@ -15,6 +15,22 @@ import { supabase } from './supabase';
 import { type TicketPayload } from './escpos';
 import { buildStationTicketRaster } from './station-ticket';
 
+/**
+ * The switches an owner flips in the admin panel, as the till sees them.
+ *
+ * Kept on the machine rather than read from the companies row, which RLS will
+ * not show a terminal that has no session — see app/api/public-settings.
+ */
+export interface TillSettings {
+  tablesEnabled: boolean;
+  kassaEnabled: boolean;
+  printReceipt: boolean;
+  soundEnabled: boolean;
+  menuOnly: boolean;
+  logoUrl: string | null;
+  brandColor: string | null;
+}
+
 /** The till's local database, present only in a build that ships the app. */
 export interface TillDb {
   /** The site whose /api routes the outbox replays against. */
@@ -24,6 +40,9 @@ export interface TillDb {
   setLink(value: string | null): Promise<unknown>;
   /** Pull menu photographs onto the disk so they render offline. See lib/till-image.ts. */
   cacheImages(urls: string[]): Promise<{ cached: number }>;
+  /** The company's on/off switches, as last pulled. See app/api/public-settings. */
+  settings(companyId: string): Promise<{ settings: TillSettings | null }>;
+  putSettings(companyId: string, settings: TillSettings): Promise<unknown>;
   /**
    * A request to the site, made by the main process.
    *

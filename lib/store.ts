@@ -3,6 +3,7 @@ import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
 import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
+import type { TillSettings } from './desktopPrint';
 
 async function authHeaders(): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -1487,11 +1488,36 @@ export async function fetchSellerToken(companyId: string): Promise<string | null
   } catch { return null; }
 }
 
+/**
+ * One of the owner's switches, as this machine last heard it.
+ *
+ * Every reader below used to query the companies row directly and, on failure,
+ * return the permissive answer. RLS refuses that row to a terminal with no
+ * session, so on the desktop till every switch failed and every switch came
+ * back "on" — an owner who turned Kassa off watched the till keep selling, with
+ * nothing anywhere reporting a problem.
+ *
+ * Null means "this build has no local copy", which sends the caller down the
+ * Supabase path it has always taken. See lib/till-sync.ts for what fills it.
+ */
+async function fromSettings<T>(pick: (s: TillSettings) => T): Promise<T | null> {
+  const till = typeof window === 'undefined' ? null : window.posNative?.till;
+  if (!till || !_companyId) return null;
+  try {
+    const { settings } = await till.settings(_companyId);
+    return settings ? pick(settings) : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Tables ───────────────────────────────────────────────────────────────────
 
 // Takeaway-only companies turn tables off: sellers then skip table selection
 // entirely and orders are created without a table.
 export async function fetchTablesEnabled(): Promise<boolean> {
+  const local = await fromSettings(s => s.tablesEnabled);
+  if (local !== null) return local;
   try {
     if (!_companyId) return true;
     const { data, error } = await supabase.from('companies').select('tables_enabled').eq('id', _companyId).single();
@@ -1524,6 +1550,8 @@ export async function setQrEnabled(enabled: boolean): Promise<void> {
 // ─── Branding (logo + accent color) ───────────────────────────────────────────
 
 export async function fetchBranding(): Promise<{ logoUrl: string | null; brandColor: string | null }> {
+  const local = await fromSettings(s => ({ logoUrl: s.logoUrl, brandColor: s.brandColor }));
+  if (local !== null) return local;
   try {
     if (!_companyId) return { logoUrl: null, brandColor: null };
     const { data, error } = await supabase.from('companies').select('logo_url, brand_color').eq('id', _companyId).single();
@@ -1543,6 +1571,8 @@ export async function setBrandColor(color: string): Promise<void> {
 }
 
 export async function fetchMenuOnly(): Promise<boolean> {
+  const local = await fromSettings(s => s.menuOnly);
+  if (local !== null) return local;
   try {
     if (!_companyId) return false;
     const { data, error } = await supabase.from('companies').select('menu_only').eq('id', _companyId).single();
@@ -1557,6 +1587,8 @@ export async function setMenuOnly(enabled: boolean): Promise<void> {
 }
 
 export async function fetchPrintReceipt(): Promise<boolean> {
+  const local = await fromSettings(s => s.printReceipt);
+  if (local !== null) return local;
   try {
     if (!_companyId) return true;
     const { data, error } = await supabase.from('companies').select('print_receipt').eq('id', _companyId).single();
@@ -1571,6 +1603,8 @@ export async function setPrintReceiptEnabled(enabled: boolean): Promise<void> {
 }
 
 export async function fetchSoundEnabled(): Promise<boolean> {
+  const local = await fromSettings(s => s.soundEnabled);
+  if (local !== null) return local;
   try {
     if (!_companyId) return true;
     const { data, error } = await supabase.from('companies').select('sound_enabled').eq('id', _companyId).single();
@@ -1585,6 +1619,8 @@ export async function setSoundEnabled(enabled: boolean): Promise<void> {
 }
 
 export async function fetchKassaEnabled(): Promise<boolean> {
+  const local = await fromSettings(s => s.kassaEnabled);
+  if (local !== null) return local;
   try {
     if (!_companyId) return true;
     const { data, error } = await supabase.from('companies').select('kassa_enabled').eq('id', _companyId).single();

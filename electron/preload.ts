@@ -26,6 +26,9 @@ contextBridge.exposeInMainWorld('posNative', {
     link: () => invoke('till:link'),
     setLink: (value: string | null) => invoke('till:setLink', value),
     cacheImages: (urls: string[]) => invoke('till:cacheImages', urls),
+    // The owner's on/off switches, kept so an outage still honours them.
+    settings: (companyId: string) => invoke('till:settings', companyId),
+    putSettings: (companyId: string, settings: unknown) => invoke('till:putSettings', companyId, settings),
     api: (path: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) =>
       invoke('till:api', path, init),
     menu: (companyId: string) => invoke('till:menu', companyId),
