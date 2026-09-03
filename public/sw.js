@@ -22,7 +22,12 @@ self.addEventListener('activate', e =>
 // The till's own reference data. Fine to serve a few minutes stale — a menu
 // price from this morning beats a blank screen — but always refreshed behind
 // the answer so the next order sees the new one.
-const CACHEABLE_API = /^\/api\/public-(menu|categories|tables|staff|modifiers|stations)(\?|$)/;
+// Reference data, plus the state of the room. The room matters most: without
+// orders and the open shift here, a till that reloads during an outage answers
+// its own "what is on table 6" with an empty list and every occupied table comes
+// back clean — the waiter's afternoon, gone, with no sign anything was lost.
+const CACHEABLE_API =
+  /^\/api\/public-(menu|categories|tables|staff|modifiers|stations|orders|shift|station-ready)(\?|$)/;
 
 async function staleWhileRevalidate(req) {
   const cache = await caches.open(CACHE);
