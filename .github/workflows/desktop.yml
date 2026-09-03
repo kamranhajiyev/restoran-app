@@ -67,24 +67,27 @@ jobs:
       # needs. The lock is not committed from here, so nothing drifts.
       - run: npm install --no-audit --no-fund
 
-      # Two different installers, and the difference is deliberate.
+      # One installer, always the offline till.
       #
-      # Blank url (a tag, or the button left empty) → `desktop:dist`, which runs
-      # scripts/build-desktop.mjs first: the till is exported to out-desktop/ and
-      # shipped inside the exe. That app opens with no internet, which is the
-      # whole point of the offline work.
+      # This used to branch: a url built the old shell — a window onto a Vercel
+      # preview, with no out-desktop/ and so no bundle, no local database, no
+      # offline anything. Which meant the only way to test the offline till
+      # against a branch was to build it against *production*, and the one exe
+      # anybody actually wanted could not be built at all. A tester who filled in
+      # the url got a setup screen where all nine steps failed, because there was
+      # no database behind them.
       #
-      # A url → the old shell, a window onto a Vercel preview. No out-desktop/ is
-      # produced, so electron/main.ts finds no bundle and loads the site. That is
-      # how kitchen printing gets tested against a branch without building a till,
-      # and it is *not* what a restaurant should ever be given.
+      # So the url no longer decides *what* is built, only which site the till
+      # syncs with — posUrl feeds API_URL in electron/main.ts, and does not
+      # disable the bundle the way --url= does. Blank still means production.
       - name: Build installer
         run: |
+          npm run desktop:till
+          npm run desktop:compile
           if ("${{ inputs.url }}") {
-            npm run desktop:compile
             npx electron-builder --win --publish never --config.extraMetadata.posUrl="${{ inputs.url }}"
           } else {
-            npm run desktop:dist
+            npx electron-builder --win --publish never
           }
         env:
           # electron-builder would otherwise try to publish to GitHub on its own.

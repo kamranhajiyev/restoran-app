@@ -71,9 +71,16 @@ export default function TillSetup({
               <span className={s.state === 'pending' ? 'text-stone-400' : 'text-stone-700'}>
                 {s.label}
               </span>
-              <span className="ml-auto tabular-nums text-xs text-stone-400">
+              <span className="ml-auto tabular-nums text-xs text-stone-400 truncate max-w-[9rem] text-right">
                 {s.state === 'done' && (s.count ?? 0)}
-                {s.state === 'failed' && 'alınmadı'}
+                {/* The reason, not just the verdict. Nine rows of "alınmadı"
+                    look identical whether the router is off, the link is wrong,
+                    or the build shipped without a database — and this screen is
+                    read out over the phone by someone standing in a restaurant,
+                    which is the worst moment to be guessing between them. */}
+                {s.state === 'failed' && (
+                  <span className="text-red-400" title={s.error}>{s.error ?? 'alınmadı'}</span>
+                )}
               </span>
             </li>
           ))}
