@@ -26,6 +26,9 @@ import InstallPWA from '@/components/InstallPWA';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, openCashDrawer } from '@/lib/printer';
 import { isDesktop, startKitchenPrinting } from '@/lib/desktopPrint';
+import { postOrQueue, isOnline, startConnectivityWatch, onConnectivityChange } from '@/lib/offline-net';
+import { flushQueue, ADD_ORDER } from '@/lib/sync';
+import { queueSize, enqueue } from '@/lib/offline-queue';
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
@@ -103,6 +106,12 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   const [note, setNote]                     = useState('');
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [submitting, setSubmitting]         = useState(false);
+
+  // What is waiting on the line. A waiter who cannot tell the difference between
+  // "saved" and "saved here only" will close the till on an unsent shift.
+  // (`online` above already drives the Oflayn badge; the watch below keeps it
+  // honest instead of leaving it stuck on the last page load's result.)
+  const [pendingCount, setPendingCount] = useState(0);
 
   // Poster-style PIN lock
   const [pinStaffList, setPinStaffList] = useState<Staff[]>([]);
@@ -310,10 +319,13 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     try {
       if (overrideCompanyId) {
         const [d, r] = await Promise.all([
-          fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).catch(() => ({ orders: [], total: 0 })),
+          // null, not an empty list: offline these two are indistinguishable, and
+          // treating a dead line as "this restaurant has no open orders" wipes
+          // every occupied table off the screen mid-service.
+          fetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).catch(() => null),
           fetch(`/api/public-station-ready?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.ready ?? []).catch(() => null),
         ]);
-        setOrders(d.orders ?? []); setTotalOrders(d.total ?? 0);
+        if (d) { setOrders(d.orders ?? []); setTotalOrders(d.total ?? 0); }
         // null = the request failed. Keep the last known green rather than blanking
         // the list: a blip must not make ready food look unready.
         if (r) setReadyRows(r);
@@ -323,6 +335,33 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       }
     } finally { if (!silent) setRefreshing(false); }
   }, [overrideCompanyId]);
+
+  // ── The line ────────────────────────────────────────────────────────────────
+  // Watch the connection for as long as the till is open, and the moment it comes
+  // back, send everything that piled up — then re-read, so the screen shows what
+  // the server actually has rather than the till's optimistic copy of it.
+  useEffect(() => {
+    const stop = startConnectivityWatch();
+    void queueSize().then(setPendingCount);
+
+    const off = onConnectivityChange(async up => {
+      setOnline(up);
+      if (!up) return;
+      const { stillQueued } = await flushQueue(overrideCompanyId ?? null);
+      setPendingCount(stillQueued);
+      if (stillQueued === 0) void refreshOrders({ silent: true });
+    });
+
+    return () => { stop(); off(); };
+  }, [overrideCompanyId, refreshOrders]);
+
+  // The badge would otherwise only move on a connection change, leaving a waiter
+  // watching a stale "3 waiting" while the queue drains.
+  useEffect(() => {
+    if (online && pendingCount === 0) return;
+    const t = setInterval(() => void queueSize().then(setPendingCount), 3000);
+    return () => clearInterval(t);
+  }, [online, pendingCount]);
 
   // Which sex has finished its part of which order. The sexes themselves are needed
   // to work out which sex owns a line — an order line only carries menu_item_id.
@@ -863,8 +902,14 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     const newNote = note.trim();
     setSubmitting(true);
     const saveError = overrideCompanyId
-      ? await fetch('/api/add-order-items', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId, items: newItems, companyId: overrideCompanyId, note: newNote, token: overrideToken }) })
-          .then(r => r.json()).then(d => d.ok ? null : (d.error || 'failed')).catch(() => 'failed')
+      ? (await postOrQueue(
+          // A fresh key per append: the same dish added twice to one order is two
+          // legitimate writes, not a retry.
+          `append:${crypto.randomUUID()}`,
+          '/api/add-order-items',
+          { orderId, items: newItems, companyId: overrideCompanyId, note: newNote, token: overrideToken },
+          overrideCompanyId,
+        )).ok ? null : 'failed'
       : await addItemsToOrder(orderId, newItems, newNote);
     setSubmitting(false);
     if (saveError) {
@@ -898,7 +943,14 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     if (isItemReady(order, oi) && !confirm(`"${oi.menuItem.name}" hazırdır. Yenə də silinsin?`)) return;
     const newQty = oi.quantity - 1;
     const ok = overrideCompanyId
-      ? await fetch('/api/update-order-item-qty', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderItemId: oi.id, orderId: order.id, quantity: newQty, companyId: overrideCompanyId, token: overrideToken, removedBy: effectiveSeller }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      ? (await postOrQueue(
+          // Keyed by the quantity it lands on, so two taps of "−" queue as two
+          // distinct steps while a retry of either stays one.
+          `qty:${oi.id}:${newQty}`,
+          '/api/update-order-item-qty',
+          { orderItemId: oi.id, orderId: order.id, quantity: newQty, companyId: overrideCompanyId, token: overrideToken, removedBy: effectiveSeller },
+          overrideCompanyId,
+        )).ok
       : await setOrderItemQuantity(oi.id, newQty, effectiveSeller);
     if (!ok) { alert('Dəyişdirilmədi. Yenidən cəhd edin.'); return; }
 
@@ -947,7 +999,12 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
       staffId: activeStaff?.id,
       note: note.trim() || undefined,
     };
-    const saveError = await addOrder(order);
+    // Offline the insert cannot go now, but the order still exists: it goes into
+    // the queue under its own id, the kitchen ticket still prints over the LAN,
+    // and the real order_number arrives when the line does.
+    const saveError = isOnline()
+      ? await addOrder(order)
+      : (await enqueue(`order:${order.id}`, ADD_ORDER, order, overrideCompanyId ?? null), null);
     setSubmitting(false);
     if (saveError) {
       const reason = /fetch|network|failed to fetch|load failed/i.test(saveError)
@@ -1054,8 +1111,15 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     const cashKept = cash - change;
     setPayingOrder(null);
     // The DB update is conditional — a no-op if someone else already paid this order
+    // One key per order: whether this payment goes now or waits in the queue,
+    // the server applies it exactly once.
     const paid = overrideCompanyId
-      ? await fetch('/api/update-order-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: order.id, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined, companyId: overrideCompanyId, token: overrideToken }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      ? (await postOrQueue(
+          `pay:${order.id}`,
+          '/api/update-order-status',
+          { orderId: order.id, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined, companyId: overrideCompanyId, token: overrideToken },
+          overrideCompanyId,
+        )).ok
       : await updateOrderStatus(order.id, 'ödənilib', cashKept, card, change, discountAmt || undefined, discountAmt ? discountType : undefined);
     if (paid) {
       // paidAt mirrors what the DB just wrote, so the history shows a closing time
@@ -1091,7 +1155,12 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     setCancelBusy(true);
     // Conditional in the DB — a no-op if the order got paid in the meantime
     const ok = overrideCompanyId
-      ? await fetch('/api/cancel-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: cancelling.id, reason, by: effectiveSeller, companyId: overrideCompanyId, token: overrideToken }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      ? (await postOrQueue(
+          `cancel:${cancelling.id}`,
+          '/api/cancel-order',
+          { orderId: cancelling.id, reason, by: effectiveSeller, companyId: overrideCompanyId, token: overrideToken },
+          overrideCompanyId,
+        )).ok
       : await cancelOrder(cancelling.id, reason, effectiveSeller);
     setCancelBusy(false);
     setCancellingOrder(null);
@@ -1116,7 +1185,14 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     setMoveBusy(true);
     // Conditional in the DB — a no-op if the order got paid or closed meanwhile
     const ok = overrideCompanyId
-      ? await fetch('/api/move-table', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: moving.id, tableId: target, companyId: overrideCompanyId, token: overrideToken }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      ? (await postOrQueue(
+          // The target is in the key: moving a party twice while offline is two
+          // separate writes, and both must land in the order they were made.
+          `move:${moving.id}:${target}`,
+          '/api/move-table',
+          { orderId: moving.id, tableId: target, companyId: overrideCompanyId, token: overrideToken },
+          overrideCompanyId,
+        )).ok
       : await moveOrderTable(moving.id, target);
     setMoveBusy(false);
     setMovingOrder(null);
@@ -1197,7 +1273,14 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     setShowMovForm(false); setMovAmount(''); setMovReason('');
     try {
       if (overrideCompanyId) {
-        const res = await fetch('/api/add-shift-movement', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shiftId: shift.id, movement: mv, companyId: overrideCompanyId, token: overrideToken }) }).then(r => r.json());
+        // The movement already carries the id an admin uses to correct it later,
+        // which makes it exactly the right idempotency key.
+        const res = await postOrQueue(
+          `movement:${mv.id}`,
+          '/api/add-shift-movement',
+          { shiftId: shift.id, movement: mv, companyId: overrideCompanyId, token: overrideToken },
+          overrideCompanyId,
+        );
         if (!res.ok) throw new Error('failed');
       } else {
         await addShiftMovement(shift.id, mv);
@@ -1250,7 +1333,12 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
     const prevStatus = orders.find(o => o.id === id)?.status;
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
     const ok = overrideCompanyId
-      ? await fetch('/api/update-order-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderId: id, status, companyId: overrideCompanyId, token: overrideToken }) }).then(r => r.json()).then(d => d.ok).catch(() => false)
+      ? (await postOrQueue(
+          `status:${id}:${status}`,
+          '/api/update-order-status',
+          { orderId: id, status, companyId: overrideCompanyId, token: overrideToken },
+          overrideCompanyId,
+        )).ok
       : await updateOrderStatus(id, status);
     if (!ok && prevStatus) {
       setOrders(prev => prev.map(o => o.id === id ? { ...o, status: prevStatus } : o));
@@ -1388,7 +1476,19 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
                 {effectiveSeller[0]?.toUpperCase()}
               </div>
               <span className="text-xs text-stone-600 truncate">{effectiveSeller}</span>
-              {!online && <span className="ml-auto text-[10px] bg-primary-100 text-primary-700 px-1.5 py-0.5 rounded-full">Oflayn</span>}
+              {/* Offline is not an error here — the till keeps working. What the
+                  waiter needs to know is how much has not reached the server yet,
+                  because that is what is lost if this machine dies. */}
+              {!online && (
+                <span className="ml-auto text-[10px] bg-primary-100 text-primary-700 px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                  Oflayn{pendingCount > 0 ? ` · ${pendingCount}` : ''}
+                </span>
+              )}
+              {online && pendingCount > 0 && (
+                <span className="ml-auto text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full whitespace-nowrap">
+                  Göndərilir · {pendingCount}
+                </span>
+              )}
             </div>
             {!overrideCompanyId && (
               <button onClick={() => { logout(); router.push('/login'); }} className="flex items-center gap-2 text-xs text-stone-500 hover:text-red-500 transition-colors">
