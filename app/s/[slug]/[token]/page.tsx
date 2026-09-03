@@ -2,6 +2,30 @@
 import { use, useEffect, useState } from 'react';
 import SellerPage from '@/app/seller/page';
 
+type ReadyState = { status: 'ready'; companyId: string; companyName: string; logoUrl: string | null; brandColor: string | null; expiresAt: string | null };
+
+// What this terminal was last told about itself, so an outage does not lock it
+// out. Scoped to the exact link: a rotated token has no cache of its own and
+// still has to reach the server.
+const terminalKey = (slug: string, token: string) => `possiblle.terminal.${slug}.${token}`;
+
+function rememberTerminal(slug: string, token: string, state: ReadyState): void {
+  try { localStorage.setItem(terminalKey(slug, token), JSON.stringify(state)); } catch { /* storage full or blocked */ }
+}
+
+function recallTerminal(slug: string, token: string): ReadyState | null {
+  try {
+    const raw = localStorage.getItem(terminalKey(slug, token));
+    return raw ? (JSON.parse(raw) as ReadyState) : null;
+  } catch {
+    return null;
+  }
+}
+
+function forgetTerminal(slug: string, token: string): void {
+  try { localStorage.removeItem(terminalKey(slug, token)); } catch { /* nothing stored */ }
+}
+
 export default function PublicSellerPage({ params }: { params: Promise<{ slug: string; token: string }> }) {
   const { slug, token } = use(params);
 
@@ -15,10 +39,26 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
     fetch(`/api/seller-token?slug=${encodeURIComponent(slug)}&token=${encodeURIComponent(token)}`)
       .then(r => r.json())
       .then(d => {
-        if (d.companyId) setState({ status: 'ready', companyId: d.companyId, companyName: d.companyName, logoUrl: d.logoUrl ?? null, brandColor: d.brandColor ?? null, expiresAt: d.expiresAt ?? null });
-        else setState({ status: 'invalid' });
+        if (d.companyId) {
+          const ready = { status: 'ready' as const, companyId: d.companyId, companyName: d.companyName, logoUrl: d.logoUrl ?? null, brandColor: d.brandColor ?? null, expiresAt: d.expiresAt ?? null };
+          setState(ready);
+          // Kept so the terminal can open itself again during an outage. Only
+          // ever written from a real answer, so a revoked link stops working as
+          // soon as the server is reachable enough to say so.
+          rememberTerminal(slug, token, ready);
+        } else {
+          forgetTerminal(slug, token);
+          setState({ status: 'invalid' });
+        }
       })
-      .catch(() => setState({ status: 'invalid' }));
+      .catch(() => {
+        // The line is down, not the link. Answering "etibarsız" here would put
+        // the whole offline till behind an error screen it can never clear —
+        // the terminal would be dead exactly when the queue was meant to save
+        // it. Reopen on what this machine was last told.
+        const cached = recallTerminal(slug, token);
+        setState(cached ?? { status: 'invalid' });
+      });
   }, [slug, token]);
 
   // Re-validate the link while the terminal stays open so rotating it ("Linki yenilə")
@@ -32,7 +72,7 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
       try {
         const r = await fetch(`/api/seller-token?slug=${encodeURIComponent(slug)}&token=${encodeURIComponent(token)}`);
         if (cancelled) return;
-        if (r.status === 404) { setState({ status: 'invalid' }); return; }
+        if (r.status === 404) { forgetTerminal(slug, token); setState({ status: 'invalid' }); return; }
         // A renewal paid mid-shift should clear the subscription banner on its
         // own — this poll is already running, so it costs nothing to carry.
         if (r.ok) {

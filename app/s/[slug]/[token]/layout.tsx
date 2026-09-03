@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import SellerSWRegister from '@/app/seller/SellerSWRegister';
 
 export async function generateMetadata(
   { params }: { params: Promise<{ slug: string; token: string }> }
@@ -10,5 +11,12 @@ export async function generateMetadata(
 }
 
 export default function SellerTokenLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  // This is the screen the desktop till actually runs, so this is where the
+  // offline worker has to be registered — /seller's does not reach it.
+  return (
+    <>
+      <SellerSWRegister scope="/s/" />
+      {children}
+    </>
+  );
 }

@@ -63,6 +63,8 @@ function createWindow(): void {
   win.once('ready-to-show', () => win.show());
   void win.loadURL(APP_URL);
 
+  keepTryingWhenOffline(win);
+
   // A misplaced target="_blank" must not open a second, chromeless copy of the
   // POS that the waiter cannot get out of. Send those to the real browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -71,6 +73,56 @@ function createWindow(): void {
   });
 
   grantReceiptPrinterAccess(win);
+}
+
+// ── Opening while the line is down ───────────────────────────────────────────
+// Once the till has been opened at least once, its service worker holds the
+// page and Chromium serves it from cache — a dropout mid-service costs nothing.
+//
+// A cold start during an outage is the case that needs help: there is nothing to
+// intercept the navigation, so the window lands on Chromium's error page and the
+// restaurant sees a dead app. Rather than leave them there, say what is
+// happening in their own language and keep retrying, so the till comes back by
+// itself the moment the line does.
+const OFFLINE_NOTICE = `
+  <style>
+    body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
+           font-family:system-ui,-apple-system,Segoe UI,sans-serif; background:#faf9f7; color:#44403c; }
+    .box { text-align:center; max-width:28rem; padding:2rem; }
+    h1 { font-size:1.25rem; margin:0 0 .5rem; }
+    p { margin:0; color:#78716c; font-size:.9rem; line-height:1.5; }
+    .dot { display:inline-block; width:.5rem; height:.5rem; border-radius:50%;
+           background:#f59e0b; margin-right:.4rem; animation:p 1.4s infinite; }
+    @keyframes p { 0%,100%{opacity:1} 50%{opacity:.3} }
+  </style>
+  <div class="box">
+    <h1><span class="dot"></span>İnternet bağlantısı yoxdur</h1>
+    <p>Proqram bağlantı bərpa olunan kimi özü açılacaq.<br>Pəncərəni bağlamayın.</p>
+  </div>
+`;
+
+function keepTryingWhenOffline(win: BrowserWindow): void {
+  let retry: ReturnType<typeof setTimeout> | undefined;
+
+  win.webContents.on('did-fail-load', (_e, code, _desc, url, isMainFrame) => {
+    // Sub-resources fail for their own reasons, and -3 is a navigation the app
+    // itself cancelled — neither means the restaurant is offline.
+    if (!isMainFrame || code === -3) return;
+
+    void win.webContents.executeJavaScript(
+      `document.documentElement.innerHTML = ${JSON.stringify(OFFLINE_NOTICE)}`,
+    ).catch(() => {});
+    win.show();
+
+    if (retry) clearTimeout(retry);
+    retry = setTimeout(() => void win.loadURL(url || APP_URL), 5000);
+  });
+
+  win.webContents.on('did-finish-load', () => {
+    if (retry) { clearTimeout(retry); retry = undefined; }
+  });
+
+  win.on('closed', () => { if (retry) clearTimeout(retry); });
 }
 
 // ── The USB receipt printer ──────────────────────────────────────────────────

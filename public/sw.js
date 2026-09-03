@@ -79,8 +79,14 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // The till page itself, so a reload mid-dropout still opens.
-  if (req.mode === 'navigate' && url.pathname.startsWith('/seller')) {
+  // The till itself, so a reload — or a cold start after a power cut, which is
+  // the same thing to the browser — still opens. Both addresses it is served
+  // from: /seller for a signed-in waiter, /s/<slug>/<token> for the public
+  // terminal the desktop app runs.
+  //
+  // Deliberately not the admin or QR pages: those stay online-only, and caching
+  // their shell would only let someone open a screen that cannot load its data.
+  if (req.mode === 'navigate' && (url.pathname.startsWith('/seller') || url.pathname.startsWith('/s/'))) {
     e.respondWith(networkFirst(req));
     return;
   }
