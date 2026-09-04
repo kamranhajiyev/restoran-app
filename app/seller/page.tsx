@@ -997,6 +997,18 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     });
   }
 
+  // Name every line here, as it leaves the cart, rather than leaving it to
+  // whichever store saves it. A line is edited by its id — "one Cola off" — and
+  // the "−" button only appears once it has one, so a line named downstream
+  // cannot be touched until a read brings the name back. Online that read is a
+  // realtime refresh a second later and the wait goes unnoticed; offline there
+  // is no read to wait for, and the button arrives at the next sync or not at
+  // all. SQLite, the API routes and the direct insert all keep an id the client
+  // supplies, so naming it early changes nothing downstream.
+  function named(items: OrderItem[]): OrderItem[] {
+    return items.map(ci => (ci.id ? ci : { ...ci, id: crypto.randomUUID() }));
+  }
+
   // The reusable sets this item offers, in the order the owner arranged them.
   function groupsForItem(item: MenuItem): ModifierGroup[] {
     const ids = item.modifierGroupIds ?? [];
@@ -1137,7 +1149,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   async function submitAppend() {
     if (cart.length === 0 || submitting || !appendOrderId) return;
     const orderId = appendOrderId;
-    const newItems = cart;
+    const newItems = named(cart);
     const newNote = note.trim();
     setSubmitting(true);
     const saveError = overrideCompanyId
@@ -1238,7 +1250,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       // the whole local table rather than from whatever is on screen.
       orderNumber: hasLocalDb() ? 0 : (orders[0]?.orderNumber ?? 0) + 1,
       tableNumber: orderType === 'takeaway' ? 0 : selectedTable!,
-      items: cart,
+      items: named(cart),
       status: 'gözləyir',
       createdAt: new Date().toISOString(),
       sellerName: effectiveSeller,
