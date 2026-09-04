@@ -42,7 +42,15 @@ export type SyncResult = { synced: number; failed: number; stillQueued: number }
 /** The one write that does not go through an API route. */
 export const ADD_ORDER = "supabase:addOrder";
 
-const NETWORK = /fetch|network|failed to fetch|load failed|timeout|econnrefused|aborted/i;
+// What "there was no line" looks like, in every wording this code can be handed.
+// The browser's own failures are the first half; the second is Chromium's, which
+// is what the desktop till gets — electron/till-ipc.ts calls net.fetch in the
+// main process, and a failure there arrives as `net::ERR_INTERNET_DISCONNECTED`
+// or one of its neighbours. None of those contain the word "network" or "fetch",
+// so they used to fall through to the "the server refused this" branch below and
+// the write was deleted a second after the waiter made it — orders included,
+// with the badge going green because the queue really was empty.
+const NETWORK = /fetch|network|failed to fetch|load failed|timeout|econnrefused|aborted|net::err|enotfound|unreachable|disconnected|offline/i;
 const ALREADY_APPLIED = /duplicate key|unique constraint|already exists/i;
 
 /** The fields the replay needs. Both queues supply them under these names. */
@@ -205,11 +213,15 @@ export async function flushQueue(currentCompanyId: string | null): Promise<SyncR
       await q.drop(item.id);
       failed++;
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      // Nothing came back at all. Dropping only ever makes sense when the server
+      // answered and said no — a thrown error means it may never have been
+      // asked, and the list of wordings for "the line is down" is not something
+      // this code gets to be sure it has finished writing. So an error it does
+      // not recognise is kept and the queue stops, which costs a retry; the
+      // other way round it cost a night of sales.
       failed++;
-      if (NETWORK.test(msg)) break;
-      console.error("[sync] unexpected, dropping:", item.kind, item.id, e);
-      await q.drop(item.id);
+      console.error("[sync] no answer, keeping:", item.kind, item.id, e);
+      break;
     }
   }
 
