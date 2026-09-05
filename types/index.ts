@@ -290,6 +290,51 @@ export interface SupplierPayment {
   createdAt: string;
 }
 
+// ─── Kuryerlər (couriers) ─────────────────────────────────────────────────────
+
+// A rider who takes food out of the building. A name and a phone number, not an
+// account: couriers do not log in and have no PIN. `staffId` is where a login
+// gets attached the day they need one.
+export interface Courier {
+  id: string;
+  name: string;
+  phone?: string;
+  active: boolean;
+  createdAt: string;
+  staffId?: string;
+  // What the rider is holding right now. Attached by the reads that compute it;
+  // absent from a plain list. Negative means the restaurant owes them — they
+  // paid, and an order they had already settled then came back.
+  outstanding?: number;
+}
+
+// Per-courier money summary. `delivered` and `paid` are scoped to whatever range
+// the caller asked for; `outstanding` is the all-time running balance and does
+// NOT equal delivered − paid for any range shorter than "everything".
+//
+// It can go negative: a courier who paid 20 against a 30 order that was then
+// returned is owed 20 back. The panels read that as a credit, not a debt.
+export interface CourierLedger {
+  delivered: number;
+  paid: number;
+  outstanding: number;
+  orders: number;
+}
+
+// One handover of cash from a courier, for the Ödənişlər log. `createdBy` is the
+// seller who took it and `shiftId` the drawer it went into — the whole reason
+// this row exists rather than just a decremented balance.
+export interface CourierPayment {
+  id: string;
+  courierId: string;
+  courierName: string;
+  amount: number;
+  note: string | null;
+  createdBy: string | null;
+  shiftId: string | null;
+  createdAt: string;
+}
+
 // One line of a goods receipt, as sent to record_receipt.
 export interface ReceiptLine {
   stockItemId: string;
@@ -330,6 +375,14 @@ export interface Order {
   createdAt: string;
   sellerName: string;
   staffId?: string;
+  // Which courier carried this order out. Absent on masa and takeaway orders —
+  // its presence is what makes an order a courier order; there is no order-type
+  // column, because a second marker could only ever disagree with this one.
+  courierId?: string;
+  // What the courier is still holding for this order. 0 or absent when the guest
+  // paid at the till. Only counts toward a balance while the order is 'ödənilib',
+  // which is what makes a returned order drop its debt with no reversal write.
+  courierDebt?: number;
   note?: string;
   cashAmount?: number;   // money kept in the till (net of change given back)
   cardAmount?: number;

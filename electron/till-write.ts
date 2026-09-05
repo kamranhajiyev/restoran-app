@@ -27,7 +27,9 @@
 
 import type { CashShift, Order, OrderItem, ShiftMovement } from '../types';
 import { db, getMeta, setMeta, transact } from './db';
-import { getOpenShift, getOrder, putOrder, putShift } from './till-repo';
+import {
+  addCourierPayment, getOpenShift, getOrder, hasCourierPayment, putOrder, putShift,
+} from './till-repo';
 
 /** The two writes that never had an API route: they go straight to Supabase. */
 export const ADD_ORDER = 'supabase:addOrder';
@@ -302,6 +304,10 @@ function applyStatus(id: string, body: Record<string, unknown>, companyId: strin
           changeAmount: num(body.changeAmount),
           discountAmount: num(body.discountAmount) || undefined,
           discountType: (str(body.discountType) as '%' | '₼') ?? '₼',
+          // Without this a delivery closed on debt reads locally as paid with
+          // nothing owed, and the Kuryerlər screen understates the balance
+          // until the next pull — during an outage, indefinitely.
+          courierDebt: num(body.courierDebt) || undefined,
         }
       : {}),
     ...(status === 'ödənilib' ? { paidAt: new Date().toISOString() } : {}),
@@ -395,6 +401,73 @@ function applyMovement(id: string, body: Record<string, unknown>, companyId: str
   return { ok: true };
 }
 
+// Mirrors app/api/add-courier-payment/route.ts.
+//
+// Two things happen at once and both have to survive an outage: the courier's
+// balance drops, and the cash lands in the drawer. The payment row is what the
+// Kuryerlər screen reads back; the shift movement is what makes the drawer add
+// up at close. The payment id guards both — it is the outbox key, the movement
+// id and the local row's primary key, so a replay finds all three already there.
+function applyCourierPayment(id: string, body: Record<string, unknown>, companyId: string): WriteResult {
+  const paymentId = str(body.paymentId);
+  const courierId = str(body.courierId);
+  const amount = num(body.amount);
+  if (!paymentId || !courierId || !amount || amount <= 0) return { ok: false, error: 'bad_request' };
+  if (hasCourierPayment(paymentId)) return { ok: true };
+
+  const createdAt = new Date().toISOString();
+  const by = str(body.by) ?? '';
+  const shiftId = str(body.shiftId);
+
+  // The kassa module may be off, in which case there is no drawer to book into
+  // and the payment stands on its own — the same rule the RPC applies.
+  if (shiftId) {
+    const shift = getOpenShift(companyId);
+    if (!shift || shift.id !== shiftId) return { ok: false, error: 'not_found' };
+    if (!shift.movements.some(m => m.id === paymentId)) {
+      putShift(companyId, {
+        ...shift,
+        movements: [...shift.movements, {
+          id: paymentId, at: createdAt, amount, reason: 'Kuryer ödənişi', by,
+        }],
+      });
+    }
+  }
+
+  addCourierPayment(companyId, { id: paymentId, courierId, amount, createdAt, createdBy: by, shiftId });
+  enqueue(id, '/api/add-courier-payment', { ...body, companyId }, companyId);
+  return { ok: true };
+}
+
+// Mirrors app/api/return-courier-order/route.ts — the food came back.
+//
+// applyCancel refuses a closed order, and rightly so everywhere else. A courier
+// order carrying debt is the one exception, and the conditions here are the same
+// ones cancel_courier_order enforces on the server.
+function applyCourierReturn(id: string, body: Record<string, unknown>, companyId: string): WriteResult {
+  const orderId = str(body.orderId);
+  const reason = str(body.reason);
+  const by = str(body.by);
+  if (!orderId || !reason || !by) return { ok: false, error: 'bad_request' };
+
+  const order = getOrder(orderId);
+  if (!order || !belongsTo(orderId, companyId)) return { ok: false, error: 'not_found' };
+  if (order.status === 'ləğv edildi') return { ok: true };
+  if (order.status !== 'ödənilib' || !order.courierId || !(order.courierDebt ?? 0)) {
+    return { ok: false, error: 'not_courier_order' };
+  }
+
+  putOrder(companyId, {
+    ...order,
+    status: 'ləğv edildi',
+    cancelledAt: new Date().toISOString(),
+    cancelledBy: by,
+    cancelReason: reason,
+  });
+  enqueue(id, '/api/return-courier-order', { ...body, companyId }, companyId);
+  return { ok: true };
+}
+
 // Mirrors app/api/close-shift/route.ts.
 //
 // The seller screen refuses to close a shift while the line is down or the
@@ -478,6 +551,8 @@ export function applyWrite(
       case '/api/move-table':               return applyMove(id, body, companyId);
       case '/api/open-shift':               return applyOpenShift(id, body, companyId);
       case '/api/add-shift-movement':       return applyMovement(id, body, companyId);
+      case '/api/add-courier-payment':      return applyCourierPayment(id, body, companyId);
+      case '/api/return-courier-order':     return applyCourierReturn(id, body, companyId);
       case '/api/close-shift':              return applyCloseShift(id, body, companyId);
       case MARK_READY:                      return applyReady(id, body, companyId, true);
       case UNMARK_READY:                    return applyReady(id, body, companyId, false);

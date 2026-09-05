@@ -3,7 +3,7 @@ import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 import { claim, idempotencyKey } from '@/lib/idempotency';
 
 export async function POST(req: NextRequest) {
-  const { orderId, status, cashAmount, cardAmount, changeAmount, discountAmount, discountType, companyId, token } = await req.json();
+  const { orderId, status, cashAmount, cardAmount, changeAmount, discountAmount, discountType, courierDebt, companyId, token } = await req.json();
   if (!orderId || !status) return Response.json({ ok: false }, { status: 400 });
   if (!(await verifySellerToken(companyId, token))) return Response.json({ ok: false, error: 'revoked' }, { status: 403 });
 
@@ -23,6 +23,9 @@ export async function POST(req: NextRequest) {
     updates.change_amount = changeAmount ?? 0;
     updates.discount_amount = discountAmount ?? 0;
     updates.discount_type = discountType ?? '₼';
+    // Same statement as the amounts it stands in for, so an order can never be
+    // both paid in cash and owed by a courier.
+    updates.courier_debt = courierDebt ?? 0;
   }
   if (status === 'ödənilib') updates.paid_at = new Date().toISOString();
 

@@ -73,6 +73,9 @@ export interface TicketPayload {
   orderNumber: number | null;
   table: number | null;
   fromTable?: number | null;  // 'move' only: where the order sat before
+  // Set on a courier order. Without it the ticket says "Takeaway" and the food
+  // waits on the counter for a guest who is not coming.
+  courier?: string | null;
   waiter: string | null;
   note?: string | null;
   at: string;
@@ -122,6 +125,8 @@ export function buildStationTicket(p: TicketPayload): Uint8Array {
   // station names it, and that's the one being corrected.
   if (p.kind === 'move') {
     lines.push(ESC.BOLD_ON, `Masa: ${tableLabel(p.fromTable)} -> ${tableLabel(p.table)}\n`, ESC.BOLD_OFF);
+  } else if (p.courier) {
+    lines.push(ESC.BOLD_ON, `KURYER: ${p.courier}\n`, ESC.BOLD_OFF);
   } else {
     lines.push(`Masa: ${tableLabel(p.table)}\n`);
   }

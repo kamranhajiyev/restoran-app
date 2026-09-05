@@ -1,4 +1,4 @@
-import { CashShift, Category, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
+import { CashShift, Category, Courier, CourierLedger, CourierPayment, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
 import { supabase } from './supabase';
@@ -576,6 +576,8 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
       tableNumber: o.table_id ?? 0,
       sellerName: o.waiter_name,
       staffId: o.staff_id ?? undefined,
+      courierId: o.courier_id ?? undefined,
+      courierDebt: o.courier_debt ? Number(o.courier_debt) : undefined,
       status: o.status as Order['status'],
       note: o.note ?? undefined,
       createdAt: o.created_at,
@@ -688,6 +690,7 @@ export async function addOrder(order: Order, opts?: ReadOpts): Promise<string | 
       table_id: order.tableNumber === 0 ? null : order.tableNumber,
       waiter_name: order.sellerName,
       staff_id: order.staffId ?? null,
+      courier_id: order.courierId ?? null,
       status: order.status,
       note: order.note ?? null,
       created_at: order.createdAt,
@@ -771,6 +774,9 @@ export async function updateOrderStatus(
   changeAmount?: number,
   discountAmount?: number,
   discountType?: '%' | '₼',
+  // Set only when a courier order closes on the "kuryer yığacaq" path: nothing
+  // is tendered, and this is what the rider owes for it.
+  courierDebt?: number,
 ): Promise<boolean> {
   // One key per order for a payment, one per target status otherwise: a payment
   // must be applied exactly once however many times it is retried, while
@@ -779,7 +785,7 @@ export async function updateOrderStatus(
     undefined,
     status === 'ödənilib' ? `pay:${orderId}` : `status:${orderId}:${status}`,
     '/api/update-order-status',
-    { orderId, status, cashAmount, cardAmount, changeAmount, discountAmount, discountType },
+    { orderId, status, cashAmount, cardAmount, changeAmount, discountAmount, discountType, courierDebt },
   );
   if (local) return local.ok;
 
@@ -792,6 +798,9 @@ export async function updateOrderStatus(
     updates.change_amount = changeAmount ?? 0;
     updates.discount_amount = discountAmount ?? 0;
     updates.discount_type = discountType ?? '₼';
+    // Written on the same statement as the amounts it replaces, so an order can
+    // never be both paid in cash and owed by a courier.
+    updates.courier_debt = courierDebt ?? 0;
   }
   if (status === 'ödənilib') updates.paid_at = new Date().toISOString();
   let q = supabase.from('orders').update(updates).eq('id', orderId);
@@ -938,6 +947,17 @@ export async function setOrderItemQuantity(orderItemId: string, quantity: number
 }
 
 export async function editOrderPayment(orderId: string, cashAmount: number, cardAmount: number): Promise<boolean> {
+  // A courier delivery closes with nothing tendered and the whole total sitting
+  // as that courier's debt. Writing cash/card onto it here would book the same
+  // money twice: once in the day's takings, once again when the courier hands it
+  // over. The way to correct such an order is "Qaytarıldı", not this edit.
+  const { data: row } = await supabase.from('orders')
+    .select('courier_debt').eq('id', orderId).maybeSingle();
+  if ((row?.courier_debt ?? 0) > 0) {
+    console.error('[editOrderPayment] refused: order has courier debt');
+    return false;
+  }
+
   const { error } = await supabase.from('orders')
     .update({ cash_amount: cashAmount, card_amount: cardAmount, change_amount: 0 })
     .eq('id', orderId);
@@ -1377,6 +1397,194 @@ export async function fetchSupplierLedger(): Promise<Record<string, SupplierLedg
     for (const id of Object.keys(out)) out[id].debt = out[id].total - out[id].paid;
     return out;
   } catch { return out; }
+}
+
+// ─── Kuryerlər ────────────────────────────────────────────────────────────────
+//
+// A courier's balance is derived, never stored: what they owe on closed orders
+// minus what they have handed over. Every query below therefore carries
+// status = 'ödənilib' — see supabase/migrations/20260905_couriers.sql for why
+// that predicate is load-bearing, and what breaks if one of them loses it.
+
+/** Orders that count toward a courier's debt. The one definition, so a new
+ *  caller cannot quietly disagree with the existing ones. */
+const COURIER_DEBT_STATUS = 'ödənilib';
+
+export async function fetchCouriers(opts?: ReadOpts): Promise<Courier[]> {
+  const local = await fromLocal(opts, async (till, companyId) =>
+    ((await till.couriers(companyId)) as { couriers: Courier[] }).couriers);
+  if (local) return local;
+
+  try {
+    const { data, error } = await supabase.from('couriers')
+      .select('id, name, phone, active, staff_id, created_at').order('created_at');
+    if (error || !data) return [];
+    return data.map(c => ({
+      id: c.id, name: c.name, phone: c.phone ?? undefined, active: c.active,
+      staffId: c.staff_id ?? undefined, createdAt: c.created_at,
+    }));
+  } catch { return []; }
+}
+
+export async function createCourier(name: string, phone: string): Promise<string | null> {
+  const { error } = await supabase.from('couriers')
+    .insert({ name, phone: phone || null, company_id: _companyId });
+  if (error) { console.error('[createCourier]', error); return error.message; }
+  return null;
+}
+
+export async function updateCourier(id: string, name: string, phone: string, active: boolean): Promise<string | null> {
+  const { error } = await supabase.from('couriers')
+    .update({ name, phone: phone || null, active }).eq('id', id);
+  if (error) { console.error('[updateCourier]', error); return error.message; }
+  return null;
+}
+
+// Refused by the database once the courier has carried anything — orders.courier_id
+// is `on delete restrict` on purpose. The panel turns that into "deactivate instead".
+export async function deleteCourier(id: string): Promise<string | null> {
+  const { error } = await supabase.from('couriers').delete().eq('id', id);
+  if (error) { console.error('[deleteCourier]', error); return error.message; }
+  return null;
+}
+
+// Per-courier money summary. `from`/`to` scope `delivered`, `paid` and `orders`
+// — `to` is exclusive, so callers pass the start of the day after the last one
+// they want. `outstanding` is always the all-time balance, because that is what
+// a seller standing in front of the courier needs to know regardless of the
+// range on screen.
+export async function fetchCourierLedger(range?: { from: string; to: string }): Promise<Record<string, CourierLedger>> {
+  const out: Record<string, CourierLedger> = {};
+  const ensure = (id: string) => (out[id] ??= { delivered: 0, paid: 0, outstanding: 0, orders: 0 });
+  try {
+    let ordersQ = supabase.from('orders')
+      .select('courier_id, courier_debt, paid_at')
+      .not('courier_id', 'is', null)
+      .eq('status', COURIER_DEBT_STATUS);
+    let paymentsQ = supabase.from('courier_payments').select('courier_id, amount, created_at');
+    if (range) {
+      ordersQ = ordersQ.gte('paid_at', range.from).lt('paid_at', range.to);
+      paymentsQ = paymentsQ.gte('created_at', range.from).lt('created_at', range.to);
+    }
+    const [orders, payments, allTime] = await Promise.all([
+      ordersQ,
+      paymentsQ,
+      range ? fetchCourierOutstanding() : Promise.resolve(null),
+    ]);
+
+    for (const o of orders.data ?? []) {
+      if (!o.courier_id) continue;
+      const l = ensure(o.courier_id);
+      l.orders += 1;
+      l.delivered += Number(o.courier_debt ?? 0);
+    }
+    for (const p of payments.data ?? []) {
+      if (!p.courier_id) continue;
+      ensure(p.courier_id).paid += Number(p.amount ?? 0);
+    }
+
+    if (allTime) {
+      // Couriers with a standing balance but no activity in the range still
+      // belong in the report — that is exactly who the owner is looking for.
+      for (const id of Object.keys(allTime)) ensure(id);
+      for (const id of Object.keys(out)) out[id].outstanding = allTime[id] ?? 0;
+    } else {
+      // No range: the two sums above already span everything.
+      for (const id of Object.keys(out)) out[id].outstanding = out[id].delivered - out[id].paid;
+    }
+    return out;
+  } catch { return out; }
+}
+
+// All-time balance per courier — what the seller screen shows. Negative means
+// the restaurant owes the courier (they paid, then the order came back).
+export async function fetchCourierOutstanding(): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  try {
+    const [orders, payments] = await Promise.all([
+      supabase.from('orders').select('courier_id, courier_debt')
+        .not('courier_id', 'is', null).eq('status', COURIER_DEBT_STATUS),
+      supabase.from('courier_payments').select('courier_id, amount'),
+    ]);
+    for (const o of orders.data ?? []) {
+      if (!o.courier_id) continue;
+      out[o.courier_id] = (out[o.courier_id] ?? 0) + Number(o.courier_debt ?? 0);
+    }
+    for (const p of payments.data ?? []) {
+      if (!p.courier_id) continue;
+      out[p.courier_id] = (out[p.courier_id] ?? 0) - Number(p.amount ?? 0);
+    }
+  } catch { /* ignore */ }
+  return out;
+}
+
+// Couriers with their balance already attached — the shape the seller screen
+// works in, and what /api/public-couriers returns on the terminal path. Kept as
+// one function so an authed till and a token till cannot drift apart.
+export async function fetchCouriersWithBalance(opts?: ReadOpts): Promise<Courier[]> {
+  const local = await fromLocal(opts, async (till, companyId) =>
+    ((await till.couriers(companyId)) as { couriers: Courier[] }).couriers);
+  if (local) return local;
+
+  const [list, balance] = await Promise.all([fetchCouriers(opts), fetchCourierOutstanding()]);
+  return list.map(c => ({ ...c, outstanding: balance[c.id] ?? 0 }));
+}
+
+// Full dated log of courier handovers (Ödənişlər view). Newest first.
+export async function fetchCourierPaymentLog(): Promise<CourierPayment[]> {
+  try {
+    const { data, error } = await supabase.from('courier_payments')
+      .select('id, courier_id, amount, note, created_by, shift_id, created_at, couriers(name)')
+      .order('created_at', { ascending: false }).limit(300);
+    if (error || !data) return [];
+    return data.map((p: Record<string, unknown>) => {
+      const c = (p.couriers ?? {}) as { name?: string };
+      return {
+        id: p.id as string,
+        courierId: (p.courier_id as string) ?? '',
+        courierName: c.name ?? '—',
+        amount: Number(p.amount ?? 0),
+        note: (p.note as string) ?? null,
+        createdBy: (p.created_by as string) ?? null,
+        shiftId: (p.shift_id as string) ?? null,
+        createdAt: p.created_at as string,
+      };
+    });
+  } catch { return []; }
+}
+
+// The courier hands cash over. `paymentId` is minted by the caller so a retry —
+// the offline outbox resending, a double-tap — returns the first payment instead
+// of taking the money twice. Passing `shiftId` books it into the drawer in the
+// same transaction; pass null only when the kassa module is off.
+export async function addCourierPayment(
+  courierId: string,
+  amount: number,
+  createdBy: string,
+  staffId: string | null,
+  shiftId: string | null,
+  note: string,
+  paymentId: string,
+): Promise<string | null> {
+  const { error } = await supabase.rpc('add_courier_payment', {
+    p_courier_id: courierId, p_amount: amount, p_created_by: createdBy || null,
+    p_staff_id: staffId, p_shift_id: shiftId, p_note: note || null, p_id: paymentId,
+  });
+  if (error) { console.error('[addCourierPayment]', error); return error.message; }
+  return null;
+}
+
+// The customer refused the food and the rider brought it back. The only way a
+// closed order becomes cancelled — deliberately narrow, see the migration.
+export async function returnCourierOrder(orderId: string, reason: string, by: string): Promise<boolean> {
+  const local = await toLocal(undefined, `courier-return:${orderId}`, '/api/return-courier-order', { orderId, reason, by });
+  if (local) return local.ok;
+
+  const { data, error } = await supabase.rpc('cancel_courier_order', {
+    p_order_id: orderId, p_reason: reason, p_by: by,
+  });
+  if (error) { console.error('[returnCourierOrder]', error.message); return false; }
+  return data === true;
 }
 
 export async function recordWriteoff(warehouseId: string, stockItemId: string, qty: number, reason: string): Promise<string | null> {

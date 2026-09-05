@@ -58,6 +58,7 @@ export interface TillDb {
   categories(companyId: string): Promise<unknown>;
   tables(companyId: string): Promise<unknown>;
   staff(companyId: string): Promise<unknown>;
+  couriers(companyId: string): Promise<unknown>;
   modifiers(companyId: string): Promise<unknown>;
   stations(companyId: string): Promise<unknown>;
   stationReady(companyId: string): Promise<unknown>;

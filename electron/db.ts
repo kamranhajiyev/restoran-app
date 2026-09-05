@@ -63,6 +63,26 @@ create table if not exists staff (
   doc         text not null
 );
 
+create table if not exists couriers (
+  id          text primary key,
+  company_id  text not null,
+  created_at  text not null default '',
+  doc         text not null
+);
+
+-- Courier settlements taken on this machine. Separate from the outbox, which
+-- forgets a write once it has been sent: this is what lets the Kuryerlər screen
+-- show a correct balance during an outage, by adding what this till has done to
+-- the balance the server last told it.
+create table if not exists courier_payments (
+  id          text primary key,
+  company_id  text not null,
+  courier_id  text not null,
+  amount      real not null,
+  created_at  text not null default '',
+  doc         text not null
+);
+
 create table if not exists modifier_groups (
   id          text primary key,
   company_id  text not null,

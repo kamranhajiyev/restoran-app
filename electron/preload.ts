@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('posNative', {
     categories: (companyId: string) => invoke('till:categories', companyId),
     tables: (companyId: string) => invoke('till:tables', companyId),
     staff: (companyId: string) => invoke('till:staff', companyId),
+    couriers: (companyId: string) => invoke('till:couriers', companyId),
     modifiers: (companyId: string) => invoke('till:modifiers', companyId),
     stations: (companyId: string) => invoke('till:stations', companyId),
     stationReady: (companyId: string) => invoke('till:stationReady', companyId),

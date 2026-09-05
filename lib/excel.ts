@@ -46,7 +46,7 @@ export function exportMenuExcel(menu: MenuItem[], categories: Category[]): void 
   XLSX.writeFile(wb, `menyu-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
-export function exportOrdersExcel(orders: Order[], timezone: string): void {
+export function exportOrdersExcel(orders: Order[], timezone: string, courierNames: Record<string, string> = {}): void {
   const rows = orders.map(o => {
     const gross = o.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
     const total = gross - (o.discountAmount ?? 0);
@@ -64,11 +64,16 @@ export function exportOrdersExcel(orders: Order[], timezone: string): void {
       'Endirim (₼)': o.discountAmount ?? 0,
       'Nağd (₼)': o.cashAmount ?? 0,
       'Kart (₼)': o.cardAmount ?? 0,
+      // Blank on every ordinary order. Without these two columns a delivery
+      // closed on debt shows 0 nağd, 0 kart and a full total, which reads as a
+      // sale that was never paid for.
+      'Kuryer': o.courierId ? courierNames[o.courierId] ?? '—' : '',
+      'Kuryer borcu (₼)': o.courierDebt ?? 0,
       'Cəmi (₼)': o.status === 'ləğv edildi' ? '-' : Math.round(total * 100) / 100,
     };
   });
-  const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ 'Sifariş №': '', 'Satıcı': '', 'Tarix': '', 'Bağlanma': '', 'Status': '', 'Məhsullar': '', 'Endirim (₼)': '', 'Nağd (₼)': '', 'Kart (₼)': '', 'Cəmi (₼)': '' }]);
-  ws['!cols'] = [{ wch: 10 }, { wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 14 }, { wch: 50 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
+  const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ 'Sifariş №': '', 'Satıcı': '', 'Tarix': '', 'Bağlanma': '', 'Status': '', 'Məhsullar': '', 'Endirim (₼)': '', 'Nağd (₼)': '', 'Kart (₼)': '', 'Kuryer': '', 'Kuryer borcu (₼)': '', 'Cəmi (₼)': '' }]);
+  ws['!cols'] = [{ wch: 10 }, { wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 14 }, { wch: 50 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 16 }, { wch: 16 }, { wch: 10 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Sifarişlər');
   XLSX.writeFile(wb, `sifarisler-${new Date().toISOString().slice(0, 10)}.xlsx`);

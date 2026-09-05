@@ -9,7 +9,7 @@
 // Compare each read below with its route in app/api/ when changing one.
 
 import type {
-  CashShift, Category, Hall, MenuItem, ModifierGroup, Order,
+  CashShift, Category, Courier, Hall, MenuItem, ModifierGroup, Order,
   RestaurantTable, Staff, Station,
 } from '../types';
 import { db, docs, transact } from './db';
@@ -56,6 +56,54 @@ export function getStaff(companyId: string): Staff[] {
   );
 }
 
+/**
+ * Couriers, with a balance the till can trust while the line is down.
+ *
+ * `outstanding` arrives from the server as a snapshot — it has to, because a
+ * courier's debt can be older than the window of orders this machine keeps, so
+ * there is nothing local to recompute it from. What the till *can* do is add
+ * what has happened here since that snapshot was taken: deliveries closed on
+ * debt, and cash taken off a courier at this counter. Both are filtered by the
+ * snapshot's own timestamp, so once a sync folds them into the server's number
+ * they stop being counted twice.
+ */
+export function getCouriers(companyId: string): Courier[] {
+  const rows = docs<Courier & { outstanding?: number; syncedAt?: string }>(
+    db().prepare('select doc from couriers where company_id = ? order by created_at').all(companyId),
+  );
+
+  return rows.map(c => {
+    const since = c.syncedAt ?? '';
+    const delivered = db().prepare(
+      `select coalesce(sum(json_extract(doc, '$.courierDebt')), 0) as v from orders
+        where company_id = ? and json_extract(doc, '$.courierId') = ?
+          and json_extract(doc, '$.status') = 'ödənilib'
+          and coalesce(json_extract(doc, '$.paidAt'), '') > ?`,
+    ).get(companyId, c.id, since) as { v: number };
+    const paid = db().prepare(
+      'select coalesce(sum(amount), 0) as v from courier_payments where company_id = ? and courier_id = ? and created_at > ?',
+    ).get(companyId, c.id, since) as { v: number };
+
+    return { ...c, outstanding: (c.outstanding ?? 0) + (delivered.v ?? 0) - (paid.v ?? 0) };
+  });
+}
+
+/** One settlement taken at this counter. Ignores an id already present, so a
+ *  replayed request cannot decrement the same balance twice. */
+export function addCourierPayment(
+  companyId: string,
+  row: { id: string; courierId: string; amount: number; createdAt: string; createdBy?: string; shiftId?: string | null },
+): void {
+  db().prepare(
+    `insert or ignore into courier_payments (id, company_id, courier_id, amount, created_at, doc)
+     values (?, ?, ?, ?, ?, ?)`,
+  ).run(row.id, companyId, row.courierId, row.amount, row.createdAt, JSON.stringify(row));
+}
+
+export function hasCourierPayment(id: string): boolean {
+  return !!db().prepare('select 1 from courier_payments where id = ?').get(id);
+}
+
 export function getModifierGroups(companyId: string): ModifierGroup[] {
   return docs<ModifierGroup>(
     db().prepare('select doc from modifier_groups where company_id = ? order by position').all(companyId),
@@ -69,7 +117,7 @@ export function getStations(companyId: string): Station[] {
 }
 
 /** One reference table, replaced. Callers pass rows already in domain shape. */
-type RefTable = 'menu_items' | 'categories' | 'tables' | 'halls' | 'staff' | 'modifier_groups' | 'stations';
+type RefTable = 'menu_items' | 'categories' | 'tables' | 'halls' | 'staff' | 'couriers' | 'modifier_groups' | 'stations';
 
 export function replaceReference(
   table: RefTable,
@@ -94,8 +142,9 @@ export function replaceReference(
             .run(Number(row.id), companyId, doc);
           break;
         case 'staff':
+        case 'couriers':
           handle
-            .prepare('insert into staff (id, company_id, created_at, doc) values (?, ?, ?, ?)')
+            .prepare(`insert into ${table} (id, company_id, created_at, doc) values (?, ?, ?, ?)`)
             .run(String(row.id), companyId, String(row.createdAt ?? ''), doc);
           break;
         default:

@@ -169,8 +169,12 @@ export async function printBill(order: Order, companyName: string, logoUrl?: str
 export async function printReceipt(order: Order, companyName: string, logoUrl?: string | null): Promise<boolean> {
   try {
     const logo = await loadLogo(logoUrl);
-    const total = (order.cashAmount ?? 0) + (order.cardAmount ?? 0) + (order.discountAmount ?? 0);
-    const paid = (order.cashAmount ?? 0) + (order.cardAmount ?? 0);
+    // A courier order closed on debt tenders nothing, so cash+card is 0. Reading
+    // the total off that would print a 0.00 receipt and, worse, divide by zero
+    // when reconstructing a percentage discount below.
+    const debt = order.courierDebt ?? 0;
+    const paid = (order.cashAmount ?? 0) + (order.cardAmount ?? 0) || debt;
+    const total = paid + (order.discountAmount ?? 0);
 
     const lines: Line[] = [...head(order, companyName), ...itemLines(order)];
 
@@ -191,6 +195,12 @@ export async function printReceipt(order: Order, companyName: string, logoUrl?: 
     if ((order.cashAmount ?? 0) > 0) lines.push({ text: row('Nağd:', money(order.cashAmount!)) });
     if ((order.cardAmount ?? 0) > 0) lines.push({ text: row('Kart:', money(order.cardAmount!)) });
     if ((order.changeAmount ?? 0) > 0) lines.push({ text: row('Qaytarıldı:', money(order.changeAmount!)) });
+    // The guest has not paid yet — the rider collects at the door. Saying so on
+    // the slip is the difference between a receipt and a demand for money.
+    if (debt > 0) {
+      lines.push({ text: row('ÖDƏNİLMƏYİB:', money(debt)) });
+      lines.push({ text: 'Kuryer yığacaq', center: true });
+    }
 
     lines.push({ text: '-'.repeat(WIDTH), center: true });
     lines.push({ text: 'Təşəkkürlər!', center: true });

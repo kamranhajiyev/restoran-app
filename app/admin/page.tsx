@@ -5,7 +5,7 @@ import {
   LayoutDashboard,
   PanelLeftClose, PanelLeftOpen, LogOut, Menu, X,
   TrendingUp, Receipt, Star, ChevronDown, Percent,
-  Coffee, BarChart2, Package, Wallet, ImageIcon, Trash2, RotateCcw,
+  Coffee, BarChart2, Package, Bike, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
   GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link, Printer, Check, ArrowUp, ArrowDown, ChefHat,
   Building2, AtSign,
@@ -37,6 +37,7 @@ import {
   fetchBranding, setLogoUrl as saveLogoUrl, setBrandColor as saveBrandColor,
   fetchStations, fetchModifierGroups,
   fetchAllUsers, createEmployee, updateEmployee, deleteUser, toggleUserActive,
+  fetchCouriers,
 } from '@/lib/store';
 import { applyBrand, BRAND_PRESETS, DEFAULT_BRAND } from '@/lib/branding';
 import { orderClosedAt, orderSuspicion, isSuspiciousOrder } from '@/lib/order-items';
@@ -48,6 +49,7 @@ import { supabase } from '@/lib/supabase';
 import { CashShift, Category, Hall, MenuItem, MenuItemVariant, ModifierGroup, Order, OrderStatus, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, TrashItem, isOrderOpen } from '@/types';
 import AppDialog, { DialogState } from '@/components/AppDialog';
 import AnbarPanel from '@/components/AnbarPanel';
+import CourierPanel from '@/components/CourierPanel';
 import StationsPanel from '@/components/StationsPanel';
 import ModifiersPanel from '@/components/ModifiersPanel';
 import OrderItemHistory from '@/components/OrderItemHistory';
@@ -99,7 +101,7 @@ const STATUS_LABELS: Record<OrderStatus, string> = {
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
 
-type Tab = 'stats' | 'orders' | 'kassa' | 'menu' | 'users' | 'tables' | 'anbar' | 'logins';
+type Tab = 'stats' | 'orders' | 'kassa' | 'menu' | 'users' | 'tables' | 'anbar' | 'couriers' | 'logins';
 
 type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
@@ -163,6 +165,7 @@ const NAV_ITEMS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'users',      label: 'Əməkdaşlar', icon: Users },
   { id: 'tables',     label: 'Masalar',     icon: LayoutDashboard },
   { id: 'anbar',      label: 'Anbar',       icon: Package },
+  { id: 'couriers',   label: 'Kuryerlər',   icon: Bike },
   { id: 'logins',     label: 'Girişlər',    icon: Globe },
 ];
 
@@ -174,6 +177,7 @@ const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
   users:      { title: 'Əməkdaşlar',              subtitle: 'Satıcıları idarə et' },
   tables:     { title: 'Masalar',                 subtitle: 'Restoran masalarını idarə et' },
   anbar:      { title: 'Anbar',                   subtitle: 'Anbarlar, qalıqlar, tədarükçülər və bazarlıqlar' },
+  couriers:   { title: 'Kuryerlər',               subtitle: 'Kuryerlər, borclar və ödənişlər' },
   logins:     { title: 'Girişlər',                subtitle: 'Sistemə kim, haradan daxil olub' },
 };
 
@@ -699,6 +703,10 @@ function AdminPageContent() {
   const [tokenCopied, setTokenCopied] = useState(false);
   const [tokenRegenerating, setTokenRegenerating] = useState(false);
 
+  // Courier id → name, for the columns of the orders export. Orders carry only
+  // the id, and the export runs from a button that has no panel state behind it.
+  const [courierNames, setCourierNames] = useState<Record<string, string>>({});
+
   // PIN staff (Poster-style sellers — identified by PIN on the terminal)
   const [pinStaff, setPinStaff] = useState<Staff[]>([]);
   const [showStaffForm, setShowStaffForm] = useState(false);
@@ -880,6 +888,7 @@ function AdminPageContent() {
       setCustomTo(t);
     });
     fetchStaff().then(setPinStaff);
+    fetchCouriers().then(cs => setCourierNames(Object.fromEntries(cs.map(c => [c.id, c.name]))));
     fetchStations().then(setStations);
     fetchModifierGroups().then(setModifierGroups);
     fetchHalls().then(setHalls);
@@ -2083,15 +2092,21 @@ function AdminPageContent() {
     const t = orderTotal(o);
     const cashPaid = o.cashAmount ?? 0;
     const cardPaid = o.cardAmount ?? 0;
+    // A delivery the courier is collecting for tenders nothing, so it would fall
+    // through the guard below and vanish from this breakdown while still
+    // counting as revenue — the percentages would stop adding up to the day.
+    const debt = o.courierDebt ?? 0;
+    if (debt > 0) { acc.courier += Math.min(debt, t); return acc; }
     if (cashPaid + cardPaid === 0) return acc;
     const cardPart = Math.min(cardPaid, t);
     acc.card += cardPart;
     acc.cash += Math.min(cashPaid, t - cardPart);
     return acc;
-  }, { cash: 0, card: 0 });
+  }, { cash: 0, card: 0, courier: 0 });
   const cashRev = methodRev.cash;
   const cardRev = methodRev.card;
-  const totalPayRev = cashRev + cardRev;
+  const courierRev = methodRev.courier;
+  const totalPayRev = cashRev + cardRev + courierRev;
   const sellerRevMap: Record<string, { orders: number; rev: number }> = {};
   chartPaid.forEach(o => {
     const name = o.sellerName || 'Naməlum';
@@ -2650,7 +2665,10 @@ function AdminPageContent() {
                     <p className="text-sm text-stone-400 text-center py-4">Məlumat yoxdur</p>
                   ) : (
                     <div className="space-y-3">
-                      {[{ label: 'Nağd', rev: cashRev }, { label: 'Kart', rev: cardRev }].map(pm => {
+                      {/* The courier bar only appears once there is courier debt in the
+                          range — a venue without couriers should not read a permanent 0%. */}
+                      {[{ label: 'Nağd', rev: cashRev }, { label: 'Kart', rev: cardRev },
+                        ...(courierRev > 0 ? [{ label: 'Kuryer borcu', rev: courierRev }] : [])].map(pm => {
                         const pct = totalPayRev > 0 ? (pm.rev / totalPayRev) * 100 : 0;
                         return (
                           <div key={pm.label}>
@@ -2866,7 +2884,7 @@ function AdminPageContent() {
                 </p>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => exportOrdersExcel(visibleOrders, bizSettings.timezone)}
+                    onClick={() => exportOrdersExcel(visibleOrders, bizSettings.timezone, courierNames)}
                     title="Excel-ə ixrac et"
                     className="flex items-center gap-1.5 text-xs font-medium text-stone-500 hover:text-stone-700 px-3 py-1.5 rounded-lg hover:bg-stone-100 transition-colors"
                   >
@@ -3060,7 +3078,10 @@ function AdminPageContent() {
                                   Ödənişsiz bağla
                                 </button>
                               )}
-                              {order.status === 'ödənilib' && (
+                              {/* Not offered on a delivery the courier is still collecting for:
+                                  its money is tracked as courier debt, and rewriting cash/card
+                                  here would count it twice. The store layer refuses it too. */}
+                              {order.status === 'ödənilib' && (order.courierDebt ?? 0) === 0 && (
                                 <button
                                   onClick={() => {
                                     setEditingPaymentOrder(order);
@@ -3874,6 +3895,13 @@ function AdminPageContent() {
           {tab === 'anbar' && (
             <div className="max-w-3xl">
               <AnbarPanel setDialog={setDialog} />
+            </div>
+          )}
+
+          {/* ── KURYERLƏR ──────────────────────────────────────────────── */}
+          {tab === 'couriers' && (
+            <div className="max-w-3xl">
+              <CourierPanel setDialog={setDialog} bizSettings={bizSettings} />
             </div>
           )}
 

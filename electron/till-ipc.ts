@@ -147,6 +147,8 @@ export function registerTillHandlers(appUrl: string): void {
 
   ipcMain.handle('till:staff', (_e, companyId) => ({ staff: repo.getStaff(asCompanyId(companyId)) }));
 
+  ipcMain.handle('till:couriers', (_e, companyId) => ({ couriers: repo.getCouriers(asCompanyId(companyId)) }));
+
   ipcMain.handle('till:modifiers', (_e, companyId) => ({
     groups: repo.getModifierGroups(asCompanyId(companyId)),
   }));
@@ -183,7 +185,7 @@ export function registerTillHandlers(appUrl: string): void {
   // table at a time, so the setup screen can report progress per step and
   // resume at the one that failed rather than starting over.
   ipcMain.handle('till:putReference', (_e, table, companyId, rows) => {
-    const allowed = ['menu_items', 'categories', 'tables', 'halls', 'staff', 'modifier_groups', 'stations'] as const;
+    const allowed = ['menu_items', 'categories', 'tables', 'halls', 'staff', 'couriers', 'modifier_groups', 'stations'] as const;
     type Ref = (typeof allowed)[number];
     if (typeof table !== 'string' || !allowed.includes(table as Ref)) throw new Error('bad table');
     repo.replaceReference(table as Ref, asCompanyId(companyId), asRows(rows));

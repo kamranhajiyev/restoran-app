@@ -31,7 +31,7 @@ const ORDER_WINDOW = 200;
 
 export type StepId =
   | "menu" | "categories" | "modifiers" | "stations"
-  | "tables" | "staff" | "orders" | "settings" | "shift" | "images";
+  | "tables" | "staff" | "couriers" | "orders" | "settings" | "shift" | "images";
 
 export interface StepProgress {
   id: StepId;
@@ -162,6 +162,20 @@ const STEPS: Step[] = [
     run: async (companyId, db) => {
       const { staff } = await serverRead<{ staff: unknown[] }>(db, "public-staff", companyId);
       return replace(db, "staff", companyId, staff ?? []);
+    },
+  },
+  {
+    id: "couriers",
+    label: "Kuryerlər",
+    run: async (companyId, db) => {
+      const { couriers } = await serverRead<{ couriers: Record<string, unknown>[] }>(
+        db, "public-couriers", companyId,
+      );
+      // Each row carries the balance the server computed and the moment it did.
+      // The till adds its own deliveries and settlements on top of that, counting
+      // only the ones later than this stamp — see getCouriers in till-repo.ts.
+      const syncedAt = new Date().toISOString();
+      return replace(db, "couriers", companyId, (couriers ?? []).map(c => ({ ...c, syncedAt })));
     },
   },
   {

@@ -63,6 +63,8 @@ async function readLocally(url: URL): Promise<Response | null> {
       return reply(await till.tables(companyId));
     case "/api/public-staff":
       return reply(await till.staff(companyId));
+    case "/api/public-couriers":
+      return reply(await till.couriers(companyId));
     case "/api/public-modifiers":
       return reply(await till.modifiers(companyId));
     case "/api/public-stations":

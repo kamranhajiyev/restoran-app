@@ -14,6 +14,7 @@ import {
 } from '@/lib/store';
 import { Warehouse as Wh, Supplier, StockItem, StockBalance, StockReceipt, ReceiptLine, ReceiptLineDetail, StockTransfer, TransferLine, TransferLineDetail, WriteoffEntry, SupplierLedger, SupplierPayment, MenuItem, RecipeLineRow, RecipeIngredient } from '@/types';
 import { DialogState } from '@/components/AppDialog';
+import { inputCls, btnPrimary, btnGhost, Modal, Empty } from '@/components/panel-ui';
 
 type Sub = 'warehouses' | 'balances' | 'suppliers' | 'payments' | 'receipts' | 'transfers' | 'writeoffs' | 'recipes';
 
@@ -30,9 +31,6 @@ const SUBS: { id: Sub; label: string; icon: React.ElementType }[] = [
 
 const UNITS = ['ədəd', 'kq', 'q', 'litr', 'ml', 'paket'];
 
-const inputCls = 'w-full px-3 py-2 text-sm rounded-lg border border-stone-200 focus:outline-none focus:ring-2 focus:ring-stone-300';
-const btnPrimary = 'inline-flex items-center gap-1.5 px-3.5 py-2 text-sm rounded-lg bg-stone-800 hover:bg-stone-700 text-white font-medium transition-colors disabled:opacity-50';
-const btnGhost = 'inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors';
 
 export default function AnbarPanel({ setDialog }: { setDialog: (d: DialogState | null) => void }) {
   // Persist the active sub-tab in the URL (?sub=…) so a refresh keeps you where you were instead of
@@ -1226,17 +1224,3 @@ function RecipeModal({ menuItem, items, initial, onClose, onSaved, fail }: {
 
 // ─── shared bits ────────────────────────────────────────────────────────────────
 
-function Modal({ title, children, onClose, wide }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className={`bg-white rounded-2xl shadow-xl p-6 w-full max-h-[90vh] overflow-y-auto ${wide ? 'max-w-lg' : 'max-w-sm'}`} onClick={e => e.stopPropagation()}>
-        <h3 className="text-base font-semibold text-stone-800 mb-4">{title}</h3>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function Empty({ msg }: { msg: string }) {
-  return <div className="bg-white rounded-2xl border border-stone-100 p-8 text-center text-sm text-stone-400">{msg}</div>;
-}

@@ -44,11 +44,15 @@ export function buildStationTicketRaster(p: TicketPayload): Uint8Array {
 
   // The old table is the whole point of a move slip: the ticket already at this
   // station names it, and that's the one being corrected.
-  lines.push({
-    text: p.kind === 'move'
-      ? `Masa: ${tableLabel(p.fromTable)} -> ${tableLabel(p.table)}`
-      : `Masa: ${tableLabel(p.table)}`,
-  });
+  lines.push(
+    p.kind === 'move'
+      ? { text: `Masa: ${tableLabel(p.fromTable)} -> ${tableLabel(p.table)}` }
+      // A courier order has no table, and "Takeaway" would send the food to the
+      // counter instead of to the rider waiting for it.
+      : p.courier
+      ? { text: `KURYER: ${p.courier}` }
+      : { text: `Masa: ${tableLabel(p.table)}` },
+  );
 
   lines.push({ text: when });
   if (p.waiter) lines.push({ text: `Ofisiant: ${p.waiter}` });

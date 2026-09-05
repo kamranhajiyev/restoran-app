@@ -6,6 +6,7 @@ import {
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
   ShoppingCart, ChevronLeft, ChevronRight, ChevronDown, Minus, Plus, Wallet,
   History, Search, Delete, KeyRound, Trash2, Check, Bell, BellOff, AlertTriangle, Printer, CloudOff,
+  Bike, Undo2,
 } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
@@ -15,13 +16,14 @@ import {
   fetchCompanySettings, fetchStaff, verifyStaffPin, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
   fetchStations, fetchStationReady, fetchModifierGroups, type StationReady,
+  fetchCouriersWithBalance, addCourierPayment, returnCourierOrder,
 } from '@/lib/store';
 import { menuIndex, stationForItem, readyStationIds } from '@/lib/stations';
 import { unlockSound, armSoundOnFirstGesture, playOrderReady } from '@/lib/sound';
 import { applyBrand } from '@/lib/branding';
 import { orderClosedAt } from '@/lib/order-items';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
-import { CashShift, Category, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
+import { CashShift, Category, Courier, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, openCashDrawer } from '@/lib/printer';
@@ -69,9 +71,13 @@ function normalizeTables(rows: ApiTableRow[]): RestaurantTable[] {
   return rows.map(({ hall_id, ...t }) => ({ ...t, hallId: hall_id ?? undefined }));
 }
 
-type View = 'orders' | 'new-order' | 'menu' | 'kassa' | 'history';
+type View = 'orders' | 'new-order' | 'menu' | 'kassa' | 'history' | 'couriers';
 type PayMethod = 'nağd' | 'kart';
-type OrderType = 'masa' | 'takeaway';
+type OrderType = 'masa' | 'takeaway' | 'kuryer';
+// How a courier order closes. 'paid' is the ordinary cash/card sheet — the guest
+// settled at the counter. 'debt' tenders nothing and books the total against the
+// rider instead.
+type CourierPayMode = 'paid' | 'debt';
 
 const STATUS_COLORS: Record<OrderStatus, string> = {
   'gözləyir':  'bg-primary-100 text-primary-700',
@@ -213,6 +219,13 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [kassaOn, setKassaOn]               = useState(false);
   const [orderType, setOrderType]           = useState<OrderType | null>(null);
   const [selectedTable, setSelectedTable]   = useState<number | null>(null);
+  // Couriers. `outstanding` on each row is what the rider is holding: the server's
+  // figure, already adjusted by anything this till has done since its last sync.
+  const [couriers, setCouriers]             = useState<Courier[]>([]);
+  const [selectedCourier, setSelectedCourier] = useState<string | null>(null);
+  const [payingCourier, setPayingCourier]   = useState<Courier | null>(null);
+  const [courierInput, setCourierInput]     = useState('');
+  const [courierBusy, setCourierBusy]       = useState(false);
   const [cart, setCart]                     = useState<OrderItem[]>([]);
   const [activeCategory, setActiveCategory] = useState('');
   const [note, setNote]                     = useState('');
@@ -392,6 +405,13 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [cardInput, setCardInput]     = useState('');
   const [discountInput, setDiscountInput] = useState('');
   const [discountType, setDiscountType]   = useState<'%' | '₼'>('₼');
+  // Courier orders only: which of the two ways this one is closing.
+  const [courierMode, setCourierMode]     = useState<CourierPayMode>('paid');
+
+  // "Qaytarıldı" — the customer refused the food and the rider brought it back.
+  const [returningOrder, setReturningOrder] = useState<Order | null>(null);
+  const [returnReason, setReturnReason]     = useState('');
+  const [returnBusy, setReturnBusy]         = useState(false);
 
   // kassa (cash shift)
   const [shift, setShift]               = useState<CashShift | null>(null);
@@ -440,7 +460,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     if (!silent) setPullRefreshing(true);
     try {
       if (overrideCompanyId) {
-        const [m, o, c, tb, st, rd, mg] = await Promise.all([
+        const [m, o, c, tb, st, rd, mg, kr] = await Promise.all([
           tillFetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
           tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
           tillFetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
@@ -448,23 +468,26 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
           tillFetch(`/api/public-staff?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.staff ?? []).catch(() => null),
           tillFetch(`/api/public-station-ready?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.ready ?? []).catch(() => null),
           tillFetch(`/api/public-modifiers?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.groups ?? null).catch(() => null),
+          tillFetch(`/api/public-couriers?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.couriers ?? null).catch(() => null),
         ]);
         setMenu(m); setOrders(o); setTables(tb.tables); setHalls(tb.halls);
         setAvailableCategories(c.filter((cat: { available: boolean }) => cat.available));
         if (st) setPinStaffList(st);
         if (rd) setReadyRows(rd);
+        if (kr) setCouriers(kr);
         // Keep the sets already in hand if the read failed: an empty list would
         // silently drop priced options off the next sale.
         if (mg) setModifierGroups(mg);
       } else {
-        const [m, o, c, st, s, mg, tb, hl] = await Promise.all([
+        const [m, o, c, st, s, mg, tb, hl, kr] = await Promise.all([
           fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(), fetchModifierGroups(),
-          fetchTables(), fetchHalls(),
+          fetchTables(), fetchHalls(), fetchCouriersWithBalance(),
         ]);
         setMenu(m); setOrders(o); setShift(s); setTables(tb); setHalls(hl);
         setAvailableCategories(c.filter(cat => cat.available));
         setPinStaffList(st);
         setModifierGroups(mg);
+        setCouriers(kr);
       }
     } catch { /* ignore */ } finally {
       if (!silent) setPullRefreshing(false);
@@ -784,6 +807,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       });
       tillFetch(`/api/public-modifiers?companyId=${overrideCompanyId}`)
         .then(r => r.json()).then(d => setModifierGroups(d.groups ?? [])).catch(() => {});
+      tillFetch(`/api/public-couriers?companyId=${overrideCompanyId}`)
+        .then(r => r.json()).then(d => setCouriers(d.couriers ?? [])).catch(() => {});
       Promise.all([
         tillFetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
         tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
@@ -1106,20 +1131,56 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     setActiveHallId(prev => (prev && halls.some(h => h.id === prev) ? prev : halls[0].id));
   }, [halls]);
 
+  // Couriers the seller can pick from, and whether the feature is on screen at
+  // all. A restaurant with no couriers on file never sees any of it.
+  const activeCouriers = useMemo(() => couriers.filter(c => c.active), [couriers]);
+  const courierNames = useMemo(
+    () => Object.fromEntries(couriers.map(c => [c.id, c.name])) as Record<string, string>,
+    [couriers],
+  );
+  const courierDebtTotal = useMemo(
+    () => couriers.reduce((s, c) => s + Math.max(0, c.outstanding ?? 0), 0),
+    [couriers],
+  );
+
+  // Returns the list as well as storing it: the shift-close check needs the
+  // figure in the same tick, and reading `couriers` there would see the render
+  // before this one.
+  const refreshCouriers = useCallback(async (): Promise<Courier[] | null> => {
+    try {
+      if (overrideCompanyId) {
+        const d = await tillFetch(`/api/public-couriers?companyId=${overrideCompanyId}`).then(r => r.json());
+        if (!d.couriers) return null;
+        setCouriers(d.couriers);
+        return d.couriers as Courier[];
+      }
+      const list = await fetchCouriersWithBalance();
+      setCouriers(list);
+      return list;
+    } catch {
+      // Keep what is on screen — an empty list would read as "nobody owes anything".
+      return null;
+    }
+  }, [overrideCompanyId]);
+
   function handleNav(id: View) {
     if (id === 'kassa' && !kassaOn) return;
     setAppendOrderId(null);
+    if (id === 'couriers') refreshCouriers();
     if (id === 'new-order') {
-      if (!tablesOn) { startNewOrder('takeaway'); return; }
-      setOrderType(null); setCart([]);
+      // Tables off used to mean "there is only one kind of order". With couriers
+      // on file there are two, so the chooser has to appear after all.
+      if (!tablesOn && activeCouriers.length === 0) { startNewOrder('takeaway'); return; }
+      setOrderType(null); setCart([]); setSelectedCourier(null);
     }
     setView(id);
   }
 
-  function startNewOrder(type: OrderType, tableNum?: number) {
+  function startNewOrder(type: OrderType, tableNum?: number, courierId?: string) {
     setAppendOrderId(null);
     setOrderType(type);
     setSelectedTable(tableNum ?? null);
+    setSelectedCourier(courierId ?? null);
     setCart([]);
     setNote('');
     setMenuSearch('');
@@ -1240,6 +1301,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     if (appendOrderId) { submitAppend(); return; }
     if (cart.length === 0 || submitting) return;
     if (orderType === 'masa' && !selectedTable) return;
+    if (orderType === 'kuryer' && !selectedCourier) return;
     setSubmitting(true);
     const order: Order = {
       id: crypto.randomUUID(),
@@ -1249,12 +1311,13 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       // order: that number is the one that gets printed, so it must come from
       // the whole local table rather than from whatever is on screen.
       orderNumber: hasLocalDb() ? 0 : (orders[0]?.orderNumber ?? 0) + 1,
-      tableNumber: orderType === 'takeaway' ? 0 : selectedTable!,
+      tableNumber: orderType === 'masa' ? selectedTable! : 0,
       items: named(cart),
       status: 'gözləyir',
       createdAt: new Date().toISOString(),
       sellerName: effectiveSeller,
       staffId: activeStaff?.id,
+      courierId: orderType === 'kuryer' ? selectedCourier! : undefined,
       note: note.trim() || undefined,
     };
     // Offline the insert cannot go now, but the order still exists: it goes into
@@ -1282,7 +1345,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       return;
     }
     setOrders(prev => [order, ...prev]);
-    setCart([]); setNote(''); setSelectedTable(null); setOrderType(null);
+    setCart([]); setNote(''); setSelectedTable(null); setOrderType(null); setSelectedCourier(null);
     setMobileCartOpen(false);
     setView('orders');
     // No payment sheet here on purpose. It used to open the moment the order was
@@ -1354,6 +1417,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     setCardInput('');
     setDiscountInput('');
     setDiscountType('₼');
+    // A courier order opens on the debt path, because that is the ordinary case:
+    // the rider is out with the food and the money is not here yet. The seller
+    // switches to "Ödənilib" only when the guest settled at the counter.
+    setCourierMode(order.courierId ? 'debt' : 'paid');
   }
 
   function calcDiscount(fullTotal: number): number {
@@ -1365,14 +1432,18 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   async function confirmPayment() {
     if (!payingOrder) return;
     const order = payingOrder;
-    const cash = parseFloat(cashInput) || 0;
-    const card = parseFloat(cardInput) || 0;
     const fullTotal = orderTotal(order);
     const discountAmt = calcDiscount(fullTotal);
     const total = fullTotal - discountAmt;
+    // The courier is collecting: nothing is tendered here, so nothing goes into
+    // the drawer and the whole discounted total rides out with the order.
+    const onDebt = !!order.courierId && courierMode === 'debt';
+    const cash = onDebt ? 0 : parseFloat(cashInput) || 0;
+    const card = onDebt ? 0 : parseFloat(cardInput) || 0;
     const overpay = Math.max(0, cash + card - total);
     const change = Math.min(overpay, cash);
     const cashKept = cash - change;
+    const courierDebt = onDebt ? total : 0;
     setPayingOrder(null);
     // The DB update is conditional — a no-op if someone else already paid this order
     // One key per order: whether this payment goes now or waits in the queue,
@@ -1381,15 +1452,21 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       ? (await postOrQueue(
           `pay:${order.id}`,
           '/api/update-order-status',
-          { orderId: order.id, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined, companyId: overrideCompanyId, token: overrideToken },
+          { orderId: order.id, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined, courierDebt, companyId: overrideCompanyId, token: overrideToken },
           overrideCompanyId,
         )).ok
-      : await updateOrderStatus(order.id, 'ödənilib', cashKept, card, change, discountAmt || undefined, discountAmt ? discountType : undefined);
+      : await updateOrderStatus(order.id, 'ödənilib', cashKept, card, change, discountAmt || undefined, discountAmt ? discountType : undefined, courierDebt);
     if (paid) {
       // paidAt mirrors what the DB just wrote, so the history shows a closing time
       // straight away instead of a dash until the next fetch
-      const paidOrder = { ...order, status: 'ödənilib' as const, paidAt: new Date().toISOString(), cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined };
+      const paidOrder = { ...order, status: 'ödənilib' as const, paidAt: new Date().toISOString(), cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined, courierDebt: courierDebt || undefined };
       setOrders(prev => prev.map(o => o.id === order.id ? paidOrder : o));
+      // The rider now owes this, and the Kuryerlər screen is one tap away —
+      // wait for a refresh and it shows yesterday's figure.
+      if (courierDebt > 0) {
+        setCouriers(prev => prev.map(c =>
+          c.id === order.courierId ? { ...c, outstanding: (c.outstanding ?? 0) + courierDebt } : c));
+      }
       if (printerConnected) {
         // The public terminal link has no session, so the name has to come off
         // the props there or the receipt prints with a blank header.
@@ -1403,6 +1480,95 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     } else {
       refreshOrders();
     }
+  }
+
+  // ── Kuryer borcu ───────────────────────────────────────────────────────────
+
+  // The courier hands cash over the counter.
+  //
+  // The payment id is minted here and used three times over: as the outbox key,
+  // as the row's primary key, and as the id of the drawer movement it produces.
+  // That is what makes a resend — a double-tap, the queue flushing twice — land
+  // on money that has already been counted instead of counting it again.
+  async function confirmCourierPayment() {
+    if (!payingCourier || courierBusy) return;
+    const courier = payingCourier;
+    const amount = Math.round((parseFloat(courierInput) || 0) * 100) / 100;
+    const owed = courier.outstanding ?? 0;
+    if (amount <= 0 || amount > owed + 0.005) return;
+
+    // Cash with no open drawer to put it in. The kassa module being on means
+    // somebody counts this till at the end of the night, and money that arrived
+    // outside a shift is money that will not be there when they do.
+    if (kassaOn && !shift) {
+      alert('Növbə bağlıdır.\n\nKuryerdən pul götürmək üçün əvvəlcə növbəni açın.');
+      return;
+    }
+
+    setCourierBusy(true);
+    const paymentId = crypto.randomUUID();
+    const ok = overrideCompanyId
+      ? (await postOrQueue(
+          `courier-pay:${paymentId}`,
+          '/api/add-courier-payment',
+          {
+            paymentId, courierId: courier.id, amount, by: effectiveSeller,
+            staffId: activeStaff?.id ?? null, shiftId: shift?.id ?? null,
+            companyId: overrideCompanyId, token: overrideToken,
+          },
+          overrideCompanyId,
+        )).ok
+      : !(await addCourierPayment(
+          courier.id, amount, effectiveSeller, activeStaff?.id ?? null, shift?.id ?? null, '', paymentId,
+        ));
+    setCourierBusy(false);
+
+    if (!ok) {
+      alert('Ödəniş yazılmadı. Yenidən cəhd edin.');
+      refreshCouriers();
+      return;
+    }
+
+    setPayingCourier(null);
+    setCourierInput('');
+    setCouriers(prev => prev.map(c => c.id === courier.id ? { ...c, outstanding: owed - amount } : c));
+    // Show it in the drawer immediately — the seller is standing at the Kassa
+    // screen a tap away, and "Kassada olmalıdır" that lags by a refresh is the
+    // number they will trust least.
+    if (shift) {
+      setShift(prev => prev && prev.id === shift.id
+        ? { ...prev, movements: [...prev.movements, { id: paymentId, at: new Date().toISOString(), amount, reason: 'Kuryer ödənişi', by: effectiveSeller }] }
+        : prev);
+    }
+  }
+
+  // The food came back. Cancels a closed courier order, which nothing else in
+  // this app is allowed to do — see supabase/migrations/20260905_couriers.sql.
+  async function confirmCourierReturn() {
+    if (!returningOrder || returnBusy) return;
+    const order = returningOrder;
+    const reason = returnReason.trim() || 'Müştəri imtina etdi';
+    setReturnBusy(true);
+    const ok = overrideCompanyId
+      ? (await postOrQueue(
+          `courier-return:${order.id}`,
+          '/api/return-courier-order',
+          { orderId: order.id, reason, by: effectiveSeller, companyId: overrideCompanyId, token: overrideToken },
+          overrideCompanyId,
+        )).ok
+      : await returnCourierOrder(order.id, reason, effectiveSeller);
+    setReturnBusy(false);
+    setReturningOrder(null);
+    setReturnReason('');
+
+    if (!ok) { refreshOrders(); return; }
+    setOrders(prev => prev.map(o => o.id === order.id
+      ? { ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: effectiveSeller, cancelledAt: new Date().toISOString() }
+      : o));
+    // The debt left with the order.
+    const debt = order.courierDebt ?? 0;
+    setCouriers(prev => prev.map(c =>
+      c.id === order.courierId ? { ...c, outstanding: (c.outstanding ?? 0) - debt } : c));
   }
 
   function openCancel(order: Order) {
@@ -1591,6 +1757,16 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       return;
     }
 
+    // Money that is out with a rider and not in the drawer. A warning, never a
+    // block: courier debt is a running balance carried across days by design, so
+    // refusing to close until every courier is square would mean the shift can
+    // never close at all — and a seller who cannot close will invent a payment.
+    const freshCouriers = (await refreshCouriers()) ?? couriers;
+    const owedNow = freshCouriers.reduce((s, c) => s + Math.max(0, c.outstanding ?? 0), 0);
+    if (owedNow > 0.005 && !confirm(
+      `Kuryerlərdə ${owedNow.toFixed(2)} ₼ borc qalıb.\n\nBu pul kassada deyil — növbənin hesabına daxil edilmir.\n\nNövbəni bağlayaq?`,
+    )) return;
+
     const counted = parseFloat(countedInput) || 0;
     const countedCard = terminalInput === '' ? undefined : parseFloat(terminalInput) || 0;
     setShiftBusy(true);
@@ -1729,6 +1905,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
             { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
             { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
             ...(kassaOn ? [{ id: 'kassa' as View, label: 'Kassa', icon: Wallet }] : []),
+            // Only where couriers exist: a restaurant that does not deliver
+            // should not carry an empty tab around for the life of the app.
+            ...(couriers.length > 0 ? [{ id: 'couriers' as View, label: 'Kuryerlər', icon: Bike }] : []),
             { id: 'history' as View,   label: 'Tarixçə',      icon: History },
           ].map(n => {
             const Icon = n.icon;
@@ -2179,13 +2358,13 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                 {prevOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
-                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
-                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
               </div>
@@ -2433,6 +2612,15 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                       </span>
                     </div>
                   )}
+                  {/* Deliberately outside the sum below: this money is on a bike,
+                      not in the drawer. It enters the drawer only when a courier
+                      hands it over, as a movement like any other. */}
+                  {courierDebtTotal > 0.005 && (
+                    <div className="flex justify-between items-baseline text-sm text-stone-600">
+                      <span>Kuryerlərdə <span className="text-xs text-stone-400">· kassada deyil</span></span>
+                      <span className="font-semibold text-red-600 tabular-nums">{courierDebtTotal.toFixed(2)} ₼</span>
+                    </div>
+                  )}
                   <div className="flex justify-between items-center border-t pt-3 font-bold text-lg">
                     <span>Kassada olmalıdır</span><span className="text-primary-700">{expectedCash.toFixed(2)} ₼</span>
                   </div>
@@ -2570,14 +2758,18 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
               <h1 className="text-lg font-semibold text-stone-900 mb-1">Yeni sifariş</h1>
               <p className="text-sm text-stone-600 mb-6">Sifariş növünü seçin</p>
 
-              <div className="grid grid-cols-2 gap-4 max-w-xs mb-8">
-                <button
-                  onClick={() => setOrderType('masa')}
-                  className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 ${orderType === 'masa' ? 'border-primary-800 bg-primary-50' : 'border-stone-200 bg-white hover:border-primary-300'}`}
-                >
-                  <UtensilsCrossed className={`w-8 h-8 ${orderType === 'masa' ? 'text-primary-800' : 'text-stone-500'}`} />
-                  <span className={`font-semibold text-sm ${orderType === 'masa' ? 'text-primary-800' : 'text-stone-600'}`}>Masa</span>
-                </button>
+              {/* Masa and Kuryer select — they need a second choice before the
+                  menu opens. Takeaway has nothing left to ask, so it starts. */}
+              <div className={`grid ${activeCouriers.length > 0 ? 'grid-cols-2 sm:grid-cols-3 max-w-md' : 'grid-cols-2 max-w-xs'} gap-4 mb-8`}>
+                {tablesOn && (
+                  <button
+                    onClick={() => setOrderType('masa')}
+                    className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 ${orderType === 'masa' ? 'border-primary-800 bg-primary-50' : 'border-stone-200 bg-white hover:border-primary-300'}`}
+                  >
+                    <UtensilsCrossed className={`w-8 h-8 ${orderType === 'masa' ? 'text-primary-800' : 'text-stone-500'}`} />
+                    <span className={`font-semibold text-sm ${orderType === 'masa' ? 'text-primary-800' : 'text-stone-600'}`}>Masa</span>
+                  </button>
+                )}
                 <button
                   onClick={() => startNewOrder('takeaway')}
                   className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-stone-200 bg-white hover:border-primary-300 transition-all active:scale-95"
@@ -2585,7 +2777,42 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   <span className="text-4xl">🥡</span>
                   <span className="font-semibold text-sm text-stone-600">Takeaway</span>
                 </button>
+                {activeCouriers.length > 0 && (
+                  <button
+                    onClick={() => setOrderType('kuryer')}
+                    className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 ${orderType === 'kuryer' ? 'border-primary-800 bg-primary-50' : 'border-stone-200 bg-white hover:border-primary-300'}`}
+                  >
+                    <Bike className={`w-8 h-8 ${orderType === 'kuryer' ? 'text-primary-800' : 'text-stone-500'}`} />
+                    <span className={`font-semibold text-sm ${orderType === 'kuryer' ? 'text-primary-800' : 'text-stone-600'}`}>Kuryer</span>
+                  </button>
+                )}
               </div>
+
+              {orderType === 'kuryer' && (
+                <div className="mb-8">
+                  <p className="text-sm font-medium text-stone-700 mb-3">Kuryeri seçin</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-w-3xl">
+                    {activeCouriers.map(c => {
+                      const owed = c.outstanding ?? 0;
+                      return (
+                        <button
+                          key={c.id}
+                          onClick={() => startNewOrder('kuryer', undefined, c.id)}
+                          className="flex flex-col items-start gap-1 p-4 rounded-2xl border-2 border-stone-200 bg-white hover:border-primary-300 transition-all active:scale-95 text-left"
+                        >
+                          <span className="font-semibold text-sm text-stone-800 truncate w-full">{c.name}</span>
+                          {/* What they already owe, right where the seller picks
+                              them — handing a fourth order to a rider carrying
+                              200 ₼ is a decision, and this is where it is made. */}
+                          <span className={`text-xs font-semibold tabular-nums ${owed > 0.005 ? 'text-red-600' : 'text-stone-400'}`}>
+                            {owed > 0.005 ? `Borc: ${owed.toFixed(2)} ₼` : 'Borcu yoxdur'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {orderType === 'masa' && (
                 <div>
@@ -2657,6 +2884,69 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ── KURYERLƏR ── */}
+          {view === 'couriers' && (
+            <div className="flex-1 p-5 md:p-8 overflow-y-auto">
+              <h1 className="text-lg font-semibold text-stone-900 mb-1">Kuryerlər</h1>
+              <p className="text-sm text-stone-600 mb-6">Kuryer pulu gətirəndə adına toxunun</p>
+
+              {courierDebtTotal > 0.005 && (
+                <div className="bg-white rounded-2xl border border-stone-100 p-4 mb-4 max-w-md flex items-baseline justify-between">
+                  <span className="text-sm text-stone-600">Kuryerlərdə cəmi</span>
+                  <span className="text-xl font-bold text-red-600 tabular-nums">{courierDebtTotal.toFixed(2)} ₼</span>
+                </div>
+              )}
+
+              <div className="space-y-2 max-w-md">
+                {/* Whoever owes something first, largest first — the seller is
+                    looking for a name they can see, not scrolling a roster. */}
+                {[...couriers]
+                  .sort((a, b) => Math.abs(b.outstanding ?? 0) - Math.abs(a.outstanding ?? 0))
+                  .map(c => {
+                    const owed = c.outstanding ?? 0;
+                    // Negative means they paid for an order that then came back:
+                    // the restaurant owes them, and calling that "debt" would
+                    // have a seller collecting money twice.
+                    const credit = owed < -0.005;
+                    const settled = Math.abs(owed) <= 0.005;
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={() => { if (!settled && !credit) { setPayingCourier(c); setCourierInput(''); } }}
+                        disabled={settled || credit}
+                        className={`w-full flex items-center justify-between gap-3 p-4 rounded-2xl border bg-white text-left transition-colors ${
+                          settled || credit ? 'border-stone-100 cursor-default' : 'border-stone-200 hover:border-primary-300 active:scale-[0.99]'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <p className="font-semibold text-sm text-stone-800 truncate">{c.name}</p>
+                          {c.phone && <p className="text-xs text-stone-500">{c.phone}</p>}
+                        </div>
+                        <div className="text-right shrink-0">
+                          {settled ? (
+                            <span className="text-sm text-stone-400">Borcu yoxdur</span>
+                          ) : credit ? (
+                            <>
+                              <p className="text-sm font-bold text-blue-600 tabular-nums">{Math.abs(owed).toFixed(2)} ₼</p>
+                              <p className="text-[11px] text-blue-500">ona qaytarılmalıdır</p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-lg font-bold text-red-600 tabular-nums">{owed.toFixed(2)} ₼</p>
+                              <p className="text-[11px] text-stone-400">borc</p>
+                            </>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                {couriers.length === 0 && (
+                  <p className="text-sm text-stone-500">Kuryer yoxdur — admin paneldən əlavə edin.</p>
+                )}
+              </div>
             </div>
           )}
 
@@ -2774,7 +3064,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                     <div className="flex items-center justify-between">
                       <div>
                         <h2 className="font-bold text-stone-800">{appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className="text-primary-700">({cartCount})</span>}</h2>
-                        <p className="text-xs text-stone-500">{appendOrder ? `№${orderLabel(appendOrder)}-ə əlavə` : !tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                        <p className="text-xs text-stone-500">{appendOrder ? `№${orderLabel(appendOrder)}-ə əlavə` : orderType === 'kuryer' ? `Kuryer · ${courierNames[selectedCourier ?? ''] ?? ''}` : !tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
                       </div>
                       {cart.length > 0 && (
                         <button onClick={() => setClearConfirm(true)} className="w-7 h-7 flex items-center justify-center rounded-lg text-stone-400 hover:text-red-500 hover:bg-red-50 transition-colors">
@@ -2849,6 +3139,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
           { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
           { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
           ...(kassaOn ? [{ id: 'kassa' as View, label: 'Kassa', icon: Wallet }] : []),
+          ...(couriers.length > 0 ? [{ id: 'couriers' as View, label: 'Kuryerlər', icon: Bike }] : []),
           { id: 'history' as View,   label: 'Tarixçə',      icon: History },
         ].map(n => {
           const Icon = n.icon;
@@ -2893,7 +3184,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                     <h2 className="font-bold text-stone-800">
                       {appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className="text-primary-700">({cartCount})</span>}
                     </h2>
-                    <p className="text-xs text-stone-500">{appendOrder ? `№${orderLabel(appendOrder)}-ə əlavə` : !tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                    <p className="text-xs text-stone-500">{appendOrder ? `№${orderLabel(appendOrder)}-ə əlavə` : orderType === 'kuryer' ? `Kuryer · ${courierNames[selectedCourier ?? ''] ?? ''}` : !tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
                   </div>
                   <div className="flex items-center gap-1">
                     {cart.length > 0 && (
@@ -3044,6 +3335,114 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         );
       })()}
 
+      {/* Courier settlement — the rider hands cash over the counter. One field,
+          no payment method: the money is cash by definition, and asking would
+          be a question with one answer. */}
+      {payingCourier && (() => {
+        const owed = payingCourier.outstanding ?? 0;
+        const amount = parseFloat(courierInput) || 0;
+        const tooMuch = amount > owed + 0.005;
+        const canTake = amount > 0 && !tooMuch;
+        const left = Math.max(0, owed - amount);
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
+            <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
+              <h3 className="font-bold text-lg text-stone-800 mb-1">{payingCourier.name}</h3>
+              <p className="text-sm text-stone-600 mb-4">Kuryerdən nə qədər aldınız?</p>
+
+              <div className="flex justify-between items-center px-4 py-3 rounded-xl bg-stone-50 mb-4">
+                <span className="text-sm text-stone-600">Borcu</span>
+                <span className="font-bold text-lg text-red-600 tabular-nums">{owed.toFixed(2)} ₼</span>
+              </div>
+
+              <div className="flex items-center gap-2 mb-4">
+                <input
+                  type="number" min="0" step="0.01" placeholder="0.00"
+                  value={courierInput}
+                  onChange={e => setCourierInput(e.target.value)}
+                  onFocus={e => e.target.select()}
+                  className="flex-1 border border-stone-200 rounded-xl px-3 py-3 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700 text-center"
+                  autoFocus
+                />
+                {/* The common case by a distance: the rider empties their pocket. */}
+                <button
+                  onClick={() => setCourierInput(owed.toFixed(2))}
+                  className="px-4 py-3 rounded-xl border border-stone-200 text-sm font-semibold text-stone-600 hover:bg-stone-50 shrink-0"
+                >
+                  Hamısı
+                </button>
+              </div>
+
+              {tooMuch && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-4">
+                  Borcundan çox ola bilməz — {owed.toFixed(2)} ₼ borcu var.
+                </p>
+              )}
+              {canTake && (
+                <div className="flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-sm mb-4 bg-green-50 text-green-700">
+                  <span>{left > 0.005 ? 'Qalan borcu' : 'Borcu bağlanır'}</span>
+                  <span className="tabular-nums">{left > 0.005 ? `${left.toFixed(2)} ₼` : '✓'}</span>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setPayingCourier(null); setCourierInput(''); }}
+                  className="py-3 px-5 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50"
+                >
+                  İmtina
+                </button>
+                <button
+                  onClick={confirmCourierPayment}
+                  disabled={!canTake || courierBusy}
+                  className="flex-1 py-3 rounded-xl bg-green-500 hover:bg-green-600 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2"
+                >
+                  {courierBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                  Aldım ✓
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* "Qaytarıldı" — the customer refused the food and it came back. */}
+      {returningOrder && (
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
+            <h3 className="font-bold text-lg text-stone-800 mb-1">Sifariş qaytarıldı</h3>
+            <p className="text-sm text-stone-600 mb-4">
+              №{orderLabel(returningOrder)} ləğv ediləcək və{' '}
+              {courierNames[returningOrder.courierId ?? ''] ?? 'kuryerin'} borcundan{' '}
+              <b className="tabular-nums">{(returningOrder.courierDebt ?? 0).toFixed(2)} ₼</b> silinəcək.
+            </p>
+            <input
+              type="text"
+              placeholder="Səbəb (istəyə bağlı)"
+              value={returnReason}
+              onChange={e => setReturnReason(e.target.value)}
+              className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 mb-4"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setReturningOrder(null); setReturnReason(''); }}
+                className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50"
+              >
+                İmtina
+              </button>
+              <button
+                onClick={confirmCourierReturn}
+                disabled={returnBusy}
+                className="flex-1 py-3 rounded-xl bg-red-500 hover:bg-red-600 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2"
+              >
+                {returnBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                Qaytarıldı
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Payment modal — bottom sheet on mobile */}
       {payingOrder && (() => {
         const fullTotal = orderTotal(payingOrder);
@@ -3053,16 +3452,43 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         const card = parseFloat(cardInput) || 0;
         const paid = cash + card;
         const missing = total - paid;
-        const canPay = paid >= total;
         const overpay = Math.max(0, cash + card - total);
         const change = Math.min(overpay, cash);
+        const isCourier = !!payingOrder.courierId;
+        const onDebt = isCourier && courierMode === 'debt';
+        // The cash/card gate is what stops an order closing for nothing, so it
+        // is bypassed here and nowhere else: on the debt path there is genuinely
+        // nothing to tender, and the total goes on the rider's balance instead.
+        const canPay = onDebt ? total > 0 : paid >= total;
         return (
           <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
             <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
               <h3 className="font-bold text-lg text-stone-800 mb-1">Ödəniş</h3>
               <p className="text-sm text-stone-600 mb-4">
-                №{orderLabel(payingOrder)}{tableName(payingOrder.tableNumber) && ` · ${tableName(payingOrder.tableNumber)}`}
+                №{orderLabel(payingOrder)}
+                {isCourier
+                  ? ` · Kuryer: ${courierNames[payingOrder.courierId!] ?? '—'}`
+                  : tableName(payingOrder.tableNumber) && ` · ${tableName(payingOrder.tableNumber)}`}
               </p>
+
+              {/* The only question a courier order asks: is the money here, or
+                  is the rider bringing it back? */}
+              {isCourier && (
+                <div className="grid grid-cols-2 gap-2 mb-4">
+                  <button
+                    onClick={() => { setCourierMode('paid'); setCashInput(total.toFixed(2)); setCardInput(''); }}
+                    className={`px-3 py-3 rounded-xl text-sm font-semibold border-2 transition-colors ${courierMode === 'paid' ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 bg-white text-stone-600'}`}
+                  >
+                    Ödənilib
+                  </button>
+                  <button
+                    onClick={() => setCourierMode('debt')}
+                    className={`px-3 py-3 rounded-xl text-sm font-semibold border-2 transition-colors ${courierMode === 'debt' ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 bg-white text-stone-600'}`}
+                  >
+                    Kuryer yığacaq
+                  </button>
+                </div>
+              )}
               <ul className="text-sm space-y-2 mb-4 border-t pt-3 max-h-40 overflow-y-auto">
                 {payingOrder.items.map((oi, i) => (
                   <li key={i} className="flex justify-between text-stone-700">
@@ -3104,6 +3530,12 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   <span className="text-primary-700">{total.toFixed(2)} ₼</span>
                 </div>
               </div>
+              {onDebt ? (
+                <div className="flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base mb-4 bg-primary-50 text-primary-800">
+                  <span>{courierNames[payingOrder.courierId!] ?? 'Kuryer'} yığacaq</span>
+                  <span className="tabular-nums">{total.toFixed(2)} ₼</span>
+                </div>
+              ) : (
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div>
                   <label className="text-xs font-medium text-stone-600 mb-1.5 flex items-center gap-1 block">💵 Nağd (₼)</label>
@@ -3141,19 +3573,20 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   />
                 </div>
               </div>
-              {paid > 0 && missing > 0 && (
+              )}
+              {!onDebt && paid > 0 && missing > 0 && (
                 <div className="flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base mb-4 bg-red-50 text-red-600">
                   <span>Çatışmır</span>
                   <span>{missing.toFixed(2)} ₼</span>
                 </div>
               )}
-              {paid > 0 && change > 0 && (
+              {!onDebt && paid > 0 && change > 0 && (
                 <div className="flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base mb-4 bg-green-50 text-green-700">
                   <span>💸 Qaytarılacaq</span>
                   <span>{change.toFixed(2)} ₼</span>
                 </div>
               )}
-              {paid > 0 && missing === 0 && overpay === 0 && (
+              {!onDebt && paid > 0 && missing === 0 && overpay === 0 && (
                 <div className="flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base mb-4 bg-green-50 text-green-700">
                   <span>Dəqiq ödəniş</span>
                   <span>✓</span>
@@ -3186,7 +3619,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   disabled={!canPay}
                   className="flex-1 py-3 rounded-xl bg-green-500 hover:bg-green-600 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors"
                 >
-                  Ödənildi ✓
+                  {onDebt ? 'Kuryerə ver ✓' : 'Ödənildi ✓'}
                 </button>
               </div>
             </div>
@@ -3378,7 +3811,7 @@ function ReadyBadge({ progress, allReady }: { progress: { done: number; total: n
 
 // ── OrderRow — mobile card + desktop table row ────────────────────────────
 
-function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItemReady, onReprint, onPay, onCancel, onAppend, onMove, onPrintBill, billBusy, onStatusChange }: {
+function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItemReady, onReprint, onPay, onCancel, onReturn, courierName, onAppend, onMove, onPrintBill, billBusy, onStatusChange }: {
   order: Order;
   tableLabel: string;
   tz: string;
@@ -3390,6 +3823,10 @@ function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItem
   onReprint: () => void;
   onPay: () => void;
   onCancel: () => void;
+  /** The food came back. Offered only on a closed courier order still carrying
+   *  debt — the one case where a paid order may be cancelled. */
+  onReturn: () => void;
+  courierName?: string;
   onAppend: () => void;
   onMove: () => void;
   onPrintBill: () => void;
@@ -3425,6 +3862,18 @@ function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItem
                 <span className="text-primary-700 font-bold text-sm">№{orderLabel(order)}</span>
                 <OrderSyncDot unsent={unsent} />
                 {tableLabel && <span className="text-stone-800 font-semibold text-sm">{tableLabel}</span>}
+                {/* A courier order has no table, and the row would otherwise be
+                    indistinguishable from a takeaway sitting on the counter. */}
+                {courierName && (
+                  <span className="flex items-center gap-1 text-stone-800 font-semibold text-sm">
+                    <Bike className="w-3.5 h-3.5 text-stone-500" />{courierName}
+                  </span>
+                )}
+                {(order.courierDebt ?? 0) > 0 && (
+                  <span className="text-[11px] font-semibold text-red-600 bg-red-50 border border-red-100 rounded px-1.5 py-0.5 tabular-nums">
+                    borc {order.courierDebt!.toFixed(2)} ₼
+                  </span>
+                )}
               </div>
               <p className="text-xs text-stone-500 pl-5">
                 {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: tz })} · {elapsed(order.createdAt)}
@@ -3555,6 +4004,13 @@ function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItem
                   Ödənişsiz bağla
                 </button>
               </>
+            )}
+            {/* Closed, but the money is still out on a bike and the food is back
+                on the counter. Nothing else in this app reopens a paid order. */}
+            {order.status === 'ödənilib' && (order.courierDebt ?? 0) > 0 && (
+              <button onClick={onReturn} className="flex items-center gap-1 border border-amber-300 text-amber-700 hover:bg-amber-50 text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
+                <Undo2 className="w-3.5 h-3.5" />Qaytarıldı
+              </button>
             )}
           </div>
           <div className="text-right">
