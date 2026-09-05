@@ -506,11 +506,14 @@ function StationCard({
         : 'bg-white border-stone-100'
       }`}
     >
+      {/* The table is what a cook actually calls out and what the waiter comes back
+          for; the order number is a receipt detail nobody cooks from. So the table
+          is the headline and the number is the small print — it used to be reversed. */}
       <div className="flex items-baseline justify-between gap-[0.5em] px-[1em] pt-[0.75em]">
-        <span className="text-[1.125em] font-bold">#{orderLabel(order)}</span>
-        <span className="text-[0.875em] text-stone-500">
+        <span className="text-[1.5em] font-bold leading-tight truncate">
           {order.tableNumber ? `Masa ${order.tableNumber}` : 'Özü ilə'}
         </span>
+        <span className="text-[0.8em] text-stone-400 tabular-nums shrink-0">#{orderLabel(order)}</span>
       </div>
 
       {/* Always visible: newest-first only works if an old card still shouts. */}
@@ -533,11 +536,16 @@ function StationCard({
             )}
             <ul className="space-y-[0.375em]">
               {batch.items.map((item, j) => (
-                <li key={item.id ?? `${i}-${j}`} className="flex gap-[0.5em] text-[0.875em]">
-                  <span className={`font-bold tabular-nums ${item.removedAt ? 'text-stone-400' : 'text-stone-800'}`}>
-                    {item.quantity}×
+                <li key={item.id ?? `${i}-${j}`} className="flex items-start gap-[0.6em] text-[0.875em]">
+                  {/* A filled badge, not "2×" in the same ink as the dish. How many is
+                      the number a cook gets wrong from across the room, and a count
+                      that reads as part of the name is the way that happens. */}
+                  <span className={`shrink-0 min-w-[1.9em] text-center rounded-lg px-[0.25em] py-[0.1em] text-[1.15em] font-bold tabular-nums leading-snug ${
+                    item.removedAt ? 'bg-stone-200 text-stone-400' : 'bg-stone-800 text-white'
+                  }`}>
+                    {item.quantity}
                   </span>
-                  <span className={item.removedAt ? 'line-through text-stone-400' : ''}>
+                  <span className={`leading-snug ${item.removedAt ? 'line-through text-stone-400' : 'font-semibold'}`}>
                     {item.menuItem.name}
                     {item.modifiers && (
                       <span className="block text-[0.857em] text-stone-500">{item.modifiers}</span>
