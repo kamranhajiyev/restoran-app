@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, CircleCheck } from 'lucide-react';
+import { Bell, CircleCheck, Check, Settings } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
@@ -28,6 +28,21 @@ const LATE_MS = 15 * 60 * 1000;
 // Re-renders the waiting times. Nothing else would: a quiet realtime channel means
 // a card's clock would otherwise freeze at whatever it said when it arrived.
 const CLOCK_MS = 10 * 1000;
+
+// Card text size, in px, for the whole card: everything inside is sized in `em`, so
+// this one number drives it. Older cooks read the screen from further away than the
+// person who signed off on the design ever did — and the eyes differ cook to cook,
+// so the choice belongs to the device, not the company.
+// Not persisted yet: the pick resets on reload until we decide where it lives.
+const FONT_PX = [16, 20, 25] as const;
+const FONT_LABELS = ['Normal', 'Böyük', 'Ən böyük'] as const;
+// Big text in four columns is worse than big text in two. Widen the cards as the
+// type grows rather than letting every dish name wrap.
+const FONT_GRID = [
+  'sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4',
+  'sm:grid-cols-2 xl:grid-cols-3',
+  'lg:grid-cols-2',
+] as const;
 
 // When this sex's clock on a card starts: the oldest thing it still has to make,
 // not the order's own age. After "Hazırdır" the card only comes back for items
@@ -77,6 +92,8 @@ export default function StationPage() {
   const [now, setNow] = useState(() => Date.now());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [logoutConfirm, setLogoutConfirm] = useState(false);
+  const [fontLevel, setFontLevel] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const refreshOrders = useCallback(async () => {
     const [o, r] = await Promise.all([
@@ -321,7 +338,14 @@ export default function StationPage() {
           <p className="text-xs text-stone-500 truncate">{employeeName}</p>
         </div>
         <div className="flex items-center gap-2">
-          {!online && <span className="text-xs px-2 py-1 rounded-lg bg-red-100 text-red-600">Bağlantı yoxdur</span>}
+          <button
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Tənzimləmələr"
+            className="p-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-600 transition-colors active:scale-95"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
+          {!online &&<span className="text-xs px-2 py-1 rounded-lg bg-red-100 text-red-600">Bağlantı yoxdur</span>}
           {!realtimeUp && online && <span className="text-xs px-2 py-1 rounded-lg bg-stone-100 text-stone-500">Yenilənir…</span>}
           <span className="text-sm tabular-nums px-2 py-1 rounded-lg bg-stone-100 text-stone-600">{cards.length}</span>
           <button
@@ -363,7 +387,7 @@ export default function StationPage() {
             </div>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+          <div className={`grid gap-4 ${FONT_GRID[fontLevel]}`}>
             {cards.map(card => (
               <StationCard
                 key={card.order.id}
@@ -372,6 +396,7 @@ export default function StationPage() {
                 removedItems={card.removedItems}
                 since={card.since}
                 now={now}
+                fontPx={FONT_PX[fontLevel]}
                 busy={busyId === card.order.id}
                 onReady={() => { onReady(card.order.id); setLastDone({ id: card.order.id, number: card.order.orderNumber }); }}
               />
@@ -379,6 +404,52 @@ export default function StationPage() {
           </div>
         )}
       </main>
+
+      {settingsOpen && (
+        // Tapping the backdrop closes it: the way out must not depend on finding a
+        // small × — the same eyes that need the big type have to be able to leave.
+        <div
+          className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+          onClick={() => setSettingsOpen(false)}
+        >
+          <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-xl p-5 w-full max-w-sm">
+            <h2 className="text-lg font-bold mb-1">Tənzimləmələr</h2>
+            <p className="text-sm text-stone-500 mb-4">Yazı ölçüsü</p>
+
+            <div className="space-y-2">
+              {FONT_PX.map((px, i) => (
+                // Each row is set in the size it selects — the choice is previewed, not
+                // described, so nothing has to be read to be understood.
+                <button
+                  key={px}
+                  onClick={() => setFontLevel(i)}
+                  aria-pressed={fontLevel === i}
+                  className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl border-2 text-left transition-colors ${
+                    fontLevel === i
+                      ? 'border-primary-800 bg-primary-50'
+                      : 'border-stone-200 hover:bg-stone-50'
+                  }`}
+                >
+                  <span className="flex items-baseline gap-3 min-w-0">
+                    <span className="font-bold text-stone-800 w-8 shrink-0" style={{ fontSize: px }}>A</span>
+                    <span className="font-semibold text-stone-700 truncate" style={{ fontSize: px }}>
+                      {FONT_LABELS[i]}
+                    </span>
+                  </span>
+                  {fontLevel === i && <Check className="w-6 h-6 shrink-0 text-primary-800" />}
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setSettingsOpen(false)}
+              className="mt-5 w-full py-3 rounded-xl bg-primary-800 hover:bg-primary-900 text-white font-bold transition-colors active:scale-95"
+            >
+              Bağla
+            </button>
+          </div>
+        </div>
+      )}
 
       {logoutConfirm && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
@@ -395,8 +466,11 @@ export default function StationPage() {
   );
 }
 
+// Everything below is sized in `em` against the card's own font-size, so the header's
+// A / A / A picker moves the type, the padding and the gaps together. Nothing here is
+// px — one fixed size in the middle of an em layout is what makes big text look broken.
 function StationCard({
-  order, items, removedItems, since, now, busy, onReady,
+  order, items, removedItems, since, now, busy, fontPx, onReady,
 }: {
   order: Order;
   items: OrderItem[];
@@ -404,6 +478,7 @@ function StationCard({
   since: string;
   now: number;
   busy: boolean;
+  fontPx: number;
   onReady: () => void;
 }) {
   const waitedMs = now - Date.parse(since);
@@ -422,46 +497,54 @@ function StationCard({
   const allRemoved = items.length === 0;
 
   return (
-    <div className={`rounded-2xl border-2 flex flex-col ${
-      allRemoved ? 'bg-stone-50 border-stone-200'
-      : late ? 'bg-red-50 border-red-400'
-      : 'bg-white border-stone-100'
-    }`}>
-      <div className="flex items-baseline justify-between gap-2 px-4 pt-3">
-        <span className="text-lg font-bold">#{order.orderNumber}</span>
-        <span className="text-sm text-stone-500">
+    <div
+      style={{ fontSize: fontPx }}
+      className={`rounded-2xl border-2 flex flex-col ${
+        allRemoved ? 'bg-stone-50 border-stone-200'
+        : late ? 'bg-red-50 border-red-400'
+        : 'bg-white border-stone-100'
+      }`}
+    >
+      <div className="flex items-baseline justify-between gap-[0.5em] px-[1em] pt-[0.75em]">
+        <span className="text-[1.125em] font-bold">#{order.orderNumber}</span>
+        <span className="text-[0.875em] text-stone-500">
+
           {order.tableNumber ? `Masa ${order.tableNumber}` : 'Özü ilə'}
         </span>
       </div>
 
       {/* Always visible: newest-first only works if an old card still shouts. */}
-      <div className={`px-4 pb-2 text-xs font-semibold ${late ? 'text-red-600' : 'text-stone-500'}`}>
-        {waitedLabel(since, now)}{late ? ' · gecikir' : ''}
+      {/* The size lives on the inner span: an `em` padding on a resized element would
+          resolve against that new size and pull the card's left edge out of line. */}
+      <div className="px-[1em] pb-[0.5em]">
+        <span className={`text-[0.75em] font-semibold ${late ? 'text-red-600' : 'text-stone-500'}`}>
+          {waitedLabel(since, now)}{late ? ' · gecikir' : ''}
+        </span>
       </div>
 
-      <div className="px-4 pb-3 flex-1 space-y-3">
+      <div className="px-[1em] pb-[0.75em] flex-1 space-y-[0.75em]">
         {batches.map((batch, i) => (
           <div key={batch.at}>
             {!batch.isFirst && (
               // A later addition, timestamped: "this came in after the rest".
-              <div className="text-[11px] font-semibold text-primary-800 mb-1">
+              <div className="text-[0.6875em] font-semibold text-primary-800 mb-[0.4em]">
                 + Əlavə · {clockTime(batch.at)}
               </div>
             )}
-            <ul className="space-y-1.5">
+            <ul className="space-y-[0.375em]">
               {batch.items.map((item, j) => (
-                <li key={item.id ?? `${i}-${j}`} className="flex gap-2 text-sm">
+                <li key={item.id ?? `${i}-${j}`} className="flex gap-[0.5em] text-[0.875em]">
                   <span className={`font-bold tabular-nums ${item.removedAt ? 'text-stone-400' : 'text-stone-800'}`}>
                     {item.quantity}×
                   </span>
                   <span className={item.removedAt ? 'line-through text-stone-400' : ''}>
                     {item.menuItem.name}
                     {item.modifiers && (
-                      <span className="block text-xs text-stone-500">{item.modifiers}</span>
+                      <span className="block text-[0.857em] text-stone-500">{item.modifiers}</span>
                     )}
                     {item.removedAt && (
                       // Struck through AND timestamped — never silently gone.
-                      <span className="block text-xs text-red-600">
+                      <span className="block text-[0.857em] text-red-600">
                         ləğv edildi · {clockTime(item.removedAt)}
                       </span>
                     )}
@@ -472,15 +555,17 @@ function StationCard({
           </div>
         ))}
 
+        {/* The note is an instruction to the cook, not a footnote — same size as a
+            dish line, never smaller. It was the smallest text on the card before. */}
         {order.note && (
-          <p className="text-xs bg-amber-50 rounded-lg px-2 py-1.5 text-amber-800">{order.note}</p>
+          <p className="text-[0.875em] font-medium bg-amber-50 rounded-lg px-[0.6em] py-[0.45em] text-amber-800">{order.note}</p>
         )}
       </div>
 
       <button
         onClick={onReady}
         disabled={busy}
-        className={`m-3 mt-0 py-3 rounded-xl font-bold disabled:opacity-50 transition-colors active:scale-95 ${
+        className={`m-[0.75em] mt-0 py-[0.75em] rounded-xl text-[1em] font-bold disabled:opacity-50 transition-colors active:scale-95 ${
           allRemoved
             ? 'bg-stone-200 hover:bg-stone-300 text-stone-700'
             : 'bg-primary-800 hover:bg-primary-900 text-white'
