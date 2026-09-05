@@ -34,9 +34,24 @@ const CLOCK_MS = 10 * 1000;
 // this one number drives it. Older cooks read the screen from further away than the
 // person who signed off on the design ever did — and the eyes differ cook to cook,
 // so the choice belongs to the device, not the company.
-// Not persisted yet: the pick resets on reload until we decide where it lives.
 const FONT_PX = [16, 20, 25] as const;
 const FONT_LABELS = ['Normal', 'Böyük', 'Ən böyük'] as const;
+
+// Kept in localStorage rather than on the staff row: the kitchen tablet is fixed to
+// one wall and regularly offline, so a device-local write always lands where a
+// network one would not. Keyed by employee anyway, for the tablet two cooks share.
+const fontKey = (userId: string) => `stationFont:${userId}`;
+
+function loadFontLevel(userId: string): number {
+  try {
+    const level = Number(localStorage.getItem(fontKey(userId)));
+    return Number.isInteger(level) && level >= 0 && level < FONT_PX.length ? level : 0;
+  } catch { return 0; } // private mode
+}
+
+function saveFontLevel(userId: string, level: number) {
+  try { localStorage.setItem(fontKey(userId), String(level)); } catch { /* private mode */ }
+}
 // Big text in four columns is worse than big text in two. Widen the cards as the
 // type grows rather than letting every dish name wrap.
 const FONT_GRID = [
@@ -85,6 +100,7 @@ export default function StationPage() {
   const [ready, setReady] = useState(false);
   const [station, setStation] = useState<Station | null>(null);
   const [employeeName, setEmployeeName] = useState('');
+  const [employeeId, setEmployeeId] = useState('');
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [stations, setStations] = useState<Station[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -116,6 +132,10 @@ export default function StationPage() {
     if (!session.stationId) { router.replace('/no-station'); return; }
 
     setEmployeeName(session.name);
+    setEmployeeId(session.id);
+    // In the effect, not in useState: the server has no localStorage, and reading it
+    // during render would hydrate the first paint at the wrong size.
+    setFontLevel(loadFontLevel(session.id));
     setCompanyContext(session.companyId);
 
     validateSession(session).then(valid => {
@@ -423,7 +443,7 @@ export default function StationPage() {
                 // described, so nothing has to be read to be understood.
                 <button
                   key={px}
-                  onClick={() => setFontLevel(i)}
+                  onClick={() => { setFontLevel(i); saveFontLevel(employeeId, i); }}
                   aria-pressed={fontLevel === i}
                   className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl border-2 text-left transition-colors ${
                     fontLevel === i
