@@ -65,6 +65,8 @@ export interface TillDb {
   orders(companyId: string, opts?: unknown): Promise<unknown>;
   shift(companyId: string): Promise<unknown>;
   shiftSales(companyId: string, openedAt: string): Promise<unknown>;
+  /** Courier settlements in [from, to), split nağd/kart. */
+  courierCollections(companyId: string, from: string, to: string): Promise<unknown>;
 
   putReference(table: string, companyId: string, rows: unknown): Promise<unknown>;
   putOrders(companyId: string, orders: unknown): Promise<unknown>;

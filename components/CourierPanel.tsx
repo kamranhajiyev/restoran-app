@@ -241,7 +241,14 @@ function PaymentsTab({ couriers }: { couriers: Courier[] }) {
                 {p.createdBy ? <> · Qəbul edən: <span className="text-stone-500">{p.createdBy}</span></> : ''}
               </div>
             </div>
-            <span className="text-sm font-semibold tabular-nums text-emerald-600 shrink-0">{p.amount.toFixed(2)} ₼</span>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Only cash reached the drawer — the owner reconciling a till needs
+                  to see which of these rows they should be able to find in it. */}
+              <span className={`text-[11px] px-2 py-0.5 rounded-full ${p.method === 'kart' ? 'bg-blue-50 text-blue-600' : 'bg-stone-100 text-stone-500'}`}>
+                {p.method === 'kart' ? 'Kart' : 'Nağd'}
+              </span>
+              <span className="text-sm font-semibold tabular-nums text-emerald-600">{p.amount.toFixed(2)} ₼</span>
+            </div>
           </div>
         ))}
       </div>

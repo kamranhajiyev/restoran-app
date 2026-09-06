@@ -180,6 +180,12 @@ export function registerTillHandlers(appUrl: string): void {
     return repo.getShiftSales(asCompanyId(companyId), openedAt);
   });
 
+  ipcMain.handle('till:courierCollections', (_e, companyId, from, to) => {
+    if (typeof from !== 'string' || !from) throw new Error('bad from');
+    if (typeof to !== 'string' || !to) throw new Error('bad to');
+    return repo.getCourierCollections(asCompanyId(companyId), from, to);
+  });
+
   // ── Filling the database ───────────────────────────────────────────────────
   // Used by the first-run setup and by the background refresh. One reference
   // table at a time, so the setup screen can report progress per step and

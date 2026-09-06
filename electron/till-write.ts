@@ -360,6 +360,29 @@ function applyMove(id: string, body: Record<string, unknown>, companyId: string)
   return { ok: true };
 }
 
+// The same write as applyMove, on the other column that says where an order is
+// going. Open orders only — a paid courier order already carries its debt.
+function applyChangeCourier(id: string, body: Record<string, unknown>, companyId: string): WriteResult {
+  const orderId = str(body.orderId);
+  const courierId = str(body.courierId);
+  if (!orderId || !courierId) return { ok: false, error: 'bad_request' };
+
+  const courier = db()
+    .prepare('select 1 as hit from couriers where id = ? and company_id = ?')
+    .get(courierId, companyId);
+  if (!courier) return { ok: false, error: 'courier' };
+
+  const found = openOrder(orderId, companyId);
+  if ('error' in found) return { ok: false, error: found.error };
+  // Not a way to turn a takeaway into a delivery: only an order that already has
+  // a rider can change riders.
+  if (!found.courierId) return { ok: false, error: 'not_courier' };
+
+  putOrder(companyId, { ...found, courierId });
+  enqueue(id, '/api/change-courier', { ...body, companyId }, companyId);
+  return { ok: true };
+}
+
 // ── The drawer ───────────────────────────────────────────────────────────────
 
 // Mirrors app/api/open-shift/route.ts, which already honours an id and a time
@@ -418,10 +441,13 @@ function applyCourierPayment(id: string, body: Record<string, unknown>, companyI
   const createdAt = new Date().toISOString();
   const by = str(body.by) ?? '';
   const shiftId = str(body.shiftId);
+  const method: 'nağd' | 'kart' = body.method === 'kart' ? 'kart' : 'nağd';
 
   // The kassa module may be off, in which case there is no drawer to book into
-  // and the payment stands on its own — the same rule the RPC applies.
-  if (shiftId) {
+  // and the payment stands on its own — the same rule the RPC applies. A card
+  // settlement books nothing either: the guest tapped the rider's terminal and
+  // no note ever reached this drawer.
+  if (shiftId && method === 'nağd') {
     const shift = getOpenShift(companyId);
     if (!shift || shift.id !== shiftId) return { ok: false, error: 'not_found' };
     if (!shift.movements.some(m => m.id === paymentId)) {
@@ -434,7 +460,7 @@ function applyCourierPayment(id: string, body: Record<string, unknown>, companyI
     }
   }
 
-  addCourierPayment(companyId, { id: paymentId, courierId, amount, createdAt, createdBy: by, shiftId });
+  addCourierPayment(companyId, { id: paymentId, courierId, amount, createdAt, createdBy: by, shiftId, method });
   enqueue(id, '/api/add-courier-payment', { ...body, companyId }, companyId);
   return { ok: true };
 }
@@ -549,6 +575,7 @@ export function applyWrite(
       case '/api/update-order-status':      return applyStatus(id, body, companyId);
       case '/api/cancel-order':             return applyCancel(id, body, companyId);
       case '/api/move-table':               return applyMove(id, body, companyId);
+      case '/api/change-courier':           return applyChangeCourier(id, body, companyId);
       case '/api/open-shift':               return applyOpenShift(id, body, companyId);
       case '/api/add-shift-movement':       return applyMovement(id, body, companyId);
       case '/api/add-courier-payment':      return applyCourierPayment(id, body, companyId);

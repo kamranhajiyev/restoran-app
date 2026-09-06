@@ -1,4 +1,4 @@
-import { CashShift, Category, Courier, CourierLedger, CourierPayment, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
+import { CashShift, Category, Courier, CourierLedger, CourierPayMethod, CourierPayment, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
 import { supabase } from './supabase';
@@ -836,6 +836,30 @@ export async function moveOrderTable(orderId: string, tableId: number): Promise<
   return (data?.length ?? 0) > 0;
 }
 
+// A different rider takes the order. Which one it will be is rarely known when
+// the order is rung up, so the courier picked at the till is a first guess.
+//
+// Open orders only: after payment the total is already on a courier's balance as
+// debt, and moving it is a transfer between two books rather than this write.
+export async function changeOrderCourier(orderId: string, courierId: string): Promise<boolean> {
+  // The courier is in the key: reassigning twice during an outage is two separate
+  // writes, and both must land in the order they were made.
+  const local = await toLocal(undefined, `courier:${orderId}:${courierId}`, '/api/change-courier', { orderId, courierId });
+  if (local) return local.ok;
+
+  const { data, error } = await supabase.from('orders')
+    .update({ courier_id: courierId })
+    .eq('id', orderId)
+    .eq('company_id', _companyId)
+    .not('courier_id', 'is', null)
+    .neq('status', 'ödənilib')
+    .neq('status', 'ləğv edildi')
+    .neq('status', 'silinib')
+    .select('id');
+  if (error) { console.error('[changeOrderCourier]', error.message); return false; }
+  return (data?.length ?? 0) > 0;
+}
+
 // Only unpaid orders can be cancelled — a paid order is final, mistakes after
 // payment are for the owner to sort out manually.
 export async function cancelOrder(orderId: string, reason: string, by: string): Promise<boolean> {
@@ -1534,7 +1558,7 @@ export async function fetchCouriersWithBalance(opts?: ReadOpts): Promise<Courier
 export async function fetchCourierPaymentLog(): Promise<CourierPayment[]> {
   try {
     const { data, error } = await supabase.from('courier_payments')
-      .select('id, courier_id, amount, note, created_by, shift_id, created_at, couriers(name)')
+      .select('id, courier_id, amount, method, note, created_by, shift_id, created_at, couriers(name)')
       .order('created_at', { ascending: false }).limit(300);
     if (error || !data) return [];
     return data.map((p: Record<string, unknown>) => {
@@ -1544,6 +1568,7 @@ export async function fetchCourierPaymentLog(): Promise<CourierPayment[]> {
         courierId: (p.courier_id as string) ?? '',
         courierName: c.name ?? '—',
         amount: Number(p.amount ?? 0),
+        method: p.method === 'kart' ? 'kart' : 'nağd',
         note: (p.note as string) ?? null,
         createdBy: (p.created_by as string) ?? null,
         shiftId: (p.shift_id as string) ?? null,
@@ -1553,10 +1578,47 @@ export async function fetchCourierPaymentLog(): Promise<CourierPayment[]> {
   } catch { return []; }
 }
 
-// The courier hands cash over. `paymentId` is minted by the caller so a retry —
+// What couriers handed over inside a window, split the way the money actually
+// arrived. `to` is exclusive.
+//
+// This is the number the history screen adds to its Nağd/Kart tiles. A courier
+// order closes with cash=0 and card=0 — the whole total sits as debt — so
+// without this the day's takings read short by everything still out on a bike,
+// which is precisely what a restaurant not running kassa shifts needs to see.
+//
+// Attributed by when the money arrived, not when the order was placed: a rider
+// settling on Tuesday for Sunday's delivery puts that cash in Tuesday's drawer.
+// Server first, unlike every other till read here, and the local database only
+// when that fails. The till's courier_payments table holds the settlements THIS
+// machine took and no others — enough to keep a seller honest through an outage,
+// but it would quietly hide a second till's collections if it were preferred
+// while the line is up.
+export async function fetchCourierCollections(
+  from: string,
+  to: string,
+  opts?: ReadOpts,
+): Promise<{ nagd: number; kart: number }> {
+  try {
+    const { data, error } = await supabase.from('courier_payments')
+      .select('amount, method').gte('created_at', from).lt('created_at', to);
+    if (error) throw error;
+    return (data ?? []).reduce((acc, p) => {
+      if (p.method === 'kart') acc.kart += Number(p.amount ?? 0);
+      else acc.nagd += Number(p.amount ?? 0);
+      return acc;
+    }, { nagd: 0, kart: 0 });
+  } catch {
+    const local = await fromLocal(opts, (till, companyId) =>
+      till.courierCollections(companyId, from, to) as Promise<{ nagd: number; kart: number }>);
+    return local ?? { nagd: 0, kart: 0 };
+  }
+}
+
+// Money taken off a courier. `paymentId` is minted by the caller so a retry —
 // the offline outbox resending, a double-tap — returns the first payment instead
 // of taking the money twice. Passing `shiftId` books it into the drawer in the
-// same transaction; pass null only when the kassa module is off.
+// same transaction, but only for 'nağd': a card settlement never entered this
+// till, so counting it would leave the drawer short at close.
 export async function addCourierPayment(
   courierId: string,
   amount: number,
@@ -1565,10 +1627,12 @@ export async function addCourierPayment(
   shiftId: string | null,
   note: string,
   paymentId: string,
+  method: CourierPayMethod = 'nağd',
 ): Promise<string | null> {
   const { error } = await supabase.rpc('add_courier_payment', {
     p_courier_id: courierId, p_amount: amount, p_created_by: createdBy || null,
     p_staff_id: staffId, p_shift_id: shiftId, p_note: note || null, p_id: paymentId,
+    p_method: method,
   });
   if (error) { console.error('[addCourierPayment]', error); return error.message; }
   return null;

@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
     table_id: order.tableNumber === 0 ? null : order.tableNumber,
     waiter_name: order.sellerName,
     staff_id: order.staffId ?? null,
+    courier_id: order.courierId ?? null,
     status: order.status,
     note: order.note ?? null,
     created_at: order.createdAt,

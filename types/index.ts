@@ -321,14 +321,20 @@ export interface CourierLedger {
   orders: number;
 }
 
-// One handover of cash from a courier, for the Ödənişlər log. `createdBy` is the
-// seller who took it and `shiftId` the drawer it went into — the whole reason
-// this row exists rather than just a decremented balance.
+// How the money came back off the courier. Only 'nağd' reaches the drawer — a
+// card settlement is the guest tapping the rider's terminal, which the shift
+// must not count as cash on hand.
+export type CourierPayMethod = 'nağd' | 'kart';
+
+// One handover of money from a courier, for the Ödənişlər log. `createdBy` is
+// the seller who took it and `shiftId` the drawer it went into — the whole
+// reason this row exists rather than just a decremented balance.
 export interface CourierPayment {
   id: string;
   courierId: string;
   courierName: string;
   amount: number;
+  method: CourierPayMethod;
   note: string | null;
   createdBy: string | null;
   shiftId: string | null;

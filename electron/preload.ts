@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('posNative', {
     orders: (companyId: string, opts?: unknown) => invoke('till:orders', companyId, opts),
     shift: (companyId: string) => invoke('till:shift', companyId),
     shiftSales: (companyId: string, openedAt: string) => invoke('till:shiftSales', companyId, openedAt),
+    courierCollections: (companyId: string, from: string, to: string) =>
+      invoke('till:courierCollections', companyId, from, to),
 
     putReference: (table: string, companyId: string, rows: unknown) =>
       invoke('till:putReference', table, companyId, rows),

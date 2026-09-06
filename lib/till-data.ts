@@ -93,6 +93,52 @@ async function readLocally(url: URL): Promise<Response | null> {
 }
 
 /**
+ * This machine's own courier settlements, for when the network cannot answer.
+ * Null in a browser, and null if the local read fails.
+ *
+ * Deliberately not part of readLocally: the till records the settlements taken
+ * at this counter and no others, so preferring it while the line is up would
+ * hide what a second till or the admin panel collected.
+ */
+export async function localCourierCollections(
+  companyId: string,
+  from: string,
+  to: string,
+): Promise<{ nagd: number; kart: number } | null> {
+  const till = local();
+  if (!till) return null;
+  try {
+    return (await till.courierCollections(companyId, from, to)) as { nagd: number; kart: number };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * GET one of the site's routes, from wherever the till happens to be running.
+ *
+ * The read-side companion to tillPost in lib/till-write.ts, and there for the
+ * same reason: inside the shell the page is served from app://till, so a fetch
+ * straight at the site is cross-origin and the browser refuses it before it is
+ * sent — which reaches the caller as a thrown fetch, indistinguishable from a
+ * real outage. A route that has to reach the server, rather than one readLocally
+ * can answer, must come through here or it will report "offline" on a machine
+ * with a perfectly good line.
+ *
+ * Throws on a genuine outage, exactly as fetch does, so a caller's catch still
+ * means what it meant.
+ */
+export async function siteGet(path: string): Promise<Response> {
+  const till = local();
+  if (!till) return fetch(path);
+  const res = await till.api(path);
+  return new Response(res.body, {
+    status: res.status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/**
  * fetch(), but served from the machine when the machine has the answer.
  *
  * Drop-in: same arguments, same Response, same rejection on a dead network. The

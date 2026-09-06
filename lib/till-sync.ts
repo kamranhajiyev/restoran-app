@@ -185,6 +185,16 @@ const STEPS: Step[] = [
       const { orders } = await serverRead<{ orders: unknown[] }>(
         db, "public-orders", companyId, { limit: String(ORDER_WINDOW) },
       );
+
+      // The caller checked the outbox was empty before the pull started, but the
+      // pull is eleven steps long and a waiter does not stop for it. Anything
+      // rung up or paid since then is on this disk and not yet on the server —
+      // so the list above, fetched seconds ago, would put those rows back the
+      // way they were: a paid order open again, in SQLite, where a reload cannot
+      // argue with it. Leave the orders alone and let the next sweep, after the
+      // outbox has drained, do it properly.
+      if ((await db.outbox()).pending > 0) return 0;
+
       await db.putOrders(companyId, orders ?? []);
       const { ready } = await serverRead<{ ready: unknown[] }>(db, "public-station-ready", companyId);
       await db.putStationReady(companyId, ready ?? []);

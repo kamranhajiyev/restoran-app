@@ -38,6 +38,10 @@ export async function GET(req: NextRequest) {
     tableNumber: o.table_id ?? 0,
     sellerName: o.waiter_name,
     staffId: o.staff_id ?? undefined,
+    // Without these the payment sheet cannot tell a delivery from a walk-in:
+    // it would offer no courier choice and put the money in the drawer.
+    courierId: o.courier_id ?? undefined,
+    courierDebt: o.courier_debt ? Number(o.courier_debt) : undefined,
     status: o.status,
     note: o.note ?? undefined,
     createdAt: o.created_at,

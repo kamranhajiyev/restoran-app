@@ -16,20 +16,20 @@ import {
   fetchCompanySettings, fetchStaff, verifyStaffPin, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
   fetchStations, fetchStationReady, fetchModifierGroups, type StationReady,
-  fetchCouriersWithBalance, addCourierPayment, returnCourierOrder,
+  fetchCouriersWithBalance, addCourierPayment, returnCourierOrder, fetchCourierCollections, changeOrderCourier,
 } from '@/lib/store';
 import { menuIndex, stationForItem, readyStationIds } from '@/lib/stations';
 import { unlockSound, armSoundOnFirstGesture, playOrderReady } from '@/lib/sound';
 import { applyBrand } from '@/lib/branding';
 import { orderClosedAt } from '@/lib/order-items';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
-import { CashShift, Category, Courier, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
+import { CashShift, Category, Courier, CourierPayMethod, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, openCashDrawer } from '@/lib/printer';
 import { isDesktop, startKitchenPrinting } from '@/lib/desktopPrint';
 import { postOrQueue, isOnline, startConnectivityWatch, onConnectivityChange } from '@/lib/offline-net';
-import { tillFetch, hasLocalDb } from '@/lib/till-data';
+import { tillFetch, hasLocalDb, localCourierCollections, siteGet } from '@/lib/till-data';
 import { hasLocalData, pullAll } from '@/lib/till-sync';
 import TillSetup from '@/components/TillSetup';
 import SyncStatus from '@/components/SyncStatus';
@@ -62,6 +62,34 @@ const CANCEL_REASONS =['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxd
 const AZ_CHARS: Record<string, string> = { 'ç': 'c', 'ə': 'e', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u' };
 function azNormalize(s: string): string {
   return s.toLocaleLowerCase('az').replace(/[çəğıöşü]/g, ch => AZ_CHARS[ch]);
+}
+
+// What couriers handed over inside a window, split nağd/kart — the amount the
+// history tiles add to the day's takings. A terminal linked by token asks the
+// public route, a signed-in seller goes through Supabase, and both fall back to
+// this machine's own rows when the line is down (see localCourierCollections for
+// why that is a fallback rather than the first stop).
+async function courierCollections(
+  from: string,
+  to: string,
+  companyId: string | null | undefined,
+): Promise<{ nagd: number; kart: number }> {
+  if (!companyId) return fetchCourierCollections(from, to);
+  try {
+    // siteGet, not fetch: this route is not one the local database answers, and
+    // inside the shell a bare relative fetch never leaves the machine — the till
+    // would fall to its own rows below on every single call and quietly report
+    // one counter's collections as the whole restaurant's.
+    const r = await siteGet(
+      `/api/public-courier-collections?companyId=${companyId}` +
+      `&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    );
+    if (!r.ok) throw new Error('bad response');
+    const d = await r.json();
+    return { nagd: Number(d.nagd ?? 0), kart: Number(d.kart ?? 0) };
+  } catch {
+    return (await localCourierCollections(companyId, from, to)) ?? { nagd: 0, kart: 0 };
+  }
 }
 
 // The station panel reads tables over the public API, which hands back raw DB
@@ -205,6 +233,43 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [menu, setMenu]             = useState<MenuItem[]>([]);
   const [availableCategories, setAvailableCategories] = useState<Category[]>([]);
   const [orders, setOrders]         = useState<Order[]>([]);
+
+  // ── Which picture of the room wins ─────────────────────────────────────────
+  // Three things replace this list wholesale — the terminal's 40s poll, the
+  // realtime refresh, and the re-read after a sync — and each of them is a
+  // photograph of a moment that has already passed by the time it lands. The
+  // seller's own taps, meanwhile, apply straight to state. With no rule for
+  // which is newer, the last answer to arrive won even when it was the oldest:
+  // an order rung up after the photograph was taken vanished off the screen, and
+  // one paid after it came back open in Sifarişlər. It read as lost data; a
+  // reload always "fixed" it, because the database had been right all along.
+  //
+  // So a read takes a ticket before it leaves and may only apply if nothing
+  // newer happened while it was out — no later read (`readSeq`), and no write of
+  // the seller's own (`mutSeq`). A discarded snapshot costs nothing: the state it
+  // declined to overwrite is the fresher of the two, and another read is already
+  // on its way.
+  const readSeq = useRef(0);
+  const mutSeq  = useRef(0);
+
+  /** Claim a place in line for a read that is about to start. */
+  const beginOrdersRead = useCallback(() => ({ seq: ++readSeq.current, mut: mutSeq.current }), []);
+
+  /** Apply a snapshot, unless it was overtaken in flight. */
+  const applyOrders = useCallback((ticket: { seq: number; mut: number }, apply: () => void) => {
+    if (ticket.seq !== readSeq.current || ticket.mut !== mutSeq.current) return;
+    apply();
+  }, []);
+
+  /**
+   * The seller's own change to the list — always newer than anything in flight,
+   * because it happened here and now. Every read still out is invalidated.
+   */
+  const mutateOrders = useCallback((update: (prev: Order[]) => Order[]) => {
+    mutSeq.current++;
+    setOrders(update);
+  }, []);
+
   const [sellerName, setSellerName] = useState('Satıcı');
   const [online, setOnline]         = useState(true);
   const [collapsed, setCollapsed]   = useState(false);
@@ -225,6 +290,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [selectedCourier, setSelectedCourier] = useState<string | null>(null);
   const [payingCourier, setPayingCourier]   = useState<Courier | null>(null);
   const [courierInput, setCourierInput]     = useState('');
+  const [courierMethod, setCourierMethod]   = useState<CourierPayMethod>('nağd');
   const [courierBusy, setCourierBusy]       = useState(false);
   const [cart, setCart]                     = useState<OrderItem[]>([]);
   const [activeCategory, setActiveCategory] = useState('');
@@ -386,6 +452,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [totalOrders, setTotalOrders]       = useState(0);
   const [historyOrders, setHistoryOrders]   = useState<Order[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // Courier money that reached the restaurant today. Separate from the orders
+  // because it is not attached to them: a rider settles when they get back, which
+  // may be days after the delivery closed.
+  const [historyCollected, setHistoryCollected] = useState({ nagd: 0, kart: 0 });
   const [loadingMore, setLoadingMore]       = useState(false);
 
   // cancel modal — preset reason required, free text only for "Digər"
@@ -398,6 +468,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [movingOrder, setMovingOrder]   = useState<Order | null>(null);
   const [moveTarget, setMoveTarget]     = useState<number | null>(null);
   const [moveBusy, setMoveBusy]         = useState(false);
+  // Reassigning a delivery — the same modal shape as the move above, because it
+  // is the same question asked about the other column.
+  const [reassigningOrder, setReassigningOrder] = useState<Order | null>(null);
+  const [reassignTarget, setReassignTarget]     = useState<string | null>(null);
+  const [reassignBusy, setReassignBusy]         = useState(false);
 
   // payment modal
   const [payingOrder, setPayingOrder] = useState<Order | null>(null);
@@ -458,11 +533,21 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
 
   const refreshAll = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     if (!silent) setPullRefreshing(true);
+    const ticket = beginOrdersRead();
     try {
       if (overrideCompanyId) {
-        const [m, o, c, tb, st, rd, mg, kr] = await Promise.all([
+        // The orders land the moment they arrive rather than waiting on the
+        // seven reads beside them. They used to be applied after the whole
+        // Promise.all, which meant a photograph taken at the start of the
+        // refresh was written to the screen as much as several seconds later —
+        // the widest window in the page for a stale list to overwrite a fresh
+        // one, and it opened every forty seconds.
+        const ordersRead = tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`)
+          .then(r => r.json()).then(d => d.orders ?? []).catch(() => []);
+        ordersRead.then(o => applyOrders(ticket, () => setOrders(o)));
+
+        const [m, c, tb, st, rd, mg, kr] = await Promise.all([
           tillFetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
-          tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
           tillFetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
           tillFetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => ({ tables: normalizeTables(d.tables ?? []), halls: (d.halls ?? []) as Hall[] })).catch(() => ({ tables: [], halls: [] })),
           tillFetch(`/api/public-staff?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.staff ?? []).catch(() => null),
@@ -470,7 +555,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
           tillFetch(`/api/public-modifiers?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.groups ?? null).catch(() => null),
           tillFetch(`/api/public-couriers?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.couriers ?? null).catch(() => null),
         ]);
-        setMenu(m); setOrders(o); setTables(tb.tables); setHalls(tb.halls);
+        setMenu(m); setTables(tb.tables); setHalls(tb.halls);
         setAvailableCategories(c.filter((cat: { available: boolean }) => cat.available));
         if (st) setPinStaffList(st);
         if (rd) setReadyRows(rd);
@@ -483,7 +568,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
           fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(), fetchModifierGroups(),
           fetchTables(), fetchHalls(), fetchCouriersWithBalance(),
         ]);
-        setMenu(m); setOrders(o); setShift(s); setTables(tb); setHalls(hl);
+        setMenu(m); setShift(s); setTables(tb); setHalls(hl);
+        applyOrders(ticket, () => setOrders(o));
         setAvailableCategories(c.filter(cat => cat.available));
         setPinStaffList(st);
         setModifierGroups(mg);
@@ -492,12 +578,16 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     } catch { /* ignore */ } finally {
       if (!silent) setPullRefreshing(false);
     }
-  }, [overrideCompanyId]);
+  }, [overrideCompanyId, beginOrdersRead, applyOrders]);
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshOrders = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
     if (!silent) setRefreshing(true);
+    // Three realtime handlers call this, unthrottled, and so do the sync paths —
+    // several are routinely in flight at once, and nothing guaranteed they came
+    // back in the order they went out.
+    const ticket = beginOrdersRead();
     try {
       if (overrideCompanyId) {
         const [d, r] = await Promise.all([
@@ -507,16 +597,17 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
           tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).catch(() => null),
           tillFetch(`/api/public-station-ready?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.ready ?? []).catch(() => null),
         ]);
-        if (d) { setOrders(d.orders ?? []); setTotalOrders(d.total ?? 0); }
+        if (d) applyOrders(ticket, () => { setOrders(d.orders ?? []); setTotalOrders(d.total ?? 0); });
         // null = the request failed. Keep the last known green rather than blanking
         // the list: a blip must not make ready food look unready.
         if (r) setReadyRows(r);
       } else {
         const [o, total, r] = await Promise.all([fetchOrders({ limit: 200 }), fetchOrdersCount(), fetchStationReady()]);
-        setOrders(o); setTotalOrders(total); setReadyRows(r);
+        applyOrders(ticket, () => { setOrders(o); setTotalOrders(total); });
+        setReadyRows(r);
       }
     } finally { if (!silent) setRefreshing(false); }
-  }, [overrideCompanyId]);
+  }, [overrideCompanyId, beginOrdersRead, applyOrders]);
 
   // ── The line ────────────────────────────────────────────────────────────────
   // Watch the connection for as long as the till is open, and the moment it comes
@@ -809,6 +900,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         .then(r => r.json()).then(d => setModifierGroups(d.groups ?? [])).catch(() => {});
       tillFetch(`/api/public-couriers?companyId=${overrideCompanyId}`)
         .then(r => r.json()).then(d => setCouriers(d.couriers ?? [])).catch(() => {});
+      // Guarded like every other whole-list read: this effect runs again after
+      // each pull (dataVersion), by which time the seller has a screen worth
+      // keeping.
+      const bootTicket = beginOrdersRead();
       Promise.all([
         tillFetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
         tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
@@ -817,7 +912,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         fetchTablesEnabled(),
         fetchKassaEnabled(),
       ]).then(([m, o, c, tb, te, ke]) => {
-        setOnline(true); setMenu(m); setOrders(o); setTables(tb.tables); setHalls(tb.halls); setTablesOn(te); setKassaOn(ke as boolean);
+        setOnline(true); setMenu(m); setTables(tb.tables); setHalls(tb.halls); setTablesOn(te); setKassaOn(ke as boolean);
+        applyOrders(bootTicket, () => setOrders(o));
         const available = c.filter((cat: { available: boolean }) => cat.available);
         setAvailableCategories(available);
         const cats = available.filter((a: { name: string }) => m.some((i: { category: string }) => i.category === a.name)).map((a: { name: string }) => a.name);
@@ -854,15 +950,17 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     fetchStationReady().then(setReadyRows);
     fetchModifierGroups().then(setModifierGroups);
     fetchHalls().then(setHalls);
+    const bootTicket = beginOrdersRead();
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled(), fetchKassaEnabled(), fetchPrintReceipt()]).then(([m, o, c, tb, te, ke, pr]) => {
-      setOnline(true); setMenu(m); setOrders(o); setTables(tb); setTablesOn(te); setKassaOn(ke); setShouldPrintReceipt(pr);
+      setOnline(true); setMenu(m); setTables(tb); setTablesOn(te); setKassaOn(ke); setShouldPrintReceipt(pr);
+      applyOrders(bootTicket, () => setOrders(o));
       const available = c.filter(cat => cat.available);
       setAvailableCategories(available);
       const cats = available.filter(a => m.some(i => i.category === a.name)).map(a => a.name);
       if (cats.length > 0) setActiveCategory(cats[0]);
     }).catch(() => setOnline(false));
     return () => authSub.subscription.unsubscribe();
-  }, [router, overrideCompanyId, overrideCompanyName, overrideBrandColor, overrideExpiresAt, dataVersion]);
+  }, [router, overrideCompanyId, overrideCompanyName, overrideBrandColor, overrideExpiresAt, dataVersion, beginOrdersRead, applyOrders]);
 
   // ── Kitchen printers ────────────────────────────────────────────────────────
   // Only inside the desktop shell, and only with a real login: claiming tickets
@@ -887,11 +985,13 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     if (overrideCompanyId) return;
     async function sync() {
       if (!getSession()) return;
+      const ticket = beginOrdersRead();
       try {
         const [m, o, c, st, s, mg] = await Promise.all([
           fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(), fetchModifierGroups(),
         ]);
-        setMenu(m); setOrders(o); setShift(s); setModifierGroups(mg);
+        setMenu(m); setShift(s); setModifierGroups(mg);
+        applyOrders(ticket, () => setOrders(o));
         setAvailableCategories(c.filter(cat => cat.available));
         setPinStaffList(st);
       } catch { /* ignore focus sync errors */ }
@@ -905,7 +1005,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       window.removeEventListener('focus', sync);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [overrideCompanyId]);
+  }, [overrideCompanyId, beginOrdersRead, applyOrders]);
 
   // Public terminal: the anon supabase client can't receive realtime (no auth session, RLS),
   // so poll the public endpoints on an interval and on tab-focus. This propagates admin-side
@@ -1234,7 +1334,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       return;
     }
     // Optimistically merge the new items into the order (status stays the same).
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, items: [...o.items, ...newItems], note: newNote || undefined } : o));
+    mutateOrders(prev => prev.map(o => o.id === orderId ? { ...o, items: [...o.items, ...newItems], note: newNote || undefined } : o));
     setExpandedOrderId(orderId);
     setAppendOrderId(null);
     setCart([]); setNote(''); setMenuSearch('');
@@ -1272,7 +1372,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     // into removedItems, not vanish: dropping it would make it flicker off the card and
     // back on at the next refresh.
     const now = new Date().toISOString();
-    setOrders(prev => prev.map(o => {
+    mutateOrders(prev => prev.map(o => {
       if (o.id !== order.id) return o;
       const full = newQty <= 0;
       const ghost: OrderItem = {
@@ -1344,7 +1444,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       alert(`Sifariş yadda saxlanılmadı.\n\nSəbəb: ${reason}\n\nYenidən cəhd edin.`);
       return;
     }
-    setOrders(prev => [order, ...prev]);
+    mutateOrders(prev => [order, ...prev]);
     setCart([]); setNote(''); setSelectedTable(null); setOrderType(null); setSelectedCourier(null);
     setMobileCartOpen(false);
     setView('orders');
@@ -1460,7 +1560,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       // paidAt mirrors what the DB just wrote, so the history shows a closing time
       // straight away instead of a dash until the next fetch
       const paidOrder = { ...order, status: 'ödənilib' as const, paidAt: new Date().toISOString(), cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined, courierDebt: courierDebt || undefined };
-      setOrders(prev => prev.map(o => o.id === order.id ? paidOrder : o));
+      mutateOrders(prev => prev.map(o => o.id === order.id ? paidOrder : o));
       // The rider now owes this, and the Kuryerlər screen is one tap away —
       // wait for a refresh and it shows yesterday's figure.
       if (courierDebt > 0) {
@@ -1484,7 +1584,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
 
   // ── Kuryer borcu ───────────────────────────────────────────────────────────
 
-  // The courier hands cash over the counter.
+  // The courier settles up at the counter — cash in hand, or a card the guest
+  // already tapped on the rider's terminal.
   //
   // The payment id is minted here and used three times over: as the outbox key,
   // as the row's primary key, and as the id of the drawer movement it produces.
@@ -1495,13 +1596,16 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     const courier = payingCourier;
     const amount = Math.round((parseFloat(courierInput) || 0) * 100) / 100;
     const owed = courier.outstanding ?? 0;
+    const method = courierMethod;
+    const cash = method === 'nağd';
     if (amount <= 0 || amount > owed + 0.005) return;
 
     // Cash with no open drawer to put it in. The kassa module being on means
     // somebody counts this till at the end of the night, and money that arrived
-    // outside a shift is money that will not be there when they do.
-    if (kassaOn && !shift) {
-      alert('Növbə bağlıdır.\n\nKuryerdən pul götürmək üçün əvvəlcə növbəni açın.');
+    // outside a shift is money that will not be there when they do. Card money
+    // never touches the drawer, so it has no shift to wait for.
+    if (kassaOn && !shift && cash) {
+      alert('Növbə bağlıdır.\n\nKuryerdən nağd pul götürmək üçün əvvəlcə növbəni açın.');
       return;
     }
 
@@ -1512,14 +1616,14 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
           `courier-pay:${paymentId}`,
           '/api/add-courier-payment',
           {
-            paymentId, courierId: courier.id, amount, by: effectiveSeller,
+            paymentId, courierId: courier.id, amount, by: effectiveSeller, method,
             staffId: activeStaff?.id ?? null, shiftId: shift?.id ?? null,
             companyId: overrideCompanyId, token: overrideToken,
           },
           overrideCompanyId,
         )).ok
       : !(await addCourierPayment(
-          courier.id, amount, effectiveSeller, activeStaff?.id ?? null, shift?.id ?? null, '', paymentId,
+          courier.id, amount, effectiveSeller, activeStaff?.id ?? null, shift?.id ?? null, '', paymentId, method,
         ));
     setCourierBusy(false);
 
@@ -1532,10 +1636,14 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     setPayingCourier(null);
     setCourierInput('');
     setCouriers(prev => prev.map(c => c.id === courier.id ? { ...c, outstanding: owed - amount } : c));
+    // The history screen is showing a number this just changed.
+    setHistoryCollected(prev => cash
+      ? { ...prev, nagd: prev.nagd + amount }
+      : { ...prev, kart: prev.kart + amount });
     // Show it in the drawer immediately — the seller is standing at the Kassa
     // screen a tap away, and "Kassada olmalıdır" that lags by a refresh is the
     // number they will trust least.
-    if (shift) {
+    if (shift && cash) {
       setShift(prev => prev && prev.id === shift.id
         ? { ...prev, movements: [...prev.movements, { id: paymentId, at: new Date().toISOString(), amount, reason: 'Kuryer ödənişi', by: effectiveSeller }] }
         : prev);
@@ -1562,7 +1670,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     setReturnReason('');
 
     if (!ok) { refreshOrders(); return; }
-    setOrders(prev => prev.map(o => o.id === order.id
+    mutateOrders(prev => prev.map(o => o.id === order.id
       ? { ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: effectiveSeller, cancelledAt: new Date().toISOString() }
       : o));
     // The debt left with the order.
@@ -1595,7 +1703,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     setCancelBusy(false);
     setCancellingOrder(null);
     if (ok) {
-      setOrders(prev => prev.map(o => o.id === cancelling.id
+      mutateOrders(prev => prev.map(o => o.id === cancelling.id
         ? { ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: effectiveSeller, cancelledAt: new Date().toISOString() }
         : o));
     } else {
@@ -1627,7 +1735,40 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     setMoveBusy(false);
     setMovingOrder(null);
     if (ok) {
-      setOrders(prev => prev.map(o => o.id === moving.id ? { ...o, tableNumber: target } : o));
+      mutateOrders(prev => prev.map(o => o.id === moving.id ? { ...o, tableNumber: target } : o));
+    } else {
+      refreshOrders();
+    }
+  }
+
+  // Who is actually taking this one. The seller picks a rider when the order is
+  // rung up, but the food is not ready yet and the rider who leaves with it is
+  // often someone else — so the choice stays changeable until the order closes.
+  function openReassign(order: Order) {
+    setReassigningOrder(order);
+    setReassignTarget(null);
+  }
+
+  async function confirmReassign() {
+    if (!reassigningOrder || !reassignTarget || reassignBusy) return;
+    const order = reassigningOrder;
+    const target = reassignTarget;
+    setReassignBusy(true);
+    // Conditional in the DB — a no-op if the order got paid or closed meanwhile
+    const ok = overrideCompanyId
+      ? (await postOrQueue(
+          // The rider is in the key: two reassignments made offline are two
+          // writes, and both must land in the order they were made.
+          `courier:${order.id}:${target}`,
+          '/api/change-courier',
+          { orderId: order.id, courierId: target, companyId: overrideCompanyId, token: overrideToken },
+          overrideCompanyId,
+        )).ok
+      : await changeOrderCourier(order.id, target);
+    setReassignBusy(false);
+    setReassigningOrder(null);
+    if (ok) {
+      mutateOrders(prev => prev.map(o => o.id === order.id ? { ...o, courierId: target } : o));
     } else {
       refreshOrders();
     }
@@ -1671,6 +1812,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
           .then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
       : fetchOrders({ from, to, limit: 500 });
     load.then(setHistoryOrders).finally(() => setHistoryLoading(false));
+    courierCollections(from, to, overrideCompanyId).then(setHistoryCollected);
   }, [view, bizSettings, overrideCompanyId]);
 
   async function handleOpenShift() {
@@ -1799,13 +1941,13 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       const more = overrideCompanyId
         ? await tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200&offset=${orders.length}`).then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
         : await fetchOrders({ limit: 200, offset: orders.length });
-      setOrders(prev => [...prev, ...more.filter((m: { id: string }) => !prev.some(p => p.id === m.id))]);
+      mutateOrders(prev => [...prev, ...more.filter((m: { id: string }) => !prev.some(p => p.id === m.id))]);
     } finally { setLoadingMore(false); }
   }
 
   async function handleStatusChange(id: string, status: OrderStatus) {
     const prevStatus = orders.find(o => o.id === id)?.status;
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
+    mutateOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
     const ok = overrideCompanyId
       ? (await postOrQueue(
           `status:${id}:${status}`,
@@ -1815,7 +1957,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         )).ok
       : await updateOrderStatus(id, status);
     if (!ok && prevStatus) {
-      setOrders(prev => prev.map(o => o.id === id ? { ...o, status: prevStatus } : o));
+      mutateOrders(prev => prev.map(o => o.id === id ? { ...o, status: prevStatus } : o));
     }
   }
 
@@ -1874,13 +2016,18 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         tableName(o.tableNumber).toLowerCase().includes(historyQuery))
     : historyOrders;
   const paidHistoryOrders = historyOrders.filter(o => o.status === 'ödənilib');
+  // Nağd and Kart are "money that arrived", not "what today's orders came to":
+  // a courier order tenders nothing at close, so its total only shows up here
+  // once the rider hands it over. That is the number a restaurant without kassa
+  // shifts is looking for — what should be in the drawer and on the card account.
   const { historyNagd, historyKart } = paidHistoryOrders.reduce((acc, o) => {
     const t = orderTotal(o);
     const cardPart = Math.min(o.cardAmount ?? 0, t);
     acc.historyKart += cardPart;
     acc.historyNagd += Math.min(o.cashAmount ?? 0, t - cardPart);
     return acc;
-  }, { historyNagd: 0, historyKart: 0 });
+  }, { historyNagd: historyCollected.nagd, historyKart: historyCollected.kart });
+  const historyCollectedTotal = historyCollected.nagd + historyCollected.kart;
   const historyRevenue = paidHistoryOrders.reduce((s, o) => s + orderTotal(o), 0);
 
   // ── sidebar (desktop only) ────────────────────────────────────────────────
@@ -2358,13 +2505,13 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                 {prevOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
-                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
-                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
               </div>
@@ -2392,6 +2539,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                           .then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
                       : fetchOrders({ from, to, limit: 500 });
                     load.then(setHistoryOrders).finally(() => setHistoryLoading(false));
+                    courierCollections(from, to, overrideCompanyId).then(setHistoryCollected);
                   }}
                   disabled={historyLoading}
                   className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
@@ -2404,7 +2552,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
               </div>
 
               {/* Nağd / Kart summary */}
-              {!historyLoading && historyOrders.length > 0 && (
+              {!historyLoading && (historyOrders.length > 0 || historyCollectedTotal > 0) && (
                 <div className="px-4 md:px-6 pb-2">
                   <div className="flex gap-3">
                     <div className="flex-1 bg-white rounded-xl border border-stone-100 px-4 py-3">
@@ -2420,6 +2568,17 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                       <p className="text-lg font-bold text-primary-800">{historyRevenue.toFixed(2)} ₼</p>
                     </div>
                   </div>
+                  {/* Said out loud, because otherwise the three boxes look broken:
+                      Cəmi is today's orders, while Nağd and Kart are today's
+                      money — and a rider settling for Sunday's delivery lands in
+                      the second but not the first. */}
+                  {historyCollectedTotal > 0.005 && (
+                    <p className="text-xs text-stone-500 mt-2">
+                      Nağd və Kart məbləğinə kuryerlərdən yığılan {historyCollectedTotal.toFixed(2)} ₼ daxildir
+                      {historyCollected.kart > 0.005 && ` (${historyCollected.nagd.toFixed(2)} ₼ nağd · ${historyCollected.kart.toFixed(2)} ₼ kart)`}.
+                      Cəmi isə yalnız bu günün sifarişləridir.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -2783,7 +2942,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                     className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 ${orderType === 'kuryer' ? 'border-primary-800 bg-primary-50' : 'border-stone-200 bg-white hover:border-primary-300'}`}
                   >
                     <Bike className={`w-8 h-8 ${orderType === 'kuryer' ? 'text-primary-800' : 'text-stone-500'}`} />
-                    <span className={`font-semibold text-sm ${orderType === 'kuryer' ? 'text-primary-800' : 'text-stone-600'}`}>Kuryer</span>
+                    <span className={`font-semibold text-sm ${orderType === 'kuryer' ? 'text-primary-800' : 'text-stone-600'}`}>Çatdırılma</span>
                   </button>
                 )}
               </div>
@@ -2915,7 +3074,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                     return (
                       <button
                         key={c.id}
-                        onClick={() => { if (!settled && !credit) { setPayingCourier(c); setCourierInput(''); } }}
+                        onClick={() => { if (!settled && !credit) { setPayingCourier(c); setCourierInput(''); setCourierMethod('nağd'); } }}
                         disabled={settled || credit}
                         className={`w-full flex items-center justify-between gap-3 p-4 rounded-2xl border bg-white text-left transition-colors ${
                           settled || credit ? 'border-stone-100 cursor-default' : 'border-stone-200 hover:border-primary-300 active:scale-[0.99]'
@@ -3335,9 +3494,61 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         );
       })()}
 
-      {/* Courier settlement — the rider hands cash over the counter. One field,
-          no payment method: the money is cash by definition, and asking would
-          be a question with one answer. */}
+      {/* Reassign-courier modal. Deliberately the same sheet as the move above:
+          the seller is answering the same kind of question, and the two orders
+          types never both offer it — one has a table, the other a rider. */}
+      {reassigningOrder && (
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-md">
+            <h3 className="font-bold text-lg text-stone-800 mb-1">Kuryeri dəyiş</h3>
+            <p className="text-sm text-stone-600 mb-4">
+              №{orderLabel(reassigningOrder)} · {courierNames[reassigningOrder.courierId ?? ''] ?? '—'} · {orderTotal(reassigningOrder).toFixed(2)} ₼
+            </p>
+            <p className="text-xs font-semibold text-stone-600 uppercase tracking-wide mb-2">Yeni kuryer</p>
+            <div className="flex flex-wrap gap-2 mb-4 max-h-56 overflow-y-auto">
+              {activeCouriers.map(c => {
+                const current = c.id === reassigningOrder.courierId;
+                const picked = reassignTarget === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    disabled={current}
+                    onClick={() => setReassignTarget(c.id)}
+                    className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 disabled:opacity-40 disabled:active:scale-100 ${
+                      picked
+                        ? 'border-primary-500 bg-primary-50 text-primary-800'
+                        : 'border-stone-200 text-stone-600 hover:border-stone-300'
+                    }`}
+                  >
+                    {c.name}
+                    {current && <span className="text-[10px] ml-1 opacity-70">(hazırkı)</span>}
+                  </button>
+                );
+              })}
+            </div>
+            {/* The kitchen slip is already on the pass with the old name on it —
+                nothing reprints, so say so rather than let the paper lie quietly. */}
+            <p className="text-xs text-stone-500 bg-stone-50 border border-stone-200 rounded-lg px-3 py-2 mb-4">
+              Mətbəxə çıxan çekdə əvvəlki kuryerin adı qalır.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setReassigningOrder(null)} className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">İmtina</button>
+              <button
+                onClick={confirmReassign}
+                disabled={reassignBusy || !reassignTarget}
+                className="flex-1 py-3 rounded-xl disabled:opacity-40 bg-primary-800 hover:bg-primary-900 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2"
+              >
+                {reassignBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                Dəyiş
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Courier settlement. Two questions: how much, and by which road it came
+          — cash over the counter, or a card the guest tapped on the rider's
+          terminal. Only the first kind is in this drawer at close. */}
       {payingCourier && (() => {
         const owed = payingCourier.outstanding ?? 0;
         const amount = parseFloat(courierInput) || 0;
@@ -3372,6 +3583,29 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   Hamısı
                 </button>
               </div>
+
+              {/* Cash is the default and stays first — it is still most of what
+                  a rider comes back with. */}
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                {(['nağd', 'kart'] as CourierPayMethod[]).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setCourierMethod(m)}
+                    className={`py-3 rounded-xl border-2 text-sm font-semibold transition-colors ${
+                      courierMethod === m
+                        ? 'border-primary-800 bg-primary-50 text-primary-800'
+                        : 'border-stone-200 bg-white text-stone-600 hover:border-primary-300'}`}
+                  >
+                    {m === 'nağd' ? 'Nağd' : 'Kart'}
+                  </button>
+                ))}
+              </div>
+
+              {courierMethod === 'kart' && (
+                <p className="text-xs text-stone-500 bg-stone-50 border border-stone-100 rounded-lg px-3 py-2 mb-4">
+                  Kartla gələn pul kassaya düşmür — borc bağlanır, məbləğ tarixçədə «Kart»a əlavə olunur.
+                </p>
+              )}
 
               {tooMuch && (
                 <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-4">
@@ -3811,7 +4045,7 @@ function ReadyBadge({ progress, allReady }: { progress: { done: number; total: n
 
 // ── OrderRow — mobile card + desktop table row ────────────────────────────
 
-function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItemReady, onReprint, onPay, onCancel, onReturn, courierName, onAppend, onMove, onPrintBill, billBusy, onStatusChange }: {
+function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItemReady, onReprint, onPay, onCancel, onReturn, courierName, onAppend, onMove, onReassign, onPrintBill, billBusy, onStatusChange }: {
   order: Order;
   tableLabel: string;
   tz: string;
@@ -3829,6 +4063,8 @@ function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItem
   courierName?: string;
   onAppend: () => void;
   onMove: () => void;
+  /** Hand the delivery to a different rider. Courier orders only. */
+  onReassign: () => void;
   onPrintBill: () => void;
   billBusy: boolean;
   onStatusChange: (id: string, s: OrderStatus) => void;
@@ -3945,6 +4181,14 @@ function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItem
                     Masanı dəyiş
                   </button>
                 )}
+                {order.courierId && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onReassign(); }}
+                    className="w-full px-4 py-2.5 rounded-xl border border-stone-300 text-stone-700 hover:bg-stone-100 active:scale-95 text-sm font-semibold transition-all"
+                  >
+                    Kuryeri dəyiş
+                  </button>
+                )}
                 <button
                   onClick={e => { e.stopPropagation(); onCancel(); }}
                   className="w-full px-4 py-2.5 rounded-xl border border-red-200 text-red-500 hover:bg-red-50 active:scale-95 text-sm font-semibold transition-all"
@@ -4051,6 +4295,14 @@ function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItem
                     className="text-xs font-semibold text-stone-700 border border-stone-300 hover:bg-stone-100 rounded-lg px-3 py-1.5 transition-colors"
                   >
                     Masanı dəyiş
+                  </button>
+                )}
+                {order.courierId && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onReassign(); }}
+                    className="text-xs font-semibold text-stone-700 border border-stone-300 hover:bg-stone-100 rounded-lg px-3 py-1.5 transition-colors"
+                  >
+                    Kuryeri dəyiş
                   </button>
                 )}
               </div>

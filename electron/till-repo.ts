@@ -92,7 +92,10 @@ export function getCouriers(companyId: string): Courier[] {
  *  replayed request cannot decrement the same balance twice. */
 export function addCourierPayment(
   companyId: string,
-  row: { id: string; courierId: string; amount: number; createdAt: string; createdBy?: string; shiftId?: string | null },
+  row: {
+    id: string; courierId: string; amount: number; createdAt: string;
+    createdBy?: string; shiftId?: string | null; method?: 'nağd' | 'kart';
+  },
 ): void {
   db().prepare(
     `insert or ignore into courier_payments (id, company_id, courier_id, amount, created_at, doc)
@@ -102,6 +105,28 @@ export function addCourierPayment(
 
 export function hasCourierPayment(id: string): boolean {
   return !!db().prepare('select 1 from courier_payments where id = ?').get(id);
+}
+
+/** Settlements this machine took in [from, to), split by how the money arrived.
+ *  The method lives in `doc` rather than a column: the schema is created once
+ *  with `create table if not exists` and never altered, so a new column would
+ *  exist on fresh installs and be missing on every till already in a kitchen.
+ *  Rows written before the method existed were cash — nothing else was on
+ *  offer — which is what the coalesce says. */
+export function getCourierCollections(
+  companyId: string,
+  from: string,
+  to: string,
+): { nagd: number; kart: number } {
+  const row = db().prepare(
+    `select
+       coalesce(sum(case when json_extract(doc, '$.method') = 'kart' then amount end), 0) as kart,
+       coalesce(sum(case when coalesce(json_extract(doc, '$.method'), 'nağd') <> 'kart' then amount end), 0) as nagd
+     from courier_payments
+      where company_id = ? and created_at >= ? and created_at < ?`,
+  ).get(companyId, from, to) as { nagd: number; kart: number };
+
+  return { nagd: Number(row?.nagd ?? 0), kart: Number(row?.kart ?? 0) };
 }
 
 export function getModifierGroups(companyId: string): ModifierGroup[] {
