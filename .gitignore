@@ -52,3 +52,7 @@ supabase/.temp/
 # Electron build output
 dist-electron/
 release/
+.desktop-build/
+out-desktop/
+.desktop-build/
+out-desktop/
