@@ -23,6 +23,7 @@ import { buildStationTicketRaster } from './station-ticket';
  */
 export interface TillSettings {
   tablesEnabled: boolean;
+  deliveryEnabled: boolean;
   kassaEnabled: boolean;
   printReceipt: boolean;
   soundEnabled: boolean;

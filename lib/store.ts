@@ -1832,6 +1832,31 @@ export async function setTablesEnabled(enabled: boolean): Promise<void> {
   if (error) console.error('[setTablesEnabled]', error);
 }
 
+// ─── Çatdırılma ───────────────────────────────────────────────────────────────
+
+// Whether the seller panel offers courier orders at all. Separate from having
+// couriers on file: a venue that stops delivering turns this off and keeps its
+// riders, their debts and their history.
+export async function fetchDeliveryEnabled(): Promise<boolean> {
+  // `?? null` rather than the bare field: a till that pulled its settings before
+  // this flag existed has the key missing, and undefined would read as "off".
+  const local = await fromSettings(s => s.deliveryEnabled ?? null);
+  if (local !== null) return local;
+  try {
+    if (!_companyId) return true;
+    const { data, error } = await supabase.from('companies').select('delivery_enabled').eq('id', _companyId).single();
+    if (error || !data) return true;
+    return data.delivery_enabled !== false;
+  } catch { return true; }
+}
+
+export async function setDeliveryEnabled(enabled: boolean): Promise<void> {
+  // Owners cannot UPDATE companies under RLS — see the RPC in
+  // supabase/migrations/20260908_delivery_enabled.sql.
+  const { error } = await supabase.rpc('set_delivery_enabled', { enabled });
+  if (error) console.error('[setDeliveryEnabled]', error);
+}
+
 export async function fetchQrEnabled(): Promise<boolean> {
   try {
     if (!_companyId) return true;

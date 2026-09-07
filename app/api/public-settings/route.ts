@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   const db = createServerClient();
   const { data, error } = await db
     .from('companies')
-    .select('tables_enabled, kassa_enabled, print_receipt, sound_enabled, menu_only, logo_url, brand_color')
+    .select('tables_enabled, delivery_enabled, kassa_enabled, print_receipt, sound_enabled, menu_only, logo_url, brand_color')
     .eq('id', companyId)
     .single();
 
@@ -32,6 +32,7 @@ export async function GET(req: NextRequest) {
   return Response.json({
     settings: {
       tablesEnabled: data.tables_enabled !== false,
+      deliveryEnabled: data.delivery_enabled !== false,
       kassaEnabled: data.kassa_enabled !== false,
       printReceipt: data.print_receipt !== false,
       soundEnabled: data.sound_enabled !== false,

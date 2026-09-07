@@ -27,6 +27,7 @@ import {
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, moveTableToHall, fetchCompanySlug,
   fetchHalls, createHall, renameHall, deleteHall, adoptOrphanTables,
   fetchTablesEnabled, setTablesEnabled,
+  fetchDeliveryEnabled, setDeliveryEnabled,
   fetchQrEnabled, setQrEnabled, fetchMenuOnly, setMenuOnly,
   fetchKassaEnabled, setKassaEnabled,
   fetchCompanyProfile, updateMyCompanyProfile, fetchMyUsername, updateOwnerAccount, verifyPassword,
@@ -681,6 +682,8 @@ function AdminPageContent() {
   const [tableSavedToast, setTableSavedToast] = useState(false);
   const [tablesOn, setTablesOn] = useState(true);
   const [tablesToggleBusy, setTablesToggleBusy] = useState(false);
+  const [deliveryOn, setDeliveryOn] = useState(true);
+  const [deliveryToggleBusy, setDeliveryToggleBusy] = useState(false);
   const [qrOn, setQrOn] = useState(true);
   const [qrToggleBusy, setQrToggleBusy] = useState(false);
   const [menuOnly, setMenuOnlyState] = useState(false);
@@ -895,7 +898,7 @@ function AdminPageContent() {
     reloadEmployees();
     fetchSellerToken(session.companyId ?? '').then(setSellerToken);
     fetchBranding().then(({ logoUrl: l, brandColor: b }) => { setLogoState(l); setBrandColorState(b ?? DEFAULT_BRAND); applyBrand(b); });
-    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchTables(), fetchCompanySlug(session.companyId ?? ''), fetchTablesEnabled(), fetchQrEnabled(), fetchKassaEnabled(), fetchMenuOnly()]).then(([m, o, c, t, tb, slug, te, qre, ke, mo]) => {
+    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchTables(), fetchCompanySlug(session.companyId ?? ''), fetchTablesEnabled(), fetchQrEnabled(), fetchKassaEnabled(), fetchMenuOnly(), fetchDeliveryEnabled()]).then(([m, o, c, t, tb, slug, te, qre, ke, mo, de]) => {
       setMenu(m);
       setOrders(o);
       setCategories(c);
@@ -907,6 +910,7 @@ function AdminPageContent() {
       setQrOn(qre as boolean);
       setKassaOn(ke);
       setMenuOnlyState(mo as boolean);
+      setDeliveryOn(de as boolean);
     });
     return () => authSub.subscription.unsubscribe();
   }, [router]);
@@ -3900,8 +3904,42 @@ function AdminPageContent() {
 
           {/* ── KURYERLƏR ──────────────────────────────────────────────── */}
           {tab === 'couriers' && (
-            <div className="max-w-3xl">
-              <CourierPanel setDialog={setDialog} bizSettings={bizSettings} />
+            <div className="max-w-3xl space-y-4">
+              {/* The module switch, same shape as Masa rejimi. Turning it off
+                  takes çatdırılma off the seller's screens; the riders, their
+                  debts and their history stay exactly where they are. */}
+              <div className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-stone-800">Çatdırılma</p>
+                  <p className="text-xs text-stone-500">
+                    {deliveryOn
+                      ? 'Satıcılar kuryer sifarişi yarada bilir'
+                      : 'Deaktivdir — satıcı panelində çatdırılma görünmür'}
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    const next = !deliveryOn;
+                    setDeliveryToggleBusy(true);
+                    setDeliveryOn(next);
+                    await setDeliveryEnabled(next);
+                    setDeliveryToggleBusy(false);
+                  }}
+                  disabled={deliveryToggleBusy}
+                  className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${deliveryOn ? 'bg-primary-800' : 'bg-stone-300'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${deliveryOn ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+
+              {deliveryOn ? (
+                <CourierPanel setDialog={setDialog} bizSettings={bizSettings} />
+              ) : (
+                <div className="bg-white rounded-xl border border-stone-100 p-12 text-center">
+                  <Bike className="w-10 h-10 mx-auto mb-3 text-stone-200" />
+                  <p className="text-sm text-stone-500">Çatdırılma deaktivdir. Satıcı panelində kuryer sifarişi yaradıla bilmir.</p>
+                </div>
+              )}
             </div>
           )}
 
