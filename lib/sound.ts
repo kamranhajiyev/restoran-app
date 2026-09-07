@@ -75,10 +75,27 @@ async function revive(c: AudioContext): Promise<AudioContext | null> {
 // Browsers refuse to produce sound until the user has interacted with the page, so
 // this has to run off a real gesture — either any tap at all (armSoundOnFirstGesture)
 // or the "Səsi aktivləşdir" button the UI falls back to.
+//
+// Callers overlap constantly — focus and visibilitychange both fire on one switch
+// back to the tab, and a tap can land mid-revive — and two revives at once corrupt
+// each other: the one that takes the rebuild path closes the context the other is
+// holding, so a perfectly healthy engine reports failure and the UI puts up the
+// "sound is off" banner. So a revive already in flight is shared rather than
+// started twice.
+let unlocking: Promise<boolean> | null = null;
+
 export async function unlockSound(): Promise<boolean> {
-  const c = getCtx();
-  if (!c) return false;
-  return (await revive(c)) !== null;
+  if (unlocking) return unlocking;
+  unlocking = (async () => {
+    const c = getCtx();
+    if (!c) return false;
+    return (await revive(c)) !== null;
+  })();
+  try {
+    return await unlocking;
+  } finally {
+    unlocking = null;
+  }
 }
 
 export function isSoundUnlocked(): boolean {

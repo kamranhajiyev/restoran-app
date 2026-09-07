@@ -12,7 +12,7 @@ import { Bell, CircleCheck, Check, Settings } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
-  setCompanyContext, fetchMenu, fetchOrders, fetchStations,
+  setCompanyContext, fetchMenu, fetchOrders, fetchOrdersOrNull, fetchStations,
   fetchStationReady, markStationReady, unmarkStationReady, StationReady,
 } from '@/lib/store';
 import { menuIndex, sliceForStation, readyStationIds } from '@/lib/stations';
@@ -114,10 +114,14 @@ export default function StationPage() {
 
   const refreshOrders = useCallback(async () => {
     const [o, r] = await Promise.all([
-      fetchOrders({ limit: 200 }),
+      // Null is a failed read, not an empty kitchen. Applying it would clear the
+      // board of tickets the cooks are working from — and the next poll would
+      // bring them all back, by which time someone has already started asking
+      // where the order went.
+      fetchOrdersOrNull({ limit: 200 }),
       fetchStationReady(),
     ]);
-    setOrders(o);
+    if (o) setOrders(o);
     setReadyRows(r);
     setOnline(true);
   }, []);
@@ -280,10 +284,17 @@ export default function StationPage() {
   // killed the audio engine, so re-arm it as soon as the tab is visible again
   // rather than letting the next order's beep be the thing that discovers it's dead.
   // Only worth doing once sound has been armed at least once on this device.
+  //
+  // Promote-only: a resume outside a user gesture is allowed to fail, and treating
+  // that as "audio is dead" would put the enable-sound banner in front of a cook
+  // whose sound works — and, since this effect is gated on soundReady, stop the
+  // re-arm from ever running again. A beep that failed to come out (above) is the
+  // honest signal, and it still turns soundReady off.
   useEffect(() => {
     if (!soundReady) return;
-    const rearm = () => {
-      if (document.visibilityState === 'visible') unlockSound().then(setSoundReady);
+    const rearm = async () => {
+      if (document.visibilityState !== 'visible') return;
+      if (await unlockSound()) setSoundReady(true);
     };
     window.addEventListener('focus', rearm);
     document.addEventListener('visibilitychange', rearm);
@@ -549,10 +560,19 @@ function StationCard({
         {batches.map((batch, i) => (
           <div key={batch.at}>
             {!batch.isFirst && (
-              // A later addition, timestamped: "this came in after the rest".
-              <div className="text-[0.6875em] font-semibold text-primary-800 mb-[0.4em]">
-                + Əlavə · {clockTime(batch.at)}
-              </div>
+              // A later batch is timestamped: "this came in after the rest". But a
+              // partial removal's ghost row lands in a batch of its own, and calling
+              // that an addition tells the cook to make more of what was just taken
+              // off — so a batch with nothing left in it is labelled as a removal.
+              batch.items.every(it => it.removedAt) ? (
+                <div className="text-[0.6875em] font-semibold text-red-600 mb-[0.4em]">
+                  − Silindi · {clockTime(batch.at)}
+                </div>
+              ) : (
+                <div className="text-[0.6875em] font-semibold text-primary-800 mb-[0.4em]">
+                  + Əlavə · {clockTime(batch.at)}
+                </div>
+              )
             )}
             <ul className="space-y-[0.375em]">
               {batch.items.map((item, j) => (

@@ -11,7 +11,7 @@ import {
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
-  fetchMenu, addOrder, addItemsToOrder, setOrderItemQuantity, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, fetchCategories, setCompanyContext, fetchTables, fetchHalls,
+  fetchMenu, addOrder, addItemsToOrder, setOrderItemQuantity, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, fetchCategories, setCompanyContext, fetchTables, fetchHalls,
   fetchTablesEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, fetchStaff, verifyStaffPin, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
@@ -56,6 +56,33 @@ async function pendingTotal(): Promise<number> {
 // edited in the office, a table another terminal seated — are not things a waiter
 // is standing there waiting for.
 const PULL_EVERY_MS = 5 * 60_000;
+
+/**
+ * The terminal's read of the room, or null when it did not get an answer.
+ *
+ * The public route replies `{ orders: [] }` on its own failures — a 400 for a
+ * missing company, a 500 for a database that would not answer — so a caller that
+ * only guards its `.catch()` is guarding the one failure that never happens
+ * here: the body parses, the empty list is applied, and every open table leaves
+ * the screen until the next poll brings them back. The status is the only thing
+ * that separates "nothing is open" from "ask me again".
+ *
+ * See fetchOrdersOrNull in lib/store.ts — the same rule on the signed-in side.
+ */
+async function readTerminalOrders(
+  companyId: string,
+  params = '&limit=200',
+): Promise<{ orders: Order[]; total: number } | null> {
+  try {
+    const res = await tillFetch(`/api/public-orders?companyId=${companyId}${params}`);
+    if (!res.ok) return null;
+    const d = await res.json();
+    if (!Array.isArray(d?.orders)) return null;
+    return { orders: d.orders as Order[], total: (d.total as number) ?? d.orders.length };
+  } catch {
+    return null;
+  }
+}
 
 const CANCEL_REASONS =['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
@@ -542,9 +569,12 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         // refresh was written to the screen as much as several seconds later —
         // the widest window in the page for a stale list to overwrite a fresh
         // one, and it opened every forty seconds.
-        const ordersRead = tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`)
-          .then(r => r.json()).then(d => d.orders ?? []).catch(() => []);
-        ordersRead.then(o => applyOrders(ticket, () => setOrders(o)));
+        //
+        // Null when the read failed, and then the list stands: a blank
+        // Sifarişlər every forty seconds is how a working restaurant looks like
+        // an empty one.
+        const ordersRead = readTerminalOrders(overrideCompanyId);
+        ordersRead.then(d => { if (d) applyOrders(ticket, () => setOrders(d.orders)); });
 
         const [m, c, tb, st, rd, mg, kr] = await Promise.all([
           tillFetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
@@ -565,11 +595,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         if (mg) setModifierGroups(mg);
       } else {
         const [m, o, c, st, s, mg, tb, hl, kr] = await Promise.all([
-          fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(), fetchModifierGroups(),
+          fetchMenu(), fetchOrdersOrNull({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(), fetchModifierGroups(),
           fetchTables(), fetchHalls(), fetchCouriersWithBalance(),
         ]);
         setMenu(m); setShift(s); setTables(tb); setHalls(hl);
-        applyOrders(ticket, () => setOrders(o));
+        if (o) applyOrders(ticket, () => setOrders(o));
         setAvailableCategories(c.filter(cat => cat.available));
         setPinStaffList(st);
         setModifierGroups(mg);
@@ -593,17 +623,19 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         const [d, r] = await Promise.all([
           // null, not an empty list: offline these two are indistinguishable, and
           // treating a dead line as "this restaurant has no open orders" wipes
-          // every occupied table off the screen mid-service.
-          tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).catch(() => null),
+          // every occupied table off the screen mid-service. The guard has to be
+          // on the status rather than on the catch — the route answers its own
+          // failures with `{ orders: [] }` and a 500, which parses perfectly.
+          readTerminalOrders(overrideCompanyId),
           tillFetch(`/api/public-station-ready?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.ready ?? []).catch(() => null),
         ]);
-        if (d) applyOrders(ticket, () => { setOrders(d.orders ?? []); setTotalOrders(d.total ?? 0); });
+        if (d) applyOrders(ticket, () => { setOrders(d.orders); setTotalOrders(d.total); });
         // null = the request failed. Keep the last known green rather than blanking
         // the list: a blip must not make ready food look unready.
         if (r) setReadyRows(r);
       } else {
-        const [o, total, r] = await Promise.all([fetchOrders({ limit: 200 }), fetchOrdersCount(), fetchStationReady()]);
-        applyOrders(ticket, () => { setOrders(o); setTotalOrders(total); });
+        const [o, total, r] = await Promise.all([fetchOrdersOrNull({ limit: 200 }), fetchOrdersCount(), fetchStationReady()]);
+        if (o) applyOrders(ticket, () => { setOrders(o); setTotalOrders(total); });
         setReadyRows(r);
       }
     } finally { if (!silent) setRefreshing(false); }
@@ -850,13 +882,22 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   // Coming back to the screen after a lock / app-switch is exactly when iOS has
   // suspended (or zombified) the audio engine. Re-arm it the moment the tab is
   // visible again, so the next order chimes instead of us waiting for a play to
-  // fail first. unlockSound() rebuilds a dead context; a real failure leaves soundReady
-  // off, and the effect above is still listening for the next tap to try again.
+  // fail first. unlockSound() rebuilds a dead context.
+  //
+  // This re-arm can only promote sound to ready, never demote it. Its failures are
+  // not evidence of anything: a resume outside a gesture is allowed to fail, and it
+  // would flip soundReady off, restart the 10s timer above and put the banner in
+  // front of a waiter whose sound works fine — on every tab switch. What audio is
+  // genuinely dead looks like is a *beep* that failed to come out, and that path
+  // (playOrderReady, above) still turns soundReady off and the banner on.
+  //
+  // focus and visibilitychange both fire on one switch back, so this runs twice;
+  // unlockSound() shares a revive already in flight rather than racing itself.
   useEffect(() => {
     if (!soundWanted) return;
-    const rearm = () => {
+    const rearm = async () => {
       if (document.visibilityState !== 'visible') return;
-      unlockSound().then(ok => { setSoundReady(ok); if (ok) setSoundBlocked(false); });
+      if (await unlockSound()) { setSoundReady(true); setSoundBlocked(false); }
     };
     window.addEventListener('focus', rearm);
     document.addEventListener('visibilitychange', rearm);
@@ -906,14 +947,14 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       const bootTicket = beginOrdersRead();
       Promise.all([
         tillFetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
-        tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200`).then(r => r.json()).then(d => d.orders ?? []).catch(() => []),
+        readTerminalOrders(overrideCompanyId),
         tillFetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
         tillFetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => ({ tables: normalizeTables(d.tables ?? []), halls: (d.halls ?? []) as Hall[] })).catch(() => ({ tables: [], halls: [] })),
         fetchTablesEnabled(),
         fetchKassaEnabled(),
       ]).then(([m, o, c, tb, te, ke]) => {
         setOnline(true); setMenu(m); setTables(tb.tables); setHalls(tb.halls); setTablesOn(te); setKassaOn(ke as boolean);
-        applyOrders(bootTicket, () => setOrders(o));
+        if (o) applyOrders(bootTicket, () => setOrders(o.orders));
         const available = c.filter((cat: { available: boolean }) => cat.available);
         setAvailableCategories(available);
         const cats = available.filter((a: { name: string }) => m.some((i: { category: string }) => i.category === a.name)).map((a: { name: string }) => a.name);
@@ -951,9 +992,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     fetchModifierGroups().then(setModifierGroups);
     fetchHalls().then(setHalls);
     const bootTicket = beginOrdersRead();
-    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled(), fetchKassaEnabled(), fetchPrintReceipt()]).then(([m, o, c, tb, te, ke, pr]) => {
+    Promise.all([fetchMenu(), fetchOrdersOrNull({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled(), fetchKassaEnabled(), fetchPrintReceipt()]).then(([m, o, c, tb, te, ke, pr]) => {
       setOnline(true); setMenu(m); setTables(tb); setTablesOn(te); setKassaOn(ke); setShouldPrintReceipt(pr);
-      applyOrders(bootTicket, () => setOrders(o));
+      if (o) applyOrders(bootTicket, () => setOrders(o));
       const available = c.filter(cat => cat.available);
       setAvailableCategories(available);
       const cats = available.filter(a => m.some(i => i.category === a.name)).map(a => a.name);
@@ -988,10 +1029,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       const ticket = beginOrdersRead();
       try {
         const [m, o, c, st, s, mg] = await Promise.all([
-          fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(), fetchModifierGroups(),
+          fetchMenu(), fetchOrdersOrNull({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(), fetchModifierGroups(),
         ]);
         setMenu(m); setShift(s); setModifierGroups(mg);
-        applyOrders(ticket, () => setOrders(o));
+        if (o) applyOrders(ticket, () => setOrders(o));
         setAvailableCategories(c.filter(cat => cat.available));
         setPinStaffList(st);
       } catch { /* ignore focus sync errors */ }

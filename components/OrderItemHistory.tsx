@@ -27,12 +27,17 @@ export default function OrderItemHistory({ order, tz, isItemReady }: {
     <div className="space-y-1">
       {batches.map((batch, b) => (
         <div key={batch.at}>
-          {/* Only later batches get a divider — the first one *is* the order. */}
+          {/* Only later batches get a divider — the first one *is* the order. A
+              partial removal's ghost row lands in a batch of its own, and labelling
+              that "Əlavə" says the opposite of what happened — on the very view an
+              owner audits removals from. */}
           {!batch.isFirst && (
             <div className="flex items-center gap-2 pt-2 pb-1">
               <span className="h-px flex-1 bg-stone-200" />
-              <span className="text-[11px] font-semibold text-stone-400 uppercase tracking-wide">
-                Əlavə · {time(batch.at)}
+              <span className={`text-[11px] font-semibold uppercase tracking-wide ${
+                batch.items.every(oi => oi.removedAt) ? 'text-red-400' : 'text-stone-400'
+              }`}>
+                {batch.items.every(oi => oi.removedAt) ? 'Silindi' : 'Əlavə'} · {time(batch.at)}
               </span>
               <span className="h-px flex-1 bg-stone-200" />
             </div>

@@ -538,14 +538,43 @@ export async function fetchOrdersCount(): Promise<number> {
   } catch { return 0; }
 }
 
-export async function fetchOrders(opts?: { from?: string; to?: string; limit?: number; offset?: number } & ReadOpts): Promise<Order[]> {
+type OrderQuery = { from?: string; to?: string; limit?: number; offset?: number } & ReadOpts;
+
+/**
+ * The orders, or null when the read did not get an answer.
+ *
+ * A dropped request and a restaurant with nothing open are the same empty array
+ * once an error is swallowed, and the screens that replace their whole list with
+ * what comes back cannot tell the two apart: one failed poll blanks Sifarişlər,
+ * every occupied table with it, and the next poll puts them all back. It reads
+ * as data coming and going, and a reload always "fixes" it because the database
+ * was right the whole time.
+ *
+ * So the failure keeps its own value. Anything painting a live list reads
+ * through here and leaves the screen alone when the answer is null — the rows
+ * already up are the better answer, and another read is on its way.
+ */
+export async function fetchOrdersOrNull(opts?: OrderQuery): Promise<Order[] | null> {
+  try {
+    return await readOrders(opts);
+  } catch {
+    return null;
+  }
+}
+
+/** The same read, with a failure flattened to an empty list. */
+export async function fetchOrders(opts?: OrderQuery): Promise<Order[]> {
+  return (await fetchOrdersOrNull(opts)) ?? [];
+}
+
+async function readOrders(opts?: OrderQuery): Promise<Order[]> {
   const local = await fromLocal(opts, async (till, companyId) =>
     ((await till.orders(companyId, {
       from: opts?.from, to: opts?.to, limit: opts?.limit, offset: opts?.offset,
     })) as { orders: Order[] }).orders);
   if (local) return local;
 
-  try {
+  {
     const PAGE = 1000;
     const offset = opts?.offset ?? 0;
     const all: Awaited<ReturnType<typeof runPage>> = [];
@@ -592,8 +621,6 @@ export async function fetchOrders(opts?: { from?: string; to?: string; limit?: n
       cancelReason: o.cancel_reason ?? undefined,
       ...splitOrderItems(o.order_items),
     }));
-  } catch {
-    return [];
   }
 }
 

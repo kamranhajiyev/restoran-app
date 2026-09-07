@@ -6,7 +6,9 @@
 // Only /seller is cached. Admin and the QR menu deliberately stay online-only —
 // stale reports and a menu edited against a stale copy are worse than an error.
 
-const CACHE = 'possiblle-till-v1';
+// v2 abandons the v1 cache, which holds order lists written under the old
+// stale-while-revalidate rule — snapshots that would otherwise still be served.
+const CACHE = 'possiblle-till-v2';
 
 self.addEventListener('install', e => e.waitUntil(self.skipWaiting()));
 
@@ -22,12 +24,21 @@ self.addEventListener('activate', e =>
 // The till's own reference data. Fine to serve a few minutes stale — a menu
 // price from this morning beats a blank screen — but always refreshed behind
 // the answer so the next order sees the new one.
-// Reference data, plus the state of the room. The room matters most: without
-// orders and the open shift here, a till that reloads during an outage answers
-// its own "what is on table 6" with an empty list and every occupied table comes
-// back clean — the waiter's afternoon, gone, with no sign anything was lost.
 const CACHEABLE_API =
-  /^\/api\/public-(menu|categories|tables|staff|modifiers|stations|orders|shift|station-ready)(\?|$)/;
+  /^\/api\/public-(menu|categories|tables|staff|modifiers|stations)(\?|$)/;
+
+// The state of the room is not reference data, and answering it from the cache
+// while the line is up was its own bug: stale-while-revalidate hands back the
+// snapshot taken before the last order was rung up, so an order placed seconds
+// ago is missing from the very next poll — and comes back on the one after,
+// which is the flicker a waiter reads as lost data.
+//
+// Network first, then. The cache is still written, and still answers when the
+// line is genuinely down: without it a till that reloads during an outage
+// answers its own "what is on table 6" with an empty list and every occupied
+// table comes back clean — the waiter's afternoon, gone, with no sign anything
+// was lost. That is what the copy is for, not for saving a request mid-service.
+const LIVE_API = /^\/api\/public-(orders|shift|station-ready)(\?|$)/;
 
 async function staleWhileRevalidate(req) {
   const cache = await caches.open(CACHE);
@@ -76,6 +87,11 @@ self.addEventListener('fetch', e => {
         return res;
       }),
     );
+    return;
+  }
+
+  if (LIVE_API.test(url.pathname + url.search)) {
+    e.respondWith(networkFirst(req));
     return;
   }
 
