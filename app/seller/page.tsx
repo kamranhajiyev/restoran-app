@@ -1028,6 +1028,18 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   // Pre-fill cash with the total — the common case is exact cash payment;
   // the field selects on focus so a different amount can be typed straight over it.
   function openPayment(order: Order) {
+    // An order with no lines on it has no bill, and a bill of 0.00 is never a real
+    // one — it means this copy of the order arrived before its items did (a stale
+    // read, or the cached list the service worker answers with during an outage).
+    // Paying against it books the whole tendered amount as change: cash_amount 0,
+    // change_amount 5, and the day's Nağd total quietly short by a coffee. Four
+    // orders went out that way on 7 Sep. Refuse, and say why — the lines are on
+    // their way, and the next read brings them.
+    if (order.items.length === 0) {
+      alert('Sifarişin məhsulları hələ yüklənməyib.\n\nBir neçə saniyə gözləyin, sonra yenidən cəhd edin.');
+      refreshOrders();
+      return;
+    }
     setPayingOrder(order);
     setCashInput(orderTotal(order).toFixed(2));
     setCardInput('');
@@ -1044,6 +1056,11 @@ export default function SellerPage({ overrideCompanyId, overrideCompanyName, ove
   async function confirmPayment() {
     if (!payingOrder) return;
     const order = payingOrder;
+    // The same rule as openPayment, held at the moment it costs money. The sheet
+    // takes a snapshot, so this can only fire if an empty order got past the door,
+    // but closing an order at a 0.00 bill is the one mistake with no trace on the
+    // receipt and no way back — so it is checked on both sides of the sheet.
+    if (order.items.length === 0) { setPayingOrder(null); refreshOrders(); return; }
     const cash = parseFloat(cashInput) || 0;
     const card = parseFloat(cardInput) || 0;
     const fullTotal = orderTotal(order);
