@@ -72,6 +72,22 @@ async function revive(c: AudioContext): Promise<AudioContext | null> {
   return fresh.state === 'running' ? fresh : null;
 }
 
+// resume() on a context the browser has autoplay-blocked does not reject — Chrome
+// simply leaves the promise pending until an activation it may never get. Unbounded,
+// that hangs `unlocking` below forever and every later caller inherits the hang, which
+// is precisely how the "Səsi aktivləşdir" button became a button that does nothing.
+// A revive that has not landed in three seconds is a revive that isn't coming: well
+// clear of the 60ms clock probe plus a resume, and short enough that the banner tells
+// the truth while the waiter is still looking at it.
+const REVIVE_TIMEOUT_MS = 3000;
+
+function reviveWithin(c: AudioContext): Promise<AudioContext | null> {
+  return Promise.race([
+    revive(c),
+    new Promise<null>(res => setTimeout(() => res(null), REVIVE_TIMEOUT_MS)),
+  ]);
+}
+
 // Browsers refuse to produce sound until the user has interacted with the page, so
 // this has to run off a real gesture — either any tap at all (armSoundOnFirstGesture)
 // or the "Səsi aktivləşdir" button the UI falls back to.
@@ -84,17 +100,28 @@ async function revive(c: AudioContext): Promise<AudioContext | null> {
 // started twice.
 let unlocking: Promise<boolean> | null = null;
 
-export async function unlockSound(): Promise<boolean> {
-  if (unlocking) return unlocking;
-  unlocking = (async () => {
+// `fromGesture` marks a call the user actually asked for — a tap, or the banner's
+// button. Such a call must NOT join an attempt started without a gesture: that attempt
+// is blocked on the very permission this one carries, so sharing it would make the
+// gesture inherit a failure instead of curing it. It gets a fresh context and a fresh
+// revive; everyone else keeps the de-duplication the comment above describes.
+export async function unlockSound(fromGesture = false): Promise<boolean> {
+  if (unlocking && !fromGesture) return unlocking;
+  if (fromGesture) {
+    unlocking = null;   // abandon a pre-gesture attempt; nothing awaits it but itself
+    rebuild();          // a context built before the gesture stays blocked — start clean
+  }
+  const attempt = (async () => {
     const c = getCtx();
     if (!c) return false;
-    return (await revive(c)) !== null;
+    return (await reviveWithin(c)) !== null;
   })();
+  unlocking = attempt;
   try {
-    return await unlocking;
+    return await attempt;
   } finally {
-    unlocking = null;
+    // Only clear the lock if it is still ours — a gesture that overtook us owns it now.
+    if (unlocking === attempt) unlocking = null;
   }
 }
 
@@ -112,7 +139,7 @@ export function armSoundOnFirstGesture(onArmed: (ok: boolean) => void): () => vo
   const events = ['pointerdown', 'touchstart', 'keydown'] as const;
   const off = () => events.forEach(e => document.removeEventListener(e, handler));
   async function handler() {
-    const ok = await unlockSound();
+    const ok = await unlockSound(true);   // this IS the gesture the browser was waiting for
     onArmed(ok);
     if (ok) off();   // armed — the rearm-on-focus path keeps it alive from here
   }

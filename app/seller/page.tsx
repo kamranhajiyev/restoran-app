@@ -12,7 +12,7 @@ import { getSession, logout, validateSession, clearLocalSession, homeFor } from 
 import { supabase } from '@/lib/supabase';
 import {
   fetchMenu, addOrder, addItemsToOrder, setOrderItemQuantity, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, fetchCategories, setCompanyContext, fetchTables, fetchHalls,
-  fetchTablesEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
+  fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, fetchStaff, verifyStaffPin, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
   fetchStations, fetchStationReady, fetchModifierGroups, type StationReady,
@@ -308,6 +308,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   // Tables off (takeaway-only company): the Masa/Takeaway screen is skipped and
   // "Yeni sifariş" opens the product menu directly
   const [tablesOn, setTablesOn]             = useState(true);
+  // Çatdırılma, switched on by the owner in the admin panel. Starts off like
+  // kassaOn so a venue that does not deliver never flashes a Kuryerlər tab it
+  // will lose a moment later; the boot fetch turns it on where it belongs.
+  const [deliveryOn, setDeliveryOn]         = useState(false);
   const [kassaOn, setKassaOn]               = useState(false);
   const [orderType, setOrderType]           = useState<OrderType | null>(null);
   const [selectedTable, setSelectedTable]   = useState<number | null>(null);
@@ -468,6 +472,23 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   // when set, the menu view appends items to this existing order instead of creating a new one
   const [appendOrderId, setAppendOrderId]   = useState<string | null>(null);
+  // Units staged for removal on the append screen, keyed by order_items.id. Taps of "−" only
+  // land here; nothing reaches the server until "Silinməni əlavə et". Sending each tap on its
+  // own is what turned one five-unit deletion into five separate struck-through lines on the
+  // card and five LEGV slips at the bar.
+  const [pendingRemovals, setPendingRemovals] = useState<Record<string, number>>({});
+  // The same map, kept in step for reads that happen before React has re-rendered.
+  // handleNav clears the staged units and then calls startNewOrder, which asks again:
+  // off the state that second read still sees the old map and prompts a second time.
+  const pendingRemovalsRef = useRef<Record<string, number>>({});
+  function updatePendingRemovals(
+    next: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>),
+  ) {
+    const value = typeof next === 'function' ? next(pendingRemovalsRef.current) : next;
+    pendingRemovalsRef.current = value;
+    setPendingRemovals(value);
+  }
+  const [removing, setRemoving]             = useState(false);
   // brief confirmation shown after an existing line's quantity is edited/removed on the server
   const [savedToast, setSavedToast]         = useState(false);
   const savedToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -769,6 +790,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   // screen at all. The banner hangs off this, not off !soundReady, so an ordinary
   // waiter — who arms the sound with his first tap — never sees it.
   const [soundBlocked, setSoundBlocked] = useState(false);
+  // The banner's button was pressed and the browser still said no. Distinguishes
+  // "we haven't asked yet" from "asking didn't work", which the banner reports.
+  const [soundAttemptFailed, setSoundAttemptFailed] = useState(false);
   const soundWanted = soundOn && !deviceMuted;
 
   // Whether the tab is in front, so the "food ready" diff below can hold a missed chime
@@ -816,7 +840,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     const openIds = new Set(orders.filter(isOrderOpen).map(o => o.id));
     for (const k of current) {
       if (!prev.has(k) && openIds.has(k.slice(0, k.lastIndexOf(':')))) {
-        playOrderReady().then(ok => { if (!ok) { setSoundReady(false); setSoundBlocked(true); } });
+        playOrderReady().then(ok => { if (!ok) { setSoundReady(false); setSoundBlocked(true); setSoundAttemptFailed(false); } });
         break;                       // one chime per refresh, however many sexes finished
       }
     }
@@ -850,9 +874,12 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   }
 
   async function enableSound() {
-    const ok = await unlockSound();
+    const ok = await unlockSound(true);   // a real click — don't join a pre-gesture attempt
     setSoundReady(ok);
     setSoundBlocked(!ok);
+    // Without this the banner looks identical before and after a click, so a waiter whose
+    // device is simply muted has no way to tell the button did anything at all.
+    setSoundAttemptFailed(!ok);
     if (ok) { setDeviceMuted(false); localStorage.removeItem('soundMuted'); }
   }
 
@@ -872,6 +899,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       clearTimeout(timer);
       setSoundReady(true);
       setSoundBlocked(false);
+      setSoundAttemptFailed(false);
     };
     const timer = setTimeout(() => { if (alive) setSoundBlocked(true); }, 10000);
     unlockSound().then(armed);
@@ -897,7 +925,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     if (!soundWanted) return;
     const rearm = async () => {
       if (document.visibilityState !== 'visible') return;
-      if (await unlockSound()) { setSoundReady(true); setSoundBlocked(false); }
+      if (await unlockSound()) { setSoundReady(true); setSoundBlocked(false); setSoundAttemptFailed(false); }
     };
     window.addEventListener('focus', rearm);
     document.addEventListener('visibilitychange', rearm);
@@ -952,8 +980,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         tillFetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => ({ tables: normalizeTables(d.tables ?? []), halls: (d.halls ?? []) as Hall[] })).catch(() => ({ tables: [], halls: [] })),
         fetchTablesEnabled(),
         fetchKassaEnabled(),
-      ]).then(([m, o, c, tb, te, ke]) => {
-        setOnline(true); setMenu(m); setTables(tb.tables); setHalls(tb.halls); setTablesOn(te); setKassaOn(ke as boolean);
+        fetchDeliveryEnabled(),
+      ]).then(([m, o, c, tb, te, ke, de]) => {
+        setOnline(true); setMenu(m); setTables(tb.tables); setHalls(tb.halls); setTablesOn(te); setKassaOn(ke as boolean); setDeliveryOn(de as boolean);
         if (o) applyOrders(bootTicket, () => setOrders(o.orders));
         const available = c.filter((cat: { available: boolean }) => cat.available);
         setAvailableCategories(available);
@@ -992,8 +1021,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     fetchModifierGroups().then(setModifierGroups);
     fetchHalls().then(setHalls);
     const bootTicket = beginOrdersRead();
-    Promise.all([fetchMenu(), fetchOrdersOrNull({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled(), fetchKassaEnabled(), fetchPrintReceipt()]).then(([m, o, c, tb, te, ke, pr]) => {
-      setOnline(true); setMenu(m); setTables(tb); setTablesOn(te); setKassaOn(ke); setShouldPrintReceipt(pr);
+    Promise.all([fetchMenu(), fetchOrdersOrNull({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled(), fetchKassaEnabled(), fetchPrintReceipt(), fetchDeliveryEnabled()]).then(([m, o, c, tb, te, ke, pr, de]) => {
+      setOnline(true); setMenu(m); setTables(tb); setTablesOn(te); setKassaOn(ke); setShouldPrintReceipt(pr); setDeliveryOn(de);
       if (o) applyOrders(bootTicket, () => setOrders(o));
       const available = c.filter(cat => cat.available);
       setAvailableCategories(available);
@@ -1123,8 +1152,15 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_tables' }, () => refreshAll())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'halls' }, () => refreshAll())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'companies' }, async () => {
-        const [te, ke] = await Promise.all([fetchTablesEnabled(), fetchKassaEnabled()]);
-        setTablesOn(te); setKassaOn(ke);
+        const [te, ke, de] = await Promise.all([fetchTablesEnabled(), fetchKassaEnabled(), fetchDeliveryEnabled()]);
+        setTablesOn(te); setKassaOn(ke); setDeliveryOn(de);
+        // The owner just switched çatdırılma off and a seller may be standing on
+        // one of its screens — the nav item they arrived through is gone, so
+        // leaving them there is a dead end.
+        if (!de) {
+          setView(v => (v === 'couriers' ? 'orders' : v));
+          setOrderType(t => (t === 'kuryer' ? null : t));
+        }
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -1306,18 +1342,23 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
 
   function handleNav(id: View) {
     if (id === 'kassa' && !kassaOn) return;
+    if (id === 'couriers' && !deliveryOn) return;
+    if (!confirmDiscardRemovals()) return;
+    updatePendingRemovals({});
     setAppendOrderId(null);
     if (id === 'couriers') refreshCouriers();
     if (id === 'new-order') {
-      // Tables off used to mean "there is only one kind of order". With couriers
-      // on file there are two, so the chooser has to appear after all.
-      if (!tablesOn && activeCouriers.length === 0) { startNewOrder('takeaway'); return; }
+      // Tables off used to mean "there is only one kind of order". With
+      // çatdırılma on there are two, so the chooser has to appear after all.
+      if (!tablesOn && !deliveryOn) { startNewOrder('takeaway'); return; }
       setOrderType(null); setCart([]); setSelectedCourier(null);
     }
     setView(id);
   }
 
   function startNewOrder(type: OrderType, tableNum?: number, courierId?: string) {
+    if (!confirmDiscardRemovals()) return;
+    updatePendingRemovals({});
     setAppendOrderId(null);
     setOrderType(type);
     setSelectedTable(tableNum ?? null);
@@ -1333,6 +1374,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   // Open the menu in "append to existing order" mode (reuses the same cart UI).
   function startAppend(order: Order) {
     setAppendOrderId(order.id);
+    updatePendingRemovals({});          // never carry another order's staged units in
     setCart([]);
     setNote(order.note ?? '');
     setMenuSearch('');
@@ -1342,6 +1384,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   }
 
   function cancelAppend() {
+    if (!confirmDiscardRemovals()) return;
+    updatePendingRemovals({});
     setAppendOrderId(null);
     setCart([]);
     setMenuSearch('');
@@ -1349,8 +1393,22 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   }
 
   async function submitAppend() {
-    if (cart.length === 0 || submitting || !appendOrderId) return;
+    if (submitting || removing || !appendOrderId) return;
     const orderId = appendOrderId;
+    // "Əlavə et" saves the whole edit, removals included — leaving them staged here would
+    // discard them the moment the screen closes. They go first: if they fail, the alert has
+    // already been shown and the screen stays put with the staged units intact.
+    const target = orders.find(o => o.id === orderId);
+    if (target && !(await commitRemovals(target))) return;
+    if (cart.length === 0) {
+      // Nothing to append — the removals were the whole edit.
+      setExpandedOrderId(orderId);
+      setAppendOrderId(null);
+      setCart([]); setNote(''); setMenuSearch('');
+      setMobileCartOpen(false);
+      setView('orders');
+      return;
+    }
     const newItems = named(cart);
     const newNote = note.trim();
     setSubmitting(true);
@@ -1383,59 +1441,118 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     setView('orders');
   }
 
-  // Reduce an existing line's quantity by one (from the "Əlavə et" edit screen). When it drops to
-  // zero the whole line goes. Either way it is a SOFT delete: the row survives, struck through on
-  // the card, and is what the kitchen's LEGV slip prints. No stock impact — apply_stock_on_payment()
-  // skips removed rows, so the warehouse never drains for a dish that wasn't made. A brief toast
-  // confirms the change reached the server.
-  async function handleDecrementItem(order: Order, oi: OrderItem) {
-    if (!oi.id || !isOrderOpen(order)) return;
+  // Stage one unit of an existing line for removal (from the "Əlavə et" edit screen). Nothing is
+  // sent yet — the tap only moves a unit into pendingRemovals, and commitRemovals() below does the
+  // writing. Five taps on a five-unit line therefore become one server call, one struck-through
+  // "5 əd" line on the card and one LEGV slip, instead of five of each.
+  function handleDecrementItem(order: Order, oi: OrderItem) {
+    if (!oi.id || !isOrderOpen(order) || removing) return;
+    const staged = pendingRemovalsRef.current[oi.id] ?? 0;
+    if (staged >= oi.quantity) return;          // nothing left on the line to take off
     // Already cooked: taking it off now bins real food, and somebody pays for it. Not
     // blocked — the guest may genuinely have changed their mind — but not a silent tap
-    // either. Who did it is already on the record (removed_by, removed_at).
-    if (isItemReady(order, oi) && !confirm(`"${oi.menuItem.name}" hazırdır. Yenə də silinsin?`)) return;
-    const newQty = oi.quantity - 1;
-    const ok = overrideCompanyId
-      ? (await postOrQueue(
-          // Keyed by the quantity it lands on, so two taps of "−" queue as two
-          // distinct steps while a retry of either stays one.
-          `qty:${oi.id}:${newQty}`,
-          '/api/update-order-item-qty',
-          { orderItemId: oi.id, orderId: order.id, quantity: newQty, companyId: overrideCompanyId, token: overrideToken, removedBy: effectiveSeller },
-          overrideCompanyId,
-        )).ok
-      // The order id is only needed by the desktop till, which stores an order
-      // whole and has no other way to find the line.
-      : await setOrderItemQuantity(oi.id, newQty, effectiveSeller, order.id);
-    if (!ok) { alert('Dəyişdirilmədi. Yenidən cəhd edin.'); return; }
+    // either. Asked once per line, not once per unit; who did it is on the record
+    // (removed_by, removed_at) when the batch lands.
+    if (staged === 0 && isItemReady(order, oi) && !confirm(`"${oi.menuItem.name}" hazırdır. Yenə də silinsin?`)) return;
+    updatePendingRemovals(p => ({ ...p, [oi.id!]: staged + 1 }));
+  }
 
-    // Optimistically apply, then reconcile with the server. The removed line must move
-    // into removedItems, not vanish: dropping it would make it flicker off the card and
-    // back on at the next refresh.
+  function unstageRemovals(oi: OrderItem) {
+    const id = oi.id;
+    if (!id) return;
+    updatePendingRemovals(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }
+
+  // Send everything staged, one call per line. A SOFT delete: the row survives, struck through on
+  // the card, and is what the kitchen's LEGV slip prints. No stock impact — apply_stock_on_payment()
+  // skips removed rows, so the warehouse never drains for a dish that wasn't made.
+  //
+  // Returns false if any line failed, so a caller chaining another write (submitAppend) can stop
+  // rather than navigate away from removals that never landed.
+  async function commitRemovals(order: Order): Promise<boolean> {
+    const staged = Object.entries(pendingRemovalsRef.current).filter(([, n]) => n > 0);
+    if (staged.length === 0) return true;
+    setRemoving(true);
+
     const now = new Date().toISOString();
-    mutateOrders(prev => prev.map(o => {
-      if (o.id !== order.id) return o;
-      const full = newQty <= 0;
-      const ghost: OrderItem = {
-        ...oi,
-        id: full ? oi.id : `pending-${oi.id}`,   // a partial removal's ghost is a separate server row
-        quantity: full ? oi.quantity : 1,        // …carrying only the unit that was taken away
-        // A fully-removed line keeps its original timestamp and stays in the batch it
-        // was ordered in; a partial removal's ghost belongs to the moment it happened.
-        createdAt: full ? oi.createdAt : now,
-        removedAt: now,
-        removedBy: effectiveSeller,
-      };
-      return {
-        ...o,
-        items: newQty <= 0
-          ? o.items.filter(x => x.id !== oi.id)
-          : o.items.map(x => x.id === oi.id ? { ...x, quantity: newQty } : x),
-        removedItems: [...(o.removedItems ?? []), ghost],
-      };
-    }));
+    const applied: { oi: OrderItem; count: number; newQty: number }[] = [];
+    const failed: string[] = [];
+
+    for (const [itemId, count] of staged) {
+      const oi = order.items.find(x => x.id === itemId);
+      if (!oi) continue;                        // line vanished under us; the refresh below settles it
+      const newQty = Math.max(0, oi.quantity - count);
+      const ok = overrideCompanyId
+        ? (await postOrQueue(
+            // Keyed by the quantity it lands on, so a retry of the same batch stays one write.
+            `qty:${itemId}:${newQty}`,
+            '/api/update-order-item-qty',
+            { orderItemId: itemId, orderId: order.id, quantity: newQty, companyId: overrideCompanyId, token: overrideToken, removedBy: effectiveSeller },
+            overrideCompanyId,
+          )).ok
+        // The order id is only needed by the desktop till, which stores an order
+        // whole and has no other way to find the line.
+        : await setOrderItemQuantity(itemId, newQty, effectiveSeller, order.id);
+      if (ok) applied.push({ oi, count, newQty }); else failed.push(oi.menuItem.name);
+    }
+
+    // Optimistically apply what landed, then reconcile with the server. A removed line must move
+    // into removedItems, not vanish: dropping it would make it flicker off the card and back on
+    // at the next refresh.
+    if (applied.length > 0) {
+      mutateOrders(prev => prev.map(o => {
+        if (o.id !== order.id) return o;
+        let items = o.items;
+        const ghosts: OrderItem[] = [];
+        for (const { oi, count, newQty } of applied) {
+          const full = newQty <= 0;
+          ghosts.push({
+            ...oi,
+            id: full ? oi.id : `pending-${oi.id}`,  // a partial removal's ghost is a separate server row
+            quantity: count,                        // …carrying only the units that were taken away
+            // A fully-removed line keeps its original timestamp and stays in the batch it
+            // was ordered in; a partial removal's ghost belongs to the moment it happened.
+            createdAt: full ? oi.createdAt : now,
+            removedAt: now,
+            removedBy: effectiveSeller,
+          });
+          items = full
+            ? items.filter(x => x.id !== oi.id)
+            : items.map(x => x.id === oi.id ? { ...x, quantity: newQty } : x);
+        }
+        return { ...o, items, removedItems: [...(o.removedItems ?? []), ...ghosts] };
+      }));
+    }
+
+    // Only clear what actually landed — a failed line keeps its staged units so the
+    // seller can press the button again without re-tapping "−".
+    updatePendingRemovals(prev => {
+      const next = { ...prev };
+      for (const { oi } of applied) delete next[oi.id!];
+      return next;
+    });
+    setRemoving(false);
+    if (failed.length > 0) {
+      alert(`Silinmədi: ${failed.join(', ')}\n\nYenidən cəhd edin.`);
+      refreshOrders();
+      return false;
+    }
     flashSaved();
     refreshOrders();
+    return true;
+  }
+
+  // Staged units are not on the server yet, so walking away throws them out. Ask first —
+  // a waiter who tapped "−" five times and left would otherwise believe the guest was
+  // credited for drinks that are still on the bill.
+  function confirmDiscardRemovals(): boolean {
+    const total = Object.values(pendingRemovalsRef.current).reduce((s, n) => s + n, 0);
+    if (total === 0) return true;
+    return confirm(`${total} ədəd silinmə hələ təsdiqlənməyib.\n\nÇıxsanız ləğv olunacaq. Davam edilsin?`);
   }
 
   async function submitOrder() {
@@ -2110,9 +2227,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
             { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
             { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
             ...(kassaOn ? [{ id: 'kassa' as View, label: 'Kassa', icon: Wallet }] : []),
-            // Only where couriers exist: a restaurant that does not deliver
-            // should not carry an empty tab around for the life of the app.
-            ...(couriers.length > 0 ? [{ id: 'couriers' as View, label: 'Kuryerlər', icon: Bike }] : []),
+            // Only where the owner turned çatdırılma on: a restaurant that does
+            // not deliver should not carry an empty tab around for the life of
+            // the app.
+            ...(deliveryOn ? [{ id: 'couriers' as View, label: 'Kuryerlər', icon: Bike }] : []),
             { id: 'history' as View,   label: 'Tarixçə',      icon: History },
           ].map(n => {
             const Icon = n.icon;
@@ -2498,12 +2616,26 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
               {soundOn && !deviceMuted && !soundReady && soundBlocked && (
                 <div className="mx-4 md:mx-6 mb-2 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5">
                   <Bell className="w-4 h-4 text-amber-600 shrink-0" />
-                  <p className="flex-1 text-sm text-amber-900">Yeni sifariş səsi söndürülüb — brauzer icazə istəyir.</p>
+                  <p className="flex-1 text-sm text-amber-900">
+                    {soundAttemptFailed
+                      ? 'Səs alınmadı — cihazın səsini və brauzer icazəsini yoxlayın.'
+                      : 'Yeni sifariş səsi söndürülüb — brauzer icazə istəyir.'}
+                  </p>
                   <button
                     onClick={enableSound}
                     className="shrink-0 text-sm font-medium bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg transition-colors"
                   >
-                    Səsi aktivləşdir
+                    {soundAttemptFailed ? 'Yenidən cəhd et' : 'Səsi aktivləşdir'}
+                  </button>
+                  {/* A device with no working output would otherwise show this banner all
+                      shift with no way to put it down. Muting is the existing escape and
+                      the "Səs söndürülüb — aç" link below is the way back. */}
+                  <button
+                    onClick={muteDevice}
+                    title="Bağla — bu cihazda səsi söndür"
+                    className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-amber-700 hover:bg-amber-100 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
               )}
@@ -2977,7 +3109,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
 
               {/* Masa and Kuryer select — they need a second choice before the
                   menu opens. Takeaway has nothing left to ask, so it starts. */}
-              <div className={`grid ${activeCouriers.length > 0 ? 'grid-cols-2 sm:grid-cols-3 max-w-md' : 'grid-cols-2 max-w-xs'} gap-4 mb-8`}>
+              <div className={`grid ${deliveryOn ? 'grid-cols-2 sm:grid-cols-3 max-w-md' : 'grid-cols-2 max-w-xs'} gap-4 mb-8`}>
                 {tablesOn && (
                   <button
                     onClick={() => setOrderType('masa')}
@@ -2994,7 +3126,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   <span className="text-4xl">🥡</span>
                   <span className="font-semibold text-sm text-stone-600">Takeaway</span>
                 </button>
-                {activeCouriers.length > 0 && (
+                {deliveryOn && (
                   <button
                     onClick={() => setOrderType('kuryer')}
                     className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 ${orderType === 'kuryer' ? 'border-primary-800 bg-primary-50' : 'border-stone-200 bg-white hover:border-primary-300'}`}
@@ -3008,6 +3140,14 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
               {orderType === 'kuryer' && (
                 <div className="mb-8">
                   <p className="text-sm font-medium text-stone-700 mb-3">Kuryeri seçin</p>
+                  {/* Çatdırılma is on but nobody has been added yet — say so,
+                      rather than leaving the seller looking at a blank strip. */}
+                  {activeCouriers.length === 0 && (
+                    <div className="rounded-2xl border-2 border-dashed border-stone-200 bg-white px-4 py-6 text-center max-w-3xl">
+                      <Bike className="w-8 h-8 mx-auto mb-2 text-stone-300" />
+                      <p className="text-sm text-stone-500">Aktiv kuryer yoxdur. Admin panelindən kuryer əlavə edin.</p>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-w-3xl">
                     {activeCouriers.map(c => {
                       const owed = c.outstanding ?? 0;
@@ -3293,7 +3433,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                 </div>
                 <div className="flex-1 overflow-y-auto px-4 py-3">
                   {appendOrder
-                    ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} />
+                    ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} pendingRemovals={pendingRemovals} onUnstageRemoval={unstageRemovals} onCommitRemovals={() => commitRemovals(appendOrder)} removing={removing} />
                     : cart.length === 0
                     ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
                     : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
@@ -3356,7 +3496,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
           { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
           { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
           ...(kassaOn ? [{ id: 'kassa' as View, label: 'Kassa', icon: Wallet }] : []),
-          ...(couriers.length > 0 ? [{ id: 'couriers' as View, label: 'Kuryerlər', icon: Bike }] : []),
+          ...(deliveryOn ? [{ id: 'couriers' as View, label: 'Kuryerlər', icon: Bike }] : []),
           { id: 'history' as View,   label: 'Tarixçə',      icon: History },
         ].map(n => {
           const Icon = n.icon;
@@ -3418,7 +3558,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-3">
               {appendOrder
-                ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} />
+                ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} pendingRemovals={pendingRemovals} onUnstageRemoval={unstageRemovals} onCommitRemovals={() => commitRemovals(appendOrder)} removing={removing} />
                 : cart.length === 0
                 ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
                 : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
@@ -4000,7 +4140,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
 
 // ── CartItems — shared between desktop sidebar and mobile sheet ───────────
 
-function CartItems({ cart, existingItems, removedItems, addToCart, removeFromCart, onDecrementExisting }: {
+function CartItems({ cart, existingItems, removedItems, addToCart, removeFromCart, onDecrementExisting, pendingRemovals, onUnstageRemoval, onCommitRemovals, removing }: {
   cart: OrderItem[];
   existingItems?: OrderItem[];
   removedItems?: OrderItem[];
@@ -4009,9 +4149,19 @@ function CartItems({ cart, existingItems, removedItems, addToCart, removeFromCar
   // cart at two prices if its set was re-priced between the two taps.
   removeFromCart: (itemId: string, mods?: string, price?: number) => void;
   onDecrementExisting?: (oi: OrderItem) => void;
+  // Units staged for removal but not yet sent, keyed by order_items.id.
+  pendingRemovals?: Record<string, number>;
+  onUnstageRemoval?: (oi: OrderItem) => void;
+  onCommitRemovals?: () => void;
+  removing?: boolean;
 }) {
-  // Active items only — removed lines cost the guest nothing.
-  const existingTotal = (existingItems ?? []).reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
+  const staged = pendingRemovals ?? {};
+  const stagedFor = (oi: OrderItem) => (oi.id ? staged[oi.id] ?? 0 : 0);
+  const stagedTotal = (existingItems ?? []).reduce((s, oi) => s + stagedFor(oi), 0);
+  // Active items only — removed lines cost the guest nothing. Staged units are already
+  // discounted here so the total on screen is what the guest will actually pay.
+  const existingTotal = (existingItems ?? [])
+    .reduce((s, oi) => s + oi.menuItem.price * (oi.quantity - stagedFor(oi)), 0);
   return (
     <div className="space-y-3">
       {existingItems && existingItems.length > 0 && (
@@ -4021,25 +4171,42 @@ function CartItems({ cart, existingItems, removedItems, addToCart, removeFromCar
             <p className="text-xs font-semibold text-stone-500">{existingTotal.toFixed(2)} ₼</p>
           </div>
           <ul className="space-y-1.5">
-            {existingItems.map((oi, j) => (
+            {existingItems.map((oi, j) => {
+              const off = stagedFor(oi);
+              const left = oi.quantity - off;
+              return (
               <li key={'ex' + j} className="flex items-center justify-between gap-2 text-sm text-stone-500">
-                <span className="flex-1 min-w-0 truncate">
+                <span className={`flex-1 min-w-0 truncate ${left === 0 ? 'line-through text-stone-400' : ''}`}>
                   {oi.menuItem.name}
                   {oi.modifiers && <span className="text-xs text-primary-600 ml-1">({oi.modifiers})</span>}
+                  {off > 0 && <span className="text-xs text-red-500 ml-1">−{off}</span>}
                 </span>
-                {onDecrementExisting && oi.id && (
+                {onDecrementExisting && oi.id && left > 0 && (
                   <button
                     onClick={() => onDecrementExisting(oi)}
-                    className="shrink-0 w-6 h-6 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-600 flex items-center justify-center active:scale-90"
+                    disabled={removing}
+                    className="shrink-0 w-6 h-6 rounded-full bg-stone-100 hover:bg-stone-200 disabled:opacity-40 text-stone-600 flex items-center justify-center active:scale-90"
                     title="Bir ədəd azalt"
                   >
                     <Minus className="w-3.5 h-3.5" />
                   </button>
                 )}
-                <span className="shrink-0 text-xs w-8 text-center">{oi.quantity} əd</span>
-                <span className="shrink-0 w-14 text-right">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
+                {/* Staged units are not on the server yet, so taking them back costs nothing. */}
+                {onUnstageRemoval && oi.id && off > 0 && (
+                  <button
+                    onClick={() => onUnstageRemoval(oi)}
+                    disabled={removing}
+                    className="shrink-0 w-6 h-6 rounded-full bg-stone-100 hover:bg-stone-200 disabled:opacity-40 text-stone-600 flex items-center justify-center active:scale-90"
+                    title="Silinməni ləğv et"
+                  >
+                    <Undo2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <span className="shrink-0 text-xs w-8 text-center">{left} əd</span>
+                <span className="shrink-0 w-14 text-right">{(oi.menuItem.price * left).toFixed(2)} ₼</span>
               </li>
-            ))}
+              );
+            })}
             {/* Already taken off the order: shown, not hidden, but with no minus button
                 and no price — it costs the guest nothing and isn't in existingTotal. */}
             {(removedItems ?? []).map((oi, j) => (
@@ -4053,6 +4220,18 @@ function CartItems({ cart, existingItems, removedItems, addToCart, removeFromCar
               </li>
             ))}
           </ul>
+          {/* One press sends the whole batch, so five units off one line become a single
+              struck-through row and a single cancel slip at the bar. */}
+          {onCommitRemovals && stagedTotal > 0 && (
+            <button
+              onClick={onCommitRemovals}
+              disabled={removing}
+              className="mt-3 w-full bg-red-600 hover:bg-red-700 disabled:bg-stone-300 text-white text-sm font-semibold py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"
+            >
+              {removing && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+              {removing ? 'Göndərilir...' : `Silinməni əlavə et (${stagedTotal})`}
+            </button>
+          )}
         </div>
       )}
       {existingItems && cart.length === 0 && (

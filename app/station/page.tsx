@@ -277,7 +277,7 @@ export default function StationPage() {
   }, [cards, soundReady]);
 
   async function enableSound() {
-    setSoundReady(await unlockSound());
+    setSoundReady(await unlockSound(true));   // a real click — don't join a pre-gesture attempt
   }
 
   // Same as the seller screen: returning after a lock / app-switch is when iOS has
