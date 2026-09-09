@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
     waiter_name: order.sellerName,
     staff_id: order.staffId ?? null,
     courier_id: order.courierId ?? null,
+    online: order.online ?? false,
     status: order.status,
     note: order.note ?? null,
     created_at: order.createdAt,

@@ -385,6 +385,11 @@ export interface Order {
   // its presence is what makes an order a courier order; there is no order-type
   // column, because a second marker could only ever disagree with this one.
   courierId?: string;
+  // The guest placed this through the public link rather than a table's QR code
+  // or the till. It carries no table and no courier yet, so without this flag it
+  // would read as a takeaway waiting at the counter — see
+  // supabase/migrations/20260909_order_online.sql.
+  online?: boolean;
   // What the courier is still holding for this order. 0 or absent when the guest
   // paid at the till. Only counts toward a balance while the order is 'ödənilib',
   // which is what makes a returned order drop its debt with no reversal write.

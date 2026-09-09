@@ -1,0 +1,13 @@
+-- An order the guest placed through the public link, not from a table's QR code.
+--
+-- Until now nothing on the row said so. A link order and a takeaway both carry
+-- table_id null and waiter_name 'Müştəri', so the open-orders list could only
+-- call both of them the same thing — and a link order is the opposite of a
+-- takeaway: nobody is standing at the counter waiting for it, it has to be
+-- carried out. The courier tells a delivery apart once one is assigned, but at
+-- the moment the order lands there is no courier yet, which is exactly when the
+-- seller needs to know what they are looking at.
+--
+-- False for every order a seller rings up, which is why the default carries the
+-- whole backfill.
+alter table orders add column if not exists online boolean not null default false;

@@ -167,6 +167,10 @@ export default function CustomerMenuPage({
       id: crypto.randomUUID(),
       orderNumber: 0,
       tableNumber: table?.id ?? 0,
+      // No table means the guest opened the plain link — from Instagram, a
+      // bio, a message — rather than scanning a QR code on a table. That order
+      // has to go out to them, and the seller's list says so.
+      online: !table,
       sellerName: 'Müştəri',
       status: 'gözləyir',
       createdAt: new Date().toISOString(),

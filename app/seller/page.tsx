@@ -1291,6 +1291,23 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     return tables.find(t => t.id === id)?.name ?? `Masa ${id}`;
   }
 
+  // What the open-orders list writes beside the order number: where this order
+  // is going. A table names itself; everything else has to be spelled out,
+  // because a row with nothing next to the number is the one thing a waiter
+  // cannot act on.
+  //
+  // Nothing at all is correct in exactly one case — the company that runs
+  // neither tables nor delivery. There the seller is never asked, every order
+  // is the same kind, and a word repeated on every row would say nothing.
+  function orderPlace(order: Pick<Order, 'tableNumber' | 'courierId' | 'online'>): string {
+    if (order.tableNumber) return tableName(order.tableNumber);
+    // A courier is assigned when the seller takes a delivery; a link order has
+    // no courier until someone is sent, and is a delivery from the moment it
+    // lands. Both read the same to the waiter, so both get the same word.
+    if (deliveryOn && (order.courierId || order.online)) return 'Çatdırılma';
+    return tablesOn || deliveryOn ? 'Takeaway' : '';
+  }
+
   function hallName(id: string | undefined): string {
     return halls.find(h => h.id === (id ?? halls[0]?.id))?.name ?? '';
   }
@@ -2188,7 +2205,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     ? historyOrders.filter(o =>
         orderSearchText(o).includes(historyQuery) ||
         (o.sellerName ?? '').toLowerCase().includes(historyQuery) ||
-        tableName(o.tableNumber).toLowerCase().includes(historyQuery))
+        orderPlace(o).toLowerCase().includes(historyQuery))
     : historyOrders;
   const paidHistoryOrders = historyOrders.filter(o => o.status === 'ödənilib');
   // Nağd and Kart are "money that arrived", not "what today's orders came to":
@@ -2695,13 +2712,13 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                 {prevOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
-                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
-                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={tableName(o.tableNumber)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
               </div>
@@ -2808,7 +2825,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   <div className="bg-white rounded-xl border border-stone-100 overflow-hidden">
                     {filteredHistoryOrders.map((order, i) => {
                       const isExpanded = expandedOrderId === order.id;
-                      const tLabel = tableName(order.tableNumber);
+                      const tLabel = orderPlace(order);
                       const closedAt = orderClosedAt(order);
                       return (
                         <div key={order.id} className={i < filteredHistoryOrders.length - 1 ? 'border-b border-stone-50' : ''}>
