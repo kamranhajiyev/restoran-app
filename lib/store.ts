@@ -880,7 +880,9 @@ export async function changeOrderCourier(orderId: string, courierId: string): Pr
     .update({ courier_id: courierId })
     .eq('id', orderId)
     .eq('company_id', _companyId)
-    .not('courier_id', 'is', null)
+    // Null only on a link order, which is a delivery waiting for its first
+    // rider. See /api/change-courier for why a takeaway is still refused.
+    .or('courier_id.not.is.null,online.is.true')
     .neq('status', 'ödənilib')
     .neq('status', 'ləğv edildi')
     .neq('status', 'silinib')

@@ -530,6 +530,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [discountType, setDiscountType]   = useState<'%' | '₼'>('₼');
   // Courier orders only: which of the two ways this one is closing.
   const [courierMode, setCourierMode]     = useState<CourierPayMode>('paid');
+  /** Which rider the payment sheet is currently writing onto a link order. */
+  const [payCourierBusy, setPayCourierBusy] = useState<string | null>(null);
 
   // "Qaytarıldı" — the customer refused the food and the rider brought it back.
   const [returningOrder, setReturningOrder] = useState<Order | null>(null);
@@ -1941,11 +1943,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     setReassignTarget(null);
   }
 
-  async function confirmReassign() {
-    if (!reassigningOrder || !reassignTarget || reassignBusy) return;
-    const order = reassigningOrder;
-    const target = reassignTarget;
-    setReassignBusy(true);
+  // The write itself, shared by the modal above and the payment sheet — a link
+  // order gets its first rider from inside the sheet, where the seller is
+  // standing when the question comes up.
+  async function assignCourier(order: Order, target: string): Promise<boolean> {
     // Conditional in the DB — a no-op if the order got paid or closed meanwhile
     const ok = overrideCompanyId
       ? (await postOrQueue(
@@ -1957,12 +1958,40 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
           overrideCompanyId,
         )).ok
       : await changeOrderCourier(order.id, target);
-    setReassignBusy(false);
-    setReassigningOrder(null);
     if (ok) {
       mutateOrders(prev => prev.map(o => o.id === order.id ? { ...o, courierId: target } : o));
     } else {
       refreshOrders();
+    }
+    return ok;
+  }
+
+  async function confirmReassign() {
+    if (!reassigningOrder || !reassignTarget || reassignBusy) return;
+    const order = reassigningOrder;
+    const target = reassignTarget;
+    setReassignBusy(true);
+    await assignCourier(order, target);
+    setReassignBusy(false);
+    setReassigningOrder(null);
+  }
+
+  // Picking the rider without leaving the payment sheet. The order is written
+  // straight away rather than held until "Ödə": the sheet's whole shape depends
+  // on having a courier — the Ödənilib/Kuryer yığacaq choice, and the debt that
+  // choice writes — and a rider chosen but not yet saved would leave those
+  // reading from a value the order does not have.
+  async function pickPayingCourier(target: string) {
+    if (!payingOrder || payCourierBusy) return;
+    const order = payingOrder;
+    setPayCourierBusy(target);
+    const ok = await assignCourier(order, target);
+    setPayCourierBusy(null);
+    if (ok) {
+      setPayingOrder({ ...order, courierId: target });
+      // The ordinary case for a delivery, and the same default openPayment uses:
+      // the rider is leaving with the food and brings the money back.
+      setCourierMode('debt');
     }
   }
 
@@ -2712,13 +2741,13 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                 {prevOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
-                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
-                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
               </div>
@@ -3715,7 +3744,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       {reassigningOrder && (
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-md">
-            <h3 className="font-bold text-lg text-stone-800 mb-1">Kuryeri dəyiş</h3>
+            <h3 className="font-bold text-lg text-stone-800 mb-1">
+              {reassigningOrder.courierId ? 'Kuryeri dəyiş' : 'Kuryer təyin et'}
+            </h3>
             <p className="text-sm text-stone-600 mb-4">
               №{orderLabel(reassigningOrder)} · {courierNames[reassigningOrder.courierId ?? ''] ?? '—'} · {orderTotal(reassigningOrder).toFixed(2)} ₼
             </p>
@@ -3905,6 +3936,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         const change = Math.min(overpay, cash);
         const isCourier = !!payingOrder.courierId;
         const onDebt = isCourier && courierMode === 'debt';
+        // A link order arrives with nobody assigned — the guest ordered, no
+        // seller was involved, and it still has to be carried out. Without this
+        // the sheet offered a walk-in's two boxes and the money went in the
+        // drawer, which is the one thing a delivery does not do.
+        const needsCourier = !isCourier && payingOrder.online && deliveryOn && activeCouriers.length > 0;
         // The cash/card gate is what stops an order closing for nothing, so it
         // is bypassed here and nowhere else: on the debt path there is genuinely
         // nothing to tender, and the total goes on the rider's balance instead.
@@ -3917,8 +3953,32 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                 №{orderLabel(payingOrder)}
                 {isCourier
                   ? ` · Kuryer: ${courierNames[payingOrder.courierId!] ?? '—'}`
-                  : tableName(payingOrder.tableNumber) && ` · ${tableName(payingOrder.tableNumber)}`}
+                  : orderPlace(payingOrder) && ` · ${orderPlace(payingOrder)}`}
               </p>
+
+              {needsCourier && (
+                <div className="mb-4">
+                  <p className="text-xs font-medium text-stone-600 mb-1.5">Kuryeri seçin</p>
+                  <div className="flex flex-wrap gap-2">
+                    {activeCouriers.map(c => (
+                      <button
+                        key={c.id}
+                        onClick={() => pickPayingCourier(c.id)}
+                        disabled={!!payCourierBusy}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border-2 border-stone-200 bg-white text-stone-600 hover:border-primary-800 hover:text-primary-800 disabled:opacity-50 transition-colors"
+                      >
+                        {payCourierBusy === c.id
+                          ? <span className="w-3.5 h-3.5 border-2 border-stone-300 border-t-primary-800 rounded-full animate-spin" />
+                          : <Bike className="w-3.5 h-3.5 text-stone-400" />}
+                        {c.name}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Not every link order is delivered — someone may be coming
+                      to collect it — so the sheet stays payable without one. */}
+                  <p className="text-[11px] text-stone-400 mt-1.5">Kuryer olmadan da ödəniş edilə bilər.</p>
+                </div>
+              )}
 
               {/* The only question a courier order asks: is the money here, or
                   is the rider bringing it back? */}
@@ -4299,7 +4359,7 @@ function ReadyBadge({ progress, allReady }: { progress: { done: number; total: n
 
 // ── OrderRow — mobile card + desktop table row ────────────────────────────
 
-function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItemReady, onReprint, onPay, onCancel, onReturn, courierName, onAppend, onMove, onReassign, onPrintBill, billBusy, onStatusChange }: {
+function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItemReady, onReprint, onPay, onCancel, onReturn, courierName, canPickCourier, onAppend, onMove, onReassign, onPrintBill, billBusy, onStatusChange }: {
   order: Order;
   tableLabel: string;
   tz: string;
@@ -4315,6 +4375,9 @@ function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItem
    *  debt — the one case where a paid order may be cancelled. */
   onReturn: () => void;
   courierName?: string;
+  /** Whether a rider may be put on this order at all — a delivery that has one,
+   *  or a link order still waiting for its first. Never a table or a takeaway. */
+  canPickCourier: boolean;
   onAppend: () => void;
   onMove: () => void;
   /** Hand the delivery to a different rider. Courier orders only. */
@@ -4435,12 +4498,12 @@ function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItem
                     Masanı dəyiş
                   </button>
                 )}
-                {order.courierId && (
+                {canPickCourier && (
                   <button
                     onClick={e => { e.stopPropagation(); onReassign(); }}
                     className="w-full px-4 py-2.5 rounded-xl border border-stone-300 text-stone-700 hover:bg-stone-100 active:scale-95 text-sm font-semibold transition-all"
                   >
-                    Kuryeri dəyiş
+                    {order.courierId ? 'Kuryeri dəyiş' : 'Kuryer təyin et'}
                   </button>
                 )}
                 <button
@@ -4551,12 +4614,12 @@ function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItem
                     Masanı dəyiş
                   </button>
                 )}
-                {order.courierId && (
+                {canPickCourier && (
                   <button
                     onClick={e => { e.stopPropagation(); onReassign(); }}
                     className="text-xs font-semibold text-stone-700 border border-stone-300 hover:bg-stone-100 rounded-lg px-3 py-1.5 transition-colors"
                   >
-                    Kuryeri dəyiş
+                    {order.courierId ? 'Kuryeri dəyiş' : 'Kuryer təyin et'}
                   </button>
                 )}
               </div>

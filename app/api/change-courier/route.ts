@@ -37,12 +37,17 @@ export async function POST(req: NextRequest) {
   // Only while the order is open. Once it is paid the amount is already sitting
   // on a rider's balance as debt, and moving it would be a transfer between two
   // couriers' books — not this write.
+  //
+  // An order the guest placed through the link is a delivery with nobody on it
+  // yet: it has to be able to gain its first rider here, which is the one case
+  // where courier_id starts null. A takeaway still may not — nothing is being
+  // carried anywhere — so the guard stays, widened by exactly that case.
   const { data, error } = await db
     .from('orders')
     .update({ courier_id: courierId })
     .eq('id', orderId)
     .eq('company_id', companyId)
-    .not('courier_id', 'is', null)
+    .or('courier_id.not.is.null,online.is.true')
     .neq('status', 'ödənilib')
     .neq('status', 'ləğv edildi')
     .neq('status', 'silinib')
