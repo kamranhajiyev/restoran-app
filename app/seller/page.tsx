@@ -15,7 +15,7 @@ import {
   fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, fetchStaff, verifyStaffPin, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
-  fetchStations, fetchStationReady, fetchModifierGroups, type StationReady,
+  fetchStations, fetchStationReady, fetchStationReadyOrNull, fetchModifierGroups, type StationReady,
   fetchCouriersWithBalance, addCourierPayment, returnCourierOrder, fetchCourierCollections, changeOrderCourier,
 } from '@/lib/store';
 import { menuIndex, stationForItem, readyStationIds } from '@/lib/stations';
@@ -658,9 +658,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         // the list: a blip must not make ready food look unready.
         if (r) setReadyRows(r);
       } else {
-        const [o, total, r] = await Promise.all([fetchOrdersOrNull({ limit: 200 }), fetchOrdersCount(), fetchStationReady()]);
+        const [o, total, r] = await Promise.all([fetchOrdersOrNull({ limit: 200 }), fetchOrdersCount(), fetchStationReadyOrNull()]);
         if (o) applyOrders(ticket, () => { setOrders(o); setTotalOrders(total); });
-        setReadyRows(r);
+        // The same guard as the branch above: [] would blank the green badges on
+        // a blip and make ready food look unready to the seller.
+        if (r) setReadyRows(r);
       }
     } finally { if (!silent) setRefreshing(false); }
   }, [overrideCompanyId, beginOrdersRead, applyOrders]);

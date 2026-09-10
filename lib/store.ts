@@ -632,7 +632,12 @@ async function readOrders(opts?: OrderQuery): Promise<Order[]> {
 
 export type StationReady = { orderId: string; stationId: string; readyAt: string; readyBy: string | null };
 
-export async function fetchStationReady(orderIds?: string[], opts?: ReadOpts): Promise<StationReady[]> {
+// Null is a failed read, not "nothing is ready". The distinction is the whole
+// point: an empty list retires every card the cooks have finished, so a screen
+// that flattens a network blip to [] puts the whole night's work back on the
+// board and takes it off again on the next poll. Same reasoning, and the same
+// shape, as fetchOrdersOrNull above.
+export async function fetchStationReadyOrNull(orderIds?: string[], opts?: ReadOpts): Promise<StationReady[] | null> {
   const local = await fromLocal(opts, async (till, companyId) => {
     const { ready } = (await till.stationReady(companyId)) as { ready: StationReady[] };
     return orderIds ? ready.filter(r => orderIds.includes(r.orderId)) : ready;
@@ -642,11 +647,12 @@ export async function fetchStationReady(orderIds?: string[], opts?: ReadOpts): P
   try {
     let q = supabase.from('order_station_ready').select('order_id, station_id, ready_at, ready_by');
     if (orderIds) {
+      // Genuinely nothing to ask about, which is an answer rather than a failure.
       if (orderIds.length === 0) return [];
       q = q.in('order_id', orderIds);
     }
     const { data, error } = await q;
-    if (error || !data) return [];
+    if (error || !data) return null;
     return data.map(r => ({
       orderId: r.order_id,
       stationId: r.station_id,
@@ -654,8 +660,13 @@ export async function fetchStationReady(orderIds?: string[], opts?: ReadOpts): P
       readyBy: r.ready_by ?? null,
     }));
   } catch {
-    return [];
+    return null;
   }
+}
+
+/** The same read, with a failure flattened to an empty list. */
+export async function fetchStationReady(orderIds?: string[], opts?: ReadOpts): Promise<StationReady[]> {
+  return (await fetchStationReadyOrNull(orderIds, opts)) ?? [];
 }
 
 // Upsert, not insert: two cooks at the same sex tapping "Hazırdır" on the same order

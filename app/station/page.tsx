@@ -13,7 +13,7 @@ import { getSession, logout, validateSession, clearLocalSession, homeFor } from 
 import { supabase } from '@/lib/supabase';
 import {
   setCompanyContext, fetchMenu, fetchOrders, fetchOrdersOrNull, fetchStations,
-  fetchStationReady, markStationReady, unmarkStationReady, StationReady,
+  fetchStationReady, fetchStationReadyOrNull, markStationReady, unmarkStationReady, StationReady,
 } from '@/lib/store';
 import { menuIndex, sliceForStation, readyStationIds } from '@/lib/stations';
 import { itemBatches } from '@/lib/order-items';
@@ -112,6 +112,14 @@ export default function StationPage() {
   const [fontLevel, setFontLevel] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // Taps this screen has made that the server has not yet echoed back. A refresh
+  // is usually already in flight when the cook taps — every order change on the
+  // floor starts one — and it answers from before the tap, so applying its list
+  // as-is puts the card straight back under the cook's hand. Each entry is held
+  // until a read actually contains it, then dropped: the server's copy is the
+  // one that survives a reload, so nothing may outlive it here.
+  const pendingReady = useRef<StationReady[]>([]);
+
   const refreshOrders = useCallback(async () => {
     const [o, r] = await Promise.all([
       // Null is a failed read, not an empty kitchen. Applying it would clear the
@@ -119,10 +127,20 @@ export default function StationPage() {
       // bring them all back, by which time someone has already started asking
       // where the order went.
       fetchOrdersOrNull({ limit: 200 }),
-      fetchStationReady(),
+      // Null for the same reason the orders read has one: [] here is "nothing is
+      // ready", which retires nothing and re-opens every card this sex has
+      // already finished. The cook sees the night's work come back, taps
+      // "Hazırdır" on orders that are long gone, and it clears itself on the
+      // next poll — so the screen looks broken rather than offline.
+      fetchStationReadyOrNull(),
     ]);
     if (o) setOrders(o);
-    setReadyRows(r);
+    if (r) {
+      const has = (rows: StationReady[], p: StationReady) =>
+        rows.some(x => x.orderId === p.orderId && x.stationId === p.stationId);
+      pendingReady.current = pendingReady.current.filter(p => !has(r, p));
+      setReadyRows([...r, ...pendingReady.current]);
+    }
     setOnline(true);
   }, []);
 
@@ -310,9 +328,14 @@ export default function StationPage() {
     // Optimistic: the card must go the instant it's tapped, or a cook taps twice.
     const optimistic: StationReady = { orderId, stationId, readyAt: new Date().toISOString(), readyBy: employeeName };
     setReadyRows(rows => [...rows, optimistic]);
+    // Also held outside React state, so a refresh that started before this tap
+    // cannot answer with a list that predates it and put the card back.
+    pendingReady.current = [...pendingReady.current, optimistic];
     const err = await markStationReady(orderId, stationId, employeeName);
     setBusyId(null);
     if (err) {
+      pendingReady.current = pendingReady.current.filter(
+        r => !(r.orderId === orderId && r.stationId === stationId));
       setReadyRows(rows => rows.filter(r => !(r.orderId === orderId && r.stationId === stationId)));
       setOnline(false);
       return;
@@ -346,6 +369,10 @@ export default function StationPage() {
 
   async function onUndo(orderId: string) {
     if (!stationId) return;
+    // Drop the tap being undone first, or the refresh below would re-apply it as
+    // a pending row and the card would never come back.
+    pendingReady.current = pendingReady.current.filter(
+      r => !(r.orderId === orderId && r.stationId === stationId));
     await unmarkStationReady(orderId, stationId);
     refreshOrders();
   }
