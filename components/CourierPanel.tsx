@@ -14,8 +14,10 @@ import { Plus, Pencil, Trash2, Bike, Wallet, BarChart2 } from 'lucide-react';
 import {
   fetchCouriers, createCourier, updateCourier, deleteCourier,
   fetchCourierLedger, fetchCourierOutstanding, fetchCourierPaymentLog,
+  setCourierPaymentMethod, deleteCourierPayment,
 } from '@/lib/store';
-import { Courier, CourierLedger, CourierPayment } from '@/types';
+import { getSession } from '@/lib/auth';
+import { Courier, CourierLedger, CourierPayMethod, CourierPayment } from '@/types';
 import { DialogState } from '@/components/AppDialog';
 import { inputCls, btnPrimary, btnGhost, Modal } from '@/components/panel-ui';
 import { CompanySettings, businessToday, businessDayStartUtc, addDays } from '@/lib/business-day';
@@ -78,7 +80,7 @@ export default function CourierPanel({ setDialog, bizSettings }: {
       ) : (
         <>
           {sub === 'couriers' && <CouriersTab couriers={couriers} reload={reload} flash={flash} fail={fail} setDialog={setDialog} />}
-          {sub === 'payments' && <PaymentsTab couriers={couriers} />}
+          {sub === 'payments' && <PaymentsTab couriers={couriers} flash={flash} fail={fail} setDialog={setDialog} />}
           {sub === 'report' && <ReportTab couriers={couriers} bizSettings={bizSettings} />}
         </>
       )}
@@ -202,11 +204,63 @@ function CouriersTab({ couriers, reload, flash, fail, setDialog }: {
 
 // ─── Ödənişlər ────────────────────────────────────────────────────────────────
 
-function PaymentsTab({ couriers }: { couriers: Courier[] }) {
+// The two the RPCs raise on purpose. 'not_allowed' is reachable in normal use —
+// an owner whose session went stale — so it gets a sentence rather than a
+// Postgres string.
+function methodError(err: string): string {
+  if (/not_allowed/.test(err)) return 'Buna icazəniz yoxdur — yenidən daxil olun.';
+  if (/bad_payment/.test(err)) return 'Bu ödəniş artıq yoxdur.';
+  return err;
+}
+
+function PaymentsTab({ couriers, flash, fail, setDialog }: {
+  couriers: Courier[]; flash: (m: string) => void;
+  fail: (m: string | null) => void; setDialog: (d: DialogState | null) => void;
+}) {
   const [rows, setRows] = useState<CourierPayment[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [courierId, setCourierId] = useState('');
+  // The row being corrected right now, so its two buttons can be disabled
+  // together — a second tap while the drawer is being rewritten is the one thing
+  // that must not get through.
+  const [busyId, setBusyId] = useState<string | null>(null);
   useEffect(() => { fetchCourierPaymentLog().then(r => { setRows(r); setLoaded(true); }); }, []);
+
+  const me = getSession()?.name ?? '';
+
+  // A wrong method is the common mistake — the seller taps Nağd out of habit for
+  // money the guest put on the rider's card terminal — and it is the one that
+  // makes the drawer disagree with itself at close. The server moves the kassa
+  // movement to match; here the row is just patched in place, because refetching
+  // the whole log would throw away the courier filter the owner is working in.
+  async function changeMethod(p: CourierPayment) {
+    const next: CourierPayMethod = p.method === 'kart' ? 'nağd' : 'kart';
+    setBusyId(p.id);
+    const err = await setCourierPaymentMethod(p.id, next, me);
+    setBusyId(null);
+    if (err) { fail(methodError(err)); return; }
+    setRows(rs => rs.map(r => (r.id === p.id ? { ...r, method: next } : r)));
+    flash(next === 'kart' ? 'Kart olaraq işarələndi' : 'Nağd olaraq işarələndi');
+  }
+
+  function remove(p: CourierPayment) {
+    setDialog({
+      title: 'Ödənişi sil?',
+      // Both consequences, because neither is obvious from the row: the money
+      // goes back onto the courier's balance, and if it was cash it also leaves
+      // the till it was booked into.
+      message: `«${p.courierName}» — ${p.amount.toFixed(2)} ₼ silinəcək və bu məbləğ yenidən kuryerin borcuna qayıdacaq.${
+        p.method === 'nağd' ? ' Kassadan da çıxarılacaq.' : ''}`,
+      onConfirm: async () => {
+        setBusyId(p.id);
+        const err = await deleteCourierPayment(p.id, me);
+        setBusyId(null);
+        if (err) { fail(methodError(err)); return; }
+        setRows(rs => rs.filter(r => r.id !== p.id));
+        flash('Silindi');
+      },
+    });
+  }
 
   const visible = useMemo(
     () => (courierId ? rows.filter(p => p.courierId === courierId) : rows),
@@ -219,7 +273,10 @@ function PaymentsTab({ couriers }: { couriers: Courier[] }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-stone-400">Kuryerlərin təhvil verdiyi bütün pullar — kim qəbul edib.</p>
+        <p className="text-xs text-stone-400">
+          Kuryerlərin təhvil verdiyi bütün pullar — kim qəbul edib.
+          {' '}Nağd/Kart səhv qeyd olunubsa, üzərinə toxunub dəyişin.
+        </p>
         <div className="flex items-center gap-2">
           <select value={courierId} onChange={e => setCourierId(e.target.value)}
             className="px-3 py-2 text-sm rounded-lg border border-stone-200 focus:outline-none focus:ring-2 focus:ring-stone-300">
@@ -243,11 +300,31 @@ function PaymentsTab({ couriers }: { couriers: Courier[] }) {
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {/* Only cash reached the drawer — the owner reconciling a till needs
-                  to see which of these rows they should be able to find in it. */}
-              <span className={`text-[11px] px-2 py-0.5 rounded-full ${p.method === 'kart' ? 'bg-blue-50 text-blue-600' : 'bg-stone-100 text-stone-500'}`}>
+                  to see which of these rows they should be able to find in it,
+                  and to fix the one the seller tapped wrong. The pill is the
+                  control: there are exactly two methods, so a menu would be a
+                  click more for the same answer. */}
+              <button
+                onClick={() => changeMethod(p)}
+                disabled={busyId === p.id}
+                title={p.method === 'kart' ? 'Nağd olaraq işarələ' : 'Kart olaraq işarələ'}
+                className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors disabled:opacity-50 ${
+                  p.method === 'kart'
+                    ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100'
+                    : 'bg-stone-100 text-stone-500 border-stone-200 hover:bg-stone-200'
+                }`}
+              >
                 {p.method === 'kart' ? 'Kart' : 'Nağd'}
-              </span>
+              </button>
               <span className="text-sm font-semibold tabular-nums text-emerald-600">{p.amount.toFixed(2)} ₼</span>
+              <button
+                onClick={() => remove(p)}
+                disabled={busyId === p.id}
+                title="Ödənişi sil"
+                className={`${btnGhost} disabled:opacity-50`}
+              >
+                <Trash2 className="w-3.5 h-3.5 text-red-500" />
+              </button>
             </div>
           </div>
         ))}

@@ -1669,6 +1669,35 @@ export async function addCourierPayment(
   return null;
 }
 
+// Correcting a settlement that was recorded wrong. Owner-only, and both go
+// through an RPC rather than a table write: courier_payments has no write policy,
+// and the drawer movement has to move with the row or the shift stops balancing.
+// See supabase/migrations/20260910_courier_payment_edit.sql.
+//
+// No offline path. A till never corrects history — this is the admin panel, which
+// needs the server anyway to show the log it is correcting.
+export async function setCourierPaymentMethod(
+  paymentId: string,
+  method: CourierPayMethod,
+  by: string,
+): Promise<string | null> {
+  const { error } = await supabase.rpc('set_courier_payment_method', {
+    p_id: paymentId, p_method: method, p_by: by || null,
+  });
+  if (error) { console.error('[setCourierPaymentMethod]', error); return error.message; }
+  return null;
+}
+
+// The debt comes back on its own — it is derived from the payment rows, so
+// removing one restores it. Nothing to write here beyond the delete.
+export async function deleteCourierPayment(paymentId: string, by: string): Promise<string | null> {
+  const { error } = await supabase.rpc('delete_courier_payment', {
+    p_id: paymentId, p_by: by || null,
+  });
+  if (error) { console.error('[deleteCourierPayment]', error); return error.message; }
+  return null;
+}
+
 // The customer refused the food and the rider brought it back. The only way a
 // closed order becomes cancelled — deliberately narrow, see the migration.
 export async function returnCourierOrder(orderId: string, reason: string, by: string): Promise<boolean> {
