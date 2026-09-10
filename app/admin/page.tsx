@@ -3283,6 +3283,24 @@ function AdminPageContent() {
                                   {[order.cashAmount ? `💵 ${order.cashAmount.toFixed(2)}` : '', order.cardAmount ? `💳 ${order.cardAmount.toFixed(2)}` : ''].filter(Boolean).join(' · ')}
                                 </span>
                               )}
+                              {/* Otherwise this receipt reads as "ödənilib, 15 ₼"
+                                  with no money against it — a courier delivery
+                                  closes with cash=0 and card=0 and the whole
+                                  total on the rider.
+
+                                  It says "the courier collected it", not "the
+                                  courier still owes it": settlements are recorded
+                                  against the COURIER, never against an order, so
+                                  courier_debt stays on this row for good and
+                                  cannot tell whether the money has since come
+                                  back. Kuryerlər → Ödənişlər is where that is
+                                  answered. Saying "borc" here would keep accusing
+                                  a rider who squared up weeks ago. */}
+                              {(order.courierDebt ?? 0) > 0 && (
+                                <span className="text-xs text-stone-500">
+                                  🛵 Kuryer yığıb: {order.courierDebt!.toFixed(2)} ₼
+                                </span>
+                              )}
                               {(order.changeAmount ?? 0) > 0 && (
                                 <span className="text-xs text-stone-500">
                                   💸 {((order.cashAmount ?? 0) + order.changeAmount!).toFixed(2)} alındı · {order.changeAmount!.toFixed(2)} qaytarıldı
