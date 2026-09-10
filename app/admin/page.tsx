@@ -38,7 +38,7 @@ import {
   fetchBranding, setLogoUrl as saveLogoUrl, setBrandColor as saveBrandColor,
   fetchStations, fetchModifierGroups,
   fetchAllUsers, createEmployee, updateEmployee, deleteUser, toggleUserActive,
-  fetchCouriers,
+  fetchCouriers, fetchCourierCollections,
 } from '@/lib/store';
 import { applyBrand, BRAND_PRESETS, DEFAULT_BRAND } from '@/lib/branding';
 import { orderClosedAt, orderSuspicion, isSuspiciousOrder } from '@/lib/order-items';
@@ -130,6 +130,18 @@ function presetRange(p: ChartPreset, today: string): [string, string] {
   else if (p === '6ay') { from.setMonth(from.getMonth() - 6); from.setDate(from.getDate() + 1); }
   else if (p === '1il') { from.setFullYear(from.getFullYear() - 1); from.setDate(from.getDate() + 1); }
   return [toStr(from), today];
+}
+
+// The UTC window a business-day range covers: the cutoff on the first day, to an
+// instant before the cutoff on the day after the last. Every read that feeds the
+// statistics derives its boundaries here — orders and courier settlements have to
+// land on the same business day, and a settlement taken at 01:00 would otherwise
+// be counted against the following one.
+function statsRangeUtc(from: string, to: string, s: CompanySettings): [string, string] {
+  return [
+    businessDayStartUtc(from, s).toISOString(),
+    new Date(businessDayStartUtc(addDays(to, 1), s).getTime() - 1).toISOString(),
+  ];
 }
 
 // Human-readable device summary; raw user agents are unreadable in a table.
@@ -646,6 +658,11 @@ function AdminPageContent() {
   const [statsLoaded, setStatsLoaded] = useState(false);
   const [statsRefreshKey, setStatsRefreshKey] = useState(0);
   const statsCache = useRef<Map<string, { at: number; data: Order[] }>>(new Map());
+  // What couriers handed over inside the selected range, split by how it arrived.
+  // Kept beside the orders rather than derived from them: a settlement is dated by
+  // when the money reached the counter, which is rarely the day of the delivery.
+  const [courierCollected, setCourierCollected] = useState({ nagd: 0, kart: 0 });
+  const collectedCache = useRef<Map<string, { at: number; data: { nagd: number; kart: number } }>>(new Map());
   const refreshRef = useRef<() => void>(() => {});
   const refreshAllRef = useRef<() => void>(() => {});
   const [sessionReady, setSessionReady] = useState(false);
@@ -929,8 +946,7 @@ function AdminPageContent() {
     const valid = !!(customFrom && customTo && customFrom <= customTo);
     const [f, t] = valid ? [customFrom, customTo] : presetRange('bugün', bizT);
     // a business day runs from cutoff to cutoff in the company timezone
-    const from = businessDayStartUtc(f, bizSettings).toISOString();
-    const to = new Date(businessDayStartUtc(addDays(t, 1), bizSettings).getTime() - 1).toISOString();
+    const [from, to] = statsRangeUtc(f, t, bizSettings);
     const key = `${from}|${to}`;
     const ttl = t >= bizT ? 60000 : Infinity;
     const cached = statsCache.current.get(key);
@@ -947,12 +963,37 @@ function AdminPageContent() {
     }).finally(() => { setDataLoading(false); setStatsLoaded(true); });
   }, [sessionReady, customFrom, customTo, bizSettings, statsRefreshKey]);
 
+  // Courier settlements for the same window, cached the same way. Deliberately a
+  // second read rather than a widened orders query: the payments carry no order
+  // id, so there is nothing to join them onto — see the header of
+  // supabase/migrations/20260905_couriers.sql. A failure leaves the totals at
+  // zero, which is exactly what the page showed before this existed.
+  useEffect(() => {
+    if (!sessionReady) return;
+    const bizT = businessToday(bizSettings);
+    const valid = !!(customFrom && customTo && customFrom <= customTo);
+    const [f, t] = valid ? [customFrom, customTo] : presetRange('bugün', bizT);
+    const [from, to] = statsRangeUtc(f, t, bizSettings);
+    const key = `${from}|${to}`;
+    const cached = collectedCache.current.get(key);
+    if (cached && Date.now() - cached.at < (t >= bizT ? 60000 : Infinity)) {
+      setCourierCollected(cached.data);
+      return;
+    }
+    let cancelled = false;
+    fetchCourierCollections(from, to).then(c => {
+      if (cancelled) return;
+      collectedCache.current.set(key, { at: Date.now(), data: c });
+      setCourierCollected(c);
+    }).catch(() => { if (!cancelled) setCourierCollected({ nagd: 0, kart: 0 }); });
+    return () => { cancelled = true; };
+  }, [sessionReady, customFrom, customTo, bizSettings, statsRefreshKey]);
+
   // Orders tab date range — fetched from the server so it isn't limited to the
   // loaded page. A cleared or invalid range falls back to the preset filters.
   useEffect(() => {
     if (!sessionReady || !ordersRangeKey) return;
-    const from = businessDayStartUtc(ordersFrom, bizSettings).toISOString();
-    const to = new Date(businessDayStartUtc(addDays(ordersTo, 1), bizSettings).getTime() - 1).toISOString();
+    const [from, to] = statsRangeUtc(ordersFrom, ordersTo, bizSettings);
     let cancelled = false;
     const t = setTimeout(() => setRangeLoading(true), 0);
     fetchOrders({ from, to })
@@ -1209,9 +1250,9 @@ function AdminPageContent() {
   function invalidateTodayStatsCache() {
     const bizT = businessToday(bizSettings);
     const [f, t] = presetRange('bugün', bizT);
-    const from = businessDayStartUtc(f, bizSettings).toISOString();
-    const to = new Date(businessDayStartUtc(addDays(t, 1), bizSettings).getTime() - 1).toISOString();
+    const [from, to] = statsRangeUtc(f, t, bizSettings);
     statsCache.current.delete(`${from}|${to}`);
+    collectedCache.current.delete(`${from}|${to}`);
     setStatsRefreshKey(k => k + 1);
   }
 
@@ -2107,9 +2148,19 @@ function AdminPageContent() {
     acc.cash += Math.min(cashPaid, t - cardPart);
     return acc;
   }, { cash: 0, card: 0, courier: 0 });
-  const cashRev = methodRev.cash;
-  const cardRev = methodRev.card;
-  const courierRev = methodRev.courier;
+  // Nağd and Kart are "money that arrived", so a courier settlement belongs in
+  // them from the moment the rider hands it over — the same definition the seller
+  // history uses, and the two screens have to agree.
+  //
+  // The collected amount is then taken back off the debt line, or the same money
+  // would be counted twice in any range that contains both the delivery and the
+  // settlement. Clamped at 0 because the subtraction can legitimately overshoot:
+  // a rider settling today for last week's order, or an order cancelled after it
+  // was paid for, leaves payments in the range with no matching debt.
+  const collectedTotal = courierCollected.nagd + courierCollected.kart;
+  const cashRev = methodRev.cash + courierCollected.nagd;
+  const cardRev = methodRev.card + courierCollected.kart;
+  const courierRev = Math.max(0, methodRev.courier - collectedTotal);
   const totalPayRev = cashRev + cardRev + courierRev;
   const sellerRevMap: Record<string, { orders: number; rev: number }> = {};
   chartPaid.forEach(o => {
@@ -2689,6 +2740,15 @@ function AdminPageContent() {
                           </div>
                         );
                       })}
+                      {/* Without this the owner reads Nağd + Kart > Ümumi satış as a
+                          bug. It isn't: a rider settling today for yesterday's
+                          delivery puts that money in today's takings. */}
+                      {collectedTotal > 0.005 && (
+                        <p className="text-[11px] text-stone-400 leading-snug pt-1">
+                          Nağd və Kart məbləğinə kuryerlərdən yığılan {collectedTotal.toFixed(2)} ₼ daxildir
+                          {courierCollected.kart > 0.005 && ` (${courierCollected.nagd.toFixed(2)} ₼ nağd · ${courierCollected.kart.toFixed(2)} ₼ kart)`}.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
