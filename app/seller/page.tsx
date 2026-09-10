@@ -38,6 +38,7 @@ import TillLink from '@/components/TillLink';
 import { canLink, checkLink, clearLink, readLink, saveLink, type Terminal } from '@/lib/terminal-link';
 import { tillImage } from '@/lib/till-image';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
+import { orderPlace as placeOf } from '@/lib/order-place';
 import { flushQueue, pendingOrderIds, ADD_ORDER } from '@/lib/sync';
 import { verifyPinOffline, rememberPin, forgetPins } from '@/lib/offline-pin';
 import { queueSize, enqueue } from '@/lib/offline-queue';
@@ -1294,20 +1295,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   }
 
   // What the open-orders list writes beside the order number: where this order
-  // is going. A table names itself; everything else has to be spelled out,
-  // because a row with nothing next to the number is the one thing a waiter
-  // cannot act on.
-  //
-  // Nothing at all is correct in exactly one case — the company that runs
-  // neither tables nor delivery. There the seller is never asked, every order
-  // is the same kind, and a word repeated on every row would say nothing.
+  // is going. The rule itself lives in lib/order-place.ts, because the admin
+  // history shows the same thing about the same rows.
   function orderPlace(order: Pick<Order, 'tableNumber' | 'courierId' | 'online'>): string {
-    if (order.tableNumber) return tableName(order.tableNumber);
-    // A courier is assigned when the seller takes a delivery; a link order has
-    // no courier until someone is sent, and is a delivery from the moment it
-    // lands. Both read the same to the waiter, so both get the same word.
-    if (deliveryOn && (order.courierId || order.online)) return 'Çatdırılma';
-    return tablesOn || deliveryOn ? 'Takeaway' : '';
+    return placeOf(order, { tables, tablesOn, deliveryOn });
   }
 
   function hallName(id: string | undefined): string {

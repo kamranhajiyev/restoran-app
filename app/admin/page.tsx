@@ -62,6 +62,7 @@ import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt } from '@/lib/printer';
 import { isDesktop } from '@/lib/desktopPrint';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
+import { orderPlace, orderPlaceKind, PlaceKind } from '@/lib/order-place';
 
 // RPC raise messages are machine codes — translated here for display
 const STAFF_ERRORS: Record<string, string> = {
@@ -628,6 +629,11 @@ function AdminPageContent() {
   // Narrows whatever period is selected down to the receipts an owner audits —
   // removed lines, discounts, free closes. See isSuspiciousOrder.
   const [onlySuspicious, setOnlySuspicious] = useState(false);
+  // Where the order went, and who carried it. Both narrow the list that is
+  // already loaded — no refetch — and neither touches the statistics tab, which
+  // reads statsOrders and never these.
+  const [placeFilter, setPlaceFilter] = useState<PlaceKind | ''>('');
+  const [courierFilter, setCourierFilter] = useState('');
   // Date range for the orders tab. The presets above only filter the loaded page,
   // so a picked range is fetched from the server instead — that's the only way to
   // reach orders older than the last 200.
@@ -2037,9 +2043,23 @@ function AdminPageContent() {
   // (which takes visibleOrders) carries it for free.
   const ordersSuspicious = ordersDateFiltered.filter(isSuspiciousOrder);
   const ordersAudited = onlySuspicious ? ordersSuspicious : ordersDateFiltered;
+  // Place and courier sit after the audit filter and before the search box, so
+  // they narrow whichever period is in charge and the Excel export — which takes
+  // visibleOrders — carries them for free.
+  const placeCfg = { tables, tablesOn, deliveryOn };
+  // Deactivated riders included: their old deliveries are still in the history,
+  // and a name missing from the list would make them unfindable.
+  const courierOptions = Object.entries(courierNames)
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'az'));
+  const ordersPlaced = ordersAudited.filter(o =>
+    (!placeFilter || orderPlaceKind(o, placeCfg) === placeFilter) &&
+    // A link order with nobody sent yet has no courier id, so filtering by a
+    // named rider correctly leaves it out — it is not theirs until it is.
+    (!courierFilter || o.courierId === courierFilter));
   const visibleOrders = orderQuery
-    ? ordersAudited.filter(o => orderSearchText(o).includes(orderQuery) || (o.sellerName ?? '').toLowerCase().includes(orderQuery))
-    : ordersAudited;
+    ? ordersPlaced.filter(o => orderSearchText(o).includes(orderQuery) || (o.sellerName ?? '').toLowerCase().includes(orderQuery))
+    : ordersPlaced;
 
   const menuCostMap: Record<string, number> = {};
   menu.forEach(m => {
@@ -3013,6 +3033,42 @@ function AdminPageContent() {
                   Şübhəli qəbzlər{ordersSuspicious.length > 0 ? ` (${ordersSuspicious.length})` : ''}
                 </button>
 
+                {/* Offered only where the answer can differ. A company running
+                    neither tables nor delivery has one kind of order and nothing
+                    to choose between. */}
+                {(tablesOn || deliveryOn) && (
+                  <select
+                    value={placeFilter}
+                    onChange={e => setPlaceFilter(e.target.value as PlaceKind | '')}
+                    className={`text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors focus:outline-none focus:border-primary-300 ${placeFilter ? 'bg-primary-50 border-primary-300 text-primary-900' : 'bg-white border-stone-200 text-stone-600'}`}
+                  >
+                    <option value="">Hamısı</option>
+                    {tablesOn && <option value="masa">Masa</option>}
+                    {deliveryOn && <option value="delivery">Çatdırılma</option>}
+                    <option value="takeaway">Takeaway</option>
+                  </select>
+                )}
+
+                {deliveryOn && courierOptions.length > 0 && (
+                  <select
+                    value={courierFilter}
+                    onChange={e => setCourierFilter(e.target.value)}
+                    className={`text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors focus:outline-none focus:border-primary-300 ${courierFilter ? 'bg-primary-50 border-primary-300 text-primary-900' : 'bg-white border-stone-200 text-stone-600'}`}
+                  >
+                    <option value="">Bütün kuryerlər</option>
+                    {courierOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                )}
+
+                {(placeFilter || courierFilter) && (
+                  <button
+                    onClick={() => { setPlaceFilter(''); setCourierFilter(''); }}
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-white border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors"
+                  >
+                    Filtri sıfırla
+                  </button>
+                )}
+
                 {rangeLoading && <span className="w-3.5 h-3.5 border-2 border-primary-200 border-t-primary-800 rounded-full animate-spin" />}
               </div>
 
@@ -3041,9 +3097,18 @@ function AdminPageContent() {
                 </div>
               )}
 
-              {ordersAudited.length > 0 && visibleOrders.length === 0 && (
+              {/* Two ways to end up with nothing, and the owner has to be told
+                  which one it was — otherwise a stale place filter reads as an
+                  empty day. */}
+              {ordersAudited.length > 0 && ordersPlaced.length === 0 && (
                 <div className="bg-white rounded-xl border border-stone-100 card p-10 text-center">
-                  <p className="text-sm text-stone-500">Axtarışa uyğun sifariş tapılmadı ({ordersAudited.length} sifariş arasında)</p>
+                  <p className="text-sm text-stone-500">Seçilmiş filtrə uyğun sifariş yoxdur ({ordersAudited.length} sifariş arasında)</p>
+                </div>
+              )}
+
+              {ordersPlaced.length > 0 && visibleOrders.length === 0 && (
+                <div className="bg-white rounded-xl border border-stone-100 card p-10 text-center">
+                  <p className="text-sm text-stone-500">Axtarışa uyğun sifariş tapılmadı ({ordersPlaced.length} sifariş arasında)</p>
                 </div>
               )}
 
@@ -3056,6 +3121,11 @@ function AdminPageContent() {
                   // its own badge and a free close as its status pill, so neither is tinted.
                   const removedCount = order.removedItems?.length ?? 0;
                   const flagged = orderSuspicion(order).hasRemovals;
+                  // Where it went, and on a delivery who took it. Empty string
+                  // for the company that runs neither tables nor delivery, and
+                  // then the second line is not drawn at all.
+                  const place = orderPlace(order, placeCfg);
+                  const rider = order.courierId ? courierNames[order.courierId] : undefined;
                   return (
                     <div key={order.id} className={`${flagged ? 'bg-amber-50 ' : ''}${i < visibleOrders.length - 1 ? 'border-b border-stone-50' : ''}`}>
                       {/* Row */}
@@ -3065,7 +3135,14 @@ function AdminPageContent() {
                       >
                         <ChevronDown className={`w-4 h-4 text-stone-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                         <span className="w-14 text-xs font-bold text-primary-900 flex-shrink-0">#{orderLabel(order)}</span>
-                        <span className="flex-1 text-sm text-stone-700 truncate">{order.sellerName}</span>
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-sm text-stone-700 truncate">{order.sellerName}</span>
+                          {place && (
+                            <span className="block text-xs text-stone-400 truncate">
+                              {place}{rider ? ` · ${rider}` : ''}
+                            </span>
+                          )}
+                        </span>
                         <span className="text-xs text-stone-500 flex-shrink-0 hidden sm:block">
                           {new Date(order.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
                           {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
