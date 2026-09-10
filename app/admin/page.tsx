@@ -3039,7 +3039,14 @@ function AdminPageContent() {
                 {(tablesOn || deliveryOn) && (
                   <select
                     value={placeFilter}
-                    onChange={e => setPlaceFilter(e.target.value as PlaceKind | '')}
+                    // Leaving Çatdırılma takes the courier list with it, so a
+                    // rider left selected can never go on narrowing a list of
+                    // masa orders he was never part of.
+                    onChange={e => {
+                      const next = e.target.value as PlaceKind | '';
+                      setPlaceFilter(next);
+                      if (next !== 'delivery') setCourierFilter('');
+                    }}
                     className={`text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors focus:outline-none focus:border-primary-300 ${placeFilter ? 'bg-primary-50 border-primary-300 text-primary-900' : 'bg-white border-stone-200 text-stone-600'}`}
                   >
                     <option value="">Hamısı</option>
@@ -3049,7 +3056,10 @@ function AdminPageContent() {
                   </select>
                 )}
 
-                {deliveryOn && courierOptions.length > 0 && (
+                {/* Only once the list is deliveries. Asking "which courier"
+                    about masa and takeaway orders is asking about rows that by
+                    definition have none. */}
+                {deliveryOn && placeFilter === 'delivery' && courierOptions.length > 0 && (
                   <select
                     value={courierFilter}
                     onChange={e => setCourierFilter(e.target.value)}
