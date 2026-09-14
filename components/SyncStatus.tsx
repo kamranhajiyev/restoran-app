@@ -97,11 +97,18 @@ export default function SyncStatus({
   // different answers: is the line up, and does the server have tonight's
   // service. "Everything sent" while the cable is out is perfectly possible —
   // it just means nothing new has happened since it dropped.
+  // "Oflayn" belongs to the line being down, and to nothing else. It used to be
+  // printed for anything merely waiting to be sent — which is every order for
+  // the second or two between the disk and the flush — so a waiter on a
+  // perfectly good connection watched his order be called offline, and then had
+  // to decide whether to believe it.
   const text = synced
     ? online ? 'Onlayn · göndərildi' : 'Oflayn · hamısı göndərilib'
     : sending
       ? `Göndərilir · ${pending}`
-      : `Oflayn · gözləyir ${pending}`;
+      : online
+        ? `Gözləyir ${pending}`
+        : `Oflayn · gözləyir ${pending}`;
 
   return (
     <div className="relative">
