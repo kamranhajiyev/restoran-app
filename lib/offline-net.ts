@@ -39,6 +39,13 @@ function setOnline(next: boolean): void {
  * talk to. Asking the wrong question there would leave a perfectly connected
  * till permanently reporting an outage.
  */
+/**
+ * How long the dial tone gets to answer. The same on both paths: an answer that
+ * takes longer than this is no use to a waiter standing at the till, and the
+ * question is asked again seconds later anyway.
+ */
+const PROBE_MS = 4000;
+
 async function probe(): Promise<boolean> {
   const till = typeof window === "undefined" ? null : window.posNative?.till;
 
@@ -52,8 +59,24 @@ async function probe(): Promise<boolean> {
   // replays to, so that is the connection whose absence actually matters.
   if (till) {
     try {
-      const res = await till.api("/api/health");
-      return res.ok;
+      // On a clock of its own, because this one cannot be given an AbortSignal:
+      // the request is made in the main process and only its answer comes back
+      // across the bridge. Without the race a request that never answers — a
+      // captive portal holding the socket open, a router that accepted the
+      // packet and did nothing with it — leaves this promise pending forever.
+      // The watch below only schedules its next tick once this has returned, so
+      // one hung probe used to stop the connection being checked at all: the
+      // badge froze on whatever it last said, and a till with a perfectly good
+      // line sat on "Oflayn" until something else happened to disturb it.
+      //
+      // The loser of the race is abandoned, not cancelled — net.fetch carries on
+      // in the main process and its answer is dropped. That costs one request and
+      // is the price of not having a handle on it from here.
+      const res = await Promise.race([
+        till.api("/api/health"),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), PROBE_MS)),
+      ]);
+      return res !== null && res.ok;
     } catch {
       return false;
     }
@@ -63,7 +86,7 @@ async function probe(): Promise<boolean> {
     const res = await fetch("/api/health", {
       method: "HEAD",
       cache: "no-store",
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(PROBE_MS),
     });
     return res.ok;
   } catch {

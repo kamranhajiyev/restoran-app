@@ -57,6 +57,15 @@ async function pendingTotal(): Promise<number> {
 // edited in the office, a table another terminal seated — are not things a waiter
 // is standing there waiting for.
 const PULL_EVERY_MS = 5 * 60_000;
+// How soon a queue that still has something in it is tried again. Short enough
+// that a waiter does not watch an order sit there, long enough that a real
+// outage is not hammered — the queue stops on the first entry it cannot send,
+// so this is one request, not a flood.
+const RETRY_SEND_MS = 15_000;
+// How often the till asks outright which sexes have finished, whatever the
+// realtime socket is doing. Food going cold is measured in minutes, so this is
+// the number that decides whether the waiter is told in time.
+const READY_EVERY_MS = 10_000;
 
 /**
  * The terminal's read of the room, or null when it did not get an answer.
@@ -667,7 +676,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     } finally { if (!silent) setRefreshing(false); }
   }, [overrideCompanyId, beginOrdersRead, applyOrders]);
 
-  // A sex finished, and the news is on the server.
+  // A sex finished, and the news is on the server. See refreshReady below.
   //
   // The desktop till reads readiness off its own disk, and nothing puts it there
   // between sweeps — five minutes apart, and skipped entirely while the outbox
@@ -683,6 +692,32 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     if (hasLocalDb() && companyId) await pullStationReady(companyId);
     await refreshOrders({ silent: true });
   }, [overrideCompanyId, refreshOrders]);
+
+  // And on a clock, because the signal above cannot be relied on to arrive.
+  //
+  // The till is subscribed to order_station_ready, but it runs from a terminal
+  // link and has no session of its own: whether replication actually delivers a
+  // row to it is a question of RLS and of a socket staying up through a night of
+  // restaurant wifi, and the answer observed on the floor was a minute and a
+  // half. The waiter cannot tell a quiet kitchen from a dead socket, and neither
+  // can this page.
+  //
+  // So readiness is also asked for outright. Cheap — one bounded read of a route
+  // the till already calls — and it makes the worst case this interval instead
+  // of however long the socket takes to notice it is gone. The realtime handler
+  // stays: when it works it is instant, and this only ever catches what it
+  // missed.
+  //
+  // Desktop only. A browser reads Supabase directly and has nothing to catch up.
+  useEffect(() => {
+    if (!hasLocalDb()) return;
+    const id = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      if (!isOnline()) return;
+      void refreshReady();
+    }, READY_EVERY_MS);
+    return () => clearInterval(id);
+  }, [refreshReady]);
 
   // ── The line ────────────────────────────────────────────────────────────────
   // Watch the connection for as long as the till is open, and the moment it comes
@@ -747,7 +782,26 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       kick = setTimeout(() => void drain(false), 1200);
     });
 
-    return () => { stop(); off(); offWrite(); clearTimeout(kick); };
+    // A send that did not get through, tried again shortly.
+    //
+    // Everything above fires once: the write, the reconnection, the open. If the
+    // attempt behind any of them fails — a few lost seconds of wifi is all it
+    // takes, and the queue stops on the first entry it cannot send — the next
+    // one is either the five-minute sweep or the connection happening to flap.
+    // Which is why the same machine sent one order instantly and held the next
+    // one for minutes, with nothing to tell the waiter which he was watching.
+    //
+    // So while anything is still queued, ask again on a short clock. It stops as
+    // soon as the queue is empty, so a working till pays nothing for it.
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const again = async () => {
+      if ((await pendingTotal()) === 0) return;
+      await drain(false);
+      retry = setTimeout(() => void again(), RETRY_SEND_MS);
+    };
+    retry = setTimeout(() => void again(), RETRY_SEND_MS);
+
+    return () => { stop(); off(); offWrite(); clearTimeout(kick); clearTimeout(retry); };
   }, [overrideCompanyId, refreshOrders]);
 
   // While the line stays up nothing above ever fires again — onConnectivityChange
