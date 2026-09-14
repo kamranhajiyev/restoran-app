@@ -30,7 +30,7 @@ import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printRecei
 import { isDesktop, startKitchenPrinting } from '@/lib/desktopPrint';
 import { postOrQueue, isOnline, startConnectivityWatch, onConnectivityChange } from '@/lib/offline-net';
 import { tillFetch, hasLocalDb, localCourierCollections, siteGet } from '@/lib/till-data';
-import { hasLocalData, pullAll } from '@/lib/till-sync';
+import { hasLocalData, pullAll, pullStationReady } from '@/lib/till-sync';
 import TillSetup from '@/components/TillSetup';
 import SyncStatus from '@/components/SyncStatus';
 import OrderSyncDot from '@/components/OrderSyncDot';
@@ -667,6 +667,23 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     } finally { if (!silent) setRefreshing(false); }
   }, [overrideCompanyId, beginOrdersRead, applyOrders]);
 
+  // A sex finished, and the news is on the server.
+  //
+  // The desktop till reads readiness off its own disk, and nothing puts it there
+  // between sweeps — five minutes apart, and skipped entirely while the outbox
+  // has anything in it. So this handler, which has been subscribed all along,
+  // was answering "an order just became ready" by re-reading a copy that did not
+  // say so yet: the green arrived minutes late, and the chime with it, which on
+  // a busy night is food sitting on the pass.
+  //
+  // Bring the readiness across first, then redraw. A browser has no local copy
+  // and reads Supabase directly, so there it is the same refresh as before.
+  const refreshReady = useCallback(async () => {
+    const companyId = overrideCompanyId ?? getSession()?.companyId ?? null;
+    if (hasLocalDb() && companyId) await pullStationReady(companyId);
+    await refreshOrders({ silent: true });
+  }, [overrideCompanyId, refreshOrders]);
+
   // ── The line ────────────────────────────────────────────────────────────────
   // Watch the connection for as long as the till is open, and the moment it comes
   // back, send everything that piled up — then re-read, so the screen shows what
@@ -1120,11 +1137,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       // A sex finishing its part is the one change the seller doesn't make himself,
       // so it's the one he'd never learn about without this.
       .on('postgres_changes', { event: '*', schema: 'public', table: 'order_station_ready' }, () => {
-        refreshOrders();
+        void refreshReady();
       })
       .subscribe(status => setRealtimeUp(status === 'SUBSCRIBED'));
     return () => { setRealtimeUp(false); supabase.removeChannel(channel); };
-  }, [refreshOrders, rtAttempt]);
+  }, [refreshOrders, refreshReady, rtAttempt]);
 
   useEffect(() => {
     if (realtimeUp) return;

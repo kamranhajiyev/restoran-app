@@ -250,6 +250,45 @@ const STEPS: Step[] = [
 export const stepList = (): StepProgress[] =>
   STEPS.map(s => ({ id: s.id, label: s.label, state: "pending" as const }));
 
+/**
+ * Which sexes have finished, fetched now rather than at the next sweep.
+ *
+ * The till reads readiness off its own disk, and that copy is only replaced by
+ * the "orders" step above — five minutes apart, and skipped outright while
+ * anything is waiting in the outbox. A cook tapping "Hazırdır" writes to
+ * Supabase, so the waiter's screen went on showing the order unfinished until a
+ * sweep happened to come round: minutes, on a busy night most of service, with
+ * the food going cold on the pass.
+ *
+ * The till is already told the moment it changes — it has been subscribed to
+ * order_station_ready all along — and answered by re-reading the disk that does
+ * not have it yet. This is the missing half: one small read, only on that
+ * signal.
+ *
+ * Deliberately not part of a pull: it touches nothing but readiness, so unlike
+ * the orders step it cannot put a paid order back, and the outbox gate that
+ * protects that step does not apply.
+ *
+ * Returns false in a browser, where there is no local copy to bring up to date
+ * and the screen reads Supabase itself.
+ */
+export async function pullStationReady(companyId: string): Promise<boolean> {
+  const db = till();
+  if (!db || !companyId) return false;
+  try {
+    const { ready } = await serverRead<{ ready: unknown[] }>(db, "public-station-ready", companyId);
+    // An empty list is an answer here, not a failure: it is what an order being
+    // un-marked looks like, and refusing it would leave a card green after the
+    // cook took it back. serverRead already throws on a request that failed.
+    await db.putStationReady(companyId, ready ?? []);
+    return true;
+  } catch {
+    // The next sweep will carry it. Nothing on screen should change because one
+    // read did not get through.
+    return false;
+  }
+}
+
 export interface SyncOutcome {
   ok: boolean;
   steps: StepProgress[];
