@@ -36,7 +36,12 @@ export async function POST(req: NextRequest) {
 
   const db = createServerClient();
 
-  const held = await claim(db, idempotencyKey(req), companyId, 'add-order');
+  // Repeatable: the order carries the till's own id and the insert below forgives
+  // a duplicate key, and every line carries an id the till minted, so the upsert
+  // lands the same rows a second time rather than a second set of them. That is
+  // what lets a half-finished attempt be done properly instead of answered with
+  // a success it never earned — see lib/idempotency.ts.
+  const held = await claim(db, idempotencyKey(req), companyId, 'add-order', { repeatable: true });
   if (held.applied) return Response.json(held.result);
 
   const { error: orderError } = await db.from('orders').insert({
@@ -63,6 +68,9 @@ export async function POST(req: NextRequest) {
   // The till's own id is the primary key, so a replay that already landed trips
   // this — the same answer as success, and the queue must be allowed to move on.
   if (orderError && !/duplicate key|already exists/i.test(orderError.message)) {
+    // Hand the key back before answering. Holding it would leave the next
+    // attempt at this order being told it had already been applied.
+    await held.release();
     return Response.json({ ok: false, error: orderError.message }, { status: 500 });
   }
 
@@ -84,7 +92,10 @@ export async function POST(req: NextRequest) {
       variant_id: oi.variantId ?? null,
     }));
     const { error: itemsError } = await db.from('order_items').upsert(rows, { onConflict: 'id' });
-    if (itemsError) return Response.json({ ok: false, error: itemsError.message }, { status: 500 });
+    if (itemsError) {
+      await held.release();
+      return Response.json({ ok: false, error: itemsError.message }, { status: 500 });
+    }
   }
 
   const result = { ok: true };
