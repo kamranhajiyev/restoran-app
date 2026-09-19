@@ -44,16 +44,16 @@ export async function POST(req: NextRequest) {
   const held = await claim(db, idempotencyKey(req), companyId, 'add-order', { repeatable: true });
   if (held.applied) return Response.json(held.result);
 
-  const { error: orderError } = await db.from('orders').insert({
+  const insertOrder = (keepNumber: boolean) => db.from('orders').insert({
     id: order.id,
     // Absent on every other path, where the assign_order_number trigger fills it
     // in. Supplied, the trigger keeps it and moves the counter past it — the
     // desktop till numbered this order from its own database and has already
     // printed the number on a bill.
-    ...(keepOrderNumber && order.orderNumber ? { order_number: order.orderNumber } : {}),
+    ...(keepNumber && order.orderNumber ? { order_number: order.orderNumber } : {}),
     // Travels with the number it qualifies, and only then: an order the server
     // numbered belongs to no till and must stay null.
-    ...(keepOrderNumber && order.tillNumber ? { till_number: order.tillNumber } : {}),
+    ...(keepNumber && order.tillNumber ? { till_number: order.tillNumber } : {}),
     table_id: order.tableNumber === 0 ? null : order.tableNumber,
     waiter_name: order.sellerName,
     staff_id: order.staffId ?? null,
@@ -64,6 +64,19 @@ export async function POST(req: NextRequest) {
     created_at: order.createdAt,
     company_id: companyId,
   });
+
+  let { error: orderError } = await insertOrder(!!keepOrderNumber);
+
+  // The till's number was already taken — another device handed out the same
+  // one while this till could not see it (orders_company_order_number_unique).
+  // This is a new order, not a replay, and it said "duplicate key" too: taken for
+  // one, it skipped the insert and failed on the lines of an order that did not
+  // exist, and the till kept it at the head of its queue for good — Test
+  // Restoran, №3436, 2026-09-19, with every sale after it stuck behind. Let the
+  // server number it instead; a relabelled order beats one that never arrives.
+  if (orderError && /order_number/i.test(orderError.message)) {
+    ({ error: orderError } = await insertOrder(false));
+  }
 
   // The till's own id is the primary key, so a replay that already landed trips
   // this — the same answer as success, and the queue must be allowed to move on.
