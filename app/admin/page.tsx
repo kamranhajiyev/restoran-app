@@ -62,7 +62,7 @@ import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt } from '@/lib/printer';
 import { isDesktop } from '@/lib/desktopPrint';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
-import { orderPlace, orderPlaceKind, PlaceKind } from '@/lib/order-place';
+import { orderPlace, orderPlaceKind, PlaceKind, tableTitle } from '@/lib/order-place';
 
 // RPC raise messages are machine codes — translated here for display
 const STAFF_ERRORS: Record<string, string> = {
@@ -3253,7 +3253,7 @@ function AdminPageContent() {
                               {order.status === 'ödənilib' && printerConnected && (
                                 <button
                                   onClick={async () => {
-                                    const ok = await printReceipt(order, companyName);
+                                    const ok = await printReceipt(order, companyName, undefined, tableTitle(tables, order.tableNumber));
                                     if (!ok) setPrinterError('Çap alınmadı — yazıcı bağlantısını yoxlayın');
                                   }}
                                   className="text-xs font-semibold text-emerald-600 border border-emerald-200 hover:bg-emerald-50 rounded-lg px-2.5 py-1 transition-colors flex items-center gap-1"

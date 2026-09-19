@@ -28,6 +28,7 @@ import InstallPWA from '@/components/InstallPWA';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, openCashDrawer } from '@/lib/printer';
 import { isDesktop, startKitchenPrinting } from '@/lib/desktopPrint';
+import StationPrinters from '@/components/StationPrinters';
 import { postOrQueue, isOnline, startConnectivityWatch, onConnectivityChange } from '@/lib/offline-net';
 import { tillFetch, hasLocalDb, localCourierCollections, siteGet } from '@/lib/till-data';
 import { hasLocalData, pullAll, pullStationReady } from '@/lib/till-sync';
@@ -38,7 +39,7 @@ import TillLink from '@/components/TillLink';
 import { canLink, checkLink, clearLink, readLink, saveLink, type Terminal } from '@/lib/terminal-link';
 import { tillImage } from '@/lib/till-image';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
-import { orderPlace as placeOf } from '@/lib/order-place';
+import { orderPlace as placeOf, tableTitle } from '@/lib/order-place';
 import { flushQueue, pendingOrderIds, ADD_ORDER } from '@/lib/sync';
 import { verifyPinOffline, rememberPin, forgetPins } from '@/lib/offline-pin';
 import { queueSize, enqueue } from '@/lib/offline-queue';
@@ -1119,13 +1120,20 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   //
   // A session belonging to another company is the one case to refuse: a terminal
   // link pointed at one restaurant must never drain another's queue.
+  //
+  // A till opened with only its terminal link and nobody signed in used to stop
+  // here, and its sexes never printed. It collects through the link's token now.
   useEffect(() => {
     if (!isDesktop()) return;
     const companyId = getSession()?.companyId;
-    if (!companyId) return;
-    if (overrideCompanyId && overrideCompanyId !== companyId) return;
-    return startKitchenPrinting(companyId);
-  }, [overrideCompanyId]);
+    if (companyId) {
+      if (overrideCompanyId && overrideCompanyId !== companyId) return;
+      return startKitchenPrinting({ kind: 'session', companyId });
+    }
+    if (overrideCompanyId && overrideToken) {
+      return startKitchenPrinting({ kind: 'link', companyId: overrideCompanyId, token: overrideToken });
+    }
+  }, [overrideCompanyId, overrideToken]);
 
   useEffect(() => {
     if (overrideCompanyId) return;
@@ -1716,7 +1724,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         // the waiter closed it on purpose and doesn't need an alert about it.
         if (!ready) return;
       }
-      const ok = await printBill(order, overrideCompanyName || getSession()?.companyName || '', logoUrl);
+      const ok = await printBill(order, overrideCompanyName || getSession()?.companyName || '', logoUrl, tableTitle(tables, order.tableNumber));
       if (!ok) {
         setPrinterConnected(false);
         alert('Hesab çap olunmadı — yazıcı bağlantısını yoxlayın.');
@@ -1740,7 +1748,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         setPrinterConnected(ready);
         if (!ready) return;
       }
-      const ok = await printReceipt(order, overrideCompanyName || getSession()?.companyName || '', logoUrl);
+      const ok = await printReceipt(order, overrideCompanyName || getSession()?.companyName || '', logoUrl, tableTitle(tables, order.tableNumber));
       if (!ok) {
         setPrinterConnected(false);
         alert('Qəbz çap olunmadı — yazıcı bağlantısını yoxlayın.');
@@ -1829,7 +1837,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         // The public terminal link has no session, so the name has to come off
         // the props there or the receipt prints with a blank header.
         const cName = overrideCompanyName || getSession()?.companyName || '';
-        if (shouldPrintReceipt) printReceipt(paidOrder, cName, logoUrl);
+        if (shouldPrintReceipt) printReceipt(paidOrder, cName, logoUrl, tableTitle(tables, paidOrder.tableNumber));
         // Every closed bill, not just the ones that put notes in the till: a card
         // payment still needs the drawer for change owed from an earlier round,
         // and a cashier who has to open it by key stops trusting the button.
@@ -2618,6 +2626,12 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
             <ChevronLeft className="w-4 h-4" />
             <span className="hidden sm:inline">Admin</span>
           </button>
+        )}
+        {/* The sexes' printer IPs, set at the till the printers sit next to. Only
+            on the desktop, which is the one that prints, and only with a link
+            token to authorise the change. */}
+        {overrideCompanyId && overrideToken && isDesktop() && (
+          <StationPrinters companyId={overrideCompanyId} token={overrideToken} />
         )}
         {/* The drawer belongs to whoever is standing at the machine, not to the
             admin panel: change is handed over here, and a note goes in here. Kept

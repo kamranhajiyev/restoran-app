@@ -34,6 +34,21 @@ export function orderPlaceKind(order: PlaceOrder, cfg: Pick<PlaceConfig, 'delive
 }
 
 /**
+ * A table as people call it, from the id an order carries.
+ *
+ * The id is only a row number. A restaurant that deleted its first fifty tables
+ * and made new ones has "Masa 1" at id 51, and paper that printed the id sent
+ * the cook to a table that does not exist. A bare number for a name ("1") gets
+ * the word in front of it; a name that already says what it is ("Masa 1",
+ * "Terras 3") is left alone. The id is the fallback only when the table is gone.
+ */
+export function tableTitle(tables: Pick<RestaurantTable, 'id' | 'name'>[], id: number): string {
+  const name = tables.find(t => t.id === id)?.name?.trim();
+  if (!name) return `Masa ${id}`;
+  return /^\d+$/.test(name) ? `Masa ${name}` : name;
+}
+
+/**
  * What gets written beside the order number. A table names itself; everything
  * else has to be spelled out, because a row with nothing next to the number is
  * the one thing a waiter cannot act on.

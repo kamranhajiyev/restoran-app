@@ -21,9 +21,15 @@ const HEADING: Record<TicketPayload['kind'], string> = {
   move:   'MASA DƏYİŞDİ',
 };
 
-const tableLabel = (t: number | null | undefined) => (t ? String(t) : 'Takeaway');
+/**
+ * `tableName` turns the table id the payload carries into what the room calls
+ * it. The id is only a row number — a restaurant that remade its tables has
+ * "Masa 1" at id 51, and a ticket that said 51 sent the cook nowhere.
+ */
+export function buildStationTicketRaster(p: TicketPayload, tableName?: (id: number) => string): Uint8Array {
+  const place = (t: number | null | undefined) =>
+    !t ? 'Takeaway' : tableName ? tableName(t) : `Masa ${t}`;
 
-export function buildStationTicketRaster(p: TicketPayload): Uint8Array {
   const when = new Date(p.at).toLocaleString('az-AZ', {
     day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
   });
@@ -46,12 +52,12 @@ export function buildStationTicketRaster(p: TicketPayload): Uint8Array {
   // station names it, and that's the one being corrected.
   lines.push(
     p.kind === 'move'
-      ? { text: `Masa: ${tableLabel(p.fromTable)} -> ${tableLabel(p.table)}` }
+      ? { text: `${place(p.fromTable)} -> ${place(p.table)}` }
       // A courier order has no table, and "Takeaway" would send the food to the
       // counter instead of to the rider waiting for it.
       : p.courier
       ? { text: `KURYER: ${p.courier}` }
-      : { text: `Masa: ${tableLabel(p.table)}` },
+      : { text: place(p.table) },
   );
 
   lines.push({ text: when });

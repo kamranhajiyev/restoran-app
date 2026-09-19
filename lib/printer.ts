@@ -94,7 +94,7 @@ const row = (label: string, amount: string) => `${label}${amount.padStart(WIDTH 
 const money = (n: number) => `${n.toFixed(2)}m`;
 
 // The header both papers share: who, which order, which table, when, whose.
-function head(order: Order, companyName: string, heading?: string): Line[] {
+function head(order: Order, companyName: string, heading?: string, table?: string): Line[] {
   const date = new Date(order.createdAt).toLocaleString('az-AZ', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   const lines: Line[] = [
     { text: companyName, big: true, center: true },
@@ -105,7 +105,9 @@ function head(order: Order, companyName: string, heading?: string): Line[] {
     // The label, not the bare number: on a second till these are the only two
     // characters telling this receipt apart from the other №45 in the room.
     { text: `Sifariş #${orderLabel(order)}`, center: true },
-    { text: `Masa: ${order.tableNumber === 0 ? 'Takeaway' : order.tableNumber}`, center: true },
+    // The table's name, not its id — see tableTitle in lib/order-place.ts. The id
+    // is only there for a caller that has no table list to look it up in.
+    { text: order.tableNumber === 0 ? 'Masa: Takeaway' : table ?? `Masa: ${order.tableNumber}`, center: true },
     { text: date, center: true },
     { text: `Ofisiant: ${order.sellerName}`, center: true },
     { text: '='.repeat(WIDTH) },
@@ -141,13 +143,13 @@ async function send(lines: Line[], logo?: Logo | null): Promise<boolean> {
 // taken yet, so there is no cash/card split, no change and no thank-you — only
 // what was eaten and what it comes to. "HESAB" at the top is what stops a
 // customer from treating it as proof of payment.
-export async function printBill(order: Order, companyName: string, logoUrl?: string | null): Promise<boolean> {
+export async function printBill(order: Order, companyName: string, logoUrl?: string | null, table?: string): Promise<boolean> {
   try {
     const logo = await loadLogo(logoUrl);
     const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
     const discount = order.discountAmount ?? 0;
 
-    const lines: Line[] = [...head(order, companyName, 'HESAB'), ...itemLines(order)];
+    const lines: Line[] = [...head(order, companyName, 'HESAB', table), ...itemLines(order)];
 
     lines.push({ text: '='.repeat(WIDTH) });
     // A discount agreed before payment still belongs on the bill — the customer
@@ -166,7 +168,7 @@ export async function printBill(order: Order, companyName: string, logoUrl?: str
   }
 }
 
-export async function printReceipt(order: Order, companyName: string, logoUrl?: string | null): Promise<boolean> {
+export async function printReceipt(order: Order, companyName: string, logoUrl?: string | null, table?: string): Promise<boolean> {
   try {
     const logo = await loadLogo(logoUrl);
     // A courier order closed on debt tenders nothing, so cash+card is 0. Reading
@@ -176,7 +178,7 @@ export async function printReceipt(order: Order, companyName: string, logoUrl?: 
     const paid = (order.cashAmount ?? 0) + (order.cardAmount ?? 0) || debt;
     const total = paid + (order.discountAmount ?? 0);
 
-    const lines: Line[] = [...head(order, companyName), ...itemLines(order)];
+    const lines: Line[] = [...head(order, companyName, undefined, table), ...itemLines(order)];
 
     lines.push({ text: '='.repeat(WIDTH) });
 

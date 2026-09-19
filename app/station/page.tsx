@@ -12,15 +12,16 @@ import { Bell, CircleCheck, Check, Settings } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
-  setCompanyContext, fetchMenu, fetchOrders, fetchOrdersOrNull, fetchStations,
+  setCompanyContext, fetchMenu, fetchOrders, fetchOrdersOrNull, fetchStations, fetchTables,
   fetchStationReady, fetchStationReadyOrNull, markStationReady, unmarkStationReady, StationReady,
 } from '@/lib/store';
 import { menuIndex, sliceForStation, readyStationIds } from '@/lib/stations';
 import { itemBatches } from '@/lib/order-items';
 import { snapshotOrders, diffOrderAlerts, OrdersSnapshot } from '@/lib/orderAlerts';
 import { unlockSound, playNewOrder, playItemRemoved } from '@/lib/sound';
-import { MenuItem, Order, OrderItem, Station, isOrderOpen } from '@/types';
+import { MenuItem, Order, OrderItem, RestaurantTable, Station, isOrderOpen } from '@/types';
 import { orderLabel } from '@/lib/order-label';
+import { tableTitle } from '@/lib/order-place';
 
 // A card older than this is late. Newest-first puts the oldest at the BOTTOM, so
 // the colour is what stops it being forgotten — the sort can't be relied on to
@@ -103,6 +104,9 @@ export default function StationPage() {
   const [employeeId, setEmployeeId] = useState('');
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [stations, setStations] = useState<Station[]>([]);
+  // For the table's name. Orders carry only its id, which is a row number — a
+  // restaurant that remade its tables had "Masa 1" showing here as "Masa 51".
+  const [tables, setTables] = useState<RestaurantTable[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [readyRows, setReadyRows] = useState<StationReady[]>([]);
   const [online, setOnline] = useState(true);
@@ -183,6 +187,9 @@ export default function StationPage() {
         setReady(true);
       })
       .catch(() => { setOnline(false); setReady(true); });
+    // Apart from the load above: a failure here must not blank the screen, only
+    // fall back to the id.
+    fetchTables().then(setTables).catch(() => {});
 
     return () => { authSub.subscription.unsubscribe(); };
   }, [router]);
@@ -348,7 +355,7 @@ export default function StationPage() {
 
   async function notifyWaiters(orderId: string) {
     const order = orders.find(o => o.id === orderId);
-    const where = order?.tableNumber ? `Masa ${order.tableNumber}` : 'Sifariş';
+    const where = order?.tableNumber ? tableTitle(tables, order.tableNumber) : 'Sifariş';
     const num = order ? ` #${orderLabel(order)}` : '';
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -451,6 +458,7 @@ export default function StationPage() {
               <StationCard
                 key={card.order.id}
                 order={card.order}
+                table={card.order.tableNumber ? tableTitle(tables, card.order.tableNumber) : null}
                 items={card.items}
                 removedItems={card.removedItems}
                 since={card.since}
@@ -529,9 +537,10 @@ export default function StationPage() {
 // A / A / A picker moves the type, the padding and the gaps together. Nothing here is
 // px — one fixed size in the middle of an em layout is what makes big text look broken.
 function StationCard({
-  order, items, removedItems, since, now, busy, fontPx, onReady,
+  order, table, items, removedItems, since, now, busy, fontPx, onReady,
 }: {
   order: Order;
+  table: string | null;
   items: OrderItem[];
   removedItems: OrderItem[];
   since: string;
@@ -569,7 +578,7 @@ function StationCard({
           is the headline and the number is the small print — it used to be reversed. */}
       <div className="flex items-baseline justify-between gap-[0.5em] px-[1em] pt-[0.75em]">
         <span className="text-[1.5em] font-bold leading-tight truncate">
-          {order.tableNumber ? `Masa ${order.tableNumber}` : 'Özü ilə'}
+          {table ?? 'Özü ilə'}
         </span>
         <span className="text-[0.8em] text-stone-400 tabular-nums shrink-0">#{orderLabel(order)}</span>
       </div>
