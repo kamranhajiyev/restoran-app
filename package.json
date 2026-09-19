@@ -1,6 +1,6 @@
 {
   "name": "restoran-app",
-  "version": "0.1.0",
+  "version": "0.2.3",
   "private": true,
   "main": "dist-electron/electron/main.js",
   "// posUrl": "Site the desktop app opens. Point this at a preview deploy only while testing — an installer built from main must open production, or a restaurant's till ends up driving the wrong database.",

@@ -13,4 +13,4 @@ export const DESKTOP_DOWNLOAD_URL =
 
 // Shown beside the button so the owner knows what they are about to get.
 // Update alongside the URL when a new installer is published.
-export const DESKTOP_VERSION = '0.1.0';
+export const DESKTOP_VERSION = '0.2.3';
