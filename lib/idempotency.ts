@@ -19,6 +19,8 @@ type Claim =
   | { applied: true; result: unknown }   // already done — replay the old answer
   | {
       applied: false;
+      /** An earlier request took this key and never finished — its work may or may not have landed. */
+      resumed: boolean;
       commit: (result: unknown) => Promise<void>;
       /** Give the key back, so a retry is not told the write already happened. */
       release: () => Promise<void>;
@@ -41,10 +43,13 @@ type Claim =
  * Restoran, orders 3408 and 3418, 2026-09-14, the only two unfinished claims in
  * the table and the only two orders in it with no items.
  *
- * A route that is not repeatable — anything that moves money — keeps the old
- * answer. Replying "done" to a write that half happened is wrong; applying a
- * payment twice is worse, and telling those two apart needs more than this
- * table has in it.
+ * A route that is not repeatable keeps the old answer. Replying "done" to a
+ * write that half happened is wrong; applying a payment twice is worse, and
+ * telling those two apart needs more than this table has in it. A payment is
+ * repeatable only because its UPDATE refuses an order already paid — that
+ * guard, not this table, is what stops a double charge. Latte Art №3867,
+ * 2026-09-26: the pay request died after its claim, and nine presses of Ödəniş
+ * over twenty minutes were each told "done" while the order stayed unpaid.
  */
 export async function claim(
   db: SupabaseClient,
@@ -54,7 +59,7 @@ export async function claim(
   opts?: { repeatable?: boolean },
 ): Promise<Claim> {
   if (!key) {
-    return { applied: false, commit: async () => {}, release: async () => {} };
+    return { applied: false, resumed: false, commit: async () => {}, release: async () => {} };
   }
 
   const { error } = await db
@@ -63,6 +68,7 @@ export async function claim(
 
   const held = {
     applied: false as const,
+    resumed: false,
     commit: async (result: unknown) => {
       await db.from('applied_mutations').update({ result }).eq('key', key);
     },
@@ -92,7 +98,7 @@ export async function claim(
   // No answer recorded against a key that is taken: the request holding it never
   // reached its commit. See the note above — a repeatable route does the work
   // again rather than reporting a success that never happened.
-  if (data && data.result === null && opts?.repeatable) return held;
+  if (data && data.result === null && opts?.repeatable) return { ...held, resumed: true };
 
   return { applied: true, result: data?.result ?? { ok: true } };
 }

@@ -12,7 +12,10 @@ export async function POST(req: NextRequest) {
   // A payment queued offline may arrive twice. Charging the guest again is the
   // worst thing this route could do, so it answers the first attempt's result
   // instead of repeating the work.
-  const held = await claim(db, idempotencyKey(req), companyId, 'update-order-status');
+  // Repeatable because the UPDATE below refuses an order already paid or
+  // cancelled: running it a second time can never charge twice. Without this, a
+  // request that died after its claim left the order unpayable for good.
+  const held = await claim(db, idempotencyKey(req), companyId, 'update-order-status', { repeatable: true });
   if (held.applied) return Response.json(held.result);
 
   const updates: Record<string, unknown> = { status };
@@ -34,7 +37,14 @@ export async function POST(req: NextRequest) {
   q = q.neq('status', 'ləğv edildi');
   const { data, error } = await q.select('id');
   if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
-  const result = { ok: (data?.length ?? 0) > 0 };
+  let ok = (data?.length ?? 0) > 0;
+  // Retrying a payment that died after its claim: if the order is already paid,
+  // it was that earlier attempt that paid it, and the till must hear "done".
+  if (!ok && held.resumed && status === 'ödənilib') {
+    const { data: row } = await db.from('orders').select('status').eq('id', orderId).eq('company_id', companyId).maybeSingle();
+    ok = row?.status === 'ödənilib';
+  }
+  const result = { ok };
   await held.commit(result);
   return Response.json(result);
 }
