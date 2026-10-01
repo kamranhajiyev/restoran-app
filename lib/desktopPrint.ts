@@ -17,6 +17,8 @@ import { buildStationTicketRaster } from './station-ticket';
 import { tillPost } from './till-write';
 import { tableTitle } from './order-place';
 import { resolveStationId } from './stations';
+import { isUsbPrinter } from './station-printer';
+import { printRawToUsb } from './printer';
 import type { MenuItem, OrderItem, Station } from '@/types';
 
 /**
@@ -306,7 +308,7 @@ async function runJob(job: ClaimedJob): Promise<void> {
 
   try {
     const known = await tables();
-    await native.print(station.ip, station.port,
+    await printTo(native, station.ip, station.port,
       buildStationTicketRaster(job.payload, id => tableTitle(known, id)));
     await source.report(job.id, { result: 'printed' });
   } catch (err) {
@@ -417,7 +419,7 @@ export async function printKitchenNow(t: KitchenTicket): Promise<OrderItem[]> {
         .sort((a, b) => a.name.localeCompare(b.name)),
     };
     try {
-      await native.print(station.printerIp, station.printerPort ?? 9100,
+      await printTo(native, station.printerIp, station.printerPort ?? 9100,
         buildStationTicketRaster(payload, t.tableName), LOCAL_PRINT_MS);
       for (const i of idx) printed.set(i, stationId);
     } catch (err) {
@@ -481,7 +483,7 @@ export async function printNoteNow(t: NoteTicket): Promise<string[]> {
       table: t.table, courier: t.courier, waiter: t.waiter, note: t.note, at, items: [],
     };
     try {
-      await native.print(station.printerIp, station.printerPort ?? 9100,
+      await printTo(native, station.printerIp, station.printerPort ?? 9100,
         buildStationTicketRaster(payload, t.tableName), LOCAL_PRINT_MS);
       printed.push(stationId);
     } catch (err) {
@@ -489,6 +491,11 @@ export async function printNoteNow(t: NoteTicket): Promise<string[]> {
     }
   }
   return printed;
+}
+
+/** A sex's ticket to wherever its printer is: the network, or this till's USB printer. */
+function printTo(native: PosNative, ip: string, port: number, bytes: Uint8Array, timeoutMs?: number): Promise<void> {
+  return isUsbPrinter(ip) ? printRawToUsb(bytes) : native.print(ip, port, bytes, timeoutMs);
 }
 
 let draining = false;

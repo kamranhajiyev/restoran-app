@@ -44,19 +44,37 @@ async function openDevice(d: USBDevice): Promise<void> {
   throw new Error('USB cihazında çap kanalı yoxdur');
 }
 
-async function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
-  if (!device) {
-    console.error('[Printer] Yazıcı qoşulu deyil');
-    return false;
-  }
-  try {
-    await device.transferOut(endpoint, bytes);
-    return true;
-  } catch (err) {
-    console.error('[Printer] Göndərmə xətası:', err);
-    device = null;
-    return false;
-  }
+// One print at a time. A sex can print its tickets here too (see
+// lib/station-printer.ts), so a receipt and a bar ticket may be sent at the same
+// moment — queued one behind the other, never interleaved into one slip.
+let queue: Promise<unknown> = Promise.resolve();
+
+function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
+  const next = queue.then(async () => {
+    if (!device) {
+      console.error('[Printer] Yazıcı qoşulu deyil');
+      return false;
+    }
+    try {
+      await device.transferOut(endpoint, bytes);
+      return true;
+    } catch (err) {
+      console.error('[Printer] Göndərmə xətası:', err);
+      device = null;
+      return false;
+    }
+  });
+  queue = next;
+  return next;
+}
+
+/**
+ * A sex's ticket, on the till's own USB printer. Throws when it did not print,
+ * so the ticket stays in the queue exactly as one for a LAN printer that is off.
+ */
+export async function printRawToUsb(bytes: Uint8Array): Promise<void> {
+  if (!device && !(await connectPrinter())) throw new Error('USB printer not connected');
+  if (!(await sendBytes(new Uint8Array(bytes)))) throw new Error('USB printer did not take the ticket');
 }
 
 export async function connectPrinter(): Promise<boolean> {

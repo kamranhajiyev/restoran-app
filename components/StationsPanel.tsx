@@ -5,13 +5,10 @@ import { Plus, Pencil, Trash2, X, Check, ChefHat, Printer, Bell } from 'lucide-r
 import { saveStations, assignItemsToStation, fetchSoundEnabled, setSoundEnabled } from '@/lib/store';
 import { MenuItem, Station } from '@/types';
 import { DialogState } from '@/components/AppDialog';
+import { USB_PRINTER, isUsbPrinter, isValidPrinterTarget, printerLabel } from '@/lib/station-printer';
 
 // A blank IP means "no printer yet" — the station still routes tickets, they
 // just wait in the queue. Only a malformed IP is worth rejecting.
-function isValidIp(ip: string): boolean {
-  const parts = ip.split('.');
-  return parts.length === 4 && parts.every(p => /^\d{1,3}$/.test(p) && Number(p) <= 255);
-}
 
 // The admin page owns `stations` (its item form needs the same list for its
 // dropdown), so this panel edits through the setter instead of holding a copy.
@@ -80,12 +77,13 @@ export default function StationsPanel({
     const name = editName.trim();
     const ip = editIp.trim();
     if (!name) return;
-    if (ip && !isValidIp(ip)) {
+    if (ip && !isValidPrinterTarget(ip)) {
       setDialog({ title: 'Diqqət', message: 'IP ünvanı düzgün deyil. Nümunə: 192.168.1.50' });
       return;
     }
     const prev = stations;
-    const next = stations.map(s => s.id === editingId ? { ...s, name, printerIp: ip || null } : s);
+    const target = isUsbPrinter(ip) ? USB_PRINTER : ip || null;
+    const next = stations.map(s => s.id === editingId ? { ...s, name, printerIp: target } : s);
     setStations(next);
     setEditingId(null);
     if (!await persist(next)) setStations(prev);
@@ -158,12 +156,21 @@ export default function StationsPanel({
                     className="flex-1 bg-white border border-stone-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700"
                   />
                   <input
-                    value={editIp}
+                    value={isUsbPrinter(editIp) ? printerLabel(USB_PRINTER) : editIp}
+                    readOnly={isUsbPrinter(editIp)}
                     onChange={e => setEditIp(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && saveEdit()}
                     placeholder="Printer IP (məs: 192.168.1.50)"
-                    className="flex-1 bg-white border border-stone-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700"
+                    className="flex-1 bg-white border border-stone-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 read-only:bg-stone-50"
                   />
+                  {/* Tickets on the till's own USB receipt printer instead of the network. */}
+                  <button
+                    onClick={() => setEditIp(isUsbPrinter(editIp) ? '' : USB_PRINTER)}
+                    title="Kassanın USB printeri"
+                    className={`shrink-0 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${isUsbPrinter(editIp) ? 'border-primary-400 bg-primary-50 text-primary-800' : 'border-stone-200 text-stone-500 hover:border-primary-300'}`}
+                  >
+                    USB
+                  </button>
                   <div className="flex items-center gap-1 shrink-0">
                     <button onClick={saveEdit} title="Yadda saxla" className="w-8 h-8 flex items-center justify-center rounded-lg bg-primary-800 hover:bg-primary-900 text-white transition-colors">
                       <Check className="w-4 h-4" />
@@ -182,7 +189,7 @@ export default function StationsPanel({
                       <span>{count} məhsul</span>
                       <span>·</span>
                       {s.printerIp
-                        ? <span className="flex items-center gap-1"><Printer className="w-3 h-3" /> {s.printerIp}</span>
+                        ? <span className="flex items-center gap-1"><Printer className="w-3 h-3" /> {printerLabel(s.printerIp)}</span>
                         : <span className="text-amber-600">printer təyin edilməyib</span>}
                     </p>
                   </div>

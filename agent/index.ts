@@ -45,7 +45,10 @@ async function stationOf(id: string) {
   if (hit) return hit;
   const { data } = await db.from('stations').select('name, printer_ip, printer_port').eq('id', id).single();
   if (!data) return null;
-  const s = { ip: data.printer_ip, port: data.printer_port ?? 9100, name: data.name };
+  // "usb" is a sex printing on a till's own USB printer (lib/station-printer.ts).
+  // Only that till can reach it; to the agent it is a sex with no printer.
+  const ip = data.printer_ip?.trim().toLowerCase() === 'usb' ? null : data.printer_ip;
+  const s = { ip, port: data.printer_port ?? 9100, name: data.name };
   stationCache.set(id, s);
   return s;
 }

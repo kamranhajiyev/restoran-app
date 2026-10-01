@@ -7,12 +7,7 @@
 
 import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
-
-// The same check components/StationsPanel.tsx makes before saving.
-function isValidIp(ip: string): boolean {
-  const parts = ip.split('.');
-  return parts.length === 4 && parts.every(p => /^\d{1,3}$/.test(p) && Number(p) <= 255);
-}
+import { USB_PRINTER, isUsbPrinter, isValidPrinterTarget } from '@/lib/station-printer';
 
 export async function POST(req: NextRequest) {
   const { companyId, token, stationId, ip } = (await req.json()) as {
@@ -22,10 +17,11 @@ export async function POST(req: NextRequest) {
     ip?: string | null;
   };
   if (!companyId || !stationId) return Response.json({ ok: false }, { status: 400 });
-  const next = ip?.trim() || null;
-  if (next !== null && !isValidIp(next)) {
+  const typed = ip?.trim() || null;
+  if (typed !== null && !isValidPrinterTarget(typed)) {
     return Response.json({ ok: false, error: 'bad ip' }, { status: 400 });
   }
+  const next = isUsbPrinter(typed) ? USB_PRINTER : typed;
   if (!(await verifySellerToken(companyId, token ?? ''))) {
     return Response.json({ ok: false, error: 'revoked' }, { status: 403 });
   }

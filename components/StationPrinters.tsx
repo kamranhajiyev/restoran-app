@@ -9,12 +9,7 @@
 import { useState } from 'react';
 import { Check, Loader2, Network, X } from 'lucide-react';
 import { fetchStationPrinters, saveStationPrinter, type StationPrinterRow } from '@/lib/desktopPrint';
-
-// The same check the admin panel and /api/update-station-printer make.
-function isValidIp(ip: string): boolean {
-  const parts = ip.split('.');
-  return parts.length === 4 && parts.every(p => /^\d{1,3}$/.test(p) && Number(p) <= 255);
-}
+import { USB_PRINTER, isUsbPrinter, isValidPrinterTarget, printerLabel } from '@/lib/station-printer';
 
 export default function StationPrinters({ companyId, token }: { companyId: string; token: string }) {
   const [open, setOpen] = useState(false);
@@ -36,7 +31,7 @@ export default function StationPrinters({ companyId, token }: { companyId: strin
 
   async function save(s: StationPrinterRow) {
     const ip = (draft[s.id] ?? '').trim();
-    if (ip && !isValidIp(ip)) { setError(`${s.name}: IP düzgün deyil (məs: 192.168.1.50)`); return; }
+    if (ip && !isValidPrinterTarget(ip)) { setError(`${s.name}: IP düzgün deyil (məs: 192.168.1.50)`); return; }
     setError(null);
     setSaving(s.id);
     const ok = await saveStationPrinter(companyId, token, s.id, ip || null);
@@ -73,17 +68,27 @@ export default function StationPrinters({ companyId, token }: { companyId: strin
             <div className="space-y-3">
               {rows?.map(s => {
                 const changed = (draft[s.id] ?? '').trim() !== (s.printerIp ?? '');
+                const usb = isUsbPrinter(draft[s.id]);
                 return (
                   <div key={s.id}>
                     <p className="text-xs font-semibold text-stone-600 mb-1">{s.name}</p>
                     <div className="flex gap-2">
                       <input
-                        value={draft[s.id] ?? ''}
+                        value={usb ? printerLabel(USB_PRINTER) : draft[s.id] ?? ''}
+                        readOnly={usb}
                         onChange={e => { setDraft(d => ({ ...d, [s.id]: e.target.value })); setSaved(null); }}
                         placeholder="Printer IP (məs: 192.168.1.50)"
                         inputMode="decimal"
-                        className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-stone-200 text-sm focus:outline-none focus:border-primary-400"
+                        className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-stone-200 text-sm focus:outline-none focus:border-primary-400 read-only:bg-stone-50"
                       />
+                      {/* The till's own receipt printer, for a sex standing beside it. */}
+                      <button
+                        onClick={() => { setDraft(d => ({ ...d, [s.id]: usb ? '' : USB_PRINTER })); setSaved(null); }}
+                        title="Bu kassanın USB printeri"
+                        className={`px-2.5 py-2 rounded-xl border text-xs font-semibold transition-colors ${usb ? 'border-primary-400 bg-primary-50 text-primary-800' : 'border-stone-200 text-stone-500 hover:border-primary-300'}`}
+                      >
+                        USB
+                      </button>
                       <button
                         onClick={() => save(s)}
                         disabled={!changed || saving !== null}
@@ -99,7 +104,7 @@ export default function StationPrinters({ companyId, token }: { companyId: strin
 
             {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
             <p className="mt-4 text-[11px] text-stone-400 leading-relaxed">
-              Printer və bu kompüter eyni şəbəkədə olmalıdır.
+              Printer və bu kompüter eyni şəbəkədə olmalıdır. USB — sexin çeki bu kassanın öz printerindən çıxır.
             </p>
           </div>
         </div>
