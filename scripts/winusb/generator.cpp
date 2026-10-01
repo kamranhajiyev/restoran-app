@@ -14,8 +14,9 @@
 //  - It installs into a path relative to the working directory, which for an
 //    elevated process is System32.
 //
-// So: list every device with its current driver, and swap one by VID/PID into
-// a directory the caller names.
+// So: list every device with its current driver and USB class, and swap one —
+// by VID/PID, and interface on a composite device — into a directory the caller
+// names.
 
 #include <napi.h>
 #include <libwdi.h>
@@ -36,7 +37,9 @@ static int listAll(struct wdi_device_info **result) {
   return wdi_create_list(result, &options);
 }
 
-// [{ vid, pid, driver, composite, mi }] for every USB device present.
+// [{ vid, pid, driver, composite, mi, compatible }] for every USB device present.
+// `compatible` is Windows' compatible ID, e.g. USB\Class_07&SubClass_01&Prot_02
+// — class 07 is a printer.
 Napi::Value ListDevices(const Napi::CallbackInfo &info) {
   Napi::Env env = info.Env();
   Napi::Array devices = Napi::Array::New(env);
@@ -58,27 +61,30 @@ Napi::Value ListDevices(const Napi::CallbackInfo &info) {
     o.Set("driver", Napi::String::New(env, orEmpty(d->driver)));
     o.Set("composite", Napi::Boolean::New(env, d->is_composite != FALSE));
     o.Set("mi", Napi::Number::New(env, d->mi));
+    o.Set("compatible", Napi::String::New(env, orEmpty(d->compatible_id)));
     devices.Set(i++, o);
   }
   wdi_destroy_list(head);
   return devices;
 }
 
-// associate(vid, pid, description, dir): put WinUSB on that device. Needs to
+// associate(vid, pid, mi, description, dir): put WinUSB on that device. `mi`
+// picks the interface of a composite device; -1 for one that is not composite. Needs to
 // run elevated — without admin libwdi skips signing the driver, and Windows
 // 10/11 then refuses it.
 Napi::Value Associate(const Napi::CallbackInfo &info) {
   Napi::Env env = info.Env();
-  if (info.Length() != 4 || !info[0].IsNumber() || !info[1].IsNumber() ||
-      !info[2].IsString() || !info[3].IsString()) {
-    Napi::TypeError::New(env, "associate(vid, pid, description, dir)")
+  if (info.Length() != 5 || !info[0].IsNumber() || !info[1].IsNumber() ||
+      !info[2].IsNumber() || !info[3].IsString() || !info[4].IsString()) {
+    Napi::TypeError::New(env, "associate(vid, pid, mi, description, dir)")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
   const unsigned short vid = (unsigned short)info[0].As<Napi::Number>().Uint32Value();
   const unsigned short pid = (unsigned short)info[1].As<Napi::Number>().Uint32Value();
-  std::string desc = info[2].As<Napi::String>().Utf8Value();
-  std::string dir = info[3].As<Napi::String>().Utf8Value();
+  const int mi = info[2].As<Napi::Number>().Int32Value();
+  std::string desc = info[3].As<Napi::String>().Utf8Value();
+  std::string dir = info[4].As<Napi::String>().Utf8Value();
   const char *const INF_NAME = "usb_device.inf";
 
   wdi_set_log_level(WDI_LOG_LEVEL_WARNING);
@@ -92,7 +98,10 @@ Napi::Value Associate(const Napi::CallbackInfo &info) {
 
   struct wdi_device_info *found = NULL;
   for (struct wdi_device_info *d = head; d != NULL; d = d->next) {
-    if (d->vid == vid && d->pid == pid && !isCompositeParent(d)) { found = d; break; }
+    if (d->vid != vid || d->pid != pid || isCompositeParent(d)) continue;
+    if (mi >= 0 && (!d->is_composite || d->mi != mi)) continue;
+    found = d;
+    break;
   }
   if (found == NULL) {
     if (head != NULL) wdi_destroy_list(head);

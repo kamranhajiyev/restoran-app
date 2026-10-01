@@ -18,7 +18,7 @@ import { sendToPrinter } from '../lib/tcp-print';
 import { openDb } from './db';
 import { IMG_PATH, serveImage } from './images';
 import {
-  PRINTER_PID, PRINTER_VID, ensurePrinterDriver, isDriverHelper, runDriverHelper,
+  ensurePrinterDriver, isDriverHelper, isReceiptPrinter, runDriverHelper,
 } from './printer-driver';
 import { registerTillHandlers } from './till-ipc';
 import { startUpdater } from './updater';
@@ -336,10 +336,9 @@ function keepTryingWhenOffline(win: BrowserWindow): void {
 // forever — the receipt printer simply stops working inside the desktop build
 // while continuing to work in a browser tab.
 //
-// There is exactly one printer worth picking, so pick it rather than showing a
-// chooser: a waiter mid-service should not be identifying USB devices.
-const isReceiptPrinter = (d: { vendorId: number; productId: number }) =>
-  d.vendorId === PRINTER_VID && d.productId === PRINTER_PID;
+// There is one printer worth picking, so pick it rather than showing a chooser:
+// a waiter mid-service should not be identifying USB devices. Which devices
+// count as one is decided in electron/printer-driver.ts.
 
 function grantReceiptPrinterAccess(win: BrowserWindow): void {
   // An allowlist, not a blanket yes: this window loads a remote page, and the
@@ -359,14 +358,14 @@ function grantReceiptPrinterAccess(win: BrowserWindow): void {
   // asking to be paired again every morning.
   win.webContents.session.setDevicePermissionHandler(details =>
     details.deviceType === 'usb' && !!details.device && isReceiptPrinter(details.device as
-      { vendorId: number; productId: number }),
+      { vendorId: number; productId: number; deviceClass?: number }),
   );
 
   // Fired on the session, not on webContents.
   win.webContents.session.on('select-usb-device', (event, details, callback) => {
     event.preventDefault();
     // The till is looking for its printer — the moment a printer still on
-    // Windows' own driver needs WinUSB. A no-op once that is settled.
+    // Windows' own driver needs WinUSB. A no-op when every printer has it.
     void ensurePrinterDriver(win);
     const printer = details.deviceList.find(isReceiptPrinter);
     // No printer attached: answer with nothing so requestDevice() rejects and
