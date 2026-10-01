@@ -18,6 +18,7 @@ import { sendToPrinter } from '../lib/tcp-print';
 import { openDb } from './db';
 import { IMG_PATH, serveImage } from './images';
 import { registerTillHandlers } from './till-ipc';
+import { startUpdater } from './updater';
 
 // ── The till, served off the disk ────────────────────────────────────────────
 // A restaurant's line goes down and the till has to keep taking orders. That is
@@ -408,6 +409,8 @@ if (!app.requestSingleInstanceLock()) {
         ? timeoutMs : undefined;
       await sendToPrinter(ip, port, bytes, wait);
     });
+
+    startUpdater();
 
     createWindow();
 

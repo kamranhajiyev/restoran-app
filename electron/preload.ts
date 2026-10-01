@@ -18,6 +18,18 @@ contextBridge.exposeInMainWorld('posNative', {
   print: (ip: string, port: number, bytes: Uint8Array, timeoutMs?: number): Promise<void> =>
     ipcRenderer.invoke('printer:send', ip, port, bytes, timeoutMs),
 
+  // A new version, downloaded and waiting for someone to click "Yenilə". See
+  // electron/updater.ts.
+  update: {
+    status: () => invoke('update:status'),
+    onReady: (cb: (status: unknown) => void) => {
+      const listener = (_e: unknown, status: unknown) => cb(status);
+      ipcRenderer.on('update:ready', listener);
+      return () => { ipcRenderer.removeListener('update:ready', listener); };
+    },
+    install: () => invoke('update:install'),
+  },
+
   // The local database. Absent when the shell is pointed at a remote site with
   // --url=, so lib/till-data.ts can fall back to the HTTP routes.
   till: {

@@ -67,6 +67,20 @@ jobs:
       # needs. The lock is not committed from here, so nothing drifts.
       - run: npm install --no-audit --no-fund
 
+      # The tills compare the release tag with their own version (package.json)
+      # to decide whether to update. A v0.3.5 tag on a build that still says
+      # 0.3.4 would look newer to every till forever — each one would install
+      # it, come back as 0.3.4, and be told to update again.
+      - name: Tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} but package.json says $version"
+            exit 1
+          fi
+
       # One installer, always the offline till.
       #
       # This used to branch: a url built the old shell — a window onto a Vercel
@@ -112,3 +126,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release/*.exe
+          # Every installed till updates itself from the latest *published*
+          # release (electron/updater.ts). A draft is invisible to them: try the
+          # exe first, then press Publish on GitHub to send it to the restaurants.
+          draft: true

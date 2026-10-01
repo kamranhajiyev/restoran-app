@@ -106,6 +106,18 @@ export interface PosNative {
   // Absent when the shell was pointed at a website with --url=: that build is
   // the web app in a window and still reads through the API routes.
   till?: TillDb;
+  // Absent in installers built before the updater existed.
+  update?: {
+    status(): Promise<DesktopUpdate | null>;
+    onReady(cb: (status: DesktopUpdate) => void): () => void;
+    install(): Promise<void>;
+  };
+}
+
+/** A downloaded update. `required` when it was already waiting as the app opened. */
+export interface DesktopUpdate {
+  version: string;
+  required: boolean;
 }
 
 declare global {
