@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('posNative', {
   isDesktop: true,
   print: (ip: string, port: number, bytes: Uint8Array, timeoutMs?: number): Promise<void> =>
     ipcRenderer.invoke('printer:send', ip, port, bytes, timeoutMs),
+  // The network printers this machine can see, for filling in a sex's IP.
+  scanPrinters: (): Promise<string[]> => ipcRenderer.invoke('printer:scan'),
 
   // A new version, downloaded and waiting for someone to click "Yenilə". See
   // electron/updater.ts.

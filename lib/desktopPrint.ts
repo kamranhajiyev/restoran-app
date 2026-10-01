@@ -105,6 +105,8 @@ export interface OutboxEntry {
 export interface PosNative {
   isDesktop: true;
   print(ip: string, port: number, bytes: Uint8Array, timeoutMs?: number): Promise<void>;
+  /** Network printers answering on port 9100. Absent in installers before 0.3.7. */
+  scanPrinters?(): Promise<string[]>;
   // Absent when the shell was pointed at a website with --url=: that build is
   // the web app in a window and still reads through the API routes.
   till?: TillDb;

@@ -7,7 +7,7 @@
 // naming, adding and removing sexes stay in admin.
 
 import { useState } from 'react';
-import { Check, Loader2, Network, X } from 'lucide-react';
+import { Check, Loader2, Network, Search, X } from 'lucide-react';
 import { fetchStationPrinters, saveStationPrinter, type StationPrinterRow } from '@/lib/desktopPrint';
 import { USB_PRINTER, isUsbPrinter, isValidPrinterTarget, printerLabel } from '@/lib/station-printer';
 
@@ -18,15 +18,44 @@ export default function StationPrinters({ companyId, token }: { companyId: strin
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Printers found on the network by the desktop app, and the sex a tapped one
+  // goes to — the row last touched.
+  const [found, setFound] = useState<string[] | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [target, setTarget] = useState<string | null>(null);
+  const canScan = typeof window !== 'undefined' && !!window.posNative?.scanPrinters;
 
   async function show() {
     setOpen(true);
     setRows(null);
     setError(null);
     setSaved(null);
+    setFound(null);
+    setTarget(null);
     const list = await fetchStationPrinters(companyId);
     setRows(list);
     setDraft(Object.fromEntries(list.map(s => [s.id, s.printerIp ?? ''])));
+  }
+
+  async function scan() {
+    setScanning(true);
+    setError(null);
+    try {
+      setFound(await window.posNative!.scanPrinters!());
+    } catch {
+      setFound([]);
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  // A found printer into the row last touched, or else the first with none.
+  function use(ip: string) {
+    const id = target ?? rows?.find(r => !(draft[r.id] ?? '').trim())?.id ?? rows?.[0]?.id;
+    if (!id) return;
+    setDraft(d => ({ ...d, [id]: ip }));
+    setTarget(id);
+    setSaved(null);
   }
 
   async function save(s: StationPrinterRow) {
@@ -65,13 +94,40 @@ export default function StationPrinters({ companyId, token }: { companyId: strin
             {rows === null && <p className="text-sm text-stone-400 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Yüklənir…</p>}
             {rows?.length === 0 && <p className="text-sm text-stone-500">Sex yoxdur. Sexləri admin paneldə əlavə edin.</p>}
 
+            {canScan && !!rows?.length && (
+              <div className="mb-4">
+                <button
+                  onClick={scan}
+                  disabled={scanning}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-stone-200 text-sm font-semibold text-stone-700 hover:border-primary-300 hover:bg-primary-50 disabled:opacity-60 transition-colors"
+                >
+                  {scanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                  {scanning ? 'Axtarılır…' : 'Şəbəkədə printer axtar'}
+                </button>
+                {found?.length === 0 && <p className="mt-2 text-xs text-stone-500">Printer tapılmadı. Printer yanılı və eyni şəbəkədədir?</p>}
+                {!!found?.length && (
+                  <div className="mt-2">
+                    <p className="text-[11px] text-stone-400 mb-1">Toxunun — seçilmiş sexə yazılır:</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {found.map(ip => (
+                        <button key={ip} onClick={() => use(ip)}
+                          className="px-2.5 py-1 rounded-lg bg-stone-50 border border-stone-200 text-xs font-mono text-stone-700 hover:border-primary-300 hover:bg-primary-50">
+                          {ip}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="space-y-3">
               {rows?.map(s => {
                 const changed = (draft[s.id] ?? '').trim() !== (s.printerIp ?? '');
                 const usb = isUsbPrinter(draft[s.id]);
                 return (
-                  <div key={s.id}>
-                    <p className="text-xs font-semibold text-stone-600 mb-1">{s.name}</p>
+                  <div key={s.id} onFocusCapture={() => setTarget(s.id)} onClickCapture={() => setTarget(s.id)}>
+                    <p className={`text-xs font-semibold mb-1 ${found?.length && target === s.id ? 'text-primary-800' : 'text-stone-600'}`}>{s.name}</p>
                     <div className="flex gap-2">
                       <input
                         value={usb ? printerLabel(USB_PRINTER) : draft[s.id] ?? ''}

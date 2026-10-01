@@ -20,6 +20,7 @@ import { IMG_PATH, serveImage } from './images';
 import {
   ensurePrinterDriver, isDriverHelper, isReceiptPrinter, runDriverHelper,
 } from './printer-driver';
+import { scanPrinters } from './printer-scan';
 import { registerTillHandlers } from './till-ipc';
 import { startUpdater } from './updater';
 
@@ -420,6 +421,9 @@ if (isDriverHelper()) {
         ? timeoutMs : undefined;
       await sendToPrinter(ip, port, bytes, wait);
     });
+
+    // The "Axtar" button beside the sexes' printer IPs. See electron/printer-scan.ts.
+    ipcMain.handle('printer:scan', () => scanPrinters());
 
     startUpdater();
 
