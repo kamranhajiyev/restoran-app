@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 import { claim, idempotencyKey } from '@/lib/idempotency';
-import { printedStationColumn } from '@/lib/stations';
+import { printedStationColumn, printedStationList } from '@/lib/stations';
 import type { SelectedModifier } from '@/types';
 
 interface IncomingItem {
@@ -21,12 +21,15 @@ interface IncomingItem {
 }
 
 export async function POST(req: NextRequest) {
-  const { orderId, items, companyId, note, token } = (await req.json()) as {
+  const { orderId, items, companyId, note, token, noteTicket } = (await req.json()) as {
     orderId?: string;
     items?: IncomingItem[];
     companyId?: string;
     note?: string;
     token?: string;
+    // Set when the note was the whole edit: the kitchen gets a QEYD slip.
+    // `printed` lists the stations the desktop till already printed it at.
+    noteTicket?: { printed?: string[] };
   };
   // No items is allowed only when the note is the point of the call: the edit
   // screen saves a changed note before its removals, so the LƏĞV slip the
@@ -77,6 +80,14 @@ export async function POST(req: NextRequest) {
   if (note !== undefined) {
     const { error: noteError } = await db.from('orders').update({ note: note || null }).eq('id', orderId).eq('company_id', companyId);
     if (noteError) return Response.json({ ok: false, error: noteError.message }, { status: 500 });
+  }
+
+  // After the note is saved: the slip is built from the order row.
+  if (noteTicket && rows.length === 0) {
+    const { error: ticketError } = await db.rpc('enqueue_note_ticket', {
+      p_order_id: orderId, p_printed: printedStationList(noteTicket.printed),
+    });
+    if (ticketError) return Response.json({ ok: false, error: ticketError.message }, { status: 500 });
   }
   await held.commit({ ok: true });
   return Response.json({ ok: true });

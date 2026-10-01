@@ -768,11 +768,18 @@ export async function addOrder(order: Order, opts?: ReadOpts): Promise<string | 
   }
 }
 
-export async function addItemsToOrder(orderId: string, items: OrderItem[], note?: string | null): Promise<string | null> {
+export async function addItemsToOrder(
+  orderId: string,
+  items: OrderItem[],
+  note?: string | null,
+  // Set when the note is the whole edit: the kitchen gets a QEYD slip. See
+  // 20261003_note_ticket.sql.
+  noteTicket?: { printed: string[] },
+): Promise<string | null> {
   // A fresh key per append: the same dish added twice to one order is two
   // legitimate writes, not a retry of one.
   const local = await toLocal(undefined, `append:${crypto.randomUUID()}`, '/api/add-order-items', {
-    orderId, items, note: note ?? undefined,
+    orderId, items, note: note ?? undefined, noteTicket,
   });
   if (local) return local.ok ? null : local.error ?? 'failed';
 
@@ -804,6 +811,12 @@ export async function addItemsToOrder(orderId: string, items: OrderItem[], note?
     if (note !== undefined) {
       const { error: noteError } = await supabase.from('orders').update({ note: note || null }).eq('id', orderId).eq('company_id', _companyId);
       if (noteError) { console.error('[addItemsToOrder note]', noteError); return noteError.message; }
+    }
+    if (noteTicket && items.length === 0) {
+      const { error: ticketError } = await supabase.rpc('enqueue_note_ticket', {
+        p_order_id: orderId, p_printed: noteTicket.printed,
+      });
+      if (ticketError) { console.error('[addItemsToOrder noteTicket]', ticketError); return ticketError.message; }
     }
     return null;
   } catch (e) {

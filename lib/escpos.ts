@@ -65,11 +65,14 @@ export function encode(parts: string[]): Uint8Array {
 // (1 pizza + 2 lahmacun + …)"), and cutting them at the edge hid exactly the
 // part that tells the cook what goes in the bag.
 export function itemRows(qty: string, name: string): string[] {
-  const cols = WIDTH - 4;
+  return wrap(name, WIDTH - 4).map((r, i) => (i === 0 ? qty.padEnd(4) : '    ') + r);
+}
+
+// Word-wrap to `cols`. A single word longer than a row is split hard; nothing else is.
+export function wrap(text: string, cols: number): string[] {
   const rows: string[] = [];
   let row = '';
-  for (const word of name.trim().split(/\s+/)) {
-    // A single word longer than a row is split hard; nothing else is.
+  for (const word of text.trim().split(/\s+/)) {
     for (let w = word; w; w = w.slice(cols)) {
       const piece = w.slice(0, cols);
       if (!row) row = piece;
@@ -78,7 +81,7 @@ export function itemRows(qty: string, name: string): string[] {
     }
   }
   rows.push(row);
-  return rows.map((r, i) => (i === 0 ? qty.padEnd(4) : '    ') + r);
+  return rows;
 }
 
 // What the trigger froze into print_jobs.payload.
@@ -89,7 +92,7 @@ export interface TicketItem {
 }
 
 export interface TicketPayload {
-  kind: 'new' | 'append' | 'cancel' | 'move';
+  kind: 'new' | 'append' | 'cancel' | 'move' | 'note';
   station: string;
   orderNumber: number | null;
   table: number | null;
@@ -108,6 +111,7 @@ const HEADING: Record<TicketPayload['kind'], string> = {
   append: 'ƏLAVƏ',        // items added to an order the kitchen already has
   cancel: 'LƏĞV',         // stop cooking these
   move:   'MASA DƏYİŞDİ', // same food, new table — don't run it to the old one
+  note:   'QEYD',         // only the note changed; no items on the slip
 };
 
 // A kitchen ticket carries no prices — the cook doesn't need them, and they
@@ -131,6 +135,8 @@ export function buildStationTicket(p: TicketPayload): Uint8Array {
     lines.push(ESC.BIG, ESC.BOLD_ON, '*** LƏĞV ***\n', ESC.BOLD_OFF, ESC.NORMAL);
   } else if (p.kind === 'move') {
     lines.push(ESC.BIG, ESC.BOLD_ON, '*** MASA DƏYİŞDİ ***\n', ESC.BOLD_OFF, ESC.NORMAL);
+  } else if (p.kind === 'note') {
+    lines.push(ESC.BIG, ESC.BOLD_ON, '*** QEYD ***\n', ESC.BOLD_OFF, ESC.NORMAL);
   } else {
     lines.push(ESC.BOLD_ON, `${HEADING[p.kind]}\n`, ESC.BOLD_OFF);
   }
@@ -155,6 +161,12 @@ export function buildStationTicket(p: TicketPayload): Uint8Array {
   if (p.waiter) lines.push(`Ofisiant: ${p.waiter}\n`);
   lines.push('='.repeat(WIDTH) + '\n');
 
+  // A note slip has no items: the note is the whole message, so it takes their
+  // place, in the same large type.
+  if (p.kind === 'note') {
+    for (const row of wrap(p.note ?? '', WIDTH)) lines.push(ESC.BIG, `${row}\n`, ESC.NORMAL);
+  }
+
   for (const item of p.items) {
     // Quantity first and doubled in size: from arm's length that's the only
     // number a cook needs to read correctly.
@@ -165,7 +177,7 @@ export function buildStationTicket(p: TicketPayload): Uint8Array {
   }
 
   lines.push('='.repeat(WIDTH) + '\n');
-  if (p.note) lines.push(`Qeyd: ${p.note}\n`);
+  if (p.note && p.kind !== 'note') lines.push(`Qeyd: ${p.note}\n`);
   lines.push('\n\n\n', ESC.CUT);
 
   return encode(lines);

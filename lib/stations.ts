@@ -132,3 +132,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function printedStationColumn(v: unknown): string | null {
   return typeof v === 'string' && UUID.test(v) ? v : null;
 }
+
+// The stations a note slip already came out at, from an untrusted body. Anything
+// that isn't a station id is dropped; the worst that costs is a second slip.
+export function printedStationList(v: unknown): string[] {
+  return Array.isArray(v) ? v.map(printedStationColumn).filter((x): x is string => x !== null) : [];
+}

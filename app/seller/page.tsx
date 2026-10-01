@@ -27,7 +27,7 @@ import { CashShift, Category, Courier, CourierPayMethod, Hall, MenuItem, Modifie
 import InstallPWA from '@/components/InstallPWA';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, openCashDrawer } from '@/lib/printer';
-import { drainPrintQueue, isDesktop, nextLocalOrderNumber, printKitchenNow, startKitchenPrinting } from '@/lib/desktopPrint';
+import { drainPrintQueue, isDesktop, nextLocalOrderNumber, printKitchenNow, printNoteNow, startKitchenPrinting } from '@/lib/desktopPrint';
 import StationPrinters from '@/components/StationPrinters';
 import { postOrQueue, isOnline, startConnectivityWatch, onConnectivityChange } from '@/lib/offline-net';
 import { tillFetch, hasLocalDb, localCourierCollections, siteGet } from '@/lib/till-data';
@@ -1525,6 +1525,45 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       mutateOrders(prev => prev.map(o => o.id === orderId ? { ...o, note: editedNote || undefined } : o));
     }
     if (target && !(await commitRemovals(target))) return;
+    // Only the note changed: save it, and send it to the kitchen on its own QEYD
+    // slip. A cleared note is just saved — there is nothing to tell the cook.
+    if (cart.length === 0 && !hasRemovals && target && editedNote !== (target.note ?? '').trim()) {
+      setSubmitting(true);
+      let noteTicket: { printed: string[] } | undefined;
+      if (printKitchen && editedNote) {
+        const printCompany = overrideCompanyId ?? getSession()?.companyId;
+        noteTicket = {
+          printed: hasLocalDb() && printCompany
+            ? await printNoteNow({
+                companyId: printCompany,
+                orderNumber: target.orderNumber,
+                table: target.tableNumber || null,
+                courier: couriers.find(c => c.id === target.courierId)?.name ?? null,
+                waiter: target.sellerName ?? null,
+                note: editedNote,
+                items: [...target.items, ...(target.removedItems ?? [])],
+                menu,
+                tableName: id => tableTitle(tables, id),
+              })
+            : [],
+        };
+      }
+      const noteError = overrideCompanyId
+        ? (await postOrQueue(
+            `note:${orderId}:${crypto.randomUUID()}`,
+            '/api/add-order-items',
+            { orderId, items: [], companyId: overrideCompanyId, note: editedNote, noteTicket, token: overrideToken },
+            overrideCompanyId,
+          )).ok ? null : 'failed'
+        : await addItemsToOrder(orderId, [], editedNote, noteTicket);
+      setSubmitting(false);
+      if (noteError) {
+        alert(`Qeyd göndərilmədi.\n\nSəbəb: ${noteError}\n\nYenidən cəhd edin.`);
+        return;
+      }
+      mutateOrders(prev => prev.map(o => o.id === orderId ? { ...o, note: editedNote || undefined } : o));
+      setPrintKitchen(true);
+    }
     if (cart.length === 0) {
       // Nothing to append — the removals were the whole edit.
       setExpandedOrderId(orderId);
@@ -2338,6 +2377,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const cartTotal   = cart.reduce((s, ci) => s + ci.menuItem.price * ci.quantity, 0);
   const cartCount   = cart.reduce((s, ci) => s + ci.quantity, 0);
   const appendOrder = appendOrderId ? orders.find(o => o.id === appendOrderId) ?? null : null;
+  // The edit screen's button also sends a changed note on its own (a QEYD slip),
+  // so an empty cart doesn't disable it then.
+  const appendNoteOnly = !!appendOrder && cart.length === 0 && note.trim() !== (appendOrder.note ?? '').trim()
+    && !Object.values(pendingRemovals).some(n => n > 0);
   // Category tab order follows the admin's saved category order
   const categories  = [...new Set(availableCategories.filter(a => menu.some(i => i.category === a.name)).map(a => a.name))];
   const menuQuery   = azNormalize(menuSearch.trim());
@@ -3674,11 +3717,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   </div>
                   <button
                     onClick={submitOrder}
-                    disabled={cart.length === 0 || submitting}
+                    disabled={(cart.length === 0 && !appendNoteOnly) || submitting}
                     className="w-full bg-primary-800 hover:bg-primary-900 disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
                   >
                     {submitting && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                    {submitting ? 'Göndərilir...' : appendOrder ? 'Əlavə et' : 'Sifariş ver'}
+                    {submitting ? 'Göndərilir...' : appendNoteOnly ? 'Qeydi göndər' : appendOrder ? 'Əlavə et' : 'Sifariş ver'}
                   </button>
                 </div>
               </div>
@@ -3800,11 +3843,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
               </div>
               <button
                 onClick={submitOrder}
-                disabled={cart.length === 0 || submitting}
+                disabled={(cart.length === 0 && !appendNoteOnly) || submitting}
                 className="w-full bg-primary-800 hover:bg-primary-900 disabled:bg-stone-300 text-white font-semibold py-4 rounded-2xl transition-colors text-base active:scale-95 flex items-center justify-center gap-2"
               >
                 {submitting && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                {submitting ? 'Göndərilir...' : appendOrder ? 'Əlavə et' : 'Sifariş ver'}
+                {submitting ? 'Göndərilir...' : appendNoteOnly ? 'Qeydi göndər' : appendOrder ? 'Əlavə et' : 'Sifariş ver'}
               </button>
             </div>
           </div>

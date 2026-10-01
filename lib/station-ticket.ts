@@ -11,7 +11,7 @@
 // agent/ runs in Node with no DOM and keeps using the character path. Both
 // build the same layout, so a change to one belongs in the other.
 
-import { ESC, WIDTH, itemRows, stringToBytes, type TicketPayload } from './escpos';
+import { ESC, WIDTH, itemRows, stringToBytes, wrap, type TicketPayload } from './escpos';
 import { rasterize, type Line } from './raster';
 
 const HEADING: Record<TicketPayload['kind'], string> = {
@@ -19,6 +19,7 @@ const HEADING: Record<TicketPayload['kind'], string> = {
   append: 'ƏLAVƏ',
   cancel: 'LƏĞV',
   move:   'MASA DƏYİŞDİ',
+  note:   'QEYD',
 };
 
 /**
@@ -37,7 +38,7 @@ export function buildStationTicketRaster(p: TicketPayload, tableName?: (id: numb
   const lines: Line[] = [{ text: p.station, big: true, center: true }];
 
   // A cancellation must be unmistakable at a glance across a hot kitchen.
-  if (p.kind === 'cancel' || p.kind === 'move') {
+  if (p.kind === 'cancel' || p.kind === 'move' || p.kind === 'note') {
     lines.push({ text: `*** ${HEADING[p.kind]} ***`, big: true, center: true });
   } else {
     lines.push({ text: HEADING[p.kind], center: true });
@@ -64,6 +65,12 @@ export function buildStationTicketRaster(p: TicketPayload, tableName?: (id: numb
   if (p.waiter) lines.push({ text: `Ofisiant: ${p.waiter}` });
   lines.push({ text: '='.repeat(WIDTH) });
 
+  // A note slip has no items: the note is the whole message, so it takes their
+  // place, in the same large type.
+  if (p.kind === 'note') {
+    for (const row of wrap(p.note ?? '', WIDTH)) lines.push({ text: row, big: true });
+  }
+
   for (const item of p.items) {
     // Quantity first and doubled in size: from arm's length that's the only
     // number a cook needs to read correctly.
@@ -72,7 +79,7 @@ export function buildStationTicketRaster(p: TicketPayload, tableName?: (id: numb
   }
 
   lines.push({ text: '='.repeat(WIDTH) });
-  if (p.note) lines.push({ text: `Qeyd: ${p.note}` });
+  if (p.note && p.kind !== 'note') lines.push({ text: `Qeyd: ${p.note}` });
 
   const head = new Uint8Array(stringToBytes(ESC.INIT + ESC.LEFT));
   const image = rasterize(lines, WIDTH);

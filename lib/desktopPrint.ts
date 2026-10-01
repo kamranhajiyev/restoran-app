@@ -416,6 +416,69 @@ export async function printKitchenNow(t: KitchenTicket): Promise<OrderItem[]> {
   return t.items.map((oi, i) => printed.has(i) ? { ...oi, printedStationId: printed.get(i) } : oi);
 }
 
+export interface NoteTicket {
+  companyId: string;
+  orderNumber: number;
+  table: number | null;
+  courier: string | null;
+  waiter: string | null;
+  note: string;
+  // Every line the order has had, removed ones included: a station that printed
+  // a dish since taken off still holds the order's ticket.
+  items: OrderItem[];
+  menu: MenuItem[];
+  tableName: (id: number) => string;
+}
+
+/**
+ * Print a QEYD slip — the note alone — at the stations holding this order's
+ * ticket, or the first station if nothing was sent yet. The same choice
+ * enqueue_note_ticket makes on the server.
+ *
+ * Returns the stations it came out at, for the server to record as printed.
+ * Never throws: a station that did not print gets it through the queue.
+ */
+export async function printNoteNow(t: NoteTicket): Promise<string[]> {
+  const native = window.posNative;
+  if (!native?.till) return [];
+
+  let stations: Station[];
+  try {
+    stations = ((await native.till.stations(t.companyId)) as { stations?: Station[] }).stations ?? [];
+  } catch {
+    return [];
+  }
+  if (stations.length === 0) return [];
+
+  const menuById = new Map(t.menu.map(m => [String(m.id), m]));
+  const ids = new Set<string>();
+  for (const oi of t.items) {
+    if (oi.noPrint) continue;
+    const id = resolveStationId(menuById.get(String(oi.menuItem.id))?.stationId, stations);
+    if (id) ids.add(id);
+  }
+  if (ids.size === 0) ids.add(stations[0].id);
+
+  const printed: string[] = [];
+  const at = new Date().toISOString();
+  for (const stationId of ids) {
+    const station = stations.find(s => s.id === stationId);
+    if (!station?.printerIp) continue;
+    const payload: TicketPayload = {
+      kind: 'note', station: station.name, orderNumber: t.orderNumber,
+      table: t.table, courier: t.courier, waiter: t.waiter, note: t.note, at, items: [],
+    };
+    try {
+      await native.print(station.printerIp, station.printerPort ?? 9100,
+        buildStationTicketRaster(payload, t.tableName), LOCAL_PRINT_MS);
+      printed.push(stationId);
+    } catch (err) {
+      console.error(`[print] till → ${station.name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return printed;
+}
+
 let draining = false;
 // A push that lands mid-drain used to be dropped, and its ticket waited for the
 // 15-second poll. Now it just asks the running drain to go round once more.
