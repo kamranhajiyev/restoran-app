@@ -262,6 +262,27 @@ export const stepList = (): StepProgress[] =>
   STEPS.map(s => ({ id: s.id, label: s.label, state: "pending" as const }));
 
 /**
+ * Bring the till's copy of the sexes up to date now.
+ *
+ * Called right after a sex's printer is changed from the till. Otherwise the
+ * local copy — which the fast print path reads — keeps the old printer until the
+ * five-minute sweep, and every ticket meanwhile goes the slow way, through the
+ * queue.
+ */
+export async function pullStations(companyId: string): Promise<boolean> {
+  const db = till();
+  if (!db || !companyId) return false;
+  try {
+    const { stations } = await serverRead<{ stations: unknown[] }>(db, "public-stations", companyId);
+    await replace(db, "stations", companyId, stations ?? []);
+    return true;
+  } catch {
+    // The five-minute sweep will carry it.
+    return false;
+  }
+}
+
+/**
  * Which sexes have finished, fetched now rather than at the next sweep.
  *
  * The till reads readiness off its own disk, and that copy is only replaced by

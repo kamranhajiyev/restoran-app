@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { Check, Loader2, Network, Search, X } from 'lucide-react';
 import { fetchStationPrinters, saveStationPrinter, type StationPrinterRow } from '@/lib/desktopPrint';
 import { USB_PRINTER, isUsbPrinter, isValidPrinterTarget, printerLabel } from '@/lib/station-printer';
+import { pullStations } from '@/lib/till-sync';
 
 export default function StationPrinters({ companyId, token }: { companyId: string; token: string }) {
   const [open, setOpen] = useState(false);
@@ -68,6 +69,8 @@ export default function StationPrinters({ companyId, token }: { companyId: strin
     if (!ok) { setError(`${s.name}: yadda saxlanmadı — interneti yoxlayın`); return; }
     setRows(prev => prev?.map(r => r.id === s.id ? { ...r, printerIp: ip || null } : r) ?? prev);
     setSaved(s.id);
+    // So the very next order prints on the new printer, not five minutes later.
+    void pullStations(companyId);
   }
 
   return (
