@@ -16,7 +16,8 @@
     "desktop:till": "node scripts/build-desktop.mjs",
     "desktop": "npm run desktop:compile && node scripts/run-electron.mjs",
     "desktop:preview": "npm run desktop:compile && node scripts/run-electron.mjs --url=https://restoran-app-git-development-p-f968e3-kamrans-projects-11d6b816.vercel.app",
-    "desktop:dist": "npm run desktop:till && npm run desktop:compile && electron-builder --win --publish never"
+    "desktop:winusb": "node scripts/build-winusb.mjs",
+    "desktop:dist": "npm run desktop:till && npm run desktop:winusb && npm run desktop:compile && electron-builder --win --publish never"
   },
   "build": {
     "appId": "com.possiblle.pos",
@@ -29,6 +30,12 @@
       "out-desktop/**/*",
       "package.json",
       "!node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "native/winusb",
+        "to": "winusb"
+      }
     ],
     "win": {
       "target": [

@@ -17,6 +17,9 @@ import { pathToFileURL } from 'node:url';
 import { sendToPrinter } from '../lib/tcp-print';
 import { openDb } from './db';
 import { IMG_PATH, serveImage } from './images';
+import {
+  PRINTER_PID, PRINTER_VID, ensurePrinterDriver, isDriverHelper, runDriverHelper,
+} from './printer-driver';
 import { registerTillHandlers } from './till-ipc';
 import { startUpdater } from './updater';
 
@@ -239,6 +242,10 @@ function createWindow(): void {
   });
 
   grantReceiptPrinterAccess(win);
+
+  // Once the till is on screen, so the question is asked over the app rather
+  // than over nothing. See electron/printer-driver.ts.
+  win.once('ready-to-show', () => setTimeout(() => void ensurePrinterDriver(win), 3_000));
 }
 
 // ── Opening while the line is down ───────────────────────────────────────────
@@ -331,9 +338,6 @@ function keepTryingWhenOffline(win: BrowserWindow): void {
 //
 // There is exactly one printer worth picking, so pick it rather than showing a
 // chooser: a waiter mid-service should not be identifying USB devices.
-const PRINTER_VID = 0x1fc9;
-const PRINTER_PID = 0x2016;
-
 const isReceiptPrinter = (d: { vendorId: number; productId: number }) =>
   d.vendorId === PRINTER_VID && d.productId === PRINTER_PID;
 
@@ -361,6 +365,9 @@ function grantReceiptPrinterAccess(win: BrowserWindow): void {
   // Fired on the session, not on webContents.
   win.webContents.session.on('select-usb-device', (event, details, callback) => {
     event.preventDefault();
+    // The till is looking for its printer — the moment a printer still on
+    // Windows' own driver needs WinUSB. A no-op once that is settled.
+    void ensurePrinterDriver(win);
     const printer = details.deviceList.find(isReceiptPrinter);
     // No printer attached: answer with nothing so requestDevice() rejects and
     // the page shows its own "Yazici tapilmadi", rather than hanging on a
@@ -371,7 +378,12 @@ function grantReceiptPrinterAccess(win: BrowserWindow): void {
 
 // Two copies of the POS on one machine would each claim tickets, and the second
 // window is always an accident — a double-clicked shortcut mid-service.
-if (!app.requestSingleInstanceLock()) {
+//
+// The elevated copy that installs the printer driver comes first: it runs while
+// the till holds the lock, and must not be mistaken for a second window.
+if (isDriverHelper()) {
+  runDriverHelper();
+} else if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => {

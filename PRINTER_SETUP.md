@@ -6,6 +6,8 @@ The web app uses **WebUSB** (built into Chrome/Edge) to send raw ESC/POS command
 ## One-time setup on the POS computer
 
 ### 1. Install Zadig (replace USB driver)
+> **Desktop app (Possiblle POS):** skip this step. With the printer plugged in, the app sees it is not on WinUSB, explains, and Windows asks for admin permission — click **Yes** and the app swaps the driver itself (see `electron/printer-driver.ts`). Zadig is only needed for the browser version.
+
 1. Download **Zadig** from [zadig.akeo.ie](https://zadig.akeo.ie)
 2. Run as **Administrator**
 3. Go to **Options → List All Devices**

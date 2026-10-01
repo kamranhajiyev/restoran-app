@@ -97,6 +97,7 @@ jobs:
       - name: Build installer
         run: |
           npm run desktop:till
+          npm run desktop:winusb
           npm run desktop:compile
           if ("${{ inputs.url }}") {
             npx electron-builder --win --publish never --config.extraMetadata.posUrl="${{ inputs.url }}"
