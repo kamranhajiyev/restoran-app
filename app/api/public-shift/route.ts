@@ -16,7 +16,10 @@ export async function GET(req: NextRequest) {
     .limit(1)
     .maybeSingle();
 
-  if (error || !data) return Response.json({ shift: null });
+  // An error is not "no open shift": the desktop sync closes its local shift on
+  // a null answer, so a failed read must not look like one.
+  if (error) return Response.json({ shift: null }, { status: 500 });
+  if (!data) return Response.json({ shift: null });
 
   return Response.json({
     shift: {

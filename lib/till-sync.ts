@@ -219,7 +219,18 @@ const STEPS: Step[] = [
     id: "shift",
     label: "Növbə",
     run: async (companyId, db) => {
-      const { shift } = await serverRead<{ shift: unknown | null }>(db, "public-shift", companyId);
+      const { shift } = await serverRead<{ shift: { id: string } | null }>(db, "public-shift", companyId);
+      // The server only ever reports the open shift, so a shift closed
+      // somewhere else — the admin panel, another till — shows up here as
+      // nothing, or as a newer one. Without this the till kept its old copy
+      // open forever. Not while writes are queued: a shift this till has just
+      // opened and not yet sent would read as closed on the server.
+      if ((await db.outbox()).pending === 0) {
+        const local = (await db.shift(companyId)) as { shift: { id: string } | null };
+        if (local.shift && local.shift.id !== shift?.id) {
+          await db.putShift(companyId, { ...local.shift, closedAt: new Date().toISOString() });
+        }
+      }
       if (!shift) return 0;
       await db.putShift(companyId, shift);
       return 1;
