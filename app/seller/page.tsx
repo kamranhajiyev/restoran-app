@@ -490,6 +490,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
 
   // order history
   const [historySearch, setHistorySearch]   = useState('');
+  const [historyPay, setHistoryPay]         = useState<'all' | 'nagd' | 'kart'>('all');
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   // when set, the menu view appends items to this existing order instead of creating a new one
   const [appendOrderId, setAppendOrderId]   = useState<string | null>(null);
@@ -2320,12 +2321,14 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   }, [readyByOrder, menuById, stations]);
 
   const historyQuery = historySearch.trim().toLowerCase();
-  const filteredHistoryOrders = historyQuery
-    ? historyOrders.filter(o =>
-        orderSearchText(o).includes(historyQuery) ||
-        (o.sellerName ?? '').toLowerCase().includes(historyQuery) ||
-        orderPlace(o).toLowerCase().includes(historyQuery))
-    : historyOrders;
+  // A split payment is both cash and card, so it shows under either filter.
+  const filteredHistoryOrders = historyOrders.filter(o =>
+    (historyPay === 'all' ||
+      (o.status === 'ödənilib' && ((historyPay === 'nagd' ? o.cashAmount : o.cardAmount) ?? 0) > 0)) &&
+    (!historyQuery ||
+      orderSearchText(o).includes(historyQuery) ||
+      (o.sellerName ?? '').toLowerCase().includes(historyQuery) ||
+      orderPlace(o).toLowerCase().includes(historyQuery)));
   const paidHistoryOrders = historyOrders.filter(o => o.status === 'ödənilib');
   // Nağd and Kart are "money that arrived", not "what today's orders came to":
   // a courier order tenders nothing at close, so its total only shows up here
@@ -2914,8 +2917,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                 </div>
               )}
 
-              <div className="px-4 md:px-6 py-2">
-                <div className="relative max-w-md">
+              <div className="px-4 md:px-6 py-2 flex flex-wrap items-center gap-2">
+                <div className="relative flex-1 min-w-[200px] max-w-md">
                   <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     value={historySearch}
@@ -2923,6 +2926,17 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                     placeholder="Sifariş №, masa və ya satıcı ilə axtar"
                     className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-3 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
                   />
+                </div>
+                <div className="flex bg-white border border-stone-200 rounded-xl p-0.5">
+                  {([['all', 'Hamısı'], ['nagd', 'Nağd'], ['kart', 'Kart']] as const).map(([v, label]) => (
+                    <button
+                      key={v}
+                      onClick={() => setHistoryPay(v)}
+                      className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${historyPay === v ? 'bg-primary-800 text-white font-medium' : 'text-stone-600 hover:bg-stone-50'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
