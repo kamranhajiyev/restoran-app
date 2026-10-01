@@ -203,14 +203,15 @@ export function nextOrderNumber(companyId: string): number {
 function applyAddItems(id: string, body: Record<string, unknown>, companyId: string): WriteResult {
   const orderId = str(body.orderId);
   const items = Array.isArray(body.items) ? (body.items as OrderItem[]) : null;
-  if (!orderId || !items?.length) return { ok: false, error: 'bad_request' };
+  const note = typeof body.note === 'string' ? body.note : undefined;
+  // Note-only is allowed, as in the route.
+  if (!orderId || !items || (items.length === 0 && note === undefined)) return { ok: false, error: 'bad_request' };
 
   const found = openOrder(orderId, companyId);
   if ('error' in found) return { ok: false, error: found.error };
 
   const now = new Date().toISOString();
   const added = items.map(withId(now));
-  const note = typeof body.note === 'string' ? body.note : undefined;
 
   putOrder(companyId, {
     ...found,

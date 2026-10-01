@@ -1504,6 +1504,26 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     // discard them the moment the screen closes. They go first: if they fail, the alert has
     // already been shown and the screen stays put with the staged units intact.
     const target = orders.find(o => o.id === orderId);
+    // A changed note is saved before the removals: the LƏĞV slip is printed by a trigger the
+    // moment they land, and it reads the note off the order — saved afterwards, the kitchen got
+    // the old one. This also keeps a note edited alongside removals only, which was dropped.
+    const editedNote = note.trim();
+    const hasRemovals = Object.values(pendingRemovalsRef.current).some(n => n > 0);
+    if (target && hasRemovals && editedNote !== (target.note ?? '').trim()) {
+      const noteError = overrideCompanyId
+        ? (await postOrQueue(
+            `note:${orderId}:${crypto.randomUUID()}`,
+            '/api/add-order-items',
+            { orderId, items: [], companyId: overrideCompanyId, note: editedNote, token: overrideToken },
+            overrideCompanyId,
+          )).ok ? null : 'failed'
+        : await addItemsToOrder(orderId, [], editedNote);
+      if (noteError) {
+        alert(`Qeyd yadda saxlanmadı.\n\nSəbəb: ${noteError}\n\nYenidən cəhd edin.`);
+        return;
+      }
+      mutateOrders(prev => prev.map(o => o.id === orderId ? { ...o, note: editedNote || undefined } : o));
+    }
     if (target && !(await commitRemovals(target))) return;
     if (cart.length === 0) {
       // Nothing to append — the removals were the whole edit.

@@ -28,7 +28,10 @@ export async function POST(req: NextRequest) {
     note?: string;
     token?: string;
   };
-  if (!orderId || !companyId || !Array.isArray(items) || items.length === 0) {
+  // No items is allowed only when the note is the point of the call: the edit
+  // screen saves a changed note before its removals, so the LƏĞV slip the
+  // removal trigger prints carries the new note rather than the old one.
+  if (!orderId || !companyId || !Array.isArray(items) || (items.length === 0 && typeof note !== 'string')) {
     return Response.json({ ok: false }, { status: 400 });
   }
   if (!(await verifySellerToken(companyId, token ?? ''))) return Response.json({ ok: false, error: 'revoked' }, { status: 403 });
@@ -66,8 +69,10 @@ export async function POST(req: NextRequest) {
     printed_station_id: printedStationColumn(oi.printedStationId),
   }));
 
-  const { error } = await db.from('order_items').insert(rows);
-  if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
+  if (rows.length > 0) {
+    const { error } = await db.from('order_items').insert(rows);
+    if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
+  }
 
   if (note !== undefined) {
     const { error: noteError } = await db.from('orders').update({ note: note || null }).eq('id', orderId).eq('company_id', companyId);
