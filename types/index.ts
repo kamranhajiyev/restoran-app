@@ -104,6 +104,7 @@ export interface OrderItem {
   // includes these prices, so no total needs to read this.
   modifiersDetail?: SelectedModifier[];
   variantId?: string;   // which variant was chosen — drives per-variant stock deduction
+  noPrint?: boolean;    // "Mətbəxə çap et" was unticked — no kitchen slip for this line
   createdAt?: string;   // groups the item into a batch: the original order, or a later "Əlavə et"
   removedAt?: string;   // set = struck through on the order card, and excluded from every total
   removedBy?: string;

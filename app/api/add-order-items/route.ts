@@ -15,6 +15,7 @@ interface IncomingItem {
   modifiers?: string;
   modifiersDetail?: SelectedModifier[];
   variantId?: string;
+  noPrint?: boolean;
 }
 
 export async function POST(req: NextRequest) {
@@ -58,6 +59,7 @@ export async function POST(req: NextRequest) {
     modifiers: oi.modifiers ?? null,
     modifiers_detail: oi.modifiersDetail ?? null,
     variant_id: oi.variantId ?? null,
+    no_print: oi.noPrint ?? false,
   }));
 
   const { error } = await db.from('order_items').insert(rows);

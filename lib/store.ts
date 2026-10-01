@@ -754,6 +754,8 @@ export async function addOrder(order: Order, opts?: ReadOpts): Promise<string | 
       modifiers: oi.modifiers ?? null,
       modifiers_detail: oi.modifiersDetail ?? null,
       variant_id: oi.variantId ?? null,
+      // Unticked "Mətbəxə çap et": the print triggers skip the line.
+      no_print: oi.noPrint ?? false,
     }));
     const { error: itemsError } = await supabase.from('order_items').insert(rows);
     if (itemsError) { console.error('[addOrder items]', itemsError); return itemsError.message; }
@@ -791,6 +793,7 @@ export async function addItemsToOrder(orderId: string, items: OrderItem[], note?
         modifiers: oi.modifiers ?? null,
         modifiers_detail: oi.modifiersDetail ?? null,
         variant_id: oi.variantId ?? null,
+        no_print: oi.noPrint ?? false,
       }));
       const { error } = await supabase.from('order_items').insert(rows);
       if (error) { console.error('[addItemsToOrder]', error); return error.message; }
@@ -982,7 +985,7 @@ export async function setOrderItemQuantity(orderItemId: string, quantity: number
 
   const { data: row, error: readError } = await supabase
     .from('order_items')
-    .select('order_id, menu_item_id, menu_item_name, menu_item_price, modifiers, modifiers_detail, variant_id, quantity')
+    .select('order_id, menu_item_id, menu_item_name, menu_item_price, modifiers, modifiers_detail, variant_id, quantity, no_print')
     .eq('id', orderItemId)
     .single();
   if (readError || !row) { console.error('[setOrderItemQuantity read]', readError?.message); return false; }
@@ -1005,6 +1008,8 @@ export async function setOrderItemQuantity(orderItemId: string, quantity: number
     modifiers: row.modifiers,
     modifiers_detail: row.modifiers_detail,
     variant_id: row.variant_id,
+    // A line the kitchen never got must not come back as a cancel slip.
+    no_print: row.no_print,
     quantity: removedQty,
     removed_at: new Date().toISOString(),
     removed_by: removedBy,

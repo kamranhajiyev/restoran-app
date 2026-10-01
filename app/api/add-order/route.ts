@@ -103,6 +103,8 @@ export async function POST(req: NextRequest) {
       modifiers: oi.modifiers ?? null,
       modifiers_detail: oi.modifiersDetail ?? null,
       variant_id: oi.variantId ?? null,
+      // Unticked "Mətbəxə çap et": the print triggers skip the line.
+      no_print: oi.noPrint ?? false,
     }));
     const { error: itemsError } = await db.from('order_items').upsert(rows, { onConflict: 'id' });
     if (itemsError) {

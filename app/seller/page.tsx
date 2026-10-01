@@ -344,6 +344,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [cart, setCart]                     = useState<OrderItem[]>([]);
   const [activeCategory, setActiveCategory] = useState('');
   const [note, setNote]                     = useState('');
+  // "Mətbəxə çap et". Back to on after every order, so an untick meant for one
+  // counter drink can't silently keep the kitchen in the dark for the next table.
+  const [printKitchen, setPrintKitchen]     = useState(true);
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [submitting, setSubmitting]         = useState(false);
 
@@ -1507,7 +1510,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       setView('orders');
       return;
     }
-    const newItems = named(cart);
+    const newItems = printKitchen ? named(cart) : named(cart).map(oi => ({ ...oi, noPrint: true }));
     const newNote = note.trim();
     setSubmitting(true);
     const saveError = overrideCompanyId
@@ -1534,7 +1537,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     mutateOrders(prev => prev.map(o => o.id === orderId ? { ...o, items: [...o.items, ...newItems], note: newNote || undefined } : o));
     setExpandedOrderId(orderId);
     setAppendOrderId(null);
-    setCart([]); setNote(''); setMenuSearch('');
+    setCart([]); setNote(''); setMenuSearch(''); setPrintKitchen(true);
     setMobileCartOpen(false);
     setView('orders');
   }
@@ -1668,7 +1671,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       // the whole local table rather than from whatever is on screen.
       orderNumber: hasLocalDb() ? 0 : (orders[0]?.orderNumber ?? 0) + 1,
       tableNumber: orderType === 'masa' ? selectedTable! : 0,
-      items: named(cart),
+      items: printKitchen ? named(cart) : named(cart).map(oi => ({ ...oi, noPrint: true })),
       status: 'gözləyir',
       createdAt: new Date().toISOString(),
       sellerName: effectiveSeller,
@@ -1701,7 +1704,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       return;
     }
     mutateOrders(prev => [order, ...prev]);
-    setCart([]); setNote(''); setSelectedTable(null); setOrderType(null); setSelectedCourier(null);
+    setCart([]); setNote(''); setPrintKitchen(true); setSelectedTable(null); setOrderType(null); setSelectedCourier(null);
     setMobileCartOpen(false);
     setView('orders');
     // No payment sheet here on purpose. It used to open the moment the order was
@@ -3578,6 +3581,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                     rows={2}
                     className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary-400"
                   />
+                  <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-stone-600">Cəmi:</span>
                     <span className="font-bold text-lg text-primary-700">{cartTotal.toFixed(2)} ₼</span>
@@ -3703,6 +3707,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                 rows={2}
                 className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary-400"
               />
+              <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />
               <div className="flex justify-between items-center">
                 <span className="text-sm text-stone-600">Cəmi:</span>
                 <span className="font-bold text-xl text-primary-700">{cartTotal.toFixed(2)} ₼</span>
@@ -4443,6 +4448,25 @@ function ReadyBadge({ progress, allReady }: { progress: { done: number; total: n
 }
 
 // ── OrderRow — mobile card + desktop table row ────────────────────────────
+
+// The till's one say over the kitchen slip. Unticked, the lines this press sends
+// are flagged no_print and the print triggers pass them by.
+function PrintKitchenToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={() => onChange(!on)}
+      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${on ? 'bg-green-50 text-green-700' : 'bg-stone-100 text-stone-500'}`}
+    >
+      <span className="flex items-center gap-2"><Printer className="w-4 h-4" />Mətbəxə çap et</span>
+      <span className={`relative w-9 h-5 rounded-full transition-colors ${on ? 'bg-green-600' : 'bg-stone-300'}`}>
+        <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
+      </span>
+    </button>
+  );
+}
 
 function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItemReady, onReprint, onPay, onCancel, onReturn, courierName, canPickCourier, onAppend, onMove, onReassign, onPrintBill, billBusy, onStatusChange }: {
   order: Order;
