@@ -168,9 +168,16 @@ function elapsed(iso: string): string {
   return `${Math.floor(mins / 60)} saat`;
 }
 
+// Money is summed in floats, so 3.20×2 + 0.60×2 comes out as 7.6000000000000005
+// and a cashier typing 7.6 is told they are short by 0.00 and cannot close the
+// bill. Every amount the payment sheet compares goes through this first.
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 function orderTotal(order: Order): number {
   const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
-  return gross - (order.discountAmount ?? 0);
+  return round2(gross - (order.discountAmount ?? 0));
 }
 
 function tableHasActive(n: number, orders: Order[]): boolean {
@@ -1786,8 +1793,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
 
   function calcDiscount(fullTotal: number): number {
     const raw = parseFloat(discountInput) || 0;
-    if (discountType === '%') return Math.min(fullTotal, (fullTotal * raw) / 100);
-    return Math.min(fullTotal, raw);
+    if (discountType === '%') return round2(Math.min(fullTotal, (fullTotal * raw) / 100));
+    return round2(Math.min(fullTotal, raw));
   }
 
   async function confirmPayment() {
@@ -1800,15 +1807,15 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     if (order.items.length === 0) { setPayingOrder(null); refreshOrders(); return; }
     const fullTotal = orderTotal(order);
     const discountAmt = calcDiscount(fullTotal);
-    const total = fullTotal - discountAmt;
+    const total = round2(fullTotal - discountAmt);
     // The courier is collecting: nothing is tendered here, so nothing goes into
     // the drawer and the whole discounted total rides out with the order.
     const onDebt = !!order.courierId && courierMode === 'debt';
-    const cash = onDebt ? 0 : parseFloat(cashInput) || 0;
-    const card = onDebt ? 0 : parseFloat(cardInput) || 0;
-    const overpay = Math.max(0, cash + card - total);
+    const cash = onDebt ? 0 : round2(parseFloat(cashInput) || 0);
+    const card = onDebt ? 0 : round2(parseFloat(cardInput) || 0);
+    const overpay = round2(Math.max(0, cash + card - total));
     const change = Math.min(overpay, cash);
-    const cashKept = cash - change;
+    const cashKept = round2(cash - change);
     const courierDebt = onDebt ? total : 0;
     setPayingOrder(null);
     // The DB update is conditional — a no-op if someone else already paid this order
@@ -4005,12 +4012,12 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       {payingOrder && (() => {
         const fullTotal = orderTotal(payingOrder);
         const discountAmt = calcDiscount(fullTotal);
-        const total = fullTotal - discountAmt;
-        const cash = parseFloat(cashInput) || 0;
-        const card = parseFloat(cardInput) || 0;
-        const paid = cash + card;
-        const missing = total - paid;
-        const overpay = Math.max(0, cash + card - total);
+        const total = round2(fullTotal - discountAmt);
+        const cash = round2(parseFloat(cashInput) || 0);
+        const card = round2(parseFloat(cardInput) || 0);
+        const paid = round2(cash + card);
+        const missing = round2(total - paid);
+        const overpay = round2(Math.max(0, paid - total));
         const change = Math.min(overpay, cash);
         const isCourier = !!payingOrder.courierId;
         const onDebt = isCourier && courierMode === 'debt';
