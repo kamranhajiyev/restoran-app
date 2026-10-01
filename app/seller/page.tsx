@@ -27,7 +27,7 @@ import { CashShift, Category, Courier, CourierPayMethod, Hall, MenuItem, Modifie
 import InstallPWA from '@/components/InstallPWA';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, openCashDrawer } from '@/lib/printer';
-import { isDesktop, startKitchenPrinting } from '@/lib/desktopPrint';
+import { drainPrintQueue, isDesktop, startKitchenPrinting } from '@/lib/desktopPrint';
 import StationPrinters from '@/components/StationPrinters';
 import { postOrQueue, isOnline, startConnectivityWatch, onConnectivityChange } from '@/lib/offline-net';
 import { tillFetch, hasLocalDb, localCourierCollections, siteGet } from '@/lib/till-data';
@@ -746,6 +746,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       } finally {
         setSending(false);
       }
+      // The order just reached the server, so its kitchen tickets exist now.
+      // Collect them here rather than waiting on realtime or the poll.
+      void drainPrintQueue();
       const left = await pendingTotal();
       setPendingCount(left);
       setUnsent(await pendingOrderIds());

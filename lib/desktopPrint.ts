@@ -308,17 +308,28 @@ async function runJob(job: ClaimedJob): Promise<void> {
 }
 
 let draining = false;
+// A push that lands mid-drain used to be dropped, and its ticket waited for the
+// 15-second poll. Now it just asks the running drain to go round once more.
+let drainAgain = false;
+// Only while startKitchenPrinting is running: the seller page kicks the queue
+// after every send, and a till that was refused (another company's session)
+// must not start claiming through the default source.
+let printingActive = false;
 
 export async function drainPrintQueue(): Promise<void> {
-  if (!isDesktop() || draining) return;
+  if (!isDesktop() || !printingActive) return;
+  if (draining) { drainAgain = true; return; }
   draining = true;
   try {
-    const jobs = await source.claim();
-    // Sequential, not Promise.all: one printer, and two tickets interleaved on
-    // the same socket come out as one unreadable slip.
-    for (const job of jobs ?? []) {
-      await runJob(job);
-    }
+    do {
+      drainAgain = false;
+      const jobs = await source.claim();
+      // Sequential, not Promise.all: one printer, and two tickets interleaved on
+      // the same socket come out as one unreadable slip.
+      for (const job of jobs ?? []) {
+        await runJob(job);
+      }
+    } while (drainAgain);
   } finally {
     draining = false;
   }
@@ -331,6 +342,7 @@ export function startKitchenPrinting(auth: PrintAuth): () => void {
   source = auth.kind === 'session' ? sessionSource : linkSource(auth.companyId, auth.token);
   stationCache = null;
   tableCache = null;
+  printingActive = true;
 
   void drainPrintQueue();
 
@@ -350,6 +362,7 @@ export function startKitchenPrinting(auth: PrintAuth): () => void {
   const timer = setInterval(() => void drainPrintQueue(), channel ? POLL_MS : LINK_POLL_MS);
 
   return () => {
+    printingActive = false;
     clearInterval(timer);
     if (channel) void supabase.removeChannel(channel);
   };
