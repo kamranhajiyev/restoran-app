@@ -4,11 +4,24 @@ import { rasterize, type Line, type Logo } from './raster';
 import { loadLogo } from './logo';
 import { orderLabel } from './order-label';
 
-const USB_VID = 0x1FC9;
-const USB_PID = 0x2016;
-const USB_ENDPOINT = 1;
+// Any USB printer, not one model. The till first ran an XP-Q806K (1FC9:2016)
+// and the next one is an XP-S200M, whose ID nobody wrote down; a filter on one
+// VID/PID left the picker empty for every printer but the first. Class 7 is the
+// USB printer class most thermal printers declare; the vendor IDs catch the
+// clones that call themselves vendor-specific instead.
+const USB_FILTERS: USBDeviceFilter[] = [
+  { classCode: 0x07 },
+  { vendorId: 0x1FC9 },  // NXP — XP-Q806K
+  { vendorId: 0x0483 },  // STMicro — many Xprinter models
+  { vendorId: 0x0416 },  // Winbond — Xprinter / generic POS
+  { vendorId: 0x28E9 },  // GigaDevice — newer Xprinter boards
+];
 
 let device: USBDevice | null = null;
+// Read off the device rather than assumed: interface 0 / endpoint 1 held on the
+// XP-Q806K, but a different board numbers its bulk-out pipe however it likes.
+let iface = 0;
+let endpoint = 1;
 
 function isWebUSBAvailable(): boolean {
   return typeof navigator !== 'undefined' && 'usb' in navigator;
@@ -17,7 +30,18 @@ function isWebUSBAvailable(): boolean {
 async function openDevice(d: USBDevice): Promise<void> {
   await d.open();
   if (d.configuration === null) await d.selectConfiguration(1);
-  await d.claimInterface(0);
+  for (const i of d.configuration?.interfaces ?? []) {
+    for (const alt of i.alternates) {
+      const out = alt.endpoints.find(e => e.direction === 'out' && e.type === 'bulk');
+      if (!out) continue;
+      await d.claimInterface(i.interfaceNumber);
+      iface = i.interfaceNumber;
+      endpoint = out.endpointNumber;
+      return;
+    }
+  }
+  await d.close();
+  throw new Error('USB cihazında çap kanalı yoxdur');
 }
 
 async function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
@@ -26,7 +50,7 @@ async function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
     return false;
   }
   try {
-    await device.transferOut(USB_ENDPOINT, bytes);
+    await device.transferOut(endpoint, bytes);
     return true;
   } catch (err) {
     console.error('[Printer] Göndərmə xətası:', err);
@@ -38,12 +62,16 @@ async function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
 export async function connectPrinter(): Promise<boolean> {
   if (!isWebUSBAvailable()) return false;
   try {
-    const devices = await navigator.usb.getDevices();
-    const found = devices.find(d => d.vendorId === USB_VID && d.productId === USB_PID);
-    if (!found) return false;
-    await openDevice(found);
-    device = found;
-    return true;
+    // getDevices() returns only what this site was already granted, which in
+    // practice is the one printer someone picked — try each until one opens.
+    for (const d of await navigator.usb.getDevices()) {
+      try {
+        await openDevice(d);
+        device = d;
+        return true;
+      } catch { /* not a printer, or busy — try the next */ }
+    }
+    return false;
   } catch (err) {
     console.error('[Printer] Avtomatik bağlantı xətası:', err);
     return false;
@@ -53,7 +81,7 @@ export async function connectPrinter(): Promise<boolean> {
 export async function selectPrinter(): Promise<boolean> {
   if (!isWebUSBAvailable()) return false;
   try {
-    const d = await navigator.usb.requestDevice({ filters: [{ vendorId: USB_VID, productId: USB_PID }] });
+    const d = await navigator.usb.requestDevice({ filters: USB_FILTERS });
     await openDevice(d);
     device = d;
     return true;
@@ -66,21 +94,21 @@ export async function selectPrinter(): Promise<boolean> {
 export async function disconnectPrinter(): Promise<void> {
   if (!device) return;
   try {
-    await device.releaseInterface(0);
+    await device.releaseInterface(iface);
     await device.close();
   } catch { /* ignore */ }
   device = null;
 }
 
+const printerName = (d: USBDevice) => d.productName || 'USB yazıcı';
+
 export async function getPrinterList(): Promise<string[]> {
   if (!isWebUSBAvailable()) return [];
-  const devices = await navigator.usb.getDevices();
-  const found = devices.find(d => d.vendorId === USB_VID && d.productId === USB_PID);
-  return found ? ['Xprinter XP-Q806K'] : [];
+  return (await navigator.usb.getDevices()).map(printerName);
 }
 
 export function getSavedPrinter(): string | null {
-  return device ? 'Xprinter XP-Q806K' : null;
+  return device ? printerName(device) : null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
