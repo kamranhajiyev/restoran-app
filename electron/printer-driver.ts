@@ -60,7 +60,7 @@ interface UsbDevice {
   driver: string;
   composite: boolean;
   mi: number;
-  /** e.g. USB\Class_07&SubClass_01&Prot_02 */
+  /** The first compatible ID, e.g. USB\COMPAT_VID_1FC9&Class_07&SubClass_01&Prot_02 */
   compatible: string;
 }
 interface Wdi {
@@ -105,7 +105,9 @@ function isPrinterEntry(d: UsbDevice): boolean {
   // The parent of a composite device; its printer interface is listed separately.
   if (d.driver.toLowerCase() === 'usbccgp') return false;
   if (OFFICE_VENDORS.has(d.vid)) return false;
-  return isXprinter(d.vid, d.pid) || /\\Class_07(&|$)/i.test(d.compatible);
+  // libwdi keeps only the first compatible ID, which on Windows 10/11 is
+  // usually USB\COMPAT_VID_xxxx&Class_07&… rather than USB\Class_07&….
+  return isXprinter(d.vid, d.pid) || /[\\&]Class_07(&|$)/i.test(d.compatible);
 }
 
 // Listing walks every device on the machine. The permission check below runs on
