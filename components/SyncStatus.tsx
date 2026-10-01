@@ -32,6 +32,7 @@ const LABELS: Record<string, string> = {
   '/api/add-order-items': 'Sifarişə əlavə',
   '/api/update-order-item-qty': 'Say dəyişdi',
   '/api/remove-order-item': 'Məhsul silindi',
+  '/api/remove-order-items': 'Məhsul silindi',
   '/api/update-order-status': 'Status dəyişdi',
   '/api/cancel-order': 'Ləğv edildi',
   '/api/move-table': 'Masa dəyişdi',

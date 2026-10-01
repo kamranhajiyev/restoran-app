@@ -1021,6 +1021,32 @@ export async function setOrderItemQuantity(orderItemId: string, quantity: number
   return true;
 }
 
+export interface RemovalLine {
+  orderItemId: string;
+  /** What the line drops to; 0 removes it whole. */
+  quantity: number;
+  /** Id for the struck-through ghost of a partial removal, so the screen and the server agree on it. */
+  ghostId?: string;
+}
+
+// Take several lines (or units of them) off an open order in one go (authed seller).
+//
+// One call, one transaction, one LƏĞV slip per station. Sending a call per line printed a slip
+// per line — Fanta, Cola and Su taken off together came out as three tickets at the bar.
+// `key` makes a retry of the same batch one write.
+export async function removeOrderItems(orderId: string, lines: RemovalLine[], removedBy: string, key: string): Promise<boolean> {
+  const local = await toLocal(undefined, key, '/api/remove-order-items', { orderId, lines, removedBy });
+  if (local) return local.ok;
+
+  const { error } = await supabase.rpc('remove_order_items', {
+    p_order_id: orderId,
+    p_lines: lines.map(l => ({ id: l.orderItemId, quantity: l.quantity, ghostId: l.ghostId ?? null })),
+    p_by: removedBy,
+  });
+  if (error) { console.error('[removeOrderItems]', error.message); return false; }
+  return true;
+}
+
 export async function editOrderPayment(orderId: string, cashAmount: number, cardAmount: number): Promise<boolean> {
   // A courier delivery closes with nothing tendered and the whole total sitting
   // as that courier's debt. Writing cash/card onto it here would book the same

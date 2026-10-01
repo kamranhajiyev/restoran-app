@@ -274,6 +274,52 @@ function applyRemoveItem(id: string, body: Record<string, unknown>, companyId: s
   return applyItemQty(id, { ...body, quantity: 0 }, companyId);
 }
 
+// Mirrors app/api/remove-order-items/route.ts — several lines in one go.
+//
+// The same thing applyItemQty does, for every line in the batch, written as one
+// order and one outbox entry. One entry is the point: the server turns one
+// request into one LƏĞV slip per station, where a request per line printed a
+// slip per line. Ghost rows take the id the page chose, so the struck-through
+// line on screen is the very row the server inserts.
+function applyRemoveItems(id: string, body: Record<string, unknown>, companyId: string): WriteResult {
+  const orderId = str(body.orderId);
+  const lines = Array.isArray(body.lines)
+    ? (body.lines as { orderItemId?: unknown; quantity?: unknown; ghostId?: unknown }[])
+    : null;
+  if (!orderId || !lines?.length) return { ok: false, error: 'bad_request' };
+
+  const found = openOrder(orderId, companyId);
+  if ('error' in found) return { ok: false, error: found.error };
+
+  const now = new Date().toISOString();
+  const by = str(body.removedBy) ?? 'Satıcı';
+  let items = found.items;
+  const removedItems = [...(found.removedItems ?? [])];
+
+  for (const l of lines) {
+    const itemId = str(l.orderItemId);
+    const quantity = num(l.quantity, -1);
+    if (!itemId || quantity < 0) return { ok: false, error: 'bad_request' };
+    const line = items.find(x => x.id === itemId);
+    if (!line) continue;                    // the server skips it too
+
+    if (quantity <= 0) {
+      items = items.filter(x => x.id !== itemId);
+      removedItems.push({ ...line, removedAt: now, removedBy: by });
+    } else if (quantity < line.quantity) {
+      items = items.map(x => (x.id === itemId ? { ...x, quantity } : x));
+      removedItems.push({
+        ...line, id: str(l.ghostId) ?? crypto.randomUUID(), quantity: line.quantity - quantity,
+        createdAt: now, removedAt: now, removedBy: by,
+      });
+    }
+  }
+
+  putOrder(companyId, { ...found, items, removedItems });
+  enqueue(id, '/api/remove-order-items', { ...body, companyId }, companyId);
+  return { ok: true };
+}
+
 // Mirrors app/api/update-order-status/route.ts.
 //
 // The route's `.neq('status','ödənilib')` guard is what stops a second tap
@@ -572,6 +618,7 @@ export function applyWrite(
       case '/api/add-order-items':          return applyAddItems(id, body, companyId);
       case '/api/update-order-item-qty':    return applyItemQty(id, body, companyId);
       case '/api/remove-order-item':        return applyRemoveItem(id, body, companyId);
+      case '/api/remove-order-items':       return applyRemoveItems(id, body, companyId);
       case '/api/update-order-status':      return applyStatus(id, body, companyId);
       case '/api/cancel-order':             return applyCancel(id, body, companyId);
       case '/api/move-table':               return applyMove(id, body, companyId);

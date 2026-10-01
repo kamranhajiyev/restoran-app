@@ -11,7 +11,7 @@ import {
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
-  fetchMenu, addOrder, addItemsToOrder, setOrderItemQuantity, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, fetchCategories, setCompanyContext, fetchTables, fetchHalls,
+  fetchMenu, addOrder, addItemsToOrder, removeOrderItems, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, fetchCategories, setCompanyContext, fetchTables, fetchHalls,
   fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, fetchStaff, verifyStaffPin, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
@@ -1568,38 +1568,43 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     });
   }
 
-  // Send everything staged, one call per line. A SOFT delete: the row survives, struck through on
-  // the card, and is what the kitchen's LEGV slip prints. No stock impact — apply_stock_on_payment()
-  // skips removed rows, so the warehouse never drains for a dish that wasn't made.
+  // Send everything staged as ONE batch. A SOFT delete: the row survives, struck through on the
+  // card, and is what the kitchen's LEGV slip prints. One call rather than one per line, because
+  // each call printed its own slip — Fanta, Cola and Su taken off together were three tickets at
+  // the bar. No stock impact — apply_stock_on_payment() skips removed rows, so the warehouse never
+  // drains for a dish that wasn't made.
   //
-  // Returns false if any line failed, so a caller chaining another write (submitAppend) can stop
+  // Returns false if the batch failed, so a caller chaining another write (submitAppend) can stop
   // rather than navigate away from removals that never landed.
   async function commitRemovals(order: Order): Promise<boolean> {
     const staged = Object.entries(pendingRemovalsRef.current).filter(([, n]) => n > 0);
     if (staged.length === 0) return true;
-    setRemoving(true);
 
     const now = new Date().toISOString();
-    const applied: { oi: OrderItem; count: number; newQty: number }[] = [];
-    const failed: string[] = [];
-
+    const batch: { oi: OrderItem; count: number; newQty: number; ghostId: string }[] = [];
     for (const [itemId, count] of staged) {
       const oi = order.items.find(x => x.id === itemId);
       if (!oi) continue;                        // line vanished under us; the refresh below settles it
-      const newQty = Math.max(0, oi.quantity - count);
-      const ok = overrideCompanyId
-        ? (await postOrQueue(
-            // Keyed by the quantity it lands on, so a retry of the same batch stays one write.
-            `qty:${itemId}:${newQty}`,
-            '/api/update-order-item-qty',
-            { orderItemId: itemId, orderId: order.id, quantity: newQty, companyId: overrideCompanyId, token: overrideToken, removedBy: effectiveSeller },
-            overrideCompanyId,
-          )).ok
-        // The order id is only needed by the desktop till, which stores an order
-        // whole and has no other way to find the line.
-        : await setOrderItemQuantity(itemId, newQty, effectiveSeller, order.id);
-      if (ok) applied.push({ oi, count, newQty }); else failed.push(oi.menuItem.name);
+      // The ghost's id is chosen here so the struck-through line on screen is the server's row.
+      batch.push({ oi, count, newQty: Math.max(0, oi.quantity - count), ghostId: crypto.randomUUID() });
     }
+    if (batch.length === 0) { updatePendingRemovals({}); refreshOrders(); return true; }
+    setRemoving(true);
+
+    const lines = batch.map(b => ({ orderItemId: b.oi.id!, quantity: b.newQty, ghostId: b.ghostId }));
+    // Keyed by what each line lands on, so pressing the button again after a failure is a retry
+    // of the same batch, not a second one.
+    const key = `removals:${order.id}:${lines.map(l => `${l.orderItemId}=${l.quantity}`).sort().join(',')}`;
+    const ok = overrideCompanyId
+      ? (await postOrQueue(
+          key,
+          '/api/remove-order-items',
+          { orderId: order.id, lines, companyId: overrideCompanyId, token: overrideToken, removedBy: effectiveSeller },
+          overrideCompanyId,
+        )).ok
+      : await removeOrderItems(order.id, lines, effectiveSeller, key);
+    const applied = ok ? batch : [];
+    const failed = ok ? [] : batch.map(b => b.oi.menuItem.name);
 
     // Optimistically apply what landed, then reconcile with the server. A removed line must move
     // into removedItems, not vanish: dropping it would make it flicker off the card and back on
@@ -1609,11 +1614,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         if (o.id !== order.id) return o;
         let items = o.items;
         const ghosts: OrderItem[] = [];
-        for (const { oi, count, newQty } of applied) {
+        for (const { oi, count, newQty, ghostId } of applied) {
           const full = newQty <= 0;
           ghosts.push({
             ...oi,
-            id: full ? oi.id : `pending-${oi.id}`,  // a partial removal's ghost is a separate server row
+            id: full ? oi.id : ghostId,             // a partial removal's ghost is a separate server row
             quantity: count,                        // …carrying only the units that were taken away
             // A fully-removed line keeps its original timestamp and stays in the batch it
             // was ordered in; a partial removal's ghost belongs to the moment it happened.
