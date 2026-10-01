@@ -60,6 +60,27 @@ export function encode(parts: string[]): Uint8Array {
   return new Uint8Array(stringToBytes(parts.join('')));
 }
 
+// One item as ticket rows: quantity in a 4-column gutter, then the name
+// word-wrapped under itself. Set menus run to 90+ characters ("Oliqarx Süfrə
+// (1 pizza + 2 lahmacun + …)"), and cutting them at the edge hid exactly the
+// part that tells the cook what goes in the bag.
+export function itemRows(qty: string, name: string): string[] {
+  const cols = WIDTH - 4;
+  const rows: string[] = [];
+  let row = '';
+  for (const word of name.trim().split(/\s+/)) {
+    // A single word longer than a row is split hard; nothing else is.
+    for (let w = word; w; w = w.slice(cols)) {
+      const piece = w.slice(0, cols);
+      if (!row) row = piece;
+      else if (row.length + 1 + piece.length <= cols) row += ' ' + piece;
+      else { rows.push(row); row = piece; }
+    }
+  }
+  rows.push(row);
+  return rows.map((r, i) => (i === 0 ? qty.padEnd(4) : '    ') + r);
+}
+
 // What the trigger froze into print_jobs.payload.
 export interface TicketItem {
   name: string;
@@ -137,9 +158,9 @@ export function buildStationTicket(p: TicketPayload): Uint8Array {
   for (const item of p.items) {
     // Quantity first and doubled in size: from arm's length that's the only
     // number a cook needs to read correctly.
-    const qty = `${item.qty}x`;
-    const name = item.name.substring(0, WIDTH - 5);
-    lines.push(ESC.BIG, `${qty.padEnd(4)}${name}\n`, ESC.NORMAL);
+    for (const row of itemRows(`${item.qty}x`, item.name)) {
+      lines.push(ESC.BIG, `${row}\n`, ESC.NORMAL);
+    }
     if (item.modifiers) lines.push(`    ${item.modifiers}\n`);
   }
 

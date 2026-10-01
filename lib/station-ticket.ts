@@ -11,7 +11,7 @@
 // agent/ runs in Node with no DOM and keeps using the character path. Both
 // build the same layout, so a change to one belongs in the other.
 
-import { ESC, WIDTH, stringToBytes, type TicketPayload } from './escpos';
+import { ESC, WIDTH, itemRows, stringToBytes, type TicketPayload } from './escpos';
 import { rasterize, type Line } from './raster';
 
 const HEADING: Record<TicketPayload['kind'], string> = {
@@ -67,8 +67,7 @@ export function buildStationTicketRaster(p: TicketPayload, tableName?: (id: numb
   for (const item of p.items) {
     // Quantity first and doubled in size: from arm's length that's the only
     // number a cook needs to read correctly.
-    const qty = `${item.qty}x`.padEnd(4);
-    lines.push({ text: `${qty}${item.name.substring(0, WIDTH - 5)}`, big: true });
+    for (const row of itemRows(`${item.qty}x`, item.name)) lines.push({ text: row, big: true });
     if (item.modifiers) lines.push({ text: `    ${item.modifiers}` });
   }
 
