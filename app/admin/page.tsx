@@ -3263,9 +3263,14 @@ function AdminPageContent() {
                               )}
                               {order.status !== 'silinib' && (
                                 <button
-                                  onClick={() => setDialog({ title: 'Sifarişi sil?', message: <>№{orderLabel(order)} silinib statusuna keçəcək. Bərpa edə bilərsiniz.</>, onConfirm: async () => {
-                                    const ok = await deleteOrder(order.id);
-                                    if (ok) patchOrder(order.id, o => ({ ...o, status: 'silinib' as OrderStatus }));
+                                  onClick={() => setDialog({ title: 'Sifarişi sil?', message: <>
+                                    №{orderLabel(order)} silinib statusuna keçəcək. Bərpa edə bilərsiniz.
+                                    {order.status === 'ödənilib' && (order.courierDebt ?? 0) > 0 && (
+                                      <> Kuryer bu sifarişin pulunu artıq ödəyibsə, həmin ödəniş də silinəcək və kassadan çıxarılacaq.</>
+                                    )}
+                                  </>, onConfirm: async () => {
+                                    const undone = await deleteOrder(order.id, getSession()?.name ?? '');
+                                    if (undone !== null) patchOrder(order.id, o => ({ ...o, status: 'silinib' as OrderStatus }));
                                   }})}
                                   className="text-xs font-semibold text-red-400 border border-red-200 hover:bg-red-50 rounded-lg px-2.5 py-1 transition-colors"
                                 >
@@ -3275,7 +3280,9 @@ function AdminPageContent() {
                               {order.status === 'silinib' && (
                                 <button
                                   onClick={async () => {
-                                    const prev = (order.cashAmount || order.cardAmount) ? 'ödənilib' : 'ləğv edildi';
+                                    // A courier order on debt has no cash or card on it and was
+                                    // still paid — restoring it as cancelled would drop the debt.
+                                    const prev = (order.cashAmount || order.cardAmount || order.courierDebt) ? 'ödənilib' : 'ləğv edildi';
                                     const ok = await restoreOrder(order.id, prev);
                                     if (ok) patchOrder(order.id, o => ({ ...o, status: prev as OrderStatus }));
                                   }}

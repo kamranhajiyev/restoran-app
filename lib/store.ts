@@ -923,10 +923,14 @@ export async function cancelOrder(orderId: string, reason: string, by: string): 
   return (data?.length ?? 0) > 0;
 }
 
-export async function deleteOrder(orderId: string): Promise<boolean> {
-  const { error } = await supabase.from('orders').update({ status: 'silinib' }).eq('id', orderId);
-  if (error) { console.error('[deleteOrder]', error.message); return false; }
-  return true;
+// Through an RPC rather than a plain status update: a courier order the rider
+// has already paid for must hand that payment back too, or the courier ends up
+// owed money and the drawer keeps cash nobody owes it. Returns how much was
+// handed back (0 for every other order), or null on failure.
+export async function deleteOrder(orderId: string, by: string): Promise<number | null> {
+  const { data, error } = await supabase.rpc('delete_order', { p_order_id: orderId, p_by: by });
+  if (error) { console.error('[deleteOrder]', error.message); return null; }
+  return Number(data ?? 0);
 }
 
 export async function restoreOrder(orderId: string, status: 'ödənilib' | 'ləğv edildi'): Promise<boolean> {
