@@ -99,9 +99,7 @@ function log(line: string): void {
 }
 
 const hex = (n: number) => n.toString(16).padStart(4, '0');
-// TEMPORARY TEST BUILD: the known ID is switched off so the printer has to be
-// found by its USB class alone. Revert this commit after the test.
-const isXprinter = (vid: number, pid: number) => false && vid === XPRINTER.vid && pid === XPRINTER.pid;
+const isXprinter = (vid: number, pid: number) => vid === XPRINTER.vid && pid === XPRINTER.pid;
 
 function isPrinterEntry(d: UsbDevice): boolean {
   // The parent of a composite device; its printer interface is listed separately.
