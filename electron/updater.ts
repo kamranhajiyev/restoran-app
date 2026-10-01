@@ -5,7 +5,7 @@
 // one never leaves the building. /releases/latest does not return drafts.
 //
 // The new installer is fetched in the background and checked against the digest
-// GitHub publishes for it. Nothing is installed until a person clicks "Yenilə":
+// GitHub publishes for it. Nothing is installed until a person clicks "Yeni versiyanı yüklə":
 // an update that arrives mid-shift is only offered, and the next time the app
 // opens it is required — so a waiter is never thrown out of an open order, and
 // no till is more than a day behind.

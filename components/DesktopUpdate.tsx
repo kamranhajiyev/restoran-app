@@ -36,7 +36,7 @@ export default function DesktopUpdate() {
       className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 font-semibold text-white hover:bg-amber-600 disabled:opacity-60"
     >
       <Download size={18} />
-      {installing ? 'Yenilənir…' : 'Yenilə'}
+      {installing ? 'Yüklənir…' : 'Yeni versiyanı yüklə'}
     </button>
   );
 

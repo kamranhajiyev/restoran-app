@@ -14,6 +14,16 @@
 import { ESC, WIDTH, itemRows, stringToBytes, wrap, type TicketPayload } from './escpos';
 import { rasterize, type Line } from './raster';
 
+// Dish names a step up from `big`, wider as well as taller, so the cook can read
+// them at arm's length. Wrapped to fewer columns to make room.
+const ITEM_SCALE: [number, number] = [1.2, 1.8];
+const ITEM_COLS = Math.floor(WIDTH / ITEM_SCALE[0]);
+
+// A note slip has nothing on it to match against the ticket already on the rail
+// except the order number, so that is what has to be readable from across the
+// kitchen.
+const NOTE_NUMBER_SCALE: [number, number] = [2, 2.5];
+
 const HEADING: Record<TicketPayload['kind'], string> = {
   new:    'YENİ SİFARİŞ',
   append: 'ƏLAVƏ',
@@ -44,9 +54,10 @@ export function buildStationTicketRaster(p: TicketPayload, tableName?: (id: numb
     lines.push({ text: HEADING[p.kind], center: true });
   }
 
+  const number = `Sifariş #${p.orderNumber ?? '-'}`;
   lines.push(
     { text: '-'.repeat(WIDTH), center: true },
-    { text: `Sifariş #${p.orderNumber ?? '-'}` },
+    p.kind === 'note' ? { text: number, scale: NOTE_NUMBER_SCALE } : { text: number },
   );
 
   // The old table is the whole point of a move slip: the ticket already at this
@@ -74,7 +85,9 @@ export function buildStationTicketRaster(p: TicketPayload, tableName?: (id: numb
   for (const item of p.items) {
     // Quantity first and doubled in size: from arm's length that's the only
     // number a cook needs to read correctly.
-    for (const row of itemRows(`${item.qty}x`, item.name)) lines.push({ text: row, big: true });
+    for (const row of itemRows(`${item.qty}x`, item.name, ITEM_COLS)) {
+      lines.push({ text: row, scale: ITEM_SCALE });
+    }
     if (item.modifiers) lines.push({ text: `    ${item.modifiers}` });
   }
 

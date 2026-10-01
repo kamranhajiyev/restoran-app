@@ -25,7 +25,14 @@ export type Line = {
   text: string;
   big?: boolean;
   center?: boolean;
+  // Wider and taller than `big`: [x, y] times the normal glyph. Unlike `big` it
+  // widens the letters, so the caller wraps to WIDTH / x columns. For the few
+  // words a cook reads from across the kitchen, where no column has to line up.
+  scale?: [number, number];
 };
+
+const lineHeight = (l: Line) =>
+  l.scale ? Math.round(NORMAL_H * l.scale[1]) : l.big ? BIG_H : NORMAL_H;
 
 // Thermal heads spread ink and the paper fades, so a thin face at ~20px prints
 // grey and breaks up. Bold is the single biggest legibility win available here,
@@ -56,7 +63,7 @@ export type Logo = CanvasImageSource & { width: number; height: number };
 
 export function rasterize(lines: Line[], cols: number, logo?: Logo | null): Uint8Array {
   const box = logo ? logoBox(logo) : null;
-  const height = lines.reduce((h, l) => h + (l.big ? BIG_H : NORMAL_H), PAD_TOP * 2)
+  const height = lines.reduce((h, l) => h + lineHeight(l), PAD_TOP * 2)
     + (box ? box.h + LOGO_GAP : 0);
 
   const canvas = document.createElement('canvas');
@@ -81,8 +88,15 @@ export function rasterize(lines: Line[], cols: number, logo?: Logo | null): Uint
   }
 
   for (const line of lines) {
-    const x = line.center ? Math.max(0, (DOTS - ctx.measureText(line.text).width) / 2) : 0;
-    if (line.big) {
+    const sx = line.scale?.[0] ?? 1;
+    const x = line.center ? Math.max(0, (DOTS - ctx.measureText(line.text).width * sx) / 2) : 0;
+    if (line.scale) {
+      ctx.save();
+      ctx.translate(0, y);
+      ctx.scale(sx, line.scale[1]);
+      ctx.fillText(line.text, x / sx, 2);
+      ctx.restore();
+    } else if (line.big) {
       // ESC.BIG was double height at unchanged width, which is what kept the
       // emphasised total in the same money column as the lines under it.
       // Scaling only the y axis reproduces that; a bolder or larger font
@@ -95,7 +109,7 @@ export function rasterize(lines: Line[], cols: number, logo?: Logo | null): Uint
     } else {
       ctx.fillText(line.text, x, y + 2);
     }
-    y += line.big ? BIG_H : NORMAL_H;
+    y += lineHeight(line);
   }
 
   return toRaster(ctx.getImageData(0, 0, DOTS, height).data, height);

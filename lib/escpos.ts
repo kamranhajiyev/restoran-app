@@ -64,8 +64,9 @@ export function encode(parts: string[]): Uint8Array {
 // word-wrapped under itself. Set menus run to 90+ characters ("Oliqarx Süfrə
 // (1 pizza + 2 lahmacun + …)"), and cutting them at the edge hid exactly the
 // part that tells the cook what goes in the bag.
-export function itemRows(qty: string, name: string): string[] {
-  return wrap(name, WIDTH - 4).map((r, i) => (i === 0 ? qty.padEnd(4) : '    ') + r);
+// `cols` is narrower when the rows are printed in wider letters.
+export function itemRows(qty: string, name: string, cols = WIDTH): string[] {
+  return wrap(name, cols - 4).map((r, i) => (i === 0 ? qty.padEnd(4) : '    ') + r);
 }
 
 // Word-wrap to `cols`. A single word longer than a row is split hard; nothing else is.
