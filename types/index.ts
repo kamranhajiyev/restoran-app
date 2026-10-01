@@ -105,6 +105,7 @@ export interface OrderItem {
   modifiersDetail?: SelectedModifier[];
   variantId?: string;   // which variant was chosen — drives per-variant stock deduction
   noPrint?: boolean;    // "Mətbəxə çap et" was unticked — no kitchen slip for this line
+  printedStationId?: string; // the desktop till already printed this line's ticket there itself
   createdAt?: string;   // groups the item into a batch: the original order, or a later "Əlavə et"
   removedAt?: string;   // set = struck through on the order card, and excluded from every total
   removedBy?: string;

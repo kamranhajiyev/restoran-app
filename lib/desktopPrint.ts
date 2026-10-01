@@ -16,6 +16,8 @@ import { type TicketPayload } from './escpos';
 import { buildStationTicketRaster } from './station-ticket';
 import { tillPost } from './till-write';
 import { tableTitle } from './order-place';
+import { resolveStationId } from './stations';
+import type { MenuItem, OrderItem, Station } from '@/types';
 
 /**
  * The switches an owner flips in the admin panel, as the till sees them.
@@ -64,6 +66,7 @@ export interface TillDb {
   couriers(companyId: string): Promise<unknown>;
   modifiers(companyId: string): Promise<unknown>;
   stations(companyId: string): Promise<unknown>;
+  nextOrderNumber(companyId: string): Promise<{ orderNumber: number }>;
   stationReady(companyId: string): Promise<unknown>;
   orders(companyId: string, opts?: unknown): Promise<unknown>;
   shift(companyId: string): Promise<unknown>;
@@ -99,7 +102,7 @@ export interface OutboxEntry {
 
 export interface PosNative {
   isDesktop: true;
-  print(ip: string, port: number, bytes: Uint8Array): Promise<void>;
+  print(ip: string, port: number, bytes: Uint8Array, timeoutMs?: number): Promise<void>;
   // Absent when the shell was pointed at a website with --url=: that build is
   // the web app in a window and still reads through the API routes.
   till?: TillDb;
@@ -305,6 +308,112 @@ async function runJob(job: ClaimedJob): Promise<void> {
     });
     console.error(`[print] ${job.kind} → ${station.name}: ${message}`);
   }
+}
+
+// ── Printing at the till ──────────────────────────────────────────────────────
+// The queue above costs 5-10 seconds a ticket: the order has to reach Supabase,
+// the trigger has to fire, and the till has to hear about it and claim it back.
+// The till already has everything a ticket needs, and the printer is on its own
+// network, so for a new order or an append it prints first and writes after.
+//
+// Each line that printed carries printedStationId, and the insert trigger
+// records that station's job as already printed instead of queueing it (see
+// 20261002_till_printed_tickets.sql). A station that did not print — no IP,
+// printer off, unplugged — carries nothing, and its ticket goes through the
+// queue exactly as before. So the worst a failure here costs is the old delay.
+//
+// Cancels, removals and table moves are untouched: they still come from the
+// triggers, through the queue.
+
+// Long enough for a printer on the LAN to answer, short enough that a waiter
+// standing at a till whose kitchen printer is off is not kept waiting long.
+const LOCAL_PRINT_MS = 1_500;
+
+export interface KitchenTicket {
+  companyId: string;
+  kind: 'new' | 'append';
+  orderNumber: number;
+  table: number | null;
+  courier: string | null;
+  waiter: string | null;
+  note: string | null;
+  items: OrderItem[];
+  menu: MenuItem[];
+  tableName: (id: number) => string;
+}
+
+/** The number this till's database will give the next order, or null off the desktop. */
+export async function nextLocalOrderNumber(companyId: string): Promise<number | null> {
+  const till = window.posNative?.till;
+  if (!till?.nextOrderNumber) return null;
+  try {
+    const { orderNumber } = await till.nextOrderNumber(companyId);
+    return Number.isInteger(orderNumber) && orderNumber > 0 ? orderNumber : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Print a new order's (or an append's) kitchen tickets now, from the till.
+ *
+ * Returns the items with printedStationId set on every line whose ticket came
+ * out. Never throws: anything that goes wrong leaves the line unmarked, and the
+ * queue prints it.
+ */
+export async function printKitchenNow(t: KitchenTicket): Promise<OrderItem[]> {
+  const native = window.posNative;
+  if (!native?.till) return t.items;
+
+  let stations: Station[];
+  try {
+    stations = ((await native.till.stations(t.companyId)) as { stations?: Station[] }).stations ?? [];
+  } catch {
+    return t.items;
+  }
+  if (stations.length === 0) return t.items;
+
+  // Same split as the trigger: a dish with no station of its own goes to the
+  // first one.
+  const menuById = new Map(t.menu.map(m => [String(m.id), m]));
+  const groups = new Map<string, number[]>();
+  t.items.forEach((oi, i) => {
+    if (oi.noPrint || oi.removedAt) return;
+    const id = resolveStationId(menuById.get(String(oi.menuItem.id))?.stationId, stations);
+    if (!id) return;
+    groups.set(id, [...(groups.get(id) ?? []), i]);
+  });
+
+  const printed = new Map<number, string>();
+  const at = new Date().toISOString();
+  // One at a time: two stations often share one printer, and two tickets on
+  // the same socket at once come out as one unreadable slip.
+  for (const [stationId, idx] of groups) {
+    const station = stations.find(s => s.id === stationId);
+    if (!station?.printerIp) continue;
+    const payload: TicketPayload = {
+      kind: t.kind,
+      station: station.name,
+      orderNumber: t.orderNumber,
+      table: t.table,
+      courier: t.courier,
+      waiter: t.waiter,
+      note: t.note,
+      at,
+      items: idx
+        .map(i => ({ name: t.items[i].menuItem.name, qty: t.items[i].quantity, modifiers: t.items[i].modifiers ?? null }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    };
+    try {
+      await native.print(station.printerIp, station.printerPort ?? 9100,
+        buildStationTicketRaster(payload, t.tableName), LOCAL_PRINT_MS);
+      for (const i of idx) printed.set(i, stationId);
+    } catch (err) {
+      console.error(`[print] till → ${station.name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return t.items.map((oi, i) => printed.has(i) ? { ...oi, printedStationId: printed.get(i) } : oi);
 }
 
 let draining = false;

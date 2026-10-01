@@ -20,6 +20,7 @@
 import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 import { claim, idempotencyKey } from '@/lib/idempotency';
+import { printedStationColumn } from '@/lib/stations';
 import type { Order } from '@/types';
 
 export async function POST(req: NextRequest) {
@@ -105,6 +106,8 @@ export async function POST(req: NextRequest) {
       variant_id: oi.variantId ?? null,
       // Unticked "Mətbəxə çap et": the print triggers skip the line.
       no_print: oi.noPrint ?? false,
+      // Already printed by the desktop till: the trigger records it, it does not queue it.
+      printed_station_id: printedStationColumn(oi.printedStationId),
     }));
     const { error: itemsError } = await db.from('order_items').upsert(rows, { onConflict: 'id' });
     if (itemsError) {

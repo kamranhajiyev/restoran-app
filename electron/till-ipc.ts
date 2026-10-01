@@ -12,7 +12,7 @@ import type { CashShift, Order } from '../types';
 import { db, getMeta, setMeta } from './db';
 import { cacheImages } from './images';
 import * as repo from './till-repo';
-import { applyWrite, outboxAll, outboxAttempted, outboxCount, outboxDrop } from './till-write';
+import { applyWrite, nextOrderNumber, outboxAll, outboxAttempted, outboxCount, outboxDrop } from './till-write';
 
 /** Handler arguments arrive from the renderer: check them, never trust them. */
 function asCompanyId(value: unknown): string {
@@ -155,6 +155,10 @@ export function registerTillHandlers(appUrl: string): void {
 
   ipcMain.handle('till:stations', (_e, companyId) => ({
     stations: repo.getStations(asCompanyId(companyId)),
+  }));
+
+  ipcMain.handle('till:nextOrderNumber', (_e, companyId) => ({
+    orderNumber: nextOrderNumber(asCompanyId(companyId)),
   }));
 
   ipcMain.handle('till:stationReady', (_e, companyId) => ({

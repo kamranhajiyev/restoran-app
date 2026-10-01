@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 import { claim, idempotencyKey } from '@/lib/idempotency';
+import { printedStationColumn } from '@/lib/stations';
 import type { SelectedModifier } from '@/types';
 
 interface IncomingItem {
@@ -16,6 +17,7 @@ interface IncomingItem {
   modifiersDetail?: SelectedModifier[];
   variantId?: string;
   noPrint?: boolean;
+  printedStationId?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -60,6 +62,8 @@ export async function POST(req: NextRequest) {
     modifiers_detail: oi.modifiersDetail ?? null,
     variant_id: oi.variantId ?? null,
     no_print: oi.noPrint ?? false,
+    // Already printed by the desktop till: the trigger records it, it does not queue it.
+    printed_station_id: printedStationColumn(oi.printedStationId),
   }));
 
   const { error } = await db.from('order_items').insert(rows);

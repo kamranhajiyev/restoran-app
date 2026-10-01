@@ -192,7 +192,7 @@ function thisTillNumber(): number {
   }
 }
 
-function nextOrderNumber(companyId: string): number {
+export function nextOrderNumber(companyId: string): number {
   const row = db()
     .prepare('select coalesce(max(order_number), 0) as n from orders where company_id = ?')
     .get(companyId);

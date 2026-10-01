@@ -124,3 +124,11 @@ export function sliceForStation(
     removedItems: (order.removedItems ?? []).filter(kept),
   };
 }
+
+// order_items.printed_station_id, from whatever a client sent. The column is a
+// uuid, so anything else would fail the whole insert and lose the order over a
+// hint that only saves a duplicate ticket.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function printedStationColumn(v: unknown): string | null {
+  return typeof v === 'string' && UUID.test(v) ? v : null;
+}

@@ -27,7 +27,7 @@ import { CashShift, Category, Courier, CourierPayMethod, Hall, MenuItem, Modifie
 import InstallPWA from '@/components/InstallPWA';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, openCashDrawer } from '@/lib/printer';
-import { drainPrintQueue, isDesktop, startKitchenPrinting } from '@/lib/desktopPrint';
+import { drainPrintQueue, isDesktop, nextLocalOrderNumber, printKitchenNow, startKitchenPrinting } from '@/lib/desktopPrint';
 import StationPrinters from '@/components/StationPrinters';
 import { postOrQueue, isOnline, startConnectivityWatch, onConnectivityChange } from '@/lib/offline-net';
 import { tillFetch, hasLocalDb, localCourierCollections, siteGet } from '@/lib/till-data';
@@ -1514,9 +1514,28 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       setView('orders');
       return;
     }
-    const newItems = printKitchen ? named(cart) : named(cart).map(oi => ({ ...oi, noPrint: true }));
+    let newItems = printKitchen ? named(cart) : named(cart).map(oi => ({ ...oi, noPrint: true }));
     const newNote = note.trim();
     setSubmitting(true);
+    // The desktop till prints the kitchen ticket itself, before the write; see
+    // printKitchenNow. Lines it printed are marked so the server does not queue
+    // them a second time.
+    const printCompany = overrideCompanyId ?? getSession()?.companyId;
+    if (hasLocalDb() && target && printCompany) {
+      newItems = await printKitchenNow({
+        companyId: printCompany,
+        // Mirrors the trigger: 'append' once the kitchen holds a ticket for this order.
+        kind: target.items.some(oi => !oi.noPrint) ? 'append' : 'new',
+        orderNumber: target.orderNumber,
+        table: target.tableNumber || null,
+        courier: couriers.find(c => c.id === target.courierId)?.name ?? null,
+        waiter: target.sellerName ?? null,
+        note: newNote || target.note || null,
+        items: newItems,
+        menu,
+        tableName: id => tableTitle(tables, id),
+      });
+    }
     const saveError = overrideCompanyId
       ? (await postOrQueue(
           // A fresh key per append: the same dish added twice to one order is two
@@ -1688,6 +1707,29 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       courierId: orderType === 'kuryer' ? selectedCourier! : undefined,
       note: note.trim() || undefined,
     };
+    // The desktop till prints the kitchen ticket itself, before the write; see
+    // printKitchenNow. It needs the order's number for that, so it asks its own
+    // database for the one the write would have given — the same number, since
+    // nothing else writes orders on this machine between the two calls.
+    const printCompany = overrideCompanyId ?? getSession()?.companyId;
+    if (hasLocalDb() && printCompany) {
+      const number = await nextLocalOrderNumber(printCompany);
+      if (number) {
+        order.orderNumber = number;
+        order.items = await printKitchenNow({
+          companyId: printCompany,
+          kind: 'new',
+          orderNumber: number,
+          table: order.tableNumber || null,
+          courier: couriers.find(c => c.id === order.courierId)?.name ?? null,
+          waiter: order.sellerName ?? null,
+          note: order.note ?? null,
+          items: order.items,
+          menu,
+          tableName: id => tableTitle(tables, id),
+        });
+      }
+    }
     // Offline the insert cannot go now, but the order still exists: it goes into
     // the queue under its own id, the kitchen ticket still prints over the LAN,
     // and the real order_number arrives when the line does.

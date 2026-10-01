@@ -1,6 +1,7 @@
 import { CashShift, Category, Courier, CourierLedger, CourierPayMethod, CourierPayment, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
+import { printedStationColumn } from './stations';
 import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
 import type { TillSettings } from './desktopPrint';
@@ -756,6 +757,7 @@ export async function addOrder(order: Order, opts?: ReadOpts): Promise<string | 
       variant_id: oi.variantId ?? null,
       // Unticked "Mətbəxə çap et": the print triggers skip the line.
       no_print: oi.noPrint ?? false,
+      printed_station_id: printedStationColumn(oi.printedStationId),
     }));
     const { error: itemsError } = await supabase.from('order_items').insert(rows);
     if (itemsError) { console.error('[addOrder items]', itemsError); return itemsError.message; }
@@ -794,6 +796,7 @@ export async function addItemsToOrder(orderId: string, items: OrderItem[], note?
         modifiers_detail: oi.modifiersDetail ?? null,
         variant_id: oi.variantId ?? null,
         no_print: oi.noPrint ?? false,
+        printed_station_id: printedStationColumn(oi.printedStationId),
       }));
       const { error } = await supabase.from('order_items').insert(rows);
       if (error) { console.error('[addItemsToOrder]', error); return error.message; }

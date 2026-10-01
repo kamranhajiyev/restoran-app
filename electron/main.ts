@@ -394,7 +394,7 @@ if (!app.requestSingleInstanceLock()) {
     console.log(BUNDLED ? `[pos] serving the bundled till from ${BUNDLE}` : `[pos] loading ${APP_URL}`);
     if (BUNDLED) console.log(`[pos] syncing with ${API_URL}`);
 
-    ipcMain.handle('printer:send', async (_event, ip: unknown, port: unknown, bytes: unknown) => {
+    ipcMain.handle('printer:send', async (_event, ip: unknown, port: unknown, bytes: unknown, timeoutMs: unknown) => {
       // The renderer is a remote page. Validate rather than trust it: this
       // handler opens sockets to arbitrary addresses on the local network.
       if (typeof ip !== 'string' || !ip) throw new Error('bad printer ip');
@@ -402,7 +402,11 @@ if (!app.requestSingleInstanceLock()) {
         throw new Error('bad printer port');
       }
       if (!(bytes instanceof Uint8Array)) throw new Error('bad payload');
-      await sendToPrinter(ip, port, bytes);
+      // A shorter wait is asked for when a waiter is standing at the till for
+      // the answer; see printKitchenNow in lib/desktopPrint.ts.
+      const wait = typeof timeoutMs === 'number' && timeoutMs >= 500 && timeoutMs <= 10_000
+        ? timeoutMs : undefined;
+      await sendToPrinter(ip, port, bytes, wait);
     });
 
     createWindow();

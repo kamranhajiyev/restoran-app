@@ -12,6 +12,7 @@ export function sendToPrinter(
   ip: string,
   port: number,
   bytes: Uint8Array,
+  timeoutMs = CONNECT_MS,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const socket = new net.Socket();
@@ -26,7 +27,7 @@ export function sendToPrinter(
     // A kitchen printer that is off does not refuse the connection, it simply
     // never answers. Without this the socket would hang until the OS gave up
     // minutes later, and the ticket would look like it was still printing.
-    socket.setTimeout(CONNECT_MS, () => fail(new Error(`timeout connecting to ${ip}:${port}`)));
+    socket.setTimeout(timeoutMs, () => fail(new Error(`timeout connecting to ${ip}:${port}`)));
     socket.once('error', fail);
     socket.connect(port, ip, () => {
       socket.write(Buffer.from(bytes), err => {

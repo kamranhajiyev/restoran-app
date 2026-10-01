@@ -15,8 +15,8 @@ contextBridge.exposeInMainWorld('posNative', {
   // Present only inside the desktop app. The web build checks for it to decide
   // whether this machine is the one that drives the kitchen printers.
   isDesktop: true,
-  print: (ip: string, port: number, bytes: Uint8Array): Promise<void> =>
-    ipcRenderer.invoke('printer:send', ip, port, bytes),
+  print: (ip: string, port: number, bytes: Uint8Array, timeoutMs?: number): Promise<void> =>
+    ipcRenderer.invoke('printer:send', ip, port, bytes, timeoutMs),
 
   // The local database. Absent when the shell is pointed at a remote site with
   // --url=, so lib/till-data.ts can fall back to the HTTP routes.
@@ -38,6 +38,9 @@ contextBridge.exposeInMainWorld('posNative', {
     couriers: (companyId: string) => invoke('till:couriers', companyId),
     modifiers: (companyId: string) => invoke('till:modifiers', companyId),
     stations: (companyId: string) => invoke('till:stations', companyId),
+    // The number the next order will get, so its kitchen ticket can be printed
+    // before the order is written.
+    nextOrderNumber: (companyId: string) => invoke('till:nextOrderNumber', companyId),
     stationReady: (companyId: string) => invoke('till:stationReady', companyId),
     orders: (companyId: string, opts?: unknown) => invoke('till:orders', companyId, opts),
     shift: (companyId: string) => invoke('till:shift', companyId),
