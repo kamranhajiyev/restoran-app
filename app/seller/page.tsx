@@ -3565,7 +3565,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                     </div>
                   )}
                 </div>
-                <div className="flex-1 overflow-y-auto px-4 py-3">
+                {/* Sized to its items, not to the panel, so the footer rides right under the
+                    last line; once the list reaches the bottom it scrolls and the footer stays put. */}
+                <div className="min-h-0 overflow-y-auto px-4 py-3">
                   {appendOrder
                     ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} pendingRemovals={pendingRemovals} onUnstageRemoval={unstageRemovals} onCommitRemovals={() => commitRemovals(appendOrder)} removing={removing} />
                     : cart.length === 0
