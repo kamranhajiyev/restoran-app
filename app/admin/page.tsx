@@ -18,7 +18,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } 
 import { CSS } from '@dnd-kit/utilities';
 import { getSession, logout, validateSession, clearLocalSession, updateSession, lockAdmin, unlockAdmin, isAdminLocked, rememberTill, forgetTill } from '@/lib/auth';
 import {
-  fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, editOrderPayment, deleteOrder, restoreOrder,
+  fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, editOrderPayment, editCourierOrderSplit, deleteOrder, restoreOrder,
   fetchShifts, fetchShiftSales, closeShift, fetchOpenShift,
   updateShiftMovement, deleteShiftMovement, correctShiftTotals,
   fetchCategories, saveCategories,
@@ -118,6 +118,15 @@ const AZ_MON_LONG  = ['Yanvar','Fevral','Mart','Aprel','May','İyun','İyul','Av
 function orderTotal(order: Order) {
   const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
   return gross - (order.discountAmount ?? 0);
+}
+
+// A courier order is paid by the rider, so its cash/card split is over what
+// they have handed back so far, not over the order's total.
+const isCourierOrder = (order: Order) => (order.courierDebt ?? 0) > 0;
+function editableTotal(order: Order) {
+  return isCourierOrder(order)
+    ? Math.round(((order.courierCash ?? 0) + (order.courierCard ?? 0)) * 100) / 100
+    : orderTotal(order);
 }
 
 // Ranges are expressed in *business days* (company timezone + working-hours
@@ -3235,15 +3244,16 @@ function AdminPageContent() {
                                   Ödənişsiz bağla
                                 </button>
                               )}
-                              {/* Not offered on a delivery the courier is still collecting for:
-                                  its money is tracked as courier debt, and rewriting cash/card
-                                  here would count it twice. The store layer refuses it too. */}
-                              {order.status === 'ödənilib' && (order.courierDebt ?? 0) === 0 && (
+                              {/* A delivery's money is courier debt, so its own cash/card are
+                                  never rewritten. Once the rider has paid, it is the split of
+                                  what they paid that can be corrected — not before. */}
+                              {order.status === 'ödənilib' && (!isCourierOrder(order) || editableTotal(order) > 0) && (
                                 <button
                                   onClick={() => {
+                                    const courier = isCourierOrder(order);
                                     setEditingPaymentOrder(order);
-                                    setEditPaymentCash((order.cashAmount ?? 0).toFixed(2));
-                                    setEditPaymentCard((order.cardAmount ?? 0).toFixed(2));
+                                    setEditPaymentCash(((courier ? order.courierCash : order.cashAmount) ?? 0).toFixed(2));
+                                    setEditPaymentCard(((courier ? order.courierCard : order.cardAmount) ?? 0).toFixed(2));
                                   }}
                                   className="text-xs font-semibold text-blue-500 border border-blue-200 hover:bg-blue-50 rounded-lg px-2.5 py-1 transition-colors"
                                 >
@@ -3294,6 +3304,12 @@ function AdminPageContent() {
                               {(order.cashAmount || order.cardAmount) && (
                                 <span className="text-xs text-stone-500">
                                   {[order.cashAmount ? `💵 ${order.cashAmount.toFixed(2)}` : '', order.cardAmount ? `💳 ${order.cardAmount.toFixed(2)}` : ''].filter(Boolean).join(' · ')}
+                                </span>
+                              )}
+                              {/* What the courier brought back for it — absent until they settle. */}
+                              {(order.courierCash || order.courierCard) && (
+                                <span className="text-xs text-stone-500">
+                                  {[order.courierCash ? `💵 ${order.courierCash.toFixed(2)}` : '', order.courierCard ? `💳 ${order.courierCard.toFixed(2)}` : ''].filter(Boolean).join(' · ')}
                                 </span>
                               )}
                               {(order.changeAmount ?? 0) > 0 && (
@@ -4555,7 +4571,7 @@ function AdminPageContent() {
           <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
             <h3 className="font-bold text-lg text-stone-800 mb-1">Ödənişi düzəlt</h3>
             <p className="text-sm text-stone-600 mb-4">
-              №{orderLabel(editingPaymentOrder)} · {editingPaymentOrder.sellerName} · {orderTotal(editingPaymentOrder).toFixed(2)} ₼
+              №{orderLabel(editingPaymentOrder)} · {editingPaymentOrder.sellerName} · {editableTotal(editingPaymentOrder).toFixed(2)} ₼
             </p>
             <div className="space-y-3 mb-5">
               <div>
@@ -4569,7 +4585,7 @@ function AdminPageContent() {
                       setEditPaymentCash(val);
                       setEditPaymentError('');
                       const cash = parseFloat(val) || 0;
-                      const total = orderTotal(editingPaymentOrder);
+                      const total = editableTotal(editingPaymentOrder);
                       const remaining = Math.max(0, total - cash);
                       setEditPaymentCard(remaining % 1 === 0 ? String(remaining) : remaining.toFixed(2));
                     }}
@@ -4590,7 +4606,7 @@ function AdminPageContent() {
                       setEditPaymentCard(val);
                       setEditPaymentError('');
                       const card = parseFloat(val) || 0;
-                      const total = orderTotal(editingPaymentOrder);
+                      const total = editableTotal(editingPaymentOrder);
                       const remaining = Math.max(0, total - card);
                       setEditPaymentCash(remaining % 1 === 0 ? String(remaining) : remaining.toFixed(2));
                     }}
@@ -4611,7 +4627,27 @@ function AdminPageContent() {
                   if (!editingPaymentOrder || editPaymentBusy) return;
                   const cash = parseFloat(editPaymentCash) || 0;
                   const card = parseFloat(editPaymentCard) || 0;
-                  const total = orderTotal(editingPaymentOrder);
+                  const total = editableTotal(editingPaymentOrder);
+                  if (isCourierOrder(editingPaymentOrder)) {
+                    // The rider's money is fixed; only how it is split may change.
+                    if (Math.abs(cash + card - total) > 0.005) {
+                      setEditPaymentError(`Nəğd + kart ${total.toFixed(2)} ₼ olmalıdır.`);
+                      return;
+                    }
+                    setEditPaymentError('');
+                    setEditPaymentBusy(true);
+                    const err = await editCourierOrderSplit(editingPaymentOrder.id, cash, card, getSession()?.name ?? '');
+                    if (err) {
+                      setEditPaymentError(/legacy_payment/.test(err)
+                        ? 'Bu sifarişin pulu köhnə qaydada qəbul olunub. Kuryerin ödənişlərindən düzəldin.'
+                        : 'Alınmadı. Yenidən cəhd edin.');
+                    } else {
+                      patchOrder(editingPaymentOrder.id, o => ({ ...o, courierCash: cash || undefined, courierCard: card || undefined }));
+                      setEditingPaymentOrder(null);
+                    }
+                    setEditPaymentBusy(false);
+                    return;
+                  }
                   if (cash + card > total) {
                     setEditPaymentError(`Nəğd + kart (${(cash + card).toFixed(2)} ₼) sifarişin məbləğindən (${total.toFixed(2)} ₼) çox ola bilməz.`);
                     return;

@@ -1764,6 +1764,23 @@ export async function setCourierPaymentMethod(
   return null;
 }
 
+// How one courier order's money came back — the cash/card split of what the
+// rider already handed over. The total cannot change here, only the split; the
+// RPC moves the payments and the drawer to match. See
+// supabase/migrations/20261003_courier_order_split_edit.sql.
+export async function editCourierOrderSplit(
+  orderId: string,
+  cash: number,
+  card: number,
+  by: string,
+): Promise<string | null> {
+  const { error } = await supabase.rpc('set_courier_order_split', {
+    p_order_id: orderId, p_cash: cash, p_card: card, p_by: by || null,
+  });
+  if (error) { console.error('[editCourierOrderSplit]', error); return error.message; }
+  return null;
+}
+
 // The debt comes back on its own — it is derived from the payment rows, so
 // removing one restores it. Nothing to write here beyond the delete.
 export async function deleteCourierPayment(paymentId: string, by: string): Promise<string | null> {

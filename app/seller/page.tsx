@@ -2020,6 +2020,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     const cardAmt = Math.round((total - cashAmt) * 100) / 100;
     const owed = courier.outstanding ?? 0;
     if (total <= 0 || total > owed + 0.005) return;
+    // A split is only allowed on one order: across several, nobody could say
+    // which order was the cash and which the card. The modal hides the inputs.
+    if (picked.length > 1 && cashAmt > 0.005 && cardAmt > 0.005) return;
 
     // Cash with no open drawer to put it in. The kassa module being on means
     // somebody counts this till at the end of the night, and money that arrived
@@ -3248,6 +3251,12 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                                       {[order.cashAmount ? `💵 ${order.cashAmount.toFixed(2)}` : '', order.cardAmount ? `💳 ${order.cardAmount.toFixed(2)}` : ''].filter(Boolean).join(' · ')}
                                     </span>
                                   )}
+                                  {/* What the courier brought back for it — absent until they settle. */}
+                                  {(order.courierCash || order.courierCard) && (
+                                    <span className="text-xs text-stone-500">
+                                      {[order.courierCash ? `💵 ${order.courierCash.toFixed(2)}` : '', order.courierCard ? `💳 ${order.courierCard.toFixed(2)}` : ''].filter(Boolean).join(' · ')}
+                                    </span>
+                                  )}
                                   {(order.discountAmount ?? 0) > 0 && (
                                     <span className="text-xs font-semibold text-green-600 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">
                                       🏷️ endirim -{order.discountAmount!.toFixed(2)} ₼{order.discountType === '%' ? ` (${order.discountType})` : ''}
@@ -4108,7 +4117,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         const cashAmt = Math.min(total, Math.max(0, parseFloat(courierCashInput) || 0));
         const cardAmt = Math.max(0, total - cashAmt);
         const allPicked = list.length > 0 && picked.length === list.length;
-        const canTake = total > 0 && total <= owed + 0.005;
+        // Cash and card split only on a single order — see confirmCourierPayment.
+        const single = picked.length === 1;
+        const mixed = cashAmt > 0.005 && cardAmt > 0.005;
+        const canTake = total > 0 && total <= owed + 0.005 && (single || !mixed);
         const setCash = (v: number) => setCourierCashInput(String(Math.round(v * 100) / 100));
         const toggle = (id: string) => {
           const next = courierPick.includes(id) ? courierPick.filter(x => x !== id) : [...courierPick, id];
@@ -4168,8 +4180,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   </div>
 
                   {/* Cash is typed; card is the rest of the total. Two quick
-                      buttons for the common cases, where nothing is typed at all. */}
-                  <div className="grid grid-cols-2 gap-2 mb-2">
+                      buttons for the common cases, where nothing is typed at all.
+                      With several orders the buttons are the only choice. */}
+                  <div className={`grid grid-cols-2 gap-2 ${single ? 'mb-2' : 'mb-3'}`}>
                     <button
                       onClick={() => setCash(total)}
                       className={`py-2.5 rounded-xl border-2 text-sm font-semibold transition-colors ${cardAmt <= 0.005 ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 text-stone-600 hover:border-primary-300'}`}
@@ -4183,7 +4196,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                       Hamısı kart
                     </button>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 mb-3">
+                  {single && <div className="grid grid-cols-2 gap-2 mb-3">
                     <label className="block">
                       <span className="text-xs text-stone-500">Nağd</span>
                       <input
@@ -4204,7 +4217,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                         className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700 text-center"
                       />
                     </label>
-                  </div>
+                  </div>}
                   {cardAmt > 0.005 && (
                     <p className="text-xs text-stone-500 bg-stone-50 border border-stone-100 rounded-lg px-3 py-2 mb-3">
                       Kartla gələn {cardAmt.toFixed(2)} ₼ kassaya düşmür — Terminala yazılır.

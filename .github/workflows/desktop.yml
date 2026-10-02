@@ -1,9 +1,10 @@
 # Builds the Windows installer.
 #
 # A .exe can only be produced on Windows, and there is no Windows machine here —
-# so GitHub's runner is the build box. Push, wait, download the installer from
-# the run's Artifacts. Tag a version and it is attached to a Release instead, so
-# a restaurant can be sent a permanent link rather than a file over chat.
+# so GitHub's runner is the build box. Tag a version and the installer is
+# attached to a Release, so a restaurant can be sent a permanent link rather
+# than a file over chat. For a test exe without releasing, use "Run workflow"
+# on the Actions tab and download it from the run's Artifacts.
 
 name: Desktop (Windows)
 
@@ -15,26 +16,10 @@ on:
         required: false
         default: ''
   push:
-    tags: ['v*']          # a tagged version also publishes a Release
-    # The "Run workflow" button only appears once this file is on the default
-    # branch, so the working branch is listed here too — otherwise there is no
-    # way to build an installer before merging, which is exactly when it is
-    # needed.
-    branches: [main, development-printer-cash-drawer]
-    # The till now ships *inside* the exe (scripts/build-desktop.mjs), so the
-    # installer is stale the moment any of the app's own source changes — not
-    # just the Electron shell's. A filter that lists only electron/** would let
-    # a tagged release quietly hand a restaurant yesterday's till.
-    paths:
-      - 'app/**'
-      - 'components/**'
-      - 'lib/**'
-      - 'types/**'
-      - 'scripts/**'
-      - 'electron/**'
-      - 'next.config.ts'
-      - 'package.json'
-      - '.github/workflows/desktop.yml'
+    # Tags only. A release used to be built three times — once for the branch
+    # push, once for main, once for the tag — and only the tag's build ever
+    # reached a restaurant.
+    tags: ['v*']
 
 jobs:
   build:
