@@ -1661,7 +1661,7 @@ export async function fetchCouriersWithBalance(opts?: ReadOpts): Promise<Courier
 export async function fetchCourierPaymentLog(): Promise<CourierPayment[]> {
   try {
     const { data, error } = await supabase.from('courier_payments')
-      .select('id, courier_id, amount, method, note, created_by, shift_id, created_at, couriers(name)')
+      .select('id, courier_id, amount, method, note, created_by, shift_id, created_at, order_ids, couriers(name)')
       .order('created_at', { ascending: false }).limit(300);
     if (error || !data) return [];
     return data.map((p: Record<string, unknown>) => {
@@ -1676,6 +1676,7 @@ export async function fetchCourierPaymentLog(): Promise<CourierPayment[]> {
         createdBy: (p.created_by as string) ?? null,
         shiftId: (p.shift_id as string) ?? null,
         createdAt: p.created_at as string,
+        linked: Array.isArray(p.order_ids) && p.order_ids.length > 0,
       };
     });
   } catch { return []; }

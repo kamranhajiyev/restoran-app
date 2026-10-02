@@ -353,6 +353,9 @@ export interface CourierPayment {
   createdBy: string | null;
   shiftId: string | null;
   createdAt: string;
+  // Taken by ticking orders (0.4.0+). Its cash/card is corrected per order, with
+  // "Düzəlt" on the order — not on the payment, which may cover several.
+  linked: boolean;
 }
 
 // One line of a goods receipt, as sent to record_receipt.

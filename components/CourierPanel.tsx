@@ -275,7 +275,7 @@ function PaymentsTab({ couriers, flash, fail, setDialog }: {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-stone-400">
           Kuryerlərin təhvil verdiyi bütün pullar — kim qəbul edib.
-          {' '}Nağd/Kart səhv qeyd olunubsa, üzərinə toxunub dəyişin.
+          {' '}Nağd/Kart səhvdirsə, Sifarişlərdə həmin sifarişdə «Düzəlt» ilə dəyişin.
         </p>
         <div className="flex items-center gap-2">
           <select value={courierId} onChange={e => setCourierId(e.target.value)}
@@ -303,7 +303,16 @@ function PaymentsTab({ couriers, flash, fail, setDialog }: {
                   to see which of these rows they should be able to find in it,
                   and to fix the one the seller tapped wrong. The pill is the
                   control: there are exactly two methods, so a menu would be a
-                  click more for the same answer. */}
+                  click more for the same answer. A payment taken by ticking orders
+                  only shows its method: it may cover several orders, so it is
+                  corrected per order with "Düzəlt" in Sifarişlər. */}
+              {p.linked ? (
+                <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
+                  p.method === 'kart' ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-stone-100 text-stone-500 border-stone-200'
+                }`}>
+                  {p.method === 'kart' ? 'Kart' : 'Nağd'}
+                </span>
+              ) : (
               <button
                 onClick={() => changeMethod(p)}
                 disabled={busyId === p.id}
@@ -316,6 +325,7 @@ function PaymentsTab({ couriers, flash, fail, setDialog }: {
               >
                 {p.method === 'kart' ? 'Kart' : 'Nağd'}
               </button>
+              )}
               <span className="text-sm font-semibold tabular-nums text-emerald-600">{p.amount.toFixed(2)} ₼</span>
               <button
                 onClick={() => remove(p)}
