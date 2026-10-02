@@ -315,5 +315,15 @@ export function getShiftSales(companyId: string, openedAt: string): { cash: numb
     )
     .get(companyId, openedAt);
 
-  return { cash: Number(row?.cash ?? 0), card: Number(row?.card ?? 0) };
+  // A courier settling by card puts the money on the bank terminal, so it is
+  // part of the Terminal figure. Method lives in doc — see getCourierCollections.
+  const courier = db()
+    .prepare(
+      `select coalesce(sum(amount), 0) as card
+       from courier_payments
+       where company_id = ? and json_extract(doc, '$.method') = 'kart' and created_at >= ?`,
+    )
+    .get(companyId, openedAt);
+
+  return { cash: Number(row?.cash ?? 0), card: Number(row?.card ?? 0) + Number(courier?.card ?? 0) };
 }

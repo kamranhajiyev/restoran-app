@@ -2619,15 +2619,25 @@ export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promis
   if (local) return local;
 
   try {
-    const { data, error } = await supabase
-      .from('orders')
-      .select('cash_amount, card_amount')
-      .eq('status', 'ödənilib')
-      .gte('paid_at', openedAt);
+    const [{ data, error }, { data: courierCard }] = await Promise.all([
+      supabase
+        .from('orders')
+        .select('cash_amount, card_amount')
+        .eq('status', 'ödənilib')
+        .gte('paid_at', openedAt),
+      // Courier settlements by card land on the bank terminal — see
+      // app/api/public-shift-sales.
+      supabase
+        .from('courier_payments')
+        .select('amount')
+        .eq('method', 'kart')
+        .gte('created_at', openedAt),
+    ]);
     if (error || !data) return { cash: 0, card: 0 };
     return {
       cash: data.reduce((s, o) => s + Number(o.cash_amount ?? 0), 0),
-      card: data.reduce((s, o) => s + Number(o.card_amount ?? 0), 0),
+      card: data.reduce((s, o) => s + Number(o.card_amount ?? 0), 0)
+        + (courierCard ?? []).reduce((s, p) => s + Number(p.amount ?? 0), 0),
     };
   } catch { return { cash: 0, card: 0 }; }
 }
