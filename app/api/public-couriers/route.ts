@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { courierPending } from '@/lib/courier-pending';
 
 // Public: the courier list plus what each one is holding, for the seller
 // terminal, which has no Supabase auth session of its own.
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest) {
     db.from('couriers').select('id, name, phone, active, staff_id, created_at')
       .eq('company_id', companyId).order('created_at'),
     // 'ödənilib' only: a returned order stops owing the moment it is cancelled.
-    db.from('orders').select('courier_id, courier_debt')
+    db.from('orders').select('id, order_number, created_at, courier_id, courier_debt, courier_cash, courier_card')
       .eq('company_id', companyId).eq('status', 'ödənilib').not('courier_id', 'is', null),
     db.from('courier_payments').select('courier_id, amount').eq('company_id', companyId),
   ]);
@@ -33,6 +34,7 @@ export async function GET(req: NextRequest) {
     if (!p.courier_id) continue;
     balance[p.courier_id] = (balance[p.courier_id] ?? 0) - Number(p.amount ?? 0);
   }
+  const pending = courierPending(orders.data ?? []);
 
   return Response.json({
     couriers: (couriers.data ?? []).map(c => ({
@@ -43,6 +45,7 @@ export async function GET(req: NextRequest) {
       staffId: c.staff_id ?? undefined,
       createdAt: c.created_at,
       outstanding: balance[c.id] ?? 0,
+      pending: pending[c.id] ?? [],
     })),
   });
 }

@@ -28,7 +28,7 @@
 import type { CashShift, Order, OrderItem, ShiftMovement } from '../types';
 import { db, getMeta, setMeta, transact } from './db';
 import {
-  addCourierPayment, getOpenShift, getOrder, hasCourierPayment, putOrder, putShift,
+  addCourierPayment, applyCourierSettlement, getOpenShift, getOrder, hasCourierPayment, putOrder, putShift,
 } from './till-repo';
 
 /** The two writes that never had an API route: they go straight to Supabase. */
@@ -508,6 +508,10 @@ function applyCourierPayment(id: string, body: Record<string, unknown>, companyI
   }
 
   addCourierPayment(companyId, { id: paymentId, courierId, amount, createdAt, createdBy: by, shiftId, method });
+  const orderIds = Array.isArray(body.orderIds)
+    ? body.orderIds.filter((x): x is string => typeof x === 'string')
+    : [];
+  if (orderIds.length) applyCourierSettlement(companyId, orderIds, amount, method);
   enqueue(id, '/api/add-courier-payment', { ...body, companyId }, companyId);
   return { ok: true };
 }

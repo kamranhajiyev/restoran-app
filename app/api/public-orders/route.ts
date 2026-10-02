@@ -42,6 +42,8 @@ export async function GET(req: NextRequest) {
     // it would offer no courier choice and put the money in the drawer.
     courierId: o.courier_id ?? undefined,
     courierDebt: o.courier_debt ? Number(o.courier_debt) : undefined,
+    courierCash: o.courier_cash ? Number(o.courier_cash) : undefined,
+    courierCard: o.courier_card ? Number(o.courier_card) : undefined,
     // What makes a link order read as "Çatdırılma" and not as a takeaway.
     online: o.online ? true : undefined,
     status: o.status,

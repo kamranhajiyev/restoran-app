@@ -23,7 +23,8 @@ import { unlockSound, armSoundOnFirstGesture, playOrderReady } from '@/lib/sound
 import { applyBrand } from '@/lib/branding';
 import { orderClosedAt } from '@/lib/order-items';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
-import { CashShift, Category, Courier, CourierPayMethod, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
+import { courierOwed } from '@/lib/courier-pending';
+import { CashShift, Category, Courier, CourierPayMethod, CourierPendingOrder, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, openCashDrawer } from '@/lib/printer';
@@ -338,8 +339,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [couriers, setCouriers]             = useState<Courier[]>([]);
   const [selectedCourier, setSelectedCourier] = useState<string | null>(null);
   const [payingCourier, setPayingCourier]   = useState<Courier | null>(null);
-  const [courierInput, setCourierInput]     = useState('');
-  const [courierMethod, setCourierMethod]   = useState<CourierPayMethod>('nağd');
+  // Settling: the orders ticked, and how their total came back. Card is whatever
+  // of the total cash does not cover, so the two can never disagree with it.
+  const [courierPick, setCourierPick]       = useState<string[]>([]);
+  const [courierCashInput, setCourierCashInput] = useState('');
   const [courierBusy, setCourierBusy]       = useState(false);
   const [cart, setCart]                     = useState<OrderItem[]>([]);
   const [activeCategory, setActiveCategory] = useState('');
@@ -490,7 +493,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
 
   // order history
   const [historySearch, setHistorySearch]   = useState('');
-  const [historyPay, setHistoryPay]         = useState<'all' | 'nagd' | 'kart'>('all');
+  const [historyPay, setHistoryPay]         = useState<'all' | 'nagd' | 'kart' | 'kuryer'>('all');
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   // when set, the menu view appends items to this existing order instead of creating a new one
   const [appendOrderId, setAppendOrderId]   = useState<string | null>(null);
@@ -1424,6 +1427,29 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     () => couriers.reduce((s, c) => s + Math.max(0, c.outstanding ?? 0), 0),
     [couriers],
   );
+  // Each courier's unpaid deliveries: the list the server sent, brought up to
+  // date with the orders on screen — a delivery closed a moment ago joins it, one
+  // settled or returned since drops out.
+  const courierPendingById = useMemo(() => {
+    const byId = new Map(orders.map(o => [o.id, o]));
+    const out: Record<string, CourierPendingOrder[]> = {};
+    for (const c of couriers) {
+      const list: CourierPendingOrder[] = [];
+      for (const p of c.pending ?? []) {
+        const o = byId.get(p.id);
+        if (!o) { list.push(p); continue; }
+        const owed = o.status === 'ödənilib' && o.courierId === c.id ? courierOwed(o) : 0;
+        if (owed > 0.005) list.push({ ...p, owed });
+      }
+      for (const o of orders) {
+        if (o.courierId !== c.id || o.status !== 'ödənilib' || list.some(p => p.id === o.id)) continue;
+        const owed = courierOwed(o);
+        if (owed > 0.005) list.push({ id: o.id, orderNumber: o.orderNumber, createdAt: o.createdAt, owed });
+      }
+      out[c.id] = list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    }
+    return out;
+  }, [couriers, orders]);
 
   // Returns the list as well as storing it: the shift-close check needs the
   // figure in the same tick, and reading `couriers` there would see the render
@@ -1970,68 +1996,114 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
 
   // ── Kuryer borcu ───────────────────────────────────────────────────────────
 
-  // The courier settles up at the counter — cash in hand, or a card the guest
-  // already tapped on the rider's terminal.
+  function openCourierSettle(c: Courier) {
+    setPayingCourier(c);
+    setCourierPick([]);
+    setCourierCashInput('');
+  }
+
+  // The courier settles up at the counter for the orders the seller ticks —
+  // cash in hand, a card the guest tapped on the rider's terminal, or some of
+  // each. A split is two payments naming the same orders, cash first, which is
+  // also the order the server spreads them in.
   //
-  // The payment id is minted here and used three times over: as the outbox key,
+  // Each payment id is minted here and used three times over: as the outbox key,
   // as the row's primary key, and as the id of the drawer movement it produces.
   // That is what makes a resend — a double-tap, the queue flushing twice — land
   // on money that has already been counted instead of counting it again.
   async function confirmCourierPayment() {
     if (!payingCourier || courierBusy) return;
     const courier = payingCourier;
-    const amount = Math.round((parseFloat(courierInput) || 0) * 100) / 100;
+    const picked = (courierPendingById[courier.id] ?? []).filter(p => courierPick.includes(p.id));
+    const total = Math.round(picked.reduce((s, p) => s + p.owed, 0) * 100) / 100;
+    const cashAmt = Math.round(Math.min(total, Math.max(0, parseFloat(courierCashInput) || 0)) * 100) / 100;
+    const cardAmt = Math.round((total - cashAmt) * 100) / 100;
     const owed = courier.outstanding ?? 0;
-    const method = courierMethod;
-    const cash = method === 'nağd';
-    if (amount <= 0 || amount > owed + 0.005) return;
+    if (total <= 0 || total > owed + 0.005) return;
 
     // Cash with no open drawer to put it in. The kassa module being on means
     // somebody counts this till at the end of the night, and money that arrived
     // outside a shift is money that will not be there when they do. Card money
     // never touches the drawer, so it has no shift to wait for.
-    if (kassaOn && !shift && cash) {
+    if (kassaOn && !shift && cashAmt > 0) {
       alert('Növbə bağlıdır.\n\nKuryerdən nağd pul götürmək üçün əvvəlcə növbəni açın.');
       return;
     }
 
+    const orderIds = picked.map(p => p.id);
+    const parts = ([['nağd', cashAmt], ['kart', cardAmt]] as [CourierPayMethod, number][])
+      .filter(([, a]) => a > 0.005)
+      .map(([method, amount]) => ({ method, amount, paymentId: crypto.randomUUID() }));
+
     setCourierBusy(true);
-    const paymentId = crypto.randomUUID();
-    const ok = overrideCompanyId
-      ? (await postOrQueue(
-          `courier-pay:${paymentId}`,
-          '/api/add-courier-payment',
-          {
-            paymentId, courierId: courier.id, amount, by: effectiveSeller, method,
-            staffId: activeStaff?.id ?? null, shiftId: shift?.id ?? null,
-            companyId: overrideCompanyId, token: overrideToken,
-          },
-          overrideCompanyId,
-        )).ok
-      : !(await addCourierPayment(
-          courier.id, amount, effectiveSeller, activeStaff?.id ?? null, shift?.id ?? null, '', paymentId, method,
-        ));
+    const done: typeof parts = [];
+    for (const part of parts) {
+      const ok = overrideCompanyId
+        ? (await postOrQueue(
+            `courier-pay:${part.paymentId}`,
+            '/api/add-courier-payment',
+            {
+              paymentId: part.paymentId, courierId: courier.id, amount: part.amount, by: effectiveSeller,
+              method: part.method, orderIds,
+              staffId: activeStaff?.id ?? null, shiftId: shift?.id ?? null,
+              companyId: overrideCompanyId, token: overrideToken,
+            },
+            overrideCompanyId,
+          )).ok
+        : !(await addCourierPayment(
+            courier.id, part.amount, effectiveSeller, activeStaff?.id ?? null, shift?.id ?? null, '',
+            part.paymentId, part.method, orderIds,
+          ));
+      if (!ok) break;
+      done.push(part);
+    }
     setCourierBusy(false);
 
-    if (!ok) {
-      alert('Ödəniş yazılmadı. Yenidən cəhd edin.');
+    if (done.length < parts.length) {
+      alert(done.length
+        ? 'Ödənişin yalnız bir hissəsi yazıldı. Kuryerin borcunu yoxlayıb qalanını yenidən qəbul edin.'
+        : 'Ödəniş yazılmadı. Yenidən cəhd edin.');
       refreshCouriers();
-      return;
+      refreshOrders();
+      if (!done.length) return;
     }
 
+    const paidCash = done.filter(p => p.method === 'nağd').reduce((s, p) => s + p.amount, 0);
+    const paidCard = done.filter(p => p.method === 'kart').reduce((s, p) => s + p.amount, 0);
+    const paidTotal = paidCash + paidCard;
+
+    // Spread over the ticked orders the way the server will — oldest first,
+    // cash before card — so Tarixçə shows them paid without waiting for a sync.
+    const share = new Map<string, { cash: number; card: number }>();
+    let leftCash = paidCash, leftCard = paidCard;
+    for (const p of picked) {
+      const fromCash = Math.min(leftCash, p.owed);
+      const fromCard = Math.min(leftCard, p.owed - fromCash);
+      leftCash -= fromCash; leftCard -= fromCard;
+      if (fromCash + fromCard > 0) share.set(p.id, { cash: fromCash, card: fromCard });
+    }
+    const settle = (o: Order): Order => {
+      const s = share.get(o.id);
+      return s ? { ...o, courierCash: (o.courierCash ?? 0) + s.cash, courierCard: (o.courierCard ?? 0) + s.card } : o;
+    };
+    mutateOrders(prev => prev.map(settle));
+    setHistoryOrders(prev => prev.map(settle));
+
     setPayingCourier(null);
-    setCourierInput('');
-    setCouriers(prev => prev.map(c => c.id === courier.id ? { ...c, outstanding: owed - amount } : c));
+    setCourierPick([]);
+    setCourierCashInput('');
+    setCouriers(prev => prev.map(c => c.id === courier.id
+      ? { ...c, outstanding: owed - paidTotal, pending: (c.pending ?? []).filter(p => !share.has(p.id)) }
+      : c));
     // The history screen is showing a number this just changed.
-    setHistoryCollected(prev => cash
-      ? { ...prev, nagd: prev.nagd + amount }
-      : { ...prev, kart: prev.kart + amount });
+    setHistoryCollected(prev => ({ nagd: prev.nagd + paidCash, kart: prev.kart + paidCard }));
     // Show it in the drawer immediately — the seller is standing at the Kassa
     // screen a tap away, and "Kassada olmalıdır" that lags by a refresh is the
     // number they will trust least.
-    if (shift && cash) {
+    const cashPart = done.find(p => p.method === 'nağd');
+    if (shift && cashPart) {
       setShift(prev => prev && prev.id === shift.id
-        ? { ...prev, movements: [...prev.movements, { id: paymentId, at: new Date().toISOString(), amount, reason: 'Kuryer ödənişi', by: effectiveSeller }] }
+        ? { ...prev, movements: [...prev.movements, { id: cashPart.paymentId, at: new Date().toISOString(), amount: cashPart.amount, reason: 'Kuryer ödənişi', by: effectiveSeller }] }
         : prev);
     }
   }
@@ -2428,8 +2500,14 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const historyQuery = historySearch.trim().toLowerCase();
   // A split payment is both cash and card, so it shows under either filter.
   const filteredHistoryOrders = historyOrders.filter(o =>
+    // Kuryer is every delivery, paid back or not — the status pill says which.
+    // A delivery the rider has settled also counts under Nağd or Kart, by the
+    // road its money came back; a split one under both.
     (historyPay === 'all' ||
-      (o.status === 'ödənilib' && ((historyPay === 'nagd' ? o.cashAmount : o.cardAmount) ?? 0) > 0)) &&
+      (historyPay === 'kuryer' ? !!o.courierId :
+        o.status === 'ödənilib' && (historyPay === 'nagd'
+          ? (o.cashAmount ?? 0) + (o.courierCash ?? 0)
+          : (o.cardAmount ?? 0) + (o.courierCard ?? 0)) > 0)) &&
     (!historyQuery ||
       orderSearchText(o).includes(historyQuery) ||
       (o.sellerName ?? '').toLowerCase().includes(historyQuery) ||
@@ -3033,7 +3111,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   />
                 </div>
                 <div className="flex bg-white border border-stone-200 rounded-xl p-0.5">
-                  {([['all', 'Hamısı'], ['nagd', 'Nağd'], ['kart', 'Kart']] as const).map(([v, label]) => (
+                  {([['all', 'Hamısı'], ['nagd', 'Nağd'], ['kart', 'Kart'], ...(couriers.length ? [['kuryer', 'Kuryer']] as const : [])] as const).map(([v, label]) => (
                     <button
                       key={v}
                       onClick={() => setHistoryPay(v)}
@@ -3102,7 +3180,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                                 🏷️ -{order.discountAmount!.toFixed(2)} ₼
                               </span>
                             )}
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 text-center truncate ${STATUS_COLORS[order.status]}`}>{STATUS_LABELS[order.status]}</span>
+                            {order.status === 'ödənilib' && courierOwed(order) > 0.005
+                              // Closed at the till, but the rider still has the money.
+                              ? <span className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 text-center truncate bg-amber-100 text-amber-800">Kuryer gözlənilir</span>
+                              : <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 text-center truncate ${STATUS_COLORS[order.status]}`}>{STATUS_LABELS[order.status]}</span>}
                           </button>
 
                           {isExpanded && (
@@ -3533,7 +3614,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                     return (
                       <button
                         key={c.id}
-                        onClick={() => { if (!settled && !credit) { setPayingCourier(c); setCourierInput(''); setCourierMethod('nağd'); } }}
+                        onClick={() => { if (!settled && !credit) openCourierSettle(c); }}
                         disabled={settled || credit}
                         className={`w-full flex items-center justify-between gap-3 p-4 rounded-2xl border bg-white text-left transition-colors ${
                           settled || credit ? 'border-stone-100 cursor-default' : 'border-stone-200 hover:border-primary-300 active:scale-[0.99]'
@@ -3554,7 +3635,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                           ) : (
                             <>
                               <p className="text-lg font-bold text-red-600 tabular-nums">{owed.toFixed(2)} ₼</p>
-                              <p className="text-[11px] text-stone-400">borc</p>
+                              <p className="text-[11px] text-stone-400">
+                                {(courierPendingById[c.id]?.length ?? 0) > 0
+                                  ? `${courierPendingById[c.id].length} sifariş gözləyir`
+                                  : 'borc'}
+                              </p>
                             </>
                           )}
                         </div>
@@ -4011,82 +4096,126 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         </div>
       )}
 
-      {/* Courier settlement. Two questions: how much, and by which road it came
-          — cash over the counter, or a card the guest tapped on the rider's
-          terminal. Only the first kind is in this drawer at close. */}
+      {/* Courier settlement. The seller ticks the orders the rider is paying
+          for, and says how that total came back — cash over the counter, a card
+          the guest tapped on the rider's terminal, or some of each. Only the
+          cash is in this drawer at close. */}
       {payingCourier && (() => {
         const owed = payingCourier.outstanding ?? 0;
-        const amount = parseFloat(courierInput) || 0;
-        const tooMuch = amount > owed + 0.005;
-        const canTake = amount > 0 && !tooMuch;
-        const left = Math.max(0, owed - amount);
+        const list = courierPendingById[payingCourier.id] ?? [];
+        const picked = list.filter(p => courierPick.includes(p.id));
+        const total = Math.round(picked.reduce((s, p) => s + p.owed, 0) * 100) / 100;
+        const cashAmt = Math.min(total, Math.max(0, parseFloat(courierCashInput) || 0));
+        const cardAmt = Math.max(0, total - cashAmt);
+        const allPicked = list.length > 0 && picked.length === list.length;
+        const canTake = total > 0 && total <= owed + 0.005;
+        const setCash = (v: number) => setCourierCashInput(String(Math.round(v * 100) / 100));
+        const toggle = (id: string) => {
+          const next = courierPick.includes(id) ? courierPick.filter(x => x !== id) : [...courierPick, id];
+          setCourierPick(next);
+          // A new total starts as all cash — still most of what a rider brings back.
+          setCash(list.filter(p => next.includes(p.id)).reduce((s, p) => s + p.owed, 0));
+        };
+        const pickAll = () => {
+          const next = allPicked ? [] : list.map(p => p.id);
+          setCourierPick(next);
+          setCash(list.filter(p => next.includes(p.id)).reduce((s, p) => s + p.owed, 0));
+        };
         return (
           <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
-            <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
-              <h3 className="font-bold text-lg text-stone-800 mb-1">{payingCourier.name}</h3>
-              <p className="text-sm text-stone-600 mb-4">Kuryerdən nə qədər aldınız?</p>
-
-              <div className="flex justify-between items-center px-4 py-3 rounded-xl bg-stone-50 mb-4">
-                <span className="text-sm text-stone-600">Borcu</span>
-                <span className="font-bold text-lg text-red-600 tabular-nums">{owed.toFixed(2)} ₼</span>
+            <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-md max-h-[92vh] flex flex-col">
+              <div className="flex items-baseline justify-between gap-3 mb-1">
+                <h3 className="font-bold text-lg text-stone-800">{payingCourier.name}</h3>
+                <span className="text-sm text-stone-500">Borcu: <b className="text-red-600 tabular-nums">{owed.toFixed(2)} ₼</b></span>
               </div>
+              <p className="text-sm text-stone-600 mb-3">Hansı sifarişlərin pulunu gətirdi?</p>
 
-              <div className="flex items-center gap-2 mb-4">
-                <input
-                  type="number" min="0" step="0.01" placeholder="0.00"
-                  value={courierInput}
-                  onChange={e => setCourierInput(e.target.value)}
-                  onFocus={e => e.target.select()}
-                  className="flex-1 border border-stone-200 rounded-xl px-3 py-3 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700 text-center"
-                  autoFocus
-                />
-                {/* The common case by a distance: the rider empties their pocket. */}
-                <button
-                  onClick={() => setCourierInput(owed.toFixed(2))}
-                  className="px-4 py-3 rounded-xl border border-stone-200 text-sm font-semibold text-stone-600 hover:bg-stone-50 shrink-0"
-                >
-                  Hamısı
-                </button>
-              </div>
-
-              {/* Cash is the default and stays first — it is still most of what
-                  a rider comes back with. */}
-              <div className="grid grid-cols-2 gap-2 mb-4">
-                {(['nağd', 'kart'] as CourierPayMethod[]).map(m => (
+              {list.length === 0 ? (
+                <p className="text-sm text-stone-500 bg-stone-50 rounded-xl px-4 py-6 text-center mb-4">
+                  Gözləyən sifariş tapılmadı. Bir az sonra yenidən açın.
+                </p>
+              ) : (
+                <>
                   <button
-                    key={m}
-                    onClick={() => setCourierMethod(m)}
-                    className={`py-3 rounded-xl border-2 text-sm font-semibold transition-colors ${
-                      courierMethod === m
-                        ? 'border-primary-800 bg-primary-50 text-primary-800'
-                        : 'border-stone-200 bg-white text-stone-600 hover:border-primary-300'}`}
+                    onClick={pickAll}
+                    className="self-start text-xs font-semibold text-primary-800 hover:underline mb-2"
                   >
-                    {m === 'nağd' ? 'Nağd' : 'Kart'}
+                    {allPicked ? 'Seçimi təmizlə' : `Hamısını seç (${list.length})`}
                   </button>
-                ))}
-              </div>
-
-              {courierMethod === 'kart' && (
-                <p className="text-xs text-stone-500 bg-stone-50 border border-stone-100 rounded-lg px-3 py-2 mb-4">
-                  Kartla gələn pul kassaya düşmür — borc bağlanır, məbləğ tarixçədə «Kart»a əlavə olunur.
-                </p>
+                  <div className="overflow-y-auto border border-stone-100 rounded-xl divide-y divide-stone-100 mb-4 min-h-0">
+                    {list.map(p => {
+                      const on = courierPick.includes(p.id);
+                      return (
+                        <label key={p.id} className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer ${on ? 'bg-primary-50' : 'hover:bg-stone-50'}`}>
+                          <input type="checkbox" checked={on} onChange={() => toggle(p.id)} className="w-4 h-4 accent-[var(--color-primary-800,#115e59)]" />
+                          <span className="text-sm font-bold text-primary-900 w-14">№{p.orderNumber}</span>
+                          <span className="flex-1 text-xs text-stone-500">
+                            {new Date(p.createdAt).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
+                          </span>
+                          <span className="text-sm font-semibold tabular-nums text-stone-800">{p.owed.toFixed(2)} ₼</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </>
               )}
 
-              {tooMuch && (
-                <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-4">
-                  Borcundan çox ola bilməz — {owed.toFixed(2)} ₼ borcu var.
-                </p>
-              )}
-              {canTake && (
-                <div className="flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-sm mb-4 bg-green-50 text-green-700">
-                  <span>{left > 0.005 ? 'Qalan borcu' : 'Borcu bağlanır'}</span>
-                  <span className="tabular-nums">{left > 0.005 ? `${left.toFixed(2)} ₼` : '✓'}</span>
-                </div>
+              {picked.length > 0 && (
+                <>
+                  <div className="flex justify-between items-center px-4 py-3 rounded-xl bg-stone-50 mb-3">
+                    <span className="text-sm text-stone-600">{picked.length} sifariş</span>
+                    <span className="font-bold text-lg text-stone-800 tabular-nums">{total.toFixed(2)} ₼</span>
+                  </div>
+
+                  {/* Cash is typed; card is the rest of the total. Two quick
+                      buttons for the common cases, where nothing is typed at all. */}
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <button
+                      onClick={() => setCash(total)}
+                      className={`py-2.5 rounded-xl border-2 text-sm font-semibold transition-colors ${cardAmt <= 0.005 ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 text-stone-600 hover:border-primary-300'}`}
+                    >
+                      Hamısı nağd
+                    </button>
+                    <button
+                      onClick={() => setCash(0)}
+                      className={`py-2.5 rounded-xl border-2 text-sm font-semibold transition-colors ${cashAmt <= 0.005 ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 text-stone-600 hover:border-primary-300'}`}
+                    >
+                      Hamısı kart
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <label className="block">
+                      <span className="text-xs text-stone-500">Nağd</span>
+                      <input
+                        type="number" min="0" step="0.01"
+                        value={courierCashInput}
+                        onChange={e => setCourierCashInput(e.target.value)}
+                        onFocus={e => e.target.select()}
+                        className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700 text-center"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs text-stone-500">Kart</span>
+                      <input
+                        type="number" min="0" step="0.01"
+                        value={(Math.round(cardAmt * 100) / 100).toString()}
+                        onChange={e => setCash(total - Math.min(total, Math.max(0, parseFloat(e.target.value) || 0)))}
+                        onFocus={e => e.target.select()}
+                        className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700 text-center"
+                      />
+                    </label>
+                  </div>
+                  {cardAmt > 0.005 && (
+                    <p className="text-xs text-stone-500 bg-stone-50 border border-stone-100 rounded-lg px-3 py-2 mb-3">
+                      Kartla gələn {cardAmt.toFixed(2)} ₼ kassaya düşmür — Terminala yazılır.
+                    </p>
+                  )}
+                </>
               )}
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 mt-auto">
                 <button
-                  onClick={() => { setPayingCourier(null); setCourierInput(''); }}
+                  onClick={() => { setPayingCourier(null); setCourierPick([]); setCourierCashInput(''); }}
                   className="py-3 px-5 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50"
                 >
                   İmtina
@@ -4097,7 +4226,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   className="flex-1 py-3 rounded-xl bg-green-500 hover:bg-green-600 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2"
                 >
                   {courierBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
-                  Aldım ✓
+                  {picked.length ? `Aldım ✓ · ${total.toFixed(2)} ₼` : 'Aldım ✓'}
                 </button>
               </div>
             </div>

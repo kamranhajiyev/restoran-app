@@ -308,6 +308,18 @@ export interface Courier {
   // absent from a plain list. Negative means the restaurant owes them — they
   // paid, and an order they had already settled then came back.
   outstanding?: number;
+  // The orders whose money has not come back yet, oldest first — what the seller
+  // ticks when the rider settles. Attached alongside `outstanding`.
+  pending?: CourierPendingOrder[];
+}
+
+// One delivery still owing, as far as the payments already taken reach — see
+// supabase/migrations/20261002_courier_order_settlement.sql.
+export interface CourierPendingOrder {
+  id: string;
+  orderNumber: number;
+  createdAt: string;
+  owed: number;
 }
 
 // Per-courier money summary. `delivered` and `paid` are scoped to whatever range
@@ -396,6 +408,11 @@ export interface Order {
   // paid at the till. Only counts toward a balance while the order is 'ödənilib',
   // which is what makes a returned order drop its debt with no reversal write.
   courierDebt?: number;
+  // How much of courierDebt the rider has handed back, and by which road. Worked
+  // out on the server from their payments; less than courierDebt means the money
+  // is still out — "Kuryer gözlənilir".
+  courierCash?: number;
+  courierCard?: number;
   note?: string;
   cashAmount?: number;   // money kept in the till (net of change given back)
   cardAmount?: number;

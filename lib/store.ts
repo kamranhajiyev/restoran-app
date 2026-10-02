@@ -1,6 +1,7 @@
 import { CashShift, Category, Courier, CourierLedger, CourierPayMethod, CourierPayment, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
+import { courierPending } from './courier-pending';
 import { printedStationColumn } from './stations';
 import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
@@ -608,6 +609,8 @@ async function readOrders(opts?: OrderQuery): Promise<Order[]> {
       staffId: o.staff_id ?? undefined,
       courierId: o.courier_id ?? undefined,
       courierDebt: o.courier_debt ? Number(o.courier_debt) : undefined,
+      courierCash: o.courier_cash ? Number(o.courier_cash) : undefined,
+      courierCard: o.courier_card ? Number(o.courier_card) : undefined,
       online: o.online ? true : undefined,
       status: o.status as Order['status'],
       note: o.note ?? undefined,
@@ -1643,8 +1646,15 @@ export async function fetchCouriersWithBalance(opts?: ReadOpts): Promise<Courier
     ((await till.couriers(companyId)) as { couriers: Courier[] }).couriers);
   if (local) return local;
 
-  const [list, balance] = await Promise.all([fetchCouriers(opts), fetchCourierOutstanding()]);
-  return list.map(c => ({ ...c, outstanding: balance[c.id] ?? 0 }));
+  const [list, balance, pendingRows] = await Promise.all([
+    fetchCouriers(opts),
+    fetchCourierOutstanding(),
+    supabase.from('orders').select('id, order_number, created_at, courier_id, courier_debt, courier_cash, courier_card')
+      .not('courier_id', 'is', null).eq('status', COURIER_DEBT_STATUS)
+      .then(r => r.data ?? [], () => []),
+  ]);
+  const pending = courierPending(pendingRows);
+  return list.map(c => ({ ...c, outstanding: balance[c.id] ?? 0, pending: pending[c.id] ?? [] }));
 }
 
 // Full dated log of courier handovers (Ödənişlər view). Newest first.
@@ -1721,11 +1731,15 @@ export async function addCourierPayment(
   note: string,
   paymentId: string,
   method: CourierPayMethod = 'nağd',
+  orderIds?: string[],
 ): Promise<string | null> {
   const { error } = await supabase.rpc('add_courier_payment', {
     p_courier_id: courierId, p_amount: amount, p_created_by: createdBy || null,
     p_staff_id: staffId, p_shift_id: shiftId, p_note: note || null, p_id: paymentId,
     p_method: method,
+    // Only sent when there is a list, so this still works against a database
+    // that has not had 20261002_courier_order_settlement.sql applied.
+    ...(orderIds?.length ? { p_order_ids: orderIds } : {}),
   });
   if (error) { console.error('[addCourierPayment]', error); return error.message; }
   return null;

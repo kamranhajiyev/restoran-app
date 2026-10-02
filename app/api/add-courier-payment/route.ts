@@ -10,7 +10,7 @@ import { claim, idempotencyKey } from '@/lib/idempotency';
 // do; both means a retry cannot append a second drawer movement even if the
 // first response was lost on the way back.
 export async function POST(req: NextRequest) {
-  const { paymentId, courierId, amount, by, staffId, shiftId, note, method, companyId, token } = await req.json();
+  const { paymentId, courierId, amount, by, staffId, shiftId, note, method, orderIds, companyId, token } = await req.json();
   if (!paymentId || !courierId || !amount) return Response.json({ ok: false }, { status: 400 });
   if (!(await verifySellerToken(companyId, token))) return Response.json({ ok: false, error: 'revoked' }, { status: 403 });
 
@@ -36,6 +36,11 @@ export async function POST(req: NextRequest) {
     // The RPC decides the drawer movement off this, so an unrecognised value
     // must land on the conservative answer rather than skipping the movement.
     p_method: method === 'kart' ? 'kart' : 'nağd',
+    // The orders the seller ticked. Absent from a till that has not updated, and
+    // the payment then covers the courier's oldest orders.
+    ...(Array.isArray(orderIds) && orderIds.length
+      ? { p_order_ids: orderIds.filter((x: unknown): x is string => typeof x === 'string') }
+      : {}),
   });
   // 'overpay' is the courier owing less than the seller typed — a 4xx, so the
   // offline queue drops it as definitively refused instead of retrying forever.

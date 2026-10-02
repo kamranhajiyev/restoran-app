@@ -9,7 +9,7 @@
 // Compare each read below with its route in app/api/ when changing one.
 
 import type {
-  CashShift, Category, Courier, Hall, MenuItem, ModifierGroup, Order,
+  CashShift, Category, Courier, CourierPendingOrder, Hall, MenuItem, ModifierGroup, Order,
   RestaurantTable, Staff, Station,
 } from '../types';
 import { db, docs, transact } from './db';
@@ -84,8 +84,78 @@ export function getCouriers(companyId: string): Courier[] {
       'select coalesce(sum(amount), 0) as v from courier_payments where company_id = ? and courier_id = ? and created_at > ?',
     ).get(companyId, c.id, since) as { v: number };
 
-    return { ...c, outstanding: (c.outstanding ?? 0) + (delivered.v ?? 0) - (paid.v ?? 0) };
+    return {
+      ...c,
+      outstanding: (c.outstanding ?? 0) + (delivered.v ?? 0) - (paid.v ?? 0),
+      pending: pendingSince(companyId, c.id, c.pending ?? [], since),
+    };
   });
+}
+
+/**
+ * The snapshot's unpaid orders, brought up to date with this machine: an order
+ * settled or returned here since drops out, and a delivery closed here since
+ * joins. The local order doc wins wherever there is one — it is the newer copy.
+ */
+function pendingSince(
+  companyId: string,
+  courierId: string,
+  snapshot: CourierPendingOrder[],
+  since: string,
+): CourierPendingOrder[] {
+  const owedOf = (o: Order) =>
+    o.status === 'ödənilib' && o.courierId === courierId
+      ? Math.max(0, (o.courierDebt ?? 0) - (o.courierCash ?? 0) - (o.courierCard ?? 0))
+      : 0;
+
+  const out: CourierPendingOrder[] = [];
+  for (const p of snapshot) {
+    const local = getOrder(p.id);
+    if (!local) { out.push(p); continue; }
+    const owed = owedOf(local);
+    if (owed > 0.005) out.push({ ...p, owed: Math.round(owed * 100) / 100 });
+  }
+
+  const recent = docs<Order>(db().prepare(
+    `select doc from orders
+      where company_id = ? and json_extract(doc, '$.courierId') = ?
+        and json_extract(doc, '$.status') = 'ödənilib'
+        and coalesce(json_extract(doc, '$.paidAt'), '') > ?`,
+  ).all(companyId, courierId, since));
+  for (const o of recent) {
+    const owed = owedOf(o);
+    if (owed <= 0.005 || out.some(p => p.id === o.id)) continue;
+    out.push({ id: o.id, orderNumber: o.orderNumber, createdAt: o.createdAt, owed: Math.round(owed * 100) / 100 });
+  }
+  return out.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+/**
+ * Spread a settlement over the orders it names, oldest first, the way the
+ * server's courier_reallocate does — so Tarixçə shows them paid before the
+ * next sync brings the server's own figures down.
+ */
+export function applyCourierSettlement(
+  companyId: string,
+  orderIds: string[],
+  amount: number,
+  method: 'nağd' | 'kart',
+): void {
+  const orders = orderIds
+    .map(id => getOrder(id))
+    .filter((o): o is Order => !!o)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  let left = amount;
+  for (const o of orders) {
+    if (left <= 0.0001) break;
+    const owed = Math.max(0, (o.courierDebt ?? 0) - (o.courierCash ?? 0) - (o.courierCard ?? 0));
+    if (owed <= 0.0001) continue;
+    const take = Math.min(left, owed);
+    putOrder(companyId, method === 'kart'
+      ? { ...o, courierCard: (o.courierCard ?? 0) + take }
+      : { ...o, courierCash: (o.courierCash ?? 0) + take });
+    left -= take;
+  }
 }
 
 /** One settlement taken at this counter. Ignores an id already present, so a
