@@ -36,6 +36,10 @@ export interface TillSettings {
   menuOnly: boolean;
   logoUrl: string | null;
   brandColor: string | null;
+  /** Business-day settings. Missing on a till that pulled before they existed. */
+  timezone?: string | null;
+  workOpen?: string | null;
+  workClose?: string | null;
 }
 
 /** The till's local database, present only in a build that ships the app. */

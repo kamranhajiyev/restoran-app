@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   const db = createServerClient();
   const { data, error } = await db
     .from('companies')
-    .select('tables_enabled, delivery_enabled, kassa_enabled, print_receipt, sound_enabled, menu_only, logo_url, brand_color')
+    .select('tables_enabled, delivery_enabled, kassa_enabled, print_receipt, sound_enabled, menu_only, logo_url, brand_color, timezone, work_open, work_close')
     .eq('id', companyId)
     .single();
 
@@ -39,6 +39,12 @@ export async function GET(req: NextRequest) {
       menuOnly: data.menu_only === true,
       logoUrl: data.logo_url ?? null,
       brandColor: data.brand_color ?? null,
+      // Where the business day rolls over. Without these the till's Tarixçə
+      // began "today" at midnight, and a café open until 02:00 counted last
+      // night's late orders as today's.
+      timezone: data.timezone ?? null,
+      workOpen: data.work_open ?? null,
+      workClose: data.work_close ?? null,
     },
   });
 }

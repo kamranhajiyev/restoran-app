@@ -2252,6 +2252,17 @@ export async function updateMyCompanyProfile(name: string, ownerName: string, ad
 
 // Timezone + working hours drive how the statistics "business day" is computed
 export async function fetchCompanySettings(id: string): Promise<CompanySettings> {
+  // The desktop till cannot read the companies row (see fromSettings), and the
+  // default below starts the day at midnight — so Tarixçə counted orders taken
+  // after midnight but before closing as today's.
+  const local = await fromSettings(s => s.workClose != null ? s : null);
+  if (local && id === _companyId) {
+    return {
+      timezone: local.timezone || DEFAULT_TZ,
+      workOpen: local.workOpen || '00:00',
+      workClose: local.workClose || '00:00',
+    };
+  }
   try {
     const { data, error } = await supabase.from('companies').select('timezone, work_open, work_close').eq('id', id).single();
     if (error || !data) return DEFAULT_SETTINGS;
