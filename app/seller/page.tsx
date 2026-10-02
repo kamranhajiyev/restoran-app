@@ -2820,7 +2820,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
             with a count while it is catching up, grey when there is nothing to
             catch up with. Here rather than only in the sidebar footer, which is
             collapsed on a small screen and easy to never look at. */}
-        <SyncStatus online={online} pending={pendingCount} sending={sending} />
+        <SyncStatus online={online} pending={pendingCount} sending={sending} below />
         {/* The desktop shell has no browser chrome, so a till opened from admin
             would be a room with no door. Only shown to a machine that is actually
             signed in — on a waiter's tablet there is no admin to go back to. */}

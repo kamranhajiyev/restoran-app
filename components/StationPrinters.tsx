@@ -7,6 +7,7 @@
 // naming, adding and removing sexes stay in admin.
 
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, Loader2, Network, Search, X } from 'lucide-react';
 import { fetchStationPrinters, saveStationPrinter, type StationPrinterRow } from '@/lib/desktopPrint';
 import { USB_PRINTER, isUsbPrinter, isValidPrinterTarget, printerLabel } from '@/lib/station-printer';
@@ -84,7 +85,10 @@ export default function StationPrinters({ companyId, token }: { companyId: strin
         <span className="hidden sm:inline text-xs font-semibold text-stone-700">Printerlər</span>
       </button>
 
-      {open && (
+      {/* Portalled to <body>: the header's backdrop-blur makes it the containing
+          block for `fixed`, which squeezed this into the 56px bar and pushed the
+          close button off the top of the window. */}
+      {open && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 px-4" onClick={() => setOpen(false)}>
           <div className="bg-white rounded-2xl shadow-xl p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
@@ -166,7 +170,8 @@ export default function StationPrinters({ companyId, token }: { companyId: strin
               Printer və bu kompüter eyni şəbəkədə olmalıdır. USB — sexin çeki bu kassanın öz printerindən çıxır.
             </p>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );

@@ -21,7 +21,7 @@
 //
 // The first run is the opposite of all this and blocks; see components/TillSetup.tsx.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, CloudOff, RefreshCw } from 'lucide-react';
 import { ADD_ORDER, pendingEntries, type Pending } from '@/lib/sync';
 
@@ -56,6 +56,7 @@ export default function SyncStatus({
   pending,
   sending,
   compact = false,
+  below = false,
 }: {
   online: boolean;
   /** How many writes the server has not seen. */
@@ -64,9 +65,22 @@ export default function SyncStatus({
   sending: boolean;
   /** The sidebar is collapsed: icon only, no room for words. */
   compact?: boolean;
+  /** In the top bar: open downwards, not up off the window. */
+  below?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [list, setList] = useState<Pending[] | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+
+  // A tap anywhere else, or Esc, closes it.
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('pointerdown', away);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', esc); };
+  }, [open]);
 
   // Only while the panel is open, and only from the local store — this reads
   // what is queued, it never triggers a send.
@@ -112,7 +126,7 @@ export default function SyncStatus({
         : `Oflayn · gözləyir ${pending}`;
 
   return (
-    <div className="relative">
+    <div ref={box} className="relative">
       <button
         type="button"
         onClick={() => { setList(null); setOpen(o => !o); }}
@@ -127,7 +141,7 @@ export default function SyncStatus({
       </button>
 
       {open && (
-        <div className="absolute bottom-full left-0 mb-2 z-50 w-60 rounded-xl border border-stone-200 bg-white shadow-lg p-3">
+        <div className={`absolute z-50 ${below ? 'top-full right-0 mt-2' : 'bottom-full left-0 mb-2'} w-60 rounded-xl border border-stone-200 bg-white shadow-lg p-3`}>
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold text-stone-700">Göndərilməyənlər</span>
             <span className="text-[10px] text-stone-400">{online ? 'onlayn' : 'oflayn'}</span>
