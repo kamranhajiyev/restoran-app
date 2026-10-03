@@ -3446,9 +3446,9 @@ function AdminPageContent() {
                   .reduce((t, m) => t + m.amount, 0);
                 const renderSales = (cash: number, courier: number, card: number) => (
                   <div className="border-t pt-2.5 space-y-1 text-sm text-stone-600">
-                    <div className="flex justify-between"><span>Nağd satış</span><span>{cash.toFixed(2)} ₼</span></div>
+                    <div className="flex justify-between"><span>Nağd satış</span><span>{(cash + courier).toFixed(2)} ₼</span></div>
                     {Math.abs(courier) > 0.005 && (
-                      <div className="flex justify-between"><span>Kuryer ödənişi (nağd)</span><span>{courier.toFixed(2)} ₼</span></div>
+                      <p className="text-xs text-stone-400 text-right -mt-1">{courier.toFixed(2)} ₼ kuryerlərdən</p>
                     )}
                     <div className="flex justify-between"><span>Kart satışı</span><span>{card.toFixed(2)} ₼</span></div>
                     <div className="flex justify-between font-bold text-stone-800">

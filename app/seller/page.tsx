@@ -3345,12 +3345,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   return (
                     <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5 space-y-2.5">
                       <div className="flex justify-between text-sm text-stone-600">
-                        <span>Nağd satış</span><span className="font-semibold">{shiftSales.cash.toFixed(2)} ₼</span>
+                        <span>Nağd satış</span><span className="font-semibold">{(shiftSales.cash + courierCash).toFixed(2)} ₼</span>
                       </div>
                       {Math.abs(courierCash) > 0.005 && (
-                        <div className="flex justify-between text-sm text-stone-600">
-                          <span>Kuryer ödənişi (nağd)</span><span className="font-semibold">{courierCash.toFixed(2)} ₼</span>
-                        </div>
+                        <p className="text-xs text-stone-400 text-right -mt-1.5">{courierCash.toFixed(2)} ₼ kuryerlərdən</p>
                       )}
                       <div className="flex justify-between text-sm text-stone-600">
                         <span>Kart satışı</span><span className="font-semibold">{shiftSales.card.toFixed(2)} ₼</span>
