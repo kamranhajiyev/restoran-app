@@ -643,6 +643,8 @@ function AdminPageContent() {
   // reads statsOrders and never these.
   const [placeFilter, setPlaceFilter] = useState<PlaceKind | ''>('');
   const [courierFilter, setCourierFilter] = useState('');
+  const [payFilter, setPayFilter] = useState<'' | 'cash' | 'card'>('');
+  const [onlyOnline, setOnlyOnline] = useState(false);
   // Date range for the orders tab. The presets above only filter the loaded page,
   // so a picked range is fetched from the server instead — that's the only way to
   // reach orders older than the last 200.
@@ -2068,10 +2070,22 @@ function AdminPageContent() {
     (!placeFilter || orderPlaceKind(o, placeCfg) === placeFilter) &&
     // A link order with nobody sent yet has no courier id, so filtering by a
     // named rider correctly leaves it out — it is not theirs until it is.
-    (!courierFilter || o.courierId === courierFilter));
+    (!courierFilter || o.courierId === courierFilter) &&
+    (!onlyOnline || !!o.online) &&
+    // A courier's money is booked on courierCash/courierCard, not the till
+    // fields, so both roads count. A split payment belongs to both filters.
+    (!payFilter || (payFilter === 'cash'
+      ? (o.cashAmount ?? 0) > 0 || (o.courierCash ?? 0) > 0
+      : (o.cardAmount ?? 0) > 0 || (o.courierCard ?? 0) > 0)));
   const visibleOrders = orderQuery
     ? ordersPlaced.filter(o => orderSearchText(o).includes(orderQuery) || (o.sellerName ?? '').toLowerCase().includes(orderQuery))
     : ordersPlaced;
+  // Only the chosen road's money — a split order adds just its cash part to Nağd.
+  const payFilterTotal = payFilter
+    ? Math.round(visibleOrders.reduce((s, o) => s + (payFilter === 'cash'
+        ? (o.cashAmount ?? 0) + (o.courierCash ?? 0)
+        : (o.cardAmount ?? 0) + (o.courierCard ?? 0)), 0) * 100) / 100
+    : 0;
 
   const menuCostMap: Record<string, number> = {};
   menu.forEach(m => {
@@ -3085,9 +3099,29 @@ function AdminPageContent() {
                   </select>
                 )}
 
-                {(placeFilter || courierFilter) && (
+                <select
+                  value={payFilter}
+                  onChange={e => setPayFilter(e.target.value as '' | 'cash' | 'card')}
+                  className={`text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors focus:outline-none focus:border-primary-300 ${payFilter ? 'bg-primary-50 border-primary-300 text-primary-900' : 'bg-white border-stone-200 text-stone-600'}`}
+                >
+                  <option value="">Nağd və kart</option>
+                  <option value="cash">Nağd</option>
+                  <option value="card">Kart</option>
+                </select>
+
+                {deliveryOn && (
                   <button
-                    onClick={() => { setPlaceFilter(''); setCourierFilter(''); }}
+                    onClick={() => setOnlyOnline(v => !v)}
+                    title="Onlayn sifariş linkindən gələn sifarişlər"
+                    className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${onlyOnline ? 'bg-primary-800 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}
+                  >
+                    Onlayn
+                  </button>
+                )}
+
+                {(placeFilter || courierFilter || payFilter || onlyOnline) && (
+                  <button
+                    onClick={() => { setPlaceFilter(''); setCourierFilter(''); setPayFilter(''); setOnlyOnline(false); }}
                     className="text-xs font-medium px-3 py-1.5 rounded-lg bg-white border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors"
                   >
                     Filtri sıfırla
@@ -3106,6 +3140,15 @@ function AdminPageContent() {
                   className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-3 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
                 />
               </div>
+
+              {payFilter && visibleOrders.length > 0 && (
+                <div className="flex items-center justify-between bg-primary-50 border border-primary-200 rounded-xl px-4 py-2.5">
+                  <span className="text-sm text-primary-900">
+                    {payFilter === 'cash' ? '💵 Nağd' : '💳 Kart'} · {visibleOrders.length} sifariş
+                  </span>
+                  <span className="text-sm font-semibold text-primary-950">{payFilterTotal.toFixed(2)} ₼</span>
+                </div>
+              )}
 
               {ordersDateFiltered.length === 0 && (
                 <div className="bg-white rounded-xl border border-stone-100 card p-16 text-center">
