@@ -40,6 +40,10 @@ export default function CustomerMenuPage({
   const [submitting, setSubmitting] = useState(false);
   const [orderNote, setOrderNote] = useState('');
   const [noteOpen, setNoteOpen]   = useState(false);
+  // Online orders only: the shop has to be able to call back, so the phone is
+  // required; the address is optional because some guests come to collect.
+  const [phone, setPhone]         = useState('');
+  const [address, setAddress]     = useState('');
   const [menuOnly, setMenuOnly] = useState(false);
 
   // Variant picker state
@@ -160,8 +164,18 @@ export default function CustomerMenuPage({
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
   const visibleItems = menu.filter(i => i.category === activeCategory);
 
+  const phoneOk = phone.replace(/\D/g, '').length >= 7;
+
   async function placeOrder() {
     if (cart.length === 0) return;
+    if (!table && !phoneOk) return;
+    // Phone and address ride in the note: the till already shows it on the
+    // order, so the seller sees them without a schema or till change.
+    const note = [
+      !table && `Tel: ${phone.trim()}`,
+      !table && address.trim() && `Ünvan: ${address.trim()}`,
+      orderNote.trim(),
+    ].filter(Boolean).join(' · ');
     setSubmitting(true);
     await addOrder({
       id: crypto.randomUUID(),
@@ -174,7 +188,7 @@ export default function CustomerMenuPage({
       sellerName: 'Müştəri',
       status: 'gözləyir',
       createdAt: new Date().toISOString(),
-      note: orderNote.trim() || undefined,
+      note: note || undefined,
       items: cart.map(c => ({
         menuItem: c.menuItem,
         quantity: c.quantity,
@@ -187,6 +201,8 @@ export default function CustomerMenuPage({
     setCartOpen(false);
     setOrderNote('');
     setNoteOpen(false);
+    setPhone('');
+    setAddress('');
     setScreen('confirm');
   }
 
@@ -385,6 +401,24 @@ export default function CustomerMenuPage({
                 <span className="text-sm text-gray-500">Cəmi</span>
                 <span className="font-bold text-gray-800">{cartTotal.toFixed(2)} ₼</span>
               </div>
+              {!table && (
+                <>
+                  <input
+                    type="tel" inputMode="tel" autoComplete="tel"
+                    value={phone}
+                    onChange={e => setPhone(e.target.value)}
+                    placeholder="Telefon nömrəsi *"
+                    className="w-full text-sm rounded-xl border border-stone-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary-400 placeholder:text-stone-300"
+                  />
+                  <input
+                    type="text" autoComplete="street-address"
+                    value={address}
+                    onChange={e => setAddress(e.target.value)}
+                    placeholder="Ünvan (istəyə bağlı)"
+                    className="w-full text-sm rounded-xl border border-stone-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary-400 placeholder:text-stone-300"
+                  />
+                </>
+              )}
               {!noteOpen ? (
                 <button
                   onClick={() => setNoteOpen(true)}
@@ -404,7 +438,7 @@ export default function CustomerMenuPage({
               )}
               <button
                 onClick={placeOrder}
-                disabled={submitting}
+                disabled={submitting || (!table && !phoneOk)}
                 className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-60 text-white font-semibold py-3.5 rounded-xl text-sm transition-colors"
               >
                 {submitting ? 'Göndərilir...' : 'Sifariş ver'}
