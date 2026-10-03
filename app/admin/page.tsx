@@ -3433,6 +3433,25 @@ function AdminPageContent() {
                 const movTotal = (s: CashShift) => s.movements.reduce((t, m) => t + m.amount, 0);
                 const expected = open ? open.openingCash + openShiftSales.cash + movTotal(open) : 0;
                 const closed = shifts.filter(s => s.closedAt);
+                // A rider settling a debt in cash reaches the drawer as a 'Kuryer ödənişi'
+                // movement, not as an order payment — so it is sales, even though it sits
+                // in the movement list next to the expenses. Card settlements are already
+                // inside the shift's card total.
+                const courierCash = (s: CashShift) => s.movements
+                  .filter(m => m.reason === 'Kuryer ödənişi')
+                  .reduce((t, m) => t + m.amount, 0);
+                const renderSales = (cash: number, courier: number, card: number) => (
+                  <div className="border-t pt-2.5 space-y-1 text-sm text-stone-600">
+                    <div className="flex justify-between"><span>Nağd satış</span><span>{cash.toFixed(2)} ₼</span></div>
+                    {Math.abs(courier) > 0.005 && (
+                      <div className="flex justify-between"><span>Kuryer ödənişi (nağd)</span><span>{courier.toFixed(2)} ₼</span></div>
+                    )}
+                    <div className="flex justify-between"><span>Kart satışı</span><span>{card.toFixed(2)} ₼</span></div>
+                    <div className="flex justify-between font-bold text-stone-800">
+                      <span>Ümumi satış</span><span>{(cash + courier + card).toFixed(2)} ₼</span>
+                    </div>
+                  </div>
+                );
                 return (
                   <>
                     {/* Current shift */}
@@ -3475,6 +3494,7 @@ function AdminPageContent() {
                           <span>💳 Terminal (kart satışı)</span><span className="text-primary-800">{openShiftSales.card.toFixed(2)} ₼</span>
                         </div>
                         <p className="text-xs text-stone-500 -mt-1.5">Kassaya daxil deyil — bank terminalından keçir</p>
+                        {renderSales(openShiftSales.cash, courierCash(open), openShiftSales.card)}
                         {renderMovements(open)}
                         {renderEditTrail(open)}
                         {kassaEditError && (
@@ -3630,6 +3650,13 @@ function AdminPageContent() {
                                         </div>
                                       )}
                                     </>
+                                  )}
+                                  {/* Order cash isn't stored on a closed shift; it's what the
+                                      drawer expected minus the float and every movement. */}
+                                  {s.expectedCash !== undefined && renderSales(
+                                    s.expectedCash - s.openingCash - movTotal(s),
+                                    courierCash(s),
+                                    s.cardSales ?? 0,
                                   )}
                                   {renderMovements(s)}
                                   {renderEditTrail(s)}

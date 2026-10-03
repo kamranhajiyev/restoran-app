@@ -3335,6 +3335,33 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   <p className="text-xs text-stone-500 mt-1">Kassaya daxil deyil — bank terminalından keçir</p>
                 </div>
 
+                {/* Sales — a rider settling a debt in cash reaches the drawer as a
+                    'Kuryer ödənişi' movement rather than an order payment, so it is
+                    added back here. Card settlements are already in shiftSales.card. */}
+                {(() => {
+                  const courierCash = shift.movements
+                    .filter(m => m.reason === 'Kuryer ödənişi')
+                    .reduce((t, m) => t + m.amount, 0);
+                  return (
+                    <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5 space-y-2.5">
+                      <div className="flex justify-between text-sm text-stone-600">
+                        <span>Nağd satış</span><span className="font-semibold">{shiftSales.cash.toFixed(2)} ₼</span>
+                      </div>
+                      {Math.abs(courierCash) > 0.005 && (
+                        <div className="flex justify-between text-sm text-stone-600">
+                          <span>Kuryer ödənişi (nağd)</span><span className="font-semibold">{courierCash.toFixed(2)} ₼</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-sm text-stone-600">
+                        <span>Kart satışı</span><span className="font-semibold">{shiftSales.card.toFixed(2)} ₼</span>
+                      </div>
+                      <div className="flex justify-between items-center border-t pt-3 font-bold text-lg">
+                        <span>Ümumi satış</span><span className="text-primary-700">{(shiftSales.cash + courierCash + shiftSales.card).toFixed(2)} ₼</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* Movements */}
                 <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5">
                   <div className="flex items-center justify-between mb-3">
