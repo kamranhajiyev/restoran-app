@@ -96,7 +96,9 @@ export interface AnalizRow {
 
 export function exportAnalizExcel(rows: AnalizRow[], from: string, to: string): void {
   const r2 = (n: number) => Math.round(n * 100) / 100;
-  const sheet = rows.flatMap(r => [r, ...(r.sizes ?? [])]).map(r => ({
+  // A product with sizes is replaced by its sizes: a total row followed by its parts
+  // would be counted twice by anyone summing the column.
+  const sheet = rows.flatMap(r => (r.sizes?.length ? r.sizes : [r])).map(r => ({
     'Məhsul': r.name,
     'Kateqoriya': r.category,
     'Satış (ədəd)': r.qty,
