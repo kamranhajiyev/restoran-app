@@ -4324,6 +4324,19 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         const total = round2(fullTotal - discountAmt);
         const cash = round2(parseFloat(cashInput) || 0);
         const card = round2(parseFloat(cardInput) || 0);
+        // Kart follows Nağd until typed into; it has to follow the bill too, or a
+        // discount given after the cash leaves the card part sized for the old total.
+        const followCard = (cashStr: string, billTotal: number) => {
+          if (cardTyped) return;
+          const c = round2(parseFloat(cashStr) || 0);
+          // Cash at or over the total means change is due, not a card part.
+          setCardInput(c > 0 && c < billTotal ? round2(billTotal - c).toFixed(2) : '');
+        };
+        const followDiscount = (raw: string, type: '%' | '₼') => {
+          const r = parseFloat(raw) || 0;
+          const d = type === '%' ? round2(Math.min(fullTotal, (fullTotal * r) / 100)) : round2(Math.min(fullTotal, r));
+          followCard(cashInput, round2(fullTotal - d));
+        };
         const paid = round2(cash + card);
         const missing = round2(total - paid);
         const overpay = round2(Math.max(0, paid - total));
@@ -4407,18 +4420,18 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
               <div className="flex items-center gap-2 mb-3">
                 <div className="flex rounded-lg overflow-hidden border border-stone-200 shrink-0">
                   <button
-                    onClick={() => setDiscountType('₼')}
+                    onClick={() => { setDiscountType('₼'); followDiscount(discountInput, '₼'); }}
                     className={`px-3 py-1.5 text-sm font-semibold transition-colors ${discountType === '₼' ? 'bg-primary-800 text-white' : 'bg-white text-stone-600'}`}
                   >₼</button>
                   <button
-                    onClick={() => setDiscountType('%')}
+                    onClick={() => { setDiscountType('%'); followDiscount(discountInput, '%'); }}
                     className={`px-3 py-1.5 text-sm font-semibold transition-colors ${discountType === '%' ? 'bg-primary-800 text-white' : 'bg-white text-stone-600'}`}
                   >%</button>
                 </div>
                 <input
                   type="number" min="0" step="0.01" placeholder="Endirim..."
                   value={discountInput}
-                  onChange={e => setDiscountInput(e.target.value)}
+                  onChange={e => { setDiscountInput(e.target.value); followDiscount(e.target.value, discountType); }}
                   onFocus={e => e.target.select()}
                   className="flex-1 border border-stone-200 rounded-xl px-3 py-1.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700 text-center"
                 />
@@ -4445,14 +4458,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   <input
                     type="number" min="0" step="0.01" placeholder="0.00"
                     value={cashInput}
-                    onChange={e => {
-                      setCashInput(e.target.value);
-                      if (!cardTyped) {
-                        // Cash at or over the total means change is due, not a card part.
-                        const c = round2(parseFloat(e.target.value) || 0);
-                        setCardInput(c > 0 && c < total ? round2(total - c).toFixed(2) : '');
-                      }
-                    }}
+                    onChange={e => { setCashInput(e.target.value); followCard(e.target.value, total); }}
                     onFocus={e => {
                       const el = e.target;
                       if (!(parseFloat(cashInput) || 0) && (parseFloat(cardInput) || 0) === total) {
