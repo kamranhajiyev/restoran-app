@@ -3581,6 +3581,11 @@ function AdminPageContent() {
                                     Düzəliş edilib
                                   </span>
                                 )}
+                                {s.expectedCash !== undefined && (
+                                  <span className="text-xs text-stone-500 shrink-0">
+                                    Satış: {(s.expectedCash - s.openingCash - movTotal(s) + courierCash(s) + (s.cardSales ?? 0)).toFixed(2)} ₼
+                                  </span>
+                                )}
                                 <span className="text-sm font-semibold text-stone-700 shrink-0">{(s.countedCash ?? 0).toFixed(2)} ₼</span>
                                 <span className={`text-xs px-2 py-0.5 rounded-full font-semibold shrink-0 w-20 text-center ${
                                   Math.abs(diff) < 0.005 ? 'bg-green-50 text-green-600'
