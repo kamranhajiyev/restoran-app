@@ -1231,6 +1231,10 @@ function AdminPageContent() {
             </li>
           );
         })}
+        <li className="flex justify-between text-xs font-semibold border-t pt-1.5 mt-1">
+          <span className="text-green-600">Mədaxil: +{shift.movements.filter(m => m.amount > 0).reduce((t, m) => t + m.amount, 0).toFixed(2)} ₼</span>
+          <span className="text-red-500">Məxaric: {shift.movements.filter(m => m.amount < 0).reduce((t, m) => t + m.amount, 0).toFixed(2)} ₼</span>
+        </li>
       </ul>
     );
   }
