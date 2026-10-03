@@ -551,6 +551,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [payingOrder, setPayingOrder] = useState<Order | null>(null);
   const [cashInput, setCashInput]     = useState('');
   const [cardInput, setCardInput]     = useState('');
+  // Until the seller types into Kart, it follows Nağd: whatever cash leaves
+  // unpaid lands on the card, so a split payment is one number, not two.
+  const [cardTyped, setCardTyped]     = useState(false);
   const [discountInput, setDiscountInput] = useState('');
   const [discountType, setDiscountType]   = useState<'%' | '₼'>('₼');
   // Courier orders only: which of the two ways this one is closing.
@@ -1922,6 +1925,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     setPayingOrder(order);
     setCashInput(orderTotal(order).toFixed(2));
     setCardInput('');
+    setCardTyped(false);
     setDiscountInput('');
     setDiscountType('₼');
     // A courier order opens on the debt path, because that is the ordinary case:
@@ -4375,7 +4379,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
               {isCourier && (
                 <div className="grid grid-cols-2 gap-2 mb-4">
                   <button
-                    onClick={() => { setCourierMode('paid'); setCashInput(total.toFixed(2)); setCardInput(''); }}
+                    onClick={() => { setCourierMode('paid'); setCashInput(total.toFixed(2)); setCardInput(''); setCardTyped(false); }}
                     className={`px-3 py-3 rounded-xl text-sm font-semibold border-2 transition-colors ${courierMode === 'paid' ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 bg-white text-stone-600'}`}
                   >
                     Ödənilib
@@ -4441,7 +4445,14 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   <input
                     type="number" min="0" step="0.01" placeholder="0.00"
                     value={cashInput}
-                    onChange={e => setCashInput(e.target.value)}
+                    onChange={e => {
+                      setCashInput(e.target.value);
+                      if (!cardTyped) {
+                        // Cash at or over the total means change is due, not a card part.
+                        const c = round2(parseFloat(e.target.value) || 0);
+                        setCardInput(c > 0 && c < total ? round2(total - c).toFixed(2) : '');
+                      }
+                    }}
                     onFocus={e => {
                       const el = e.target;
                       if (!(parseFloat(cashInput) || 0) && (parseFloat(cardInput) || 0) === total) {
@@ -4459,7 +4470,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   <input
                     type="number" min="0" step="0.01" placeholder="0.00"
                     value={cardInput}
-                    onChange={e => setCardInput(e.target.value)}
+                    onChange={e => { setCardInput(e.target.value); setCardTyped(true); }}
                     onFocus={e => {
                       const el = e.target;
                       if (!(parseFloat(cardInput) || 0) && (parseFloat(cashInput) || 0) === total) {
