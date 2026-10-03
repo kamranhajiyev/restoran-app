@@ -3210,7 +3210,7 @@ function AdminPageContent() {
                         <span className="flex-1 min-w-0">
                           <span className="block text-sm text-stone-700 truncate">{order.sellerName}</span>
                           {place && (
-                            <span className="block text-xs text-stone-400 truncate">
+                            <span className={`block text-xs truncate ${order.online && !order.tableNumber ? 'text-sky-700 font-semibold' : 'text-stone-400'}`}>
                               {place}{rider ? ` · ${rider}` : ''}
                             </span>
                           )}

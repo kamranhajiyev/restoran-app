@@ -62,6 +62,9 @@ export function orderPlace(order: PlaceOrder, cfg: PlaceConfig): string {
   if (kind === 'masa') {
     return cfg.tables.find(t => t.id === order.tableNumber)?.name ?? `Masa ${order.tableNumber}`;
   }
+  // A guest who ordered through the menu link is told apart from a delivery the
+  // seller took on the phone: nobody at the counter has spoken to them yet.
+  if (order.online) return 'Onlayn sifariş';
   if (kind === 'delivery') return 'Çatdırılma';
   return cfg.tablesOn || cfg.deliveryOn ? 'Takeaway' : '';
 }

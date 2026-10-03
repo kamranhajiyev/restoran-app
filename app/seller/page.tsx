@@ -4834,7 +4834,7 @@ function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItem
                 <ChevronDown className={`w-3.5 h-3.5 text-stone-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
                 <span className="text-primary-700 font-bold text-sm">№{orderLabel(order)}</span>
                 <OrderSyncDot unsent={unsent} />
-                {tableLabel && <span className="text-stone-800 font-semibold text-sm">{tableLabel}</span>}
+                {tableLabel && <span className={order.online && !order.tableNumber ? 'px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 font-semibold text-xs' : 'text-stone-800 font-semibold text-sm'}>{tableLabel}</span>}
                 {/* A courier order has no table, and the row would otherwise be
                     indistinguishable from a takeaway sitting on the counter. */}
                 {courierName && (
@@ -4955,7 +4955,9 @@ function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItem
             <p className="text-sm font-medium text-stone-800 flex items-center gap-1">
               <ChevronDown className={`w-3.5 h-3.5 text-stone-400 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />
               <span className="text-primary-700">№{orderLabel(order)}</span>
-              <OrderSyncDot unsent={unsent} />{tableLabel && <>{' › '}<span>{tableLabel}</span></>}
+              <OrderSyncDot unsent={unsent} />{tableLabel && (order.online && !order.tableNumber
+                ? <span className="ml-1.5 px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 font-semibold text-xs">{tableLabel}</span>
+                : <>{' › '}<span>{tableLabel}</span></>)}
             </p>
             {!expanded && <p className="text-xs text-stone-500 truncate max-w-xs pl-5">{itemsPreview}</p>}
           </div>
