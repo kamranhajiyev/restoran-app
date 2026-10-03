@@ -91,11 +91,12 @@ export interface AnalizRow {
   hidden: boolean;
   noCost: boolean;
   orphan: boolean;
+  sizes?: AnalizRow[]; // per-variant breakdown; the row itself holds their total
 }
 
 export function exportAnalizExcel(rows: AnalizRow[], from: string, to: string): void {
   const r2 = (n: number) => Math.round(n * 100) / 100;
-  const sheet = rows.map(r => ({
+  const sheet = rows.flatMap(r => [r, ...(r.sizes ?? [])]).map(r => ({
     'Məhsul': r.name,
     'Kateqoriya': r.category,
     'Satış (ədəd)': r.qty,

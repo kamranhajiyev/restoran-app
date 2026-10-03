@@ -293,13 +293,16 @@ const isNoCost    = (r: AnalizRow) => r.noCost && r.qty > 0;
 
 const money = (n: number) => `${n.toFixed(2)} ₼`;
 
+// The product column stays pinned while the numbers scroll sideways on narrow screens.
+const ANALIZ_STICKY = 'sticky left-0 z-10 bg-white';
+
 function AnalizTh({ k, label, right, sortKey, sortDir, onSort }: {
   k: AnalizSortKey; label: string; right?: boolean;
   sortKey: AnalizSortKey; sortDir: 'asc' | 'desc'; onSort: (k: AnalizSortKey) => void;
 }) {
   const on = sortKey === k;
   return (
-    <th className={`px-4 py-3 font-medium whitespace-nowrap ${right ? 'text-right' : 'text-left'}`}>
+    <th className={`px-3 py-2.5 font-medium whitespace-nowrap ${right ? 'text-right' : 'text-left'} ${k === 'name' ? ANALIZ_STICKY : ''}`}>
       <button onClick={() => onSort(k)}
         className={`inline-flex items-center gap-1 transition-colors hover:text-stone-700 ${on ? 'text-stone-800 font-semibold' : ''}`}>
         {label}
@@ -337,14 +340,17 @@ function AnalizPanel({ rows, from, to }: { rows: AnalizRow[]; from: string; to: 
     if (chip === 'mayasız') return isNoCost(r);
     return true;
   });
-  const visible = [...filtered].sort((a, b) => {
+  const compare = (a: AnalizRow, b: AnalizRow) => {
     const dir = sortDir === 'asc' ? 1 : -1;
     if (sortKey === 'name') return a.name.localeCompare(b.name, 'az') * dir;
     if (sortKey === 'category') return a.category.localeCompare(b.category, 'az') * dir;
     // Unsold items have no margin — park them at the bottom rather than treating them as 0%.
     if (sortKey === 'margin') return ((a.margin ?? -Infinity) - (b.margin ?? -Infinity)) * dir;
     return (a[sortKey] - b[sortKey]) * dir;
-  });
+  };
+  // Filters, sorting and the footer work on product rows only; sizes ride along under
+  // their product (sorted the same way) so nothing is counted twice.
+  const visible = [...filtered].sort(compare);
 
   const tQty    = visible.reduce((s, r) => s + r.qty, 0);
   const tRev    = visible.reduce((s, r) => s + r.rev, 0);
@@ -424,20 +430,23 @@ function AnalizPanel({ rows, from, to }: { rows: AnalizRow[]; from: string; to: 
               </tr>
             </thead>
             <tbody>
-              {visible.map((r, i) => {
+              {visible.flatMap(p => [p, ...[...(p.sizes ?? [])].sort(compare)]).map((r, i, all) => {
                 const dead = r.qty === 0;
                 const low = isLowMargin(r);
+                const isSize = !rows.includes(r);
+                const parent = isSize ? all.slice(0, i).reverse().find(x => rows.includes(x)) : undefined;
+                const label = parent && r.name.startsWith(`${parent.name} · `) ? r.name.slice(parent.name.length + 3) : r.name;
                 return (
-                  <tr key={`${r.name}-${i}`} className={`border-b border-stone-50 last:border-0 ${dead ? 'text-stone-400' : 'text-stone-600'}`}>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className={dead ? '' : 'font-medium text-stone-800'}>{r.name}</span>
-                      {r.hidden && <span className="ml-1.5 text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded">Gizli</span>}
+                  <tr key={`${r.name}-${i}`} className={`border-b border-stone-50 last:border-0 ${dead ? 'text-stone-400' : 'text-stone-600'} ${isSize ? 'text-xs' : ''}`}>
+                    <td className={`py-2.5 min-w-[140px] max-w-[260px] ${ANALIZ_STICKY} ${isSize ? 'pl-8 pr-3' : 'px-3'}`}>
+                      <span className={dead || isSize ? '' : 'font-medium text-stone-800'}>{label}</span>
+                      {r.hidden && !isSize && <span className="ml-1.5 text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded">Gizli</span>}
                       {r.orphan && <span className="ml-1.5 text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded">Menyuda yoxdur</span>}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">{r.category}</td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap">{dead ? '—' : r.qty}</td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap">{dead ? '—' : money(r.rev)}</td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                    <td className="px-3 py-2.5 min-w-[100px]">{isSize ? '' : r.category}</td>
+                    <td className="px-3 py-2.5 text-right whitespace-nowrap">{dead ? '—' : r.qty}</td>
+                    <td className="px-3 py-2.5 text-right whitespace-nowrap">{dead ? '—' : money(r.rev)}</td>
+                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
                       {dead ? '—' : (
                         <span className="inline-flex items-center gap-1.5 justify-end">
                           <span className="w-10 h-1 bg-stone-100 rounded-full overflow-hidden">
@@ -447,15 +456,15 @@ function AnalizPanel({ rows, from, to }: { rows: AnalizRow[]; from: string; to: 
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
                       {dead ? '—' : r.noCost
                         ? <span title="Maya dəyəri qeyd edilməyib" className="text-amber-600">⚠ —</span>
                         : money(r.cost)}
                     </td>
-                    <td className={`px-4 py-3 text-right whitespace-nowrap ${dead || r.noCost ? '' : r.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                    <td className={`px-3 py-2.5 text-right whitespace-nowrap ${dead || r.noCost ? '' : r.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                       {dead || r.noCost ? '—' : money(r.profit)}
                     </td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
                       {dead || r.margin === null ? '—' : r.noCost
                         ? <span title="Maya dəyəri qeyd edilməyib" className="text-amber-600">⚠ 100%</span>
                         : <span className={low ? 'text-amber-600 font-medium' : ''}>
@@ -472,14 +481,14 @@ function AnalizPanel({ rows, from, to }: { rows: AnalizRow[]; from: string; to: 
             {visible.length > 0 && (
               <tfoot>
                 <tr className="border-t border-stone-100 bg-stone-50/60 text-stone-800 font-semibold">
-                  <td className="px-4 py-3 whitespace-nowrap">Cəmi</td>
-                  <td className="px-4 py-3 whitespace-nowrap text-stone-500 font-normal">{visible.length} məhsul</td>
-                  <td className="px-4 py-3 text-right whitespace-nowrap">{tQty}</td>
-                  <td className="px-4 py-3 text-right whitespace-nowrap">{money(tRev)}</td>
-                  <td className="px-4 py-3" />
-                  <td className="px-4 py-3 text-right whitespace-nowrap">{money(tCost)}</td>
-                  <td className={`px-4 py-3 text-right whitespace-nowrap ${tProfit >= 0 ? 'text-green-600' : 'text-red-500'}`}>{money(tProfit)}</td>
-                  <td className="px-4 py-3 text-right whitespace-nowrap">{tMargin === null ? '—' : `${(tMargin * 100).toFixed(0)}%`}</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap sticky left-0 z-10 bg-stone-50">Cəmi</td>
+                  <td className="px-3 py-2.5 whitespace-nowrap text-stone-500 font-normal">{visible.length} məhsul</td>
+                  <td className="px-3 py-2.5 text-right whitespace-nowrap">{tQty}</td>
+                  <td className="px-3 py-2.5 text-right whitespace-nowrap">{money(tRev)}</td>
+                  <td className="px-3 py-2.5" />
+                  <td className="px-3 py-2.5 text-right whitespace-nowrap">{money(tCost)}</td>
+                  <td className={`px-3 py-2.5 text-right whitespace-nowrap ${tProfit >= 0 ? 'text-green-600' : 'text-red-500'}`}>{money(tProfit)}</td>
+                  <td className="px-3 py-2.5 text-right whitespace-nowrap">{tMargin === null ? '—' : `${(tMargin * 100).toFixed(0)}%`}</td>
                 </tr>
               </tfoot>
             )}
@@ -2270,40 +2279,69 @@ function AdminPageContent() {
   // Analiz: one row per product, unlike topItems this keeps the whole menu — including
   // items that sold nothing, which never appear in itemMap (it's built from order snapshots)
   // and are therefore invisible everywhere else in the app.
-  const analizRows: AnalizRow[] = [];
-  menu.forEach(m => {
-    const s = itemMap[m.id];
+  // Sizes: itemMap lumps every variant into one product, so the same sales are also
+  // tallied per variant here. A variant's own costPrice beats the item's averaged one.
+  // '' = a line with no variantId (orders written before the item had sizes).
+  const sizeMap: Record<string, Record<string, { qty: number; rev: number; cost: number }>> = {};
+  chartPaid.forEach(o => {
+    const gross = o.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
+    const ratio = gross > 0 ? orderTotal(o) / gross : 1;
+    o.items.forEach(oi => {
+      const byVar = (sizeMap[oi.menuItem.id] ??= {});
+      const v = (byVar[oi.variantId ?? ''] ??= { qty: 0, rev: 0, cost: 0 });
+      v.qty += oi.quantity;
+      v.rev += oi.menuItem.price * oi.quantity * ratio;
+      v.cost += ((oi.variantId ? menuCostMap[oi.variantId] : undefined) ?? menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity;
+    });
+  });
+  const analizRow = (name: string, category: string, s: { qty: number; rev: number; cost: number } | undefined,
+    hidden: boolean, noCost: boolean, orphan: boolean): AnalizRow => {
     const rev = s?.rev ?? 0;
     const cost = s?.cost ?? 0;
-    analizRows.push({
-      name: m.name,
-      category: m.category || 'Digər',
+    return {
+      name, category,
       qty: s?.qty ?? 0,
       rev, cost,
       profit: rev - cost,
       margin: rev > 0 ? (rev - cost) / rev : null,
       share: chartRevenue > 0 ? rev / chartRevenue : 0,
-      hidden: !m.available,
-      // No costPrice on the item (nor on any variant) → menuCostMap has no key for it and
-      // every stats consumer falls back to `?? 0`, so it silently reports 100% margin.
-      noCost: menuCostMap[m.id] === undefined,
-      orphan: false,
+      hidden, noCost, orphan,
+    };
+  };
+  // Every size the menu lists (sold or not), plus any sold under a variant since deleted
+  // or with no variant at all — those are still real revenue.
+  const sizeRows = (itemId: string, itemName: string, category: string, variants: MenuItemVariant[], hidden: boolean) => {
+    const sold = sizeMap[itemId] ?? {};
+    const itemNoCost = menuCostMap[itemId] === undefined;
+    const rows = variants.map(v =>
+      analizRow(`${itemName} · ${v.name}`, category, sold[v.id], hidden, menuCostMap[v.id] === undefined && itemNoCost, false));
+    Object.entries(sold).forEach(([vid, s]) => {
+      if (variants.some(v => v.id === vid)) return;
+      rows.push(analizRow(`${itemName} · ${vid ? 'silinmiş ölçü' : 'ölçüsüz'}`, category, s, false,
+        (vid ? menuCostMap[vid] : undefined) === undefined && itemNoCost, !!vid));
     });
-  });
+    return rows;
+  };
+
+  const analizRows: AnalizRow[] = [];
+  const pushAnaliz = (id: string, name: string, category: string, variants: MenuItemVariant[], hidden: boolean, orphan: boolean) => {
+    const s = itemMap[id];
+    const sizes = sizeRows(id, name, category, variants, hidden);
+    // No costPrice on the item (nor on any variant) → menuCostMap has no key for it and
+    // every stats consumer falls back to `?? 0`, so it silently reports 100% margin.
+    // With sizes, the total is incomplete as soon as one size that sold has no cost.
+    const noCost = sizes.length > 1 || variants.length > 0
+      ? (s ? sizes.some(z => z.noCost && z.qty > 0) : sizes.every(z => z.noCost))
+      : menuCostMap[id] === undefined;
+    const row = analizRow(name, category, s, hidden, noCost, orphan);
+    if (variants.length > 0 || sizes.length > 1) row.sizes = sizes;
+    analizRows.push(row);
+  };
+  menu.forEach(m => pushAnaliz(m.id, m.name, m.category || 'Digər', m.variants ?? [], !m.available, false));
   // Sold in this range but no longer on the menu — still real revenue, so don't drop it.
   Object.entries(itemMap).forEach(([id, s]) => {
     if (menu.some(m => m.id === id)) return;
-    analizRows.push({
-      name: s.name,
-      category: s.cat,
-      qty: s.qty, rev: s.rev, cost: s.cost,
-      profit: s.rev - s.cost,
-      margin: s.rev > 0 ? (s.rev - s.cost) / s.rev : null,
-      share: chartRevenue > 0 ? s.rev / chartRevenue : 0,
-      hidden: false,
-      noCost: menuCostMap[id] === undefined,
-      orphan: true,
-    });
+    pushAnaliz(id, s.name, s.cat, [], false, true);
   });
 
   const hourlyData = Array.from({ length: 24 }, (_, h) => ({
