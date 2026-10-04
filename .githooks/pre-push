@@ -1,0 +1,9 @@
+#!/bin/sh
+# Runs every test before a push. A red test means a restaurant would get the
+# bug, so the push stops. Skip only in an emergency: git push --no-verify
+echo "Running tests before push..."
+npm test --silent || {
+  echo ""
+  echo "Tests failed — push stopped. Fix them, or in an emergency: git push --no-verify"
+  exit 1
+}
