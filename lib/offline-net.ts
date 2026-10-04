@@ -6,7 +6,7 @@
 // whether our own requests are getting through, with the browser events used
 // only as a hint to re-check sooner.
 
-import { enqueue } from "./offline-queue";
+import { enqueue, queueSize } from "./offline-queue";
 import { hasLocalDb } from "./till-data";
 import { localWrite } from "./till-write";
 
@@ -164,7 +164,12 @@ export async function postOrQueue(
   const applied = await localWrite(id, route, body, companyId);
   if (applied) return { ok: applied.ok, queued: true };
 
-  if (_online) {
+  // Online is not enough to go straight to the server: anything still queued
+  // was written first, and may be the order this write is about. A payment
+  // that jumped the queue reached the server before its order and was refused
+  // (Latte Art №4171/№4172, 2026-10-04). So while the queue holds anything,
+  // this write takes its place at the back.
+  if (_online && (await queueSize()) === 0) {
     try {
       const res = await fetch(route, {
         method: "POST",
