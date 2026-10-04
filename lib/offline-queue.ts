@@ -98,6 +98,21 @@ export async function enqueue(
     queuedAt: new Date().toISOString(),
     attempts: 0,
   });
+  _onEnqueue?.();
+}
+
+/**
+ * Called after every write parked here, so the page can send it as soon as the
+ * line allows. The browser twin of onLocalWrite in lib/till-write.ts: without
+ * it a parked write waited for the connection to flap before anything sent it.
+ */
+let _onEnqueue: (() => void) | null = null;
+
+export function onEnqueue(fn: () => void): () => void {
+  _onEnqueue = fn;
+  return () => {
+    if (_onEnqueue === fn) _onEnqueue = null;
+  };
 }
 
 /** Oldest first — the order the server must see them in. */

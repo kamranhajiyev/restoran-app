@@ -43,7 +43,7 @@ import { orderLabel, orderSearchText } from '@/lib/order-label';
 import { orderPlace as placeOf, tableTitle } from '@/lib/order-place';
 import { flushQueue, pendingOrderIds, ADD_ORDER } from '@/lib/sync';
 import { verifyPinOffline, rememberPin, forgetPins } from '@/lib/offline-pin';
-import { queueSize, enqueue } from '@/lib/offline-queue';
+import { queueSize, enqueue, onEnqueue } from '@/lib/offline-queue';
 import { onLocalWrite, pendingWrites, tillPost } from '@/lib/till-write';
 
 // How many writes the server has not seen. Two stores answer that question — the
@@ -795,10 +795,18 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     // the disk. No pull afterwards either: that is a refresh of the whole
     // restaurant, and it belongs to the timer above rather than to every tap.
     let kick: ReturnType<typeof setTimeout> | undefined;
-    const offWrite = onLocalWrite(() => {
+    const send = () => {
       clearTimeout(kick);
       kick = setTimeout(() => void drain(false), 1200);
-    });
+      // The retry clock below stops once the queue empties. A write parked
+      // after that has to start it again, or a browser tab whose first send
+      // failed held the order until the line happened to flap — 23 minutes
+      // for Latte Art №4171, with its payment refused in the meantime.
+      if (!retry) retry = setTimeout(() => void again(), RETRY_SEND_MS);
+    };
+    const offWrite = onLocalWrite(send);
+    // The browser's queue, which holds only what could not go straight out.
+    const offEnqueue = onEnqueue(send);
 
     // A send that did not get through, tried again shortly.
     //
@@ -811,15 +819,18 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     //
     // So while anything is still queued, ask again on a short clock. It stops as
     // soon as the queue is empty, so a working till pays nothing for it.
+    // `retry` is unset whenever the clock is not running, which is what lets
+    // send() above restart it without starting a second one.
     let retry: ReturnType<typeof setTimeout> | undefined;
     const again = async () => {
+      retry = undefined;
       if ((await pendingTotal()) === 0) return;
       await drain(false);
-      retry = setTimeout(() => void again(), RETRY_SEND_MS);
+      if (!retry) retry = setTimeout(() => void again(), RETRY_SEND_MS);
     };
     retry = setTimeout(() => void again(), RETRY_SEND_MS);
 
-    return () => { stop(); off(); offWrite(); clearTimeout(kick); clearTimeout(retry); };
+    return () => { stop(); off(); offWrite(); offEnqueue(); clearTimeout(kick); clearTimeout(retry); };
   }, [overrideCompanyId, refreshOrders]);
 
   // While the line stays up nothing above ever fires again — onConnectivityChange

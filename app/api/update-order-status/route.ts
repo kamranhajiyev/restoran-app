@@ -45,6 +45,12 @@ export async function POST(req: NextRequest) {
     ok = row?.status === 'ödənilib';
   }
   const result = { ok };
-  await held.commit(result);
+  // Only a success is remembered. A refusal can change — the order may simply
+  // not have arrived yet — and a remembered "no" was replayed to every later
+  // press of Ödəniş, leaving the order unpayable for good (Latte Art
+  // №4171/№4172, 2026-10-04). Forgetting it is safe: the UPDATE above refuses
+  // an order already paid, so a retry can never charge twice.
+  if (ok) await held.commit(result);
+  else await held.release();
   return Response.json(result);
 }
