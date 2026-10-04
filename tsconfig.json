@@ -32,5 +32,10 @@
   ],
   // electron/ is compiled separately by electron/tsconfig.json — it targets Node
   // and CommonJS, not the browser, and must not be dragged into the Next build.
-  "exclude": ["node_modules", "electron", "dist-electron", "release"]
+  // Tests are Vitest's and Playwright's to check, not the site's: the exe tests
+  // import electron/, which would drag it straight back in.
+  "exclude": [
+    "node_modules", "electron", "dist-electron", "release",
+    "tests", "e2e", "vitest.config.mts", "playwright.config.ts"
+  ]
 }
