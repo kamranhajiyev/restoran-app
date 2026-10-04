@@ -15,8 +15,8 @@
 create extension if not exists pg_net;
 create extension if not exists pg_cron;
 
--- Every restaurant by default; pass slugs to check only those. Latte Art is the
--- first, while we see whether the report is useful or just noise.
+-- Every restaurant by default; pass slugs to check only those. Latte Art and
+-- İXLAS CAFE are the first, while we see whether the report is useful or noise.
 create or replace function public.health_check(only_slugs text[] default null)
 returns table (company text, problem text, order_number integer, at timestamptz)
 language sql
@@ -138,4 +138,4 @@ revoke all on function public.send_health_report(text[]) from public, anon, auth
 
 -- To add a restaurant, add its slug here; drop the argument to check them all.
 select cron.schedule('nightly-health-check', '30 0 * * *',
-  $$select public.send_health_report(array['latte-art'])$$);
+  $$select public.send_health_report(array['latte-art', 'ixlas-cafe'])$$);
