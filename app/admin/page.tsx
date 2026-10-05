@@ -64,6 +64,7 @@ import { isDesktop } from '@/lib/desktopPrint';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
 import { orderPlace, orderPlaceKind, PlaceKind, tableTitle } from '@/lib/order-place';
 import { placeSales, tableSales } from '@/lib/place-sales';
+import { insertCopyAfter } from '@/lib/menu-copy';
 import OrderNote from '@/components/OrderNote';
 
 // RPC raise messages are machine codes — translated here for display
@@ -1559,10 +1560,8 @@ function AdminPageContent() {
     }
   }
   function duplicateItem(id: string) {
-    const original = menu.find(m => m.id === id);
-    if (!original) return;
-    const copy = { ...original, id: crypto.randomUUID(), name: `${original.name} (kopya)` };
-    const updated = [...menu, copy];
+    if (!menu.some(m => m.id === id)) return;
+    const updated = insertCopyAfter(menu, id, crypto.randomUUID());
     setMenu(updated);
     persistMenu(updated);
   }
