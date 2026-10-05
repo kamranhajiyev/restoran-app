@@ -63,6 +63,7 @@ import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt } from '
 import { isDesktop } from '@/lib/desktopPrint';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
 import { orderPlace, orderPlaceKind, PlaceKind, tableTitle } from '@/lib/order-place';
+import OrderNote from '@/components/OrderNote';
 
 // RPC raise messages are machine codes — translated here for display
 const STAFF_ERRORS: Record<string, string> = {
@@ -3278,7 +3279,7 @@ function AdminPageContent() {
                             </div>
                             <OrderItemHistory order={order} tz={bizSettings.timezone} />
                           </div>
-                          {order.note && <p className="text-xs text-stone-500 italic mb-3">Qeyd: {order.note}</p>}
+                          {order.note && <OrderNote note={order.note} className="text-xs text-stone-500 italic mb-3" />}
                           {/* The struck-through lines above already carry who and when; this
                               saves scanning a long receipt to find them. */}
                           {removedCount > 0 && (

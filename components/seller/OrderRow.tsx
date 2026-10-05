@@ -6,6 +6,7 @@ import OrderItemHistory from '@/components/OrderItemHistory';
 import OrderSyncDot from '@/components/OrderSyncDot';
 import { orderLabel } from '@/lib/order-label';
 import { STATUS_COLORS, STATUS_LABELS, elapsed, orderTotal } from './order-format';
+import OrderNote from '@/components/OrderNote';
 
 // ── OrderRow — mobile card + desktop table row ────────────────────────────
 
@@ -124,7 +125,7 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
             <div className="pt-3 mb-3">
               <OrderItemHistory order={order} tz={tz} isItemReady={isItemReady} />
             </div>
-            {order.note && <p className="text-xs text-stone-500 italic mb-3">Qeyd: {order.note}</p>}
+            {order.note && <OrderNote note={order.note} className="text-xs text-stone-500 italic mb-3" />}
             {(order.discountAmount ?? 0) > 0 && (
               <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg px-2 py-0.5 mb-3">
                 🏷️ -{order.discountAmount!.toFixed(2)} ₼ endirim
@@ -255,7 +256,7 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
             <div className="pt-3 mb-3">
               <OrderItemHistory order={order} tz={tz} isItemReady={isItemReady} />
             </div>
-            {order.note && <p className="text-xs text-stone-500 italic">Qeyd: {order.note}</p>}
+            {order.note && <OrderNote note={order.note} className="text-xs text-stone-500 italic" />}
             {isOrderOpen(order) && (
               <div className="flex gap-2 pt-3 mt-1 border-t border-stone-200">
                 <button

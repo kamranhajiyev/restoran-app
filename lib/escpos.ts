@@ -6,6 +6,7 @@
 // width. We lay out to 47 rather than 48 on purpose: a line that exactly fills
 // the carriage makes the printer wrap on its own, and that wrap lands on top of
 // our own newline — which is what pushed every price one row below its name.
+import { noteLines } from './order-note';
 import { PLACE_WORDS } from './order-place';
 
 export const WIDTH = 47;
@@ -93,13 +94,17 @@ export function wrap(text: string, cols: number): string[] {
 // "Dolmaları sarımsaqsız…"). Phone and address get a row each, and the guest's
 // words come last under Qeyd, where the cook looks for them.
 export function noteRows(note: string, cols = WIDTH): string[] {
-  const parts = note.split(/\n| · /).map(s => s.trim()).filter(Boolean);
-  const contact = parts.filter(s => /^(Tel|Ünvan):/.test(s));
-  const rest = parts.filter(s => !/^(Tel|Ünvan):/.test(s)).join(' · ');
-  return [
-    ...contact.flatMap(s => wrap(s, cols)),
-    ...(rest ? wrap(`Qeyd: ${rest}`, cols) : []),
-  ];
+  return sizedNoteRows(note, cols).map(r => r.text);
+}
+
+// The same rows, with the guest's words marked big: the cook kept missing them
+// in small type under the address (Test Restoran, 2026-10-05). Big is double
+// height only, so the rows wrap at the same width.
+export function sizedNoteRows(note: string, cols = WIDTH): { text: string; big: boolean }[] {
+  return noteLines(note).flatMap(line => {
+    const big = line.startsWith('Qeyd:');
+    return wrap(line, cols).map(text => ({ text, big }));
+  });
 }
 
 // What the trigger froze into print_jobs.payload.
@@ -205,7 +210,11 @@ export function buildStationTicket(p: TicketPayload): Uint8Array {
   }
 
   lines.push('='.repeat(WIDTH) + '\n');
-  if (p.note && p.kind !== 'note') for (const row of noteRows(p.note)) lines.push(`${row}\n`);
+  if (p.note && p.kind !== 'note') {
+    for (const row of sizedNoteRows(p.note)) {
+      lines.push(...(row.big ? [ESC.BIG, `${row.text}\n`, ESC.NORMAL] : [`${row.text}\n`]));
+    }
+  }
   lines.push('\n\n\n', ESC.CUT);
 
   return encode(lines);

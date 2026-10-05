@@ -11,7 +11,7 @@
 // agent/ runs in Node with no DOM and keeps using the character path. Both
 // build the same layout, so a change to one belongs in the other.
 
-import { ESC, placeLines, WIDTH, itemRows, noteRows, stringToBytes, wrap, type TicketPayload } from './escpos';
+import { ESC, placeLines, WIDTH, itemRows, sizedNoteRows, stringToBytes, wrap, type TicketPayload } from './escpos';
 import { rasterize, type Line } from './raster';
 
 // Dish names a step up from `big`, wider as well as taller, so the cook can read
@@ -23,6 +23,10 @@ const ITEM_COLS = Math.floor(WIDTH / ITEM_SCALE[0]);
 // except the order number, so that is what has to be readable from across the
 // kitchen.
 const NOTE_NUMBER_SCALE: [number, number] = [2, 2.5];
+
+// The guest's words under Qeyd: taller than the address so the cook sees them,
+// smaller than the dish names. Same width, so the rows wrap as on screen.
+export const QEYD_SCALE: [number, number] = [1, 1.3];
 
 const HEADING: Record<TicketPayload['kind'], string> = {
   new:    'YENİ SİFARİŞ',
@@ -81,7 +85,11 @@ export function buildStationTicketRaster(p: TicketPayload, tableName?: (id: numb
   }
 
   lines.push({ text: '='.repeat(WIDTH) });
-  if (p.note && p.kind !== 'note') for (const row of noteRows(p.note)) lines.push({ text: row });
+  if (p.note && p.kind !== 'note') {
+    for (const row of sizedNoteRows(p.note)) {
+      lines.push(row.big ? { text: row.text, scale: QEYD_SCALE } : { text: row.text });
+    }
+  }
 
   const head = new Uint8Array(stringToBytes(ESC.INIT + ESC.LEFT));
   const image = rasterize(lines, WIDTH);

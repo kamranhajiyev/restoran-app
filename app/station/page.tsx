@@ -22,6 +22,7 @@ import { unlockSound, playNewOrder, playItemRemoved } from '@/lib/sound';
 import { MenuItem, Order, OrderItem, RestaurantTable, Station, isOrderOpen } from '@/types';
 import { orderLabel } from '@/lib/order-label';
 import { tableTitle } from '@/lib/order-place';
+import OrderNote from '@/components/OrderNote';
 
 // A card older than this is late. Newest-first puts the oldest at the BOTTOM, so
 // the colour is what stops it being forgotten — the sort can't be relied on to
@@ -642,7 +643,7 @@ function StationCard({
         {/* The note is an instruction to the cook, not a footnote — same size as a
             dish line, never smaller. It was the smallest text on the card before. */}
         {order.note && (
-          <p className="text-[0.875em] font-medium bg-amber-50 rounded-lg px-[0.6em] py-[0.45em] text-amber-800">{order.note}</p>
+          <OrderNote note={order.note} className="text-[0.875em] font-medium bg-amber-50 rounded-lg px-[0.6em] py-[0.45em] text-amber-800" />
         )}
       </div>
 

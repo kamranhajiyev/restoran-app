@@ -5,7 +5,7 @@
 // words — was cut off.
 
 import { describe, expect, it } from 'vitest';
-import { WIDTH, noteRows } from '@/lib/escpos';
+import { ESC, WIDTH, buildStationTicket, noteRows, sizedNoteRows } from '@/lib/escpos';
 
 const note = 'Tel: 0709771070 · Ünvan: Dəyirmanın kruqu · Dolmaları sarımsaqsız göndərərsiz zəhmət olmazsa';
 
@@ -31,5 +31,24 @@ describe('noteRows', () => {
 
   it('leaves a waiter note as Qeyd', () => {
     expect(noteRows('az duzlu')).toEqual(['Qeyd: az duzlu']);
+  });
+});
+
+describe('Qeyd in big type', () => {
+  it('prints every Qeyd row big, and phone and address small', () => {
+    const rows = sizedNoteRows(note, 30);
+    expect(rows.filter(r => !r.big).map(r => r.text)).toEqual(['Tel: 0709771070', 'Ünvan: Dəyirmanın kruqu']);
+    const qeyd = rows.filter(r => r.big);
+    expect(qeyd.length).toBeGreaterThan(1);
+    expect(qeyd.map(r => r.text).join(' ')).toContain('zəhmət olmazsa');
+  });
+
+  it('the character ticket switches to big type for Qeyd', () => {
+    const bytes = buildStationTicket({
+      kind: 'new', station: 'Bar', orderNumber: 1, table: 1, waiter: null,
+      at: '2026-10-05T10:00:00Z', items: [{ name: 'Fanta', qty: 1 }], note: 'az buzlu',
+    });
+    const text = Array.from(bytes, b => String.fromCharCode(b)).join('');
+    expect(text).toContain(`${ESC.BIG}Qeyd: az buzlu\n${ESC.NORMAL}`);
   });
 });

@@ -50,6 +50,7 @@ import { flushQueue, pendingOrderIds, ADD_ORDER } from '@/lib/sync';
 import { verifyPinOffline, rememberPin, forgetPins } from '@/lib/offline-pin';
 import { queueSize, enqueue, onEnqueue } from '@/lib/offline-queue';
 import { onLocalWrite, pendingWrites, tillPost } from '@/lib/till-write';
+import OrderNote from '@/components/OrderNote';
 
 // How many writes the server has not seen. Two stores answer that question — the
 // browser till's IndexedDB queue and the desktop till's SQLite outbox — but only
@@ -3324,7 +3325,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                                   </div>
                                 ))}
                               </div>
-                              {order.note && <p className="text-xs text-stone-500 italic mb-3">Qeyd: {order.note}</p>}
+                              {order.note && <OrderNote note={order.note} className="text-xs text-stone-500 italic mb-3" />}
                               {order.status === 'ləğv edildi' && (
                                 <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3">
                                   Ödənişsiz bağlandı{order.cancelledBy ? ` — ${order.cancelledBy}` : ''}
