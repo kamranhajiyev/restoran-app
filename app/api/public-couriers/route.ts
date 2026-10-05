@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { refuseTillRead } from '@/lib/till-read-auth';
 import { courierPending } from '@/lib/courier-pending';
 
 // Public: the courier list plus what each one is holding, for the seller
@@ -12,6 +13,8 @@ import { courierPending } from '@/lib/courier-pending';
 export async function GET(req: NextRequest) {
   const companyId = req.nextUrl.searchParams.get('companyId');
   if (!companyId) return Response.json({ error: 'missing companyId' }, { status: 400 });
+  const refused = await refuseTillRead(req, companyId);
+  if (refused) return refused;
 
   const db = createServerClient();
   const [couriers, orders, payments] = await Promise.all([

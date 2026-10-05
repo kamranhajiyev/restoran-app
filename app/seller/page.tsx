@@ -32,7 +32,7 @@ import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printRecei
 import { drainPrintQueue, isDesktop, nextLocalOrderNumber, printKitchenNow, printNoteNow, startKitchenPrinting } from '@/lib/desktopPrint';
 import StationPrinters from '@/components/StationPrinters';
 import { postOrQueue, isOnline, startConnectivityWatch, onConnectivityChange } from '@/lib/offline-net';
-import { tillFetch, hasLocalDb, localCourierCollections, siteGet } from '@/lib/till-data';
+import { tillFetch, hasLocalDb, localCourierCollections, siteGet, setTillToken } from '@/lib/till-data';
 import { hasLocalData, pullAll, pullChanged, pullNewOrders, pullStationReady } from '@/lib/till-sync';
 import { SAFETY_NET_MS, listenTill, onTillSignalStatus, tillSignalUp, timerDue, type TillSignal } from '@/lib/till-signal';
 import TillSetup from '@/components/TillSetup';
@@ -280,6 +280,9 @@ export default function SellerRoute(props: SellerProps = {}) {
 
 export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideToken, overrideLogoUrl, overrideBrandColor, overrideExpiresAt }: SellerProps = {}) {
   const router = useRouter();
+  // Set before any effect runs, so the first read already proves which till
+  // this is (lib/till-read-token.ts).
+  setTillToken(overrideToken);
   const [logoUrl, setLogoUrl] = useState<string | null>(overrideLogoUrl ?? null);
   const [view, setView]             = useState<View>('orders');
   const [menu, setMenu]             = useState<MenuItem[]>([]);

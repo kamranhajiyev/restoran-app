@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { refuseTillRead } from '@/lib/till-read-auth';
 
 // Public: what couriers handed over between `from` and `to` (exclusive), split
 // by how it arrived. For the seller terminal, which has no Supabase auth session
@@ -11,6 +12,8 @@ export async function GET(req: NextRequest) {
   const from = req.nextUrl.searchParams.get('from');
   const to = req.nextUrl.searchParams.get('to');
   if (!companyId || !from || !to) return Response.json({ error: 'missing params' }, { status: 400 });
+  const refused = await refuseTillRead(req, companyId);
+  if (refused) return refused;
 
   const db = createServerClient();
   const { data, error } = await db.from('courier_payments')

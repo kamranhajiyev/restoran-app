@@ -14,6 +14,22 @@
 // worse bug than a compile error.
 
 import type { PosNative } from "./desktopPrint";
+import { withTillToken } from "./till-read-token";
+
+// The terminal's token, so a read that goes to the network can prove which
+// till it is (lib/till-read-token.ts). Set by the seller page; inside the exe
+// the main process adds it as well, from the link saved on the disk.
+let tillToken: string | null = null;
+
+export function setTillToken(token: string | null | undefined): void {
+  tillToken = token || null;
+}
+
+/** fetch() with the token added when `path` is a till read. */
+function networkFetch(path: string, init?: RequestInit): Promise<Response> {
+  const headers = withTillToken(path, init?.headers as Record<string, string> | undefined, tillToken);
+  return fetch(path, headers ? { ...init, headers } : init);
+}
 
 /** The local database, or null in a browser (and in a --url= shell). */
 function local(): NonNullable<PosNative["till"]> | null {
@@ -130,7 +146,7 @@ export async function localCourierCollections(
  */
 export async function siteGet(path: string): Promise<Response> {
   const till = local();
-  if (!till) return fetch(path);
+  if (!till) return networkFetch(path);
   const res = await till.api(path);
   return new Response(res.body, {
     status: res.status,
@@ -155,5 +171,5 @@ export async function tillFetch(input: string, init?: RequestInit): Promise<Resp
     if (answered) return answered;
   }
 
-  return fetch(input, init);
+  return networkFetch(input, init);
 }

@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { refuseTillRead } from '@/lib/till-read-auth';
 
 // Public: the company's shifts that ran between `from` and `to`, for the seller
 // terminal's Tarixçə shift picker. Only when they ran and who opened them — the
@@ -9,6 +10,8 @@ export async function GET(req: NextRequest) {
   const from = req.nextUrl.searchParams.get('from');
   const to = req.nextUrl.searchParams.get('to');
   if (!companyId || !from || !to) return Response.json({ shifts: [] }, { status: 400 });
+  const refused = await refuseTillRead(req, companyId);
+  if (refused) return refused;
 
   const db = createServerClient();
   const { data, error } = await db

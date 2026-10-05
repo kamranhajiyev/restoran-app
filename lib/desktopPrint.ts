@@ -16,6 +16,7 @@ import { SAFETY_NET_MS, listenTill, tillSignalUp, timerDue } from './till-signal
 import { type TicketPayload } from './escpos';
 import { buildStationTicketRaster } from './station-ticket';
 import { tillPost } from './till-write';
+import { siteGet } from './till-data';
 import { tableTitle } from './order-place';
 import { resolveStationId } from './stations';
 import { isUsbPrinter } from './station-printer';
@@ -237,7 +238,7 @@ function linkSource(companyId: string, token: string): JobSource {
       const till = window.posNative?.till;
       const path = `/api/public-tables?companyId=${encodeURIComponent(companyId)}`;
       try {
-        const body = till ? JSON.parse((await till.api(path)).body) : await (await fetch(path)).json();
+        const body = till ? JSON.parse((await till.api(path)).body) : await (await siteGet(path)).json();
         return ((body as { tables?: TableName[] }).tables ?? []);
       } catch {
         return [];
@@ -258,7 +259,7 @@ export async function fetchStationPrinters(companyId: string): Promise<StationPr
   try {
     const body = till
       ? JSON.parse((await till.api(path)).body)
-      : await (await fetch(path)).json();
+      : await (await siteGet(path)).json();
     return ((body as { stations?: StationPrinterRow[] }).stations ?? []);
   } catch {
     return [];

@@ -9,6 +9,7 @@
 
 import { ipcMain, net } from 'electron';
 import type { CashShift, Order } from '../types';
+import { tokenFromLink, withTillToken } from '../lib/till-read-token';
 import { db, getMeta, setMeta } from './db';
 import { cacheImages } from './images';
 import * as repo from './till-repo';
@@ -114,9 +115,13 @@ export function registerTillHandlers(appUrl: string): void {
 
     const opts = init && typeof init === 'object' ? (init as Record<string, unknown>) : {};
     const method = typeof opts.method === 'string' ? opts.method : 'GET';
-    const headers = opts.headers && typeof opts.headers === 'object'
-      ? (opts.headers as Record<string, string>)
-      : undefined;
+    // A read carries the till's token, taken from the saved link here rather
+    // than from every caller in the page (lib/till-read-token.ts).
+    const headers = withTillToken(
+      path,
+      opts.headers && typeof opts.headers === 'object' ? (opts.headers as Record<string, string>) : undefined,
+      tokenFromLink(getMeta(db(), LINK_KEY)),
+    );
     const body = typeof opts.body === 'string' ? opts.body : undefined;
 
     const res = await net.fetch(`${appUrl.replace(/\/$/, '')}${path}`, { method, headers, body });

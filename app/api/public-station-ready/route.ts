@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { refuseTillRead } from '@/lib/till-read-auth';
 
 // Which sexes have finished their part, for the tokenless terminal. Without this the
 // green never reaches the till most venues actually use — RLS gives a session-less
@@ -7,6 +8,8 @@ import { createServerClient } from '@/lib/supabase-server';
 export async function GET(req: NextRequest) {
   const companyId = req.nextUrl.searchParams.get('companyId');
   if (!companyId) return Response.json({ ready: [] }, { status: 400 });
+  const refused = await refuseTillRead(req, companyId);
+  if (refused) return refused;
 
   const db = createServerClient();
   const { data, error } = await db

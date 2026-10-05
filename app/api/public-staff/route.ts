@@ -1,11 +1,14 @@
 import { NextRequest } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { refuseTillRead } from '@/lib/till-read-auth';
 
 // Public: returns active staff list for a company (no PINs).
 // Called by the public seller terminal which has no Supabase auth session.
 export async function GET(req: NextRequest) {
   const companyId = req.nextUrl.searchParams.get('companyId');
   if (!companyId) return Response.json({ error: 'missing companyId' }, { status: 400 });
+  const refused = await refuseTillRead(req, companyId);
+  if (refused) return refused;
 
   const db = createServerClient();
   const { data, error } = await db

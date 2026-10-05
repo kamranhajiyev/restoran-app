@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { refuseTillRead } from '@/lib/till-read-auth';
 
 // The tokenless terminal has no auth session, so RLS would hand it nothing. It needs
 // the sex list to work out which sex prepares each line — the same reason it fetches
@@ -10,6 +11,8 @@ import { createServerClient } from '@/lib/supabase-server';
 export async function GET(req: NextRequest) {
   const companyId = req.nextUrl.searchParams.get('companyId');
   if (!companyId) return Response.json({ stations: [] }, { status: 400 });
+  const refused = await refuseTillRead(req, companyId);
+  if (refused) return refused;
 
   const db = createServerClient();
   const { data, error } = await db

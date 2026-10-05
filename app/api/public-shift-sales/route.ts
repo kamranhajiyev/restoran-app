@@ -1,10 +1,13 @@
 import { NextRequest } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { refuseTillRead } from '@/lib/till-read-auth';
 
 export async function GET(req: NextRequest) {
   const companyId = req.nextUrl.searchParams.get('companyId');
   const openedAt  = req.nextUrl.searchParams.get('openedAt');
   if (!companyId || !openedAt) return Response.json({ cash: 0, card: 0 }, { status: 400 });
+  const refused = await refuseTillRead(req, companyId);
+  if (refused) return refused;
 
   const db = createServerClient();
   const [{ data, error }, { data: courierCard }] = await Promise.all([
