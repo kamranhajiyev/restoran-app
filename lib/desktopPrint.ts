@@ -12,6 +12,7 @@
 // tablets and phones that will never see a printer.
 
 import { supabase } from './supabase';
+import { SAFETY_NET_MS, listenTill, tillSignalUp, timerDue } from './till-signal';
 import { type TicketPayload } from './escpos';
 import { buildStationTicketRaster } from './station-ticket';
 import { tillPost } from './till-write';
@@ -512,11 +513,15 @@ let drainAgain = false;
 // after every send, and a till that was refused (another company's session)
 // must not start claiming through the default source.
 let printingActive = false;
+// When the queue was last asked, by anyone — the signal, the seller page's kick
+// after a send, or the timer. The timer skips a tick the others just covered.
+let lastDrainAt = 0;
 
 export async function drainPrintQueue(): Promise<void> {
   if (!isDesktop() || !printingActive) return;
   if (draining) { drainAgain = true; return; }
   draining = true;
+  lastDrainAt = Date.now();
   try {
     do {
       drainAgain = false;
@@ -554,13 +559,23 @@ export function startKitchenPrinting(auth: PrintAuth): () => void {
         .subscribe()
     : null;
 
+  // A linked till hears about tickets on the restaurant's signal instead — see
+  // lib/till-signal.ts. Without it, it asked the site every 4 s all day.
+  const unlisten = auth.kind === 'session'
+    ? null
+    : listenTill(auth.companyId, kind => { if (kind === 'print') void drainPrintQueue(); });
+
   // Realtime sockets die quietly on sleep and Wi-Fi drops. Polling is the floor
-  // under that: a ticket may be late, but it is never lost.
-  const timer = setInterval(() => void drainPrintQueue(), channel ? POLL_MS : LINK_POLL_MS);
+  // under that: a ticket may be late, but it is never lost. A linked till whose
+  // signal is up only asks once a minute; with it down, every 4 s as before.
+  const timer = setInterval(() => {
+    if (channel || timerDue(lastDrainAt, Date.now(), tillSignalUp(), SAFETY_NET_MS)) void drainPrintQueue();
+  }, channel ? POLL_MS : LINK_POLL_MS);
 
   return () => {
     printingActive = false;
     clearInterval(timer);
     if (channel) void supabase.removeChannel(channel);
+    unlisten?.();
   };
 }

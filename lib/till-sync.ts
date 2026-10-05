@@ -19,6 +19,7 @@
 import { setCompanyContext } from "@/lib/store";
 import type { MenuItem, ModifierGroup } from "@/types";
 import type { PosNative, TillSettings } from "./desktopPrint";
+import type { TillSignal } from "./till-signal";
 import { cacheImages } from "./till-image";
 
 function till(): NonNullable<PosNative["till"]> | null {
@@ -321,9 +322,121 @@ export async function pullStationReady(companyId: string): Promise<boolean> {
   }
 }
 
+/**
+ * The server's orders this machine has never seen. Only new ones: an order the
+ * till already holds may carry a payment or an item not sent yet, and the
+ * server's older copy must never land on top of it.
+ */
+export function unseenOrders<T extends { id: string }>(server: T[], localIds: Set<string>): T[] {
+  return server.filter(o => !localIds.has(o.id));
+}
+
+/**
+ * Where the quick check starts reading: a little before the newest order this
+ * machine holds, so an order the server stamped a moment earlier — another
+ * till's clock, a slow request — is not stepped over. Nothing local yet means
+ * the last hour.
+ */
+export function newOrdersSince(newestLocal: string | undefined, now: number): string {
+  const t = newestLocal ? Date.parse(newestLocal) : NaN;
+  return new Date((Number.isFinite(t) ? t : now - 3_600_000) - 2 * 60_000).toISOString();
+}
+
+/**
+ * Orders placed somewhere else — the guest's phone, another till — brought onto
+ * this machine now rather than at the next sweep.
+ *
+ * Test Restoran, 2026-10-05: an order from the menu link printed in the kitchen
+ * at once (tickets come straight from the server) but reached the till's screen
+ * minutes later, because the screen reads the local copy and only the
+ * five-minute sweep put the order there.
+ *
+ * Asks only for orders newer than the newest one here, so on a quiet till the
+ * answer is an empty list. Adds orders, never changes one; see unseenOrders.
+ */
+export async function pullNewOrders(companyId: string): Promise<number> {
+  const db = till();
+  if (!db || !companyId) return 0;
+  try {
+    const newest = (await db.orders(companyId, { limit: 1 })) as { orders?: { createdAt?: string }[] };
+    const from = newOrdersSince(newest.orders?.[0]?.createdAt, Date.now());
+    const { orders = [] } = await serverRead<{ orders?: { id: string }[] }>(
+      db, "public-orders", companyId, { from, limit: "30" },
+    );
+    if (orders.length === 0) return 0;
+    const local = (await db.orders(companyId, { from, limit: 1000 })) as { orders?: { id: string }[] };
+    const fresh = unseenOrders(orders, new Set((local.orders ?? []).map(o => o.id)));
+    if (fresh.length === 0) return 0;
+    await db.putOrders(companyId, fresh);
+    return fresh.length;
+  } catch {
+    // The next tick, or the sweep, will carry it.
+    return 0;
+  }
+}
+
 export interface SyncOutcome {
   ok: boolean;
   steps: StepProgress[];
+}
+
+// ── Only what changed ────────────────────────────────────────────────────────
+//
+// The five-minute sweep re-downloaded the whole restaurant — menu, room, staff,
+// couriers, 200 orders with their dishes — whether or not anything had changed,
+// and on most ticks nothing had. With the signal up the sweep fetches only the
+// parts a signal named since the last one.
+
+/** Which steps a signal makes stale. Readiness and tickets have their own fast paths. */
+const STEPS_FOR: Record<TillSignal, StepId[]> = {
+  menu: ["menu", "categories", "modifiers", "stations", "tables", "staff", "couriers", "settings", "images"],
+  orders: ["orders", "couriers"],
+  shift: ["shift"],
+  ready: [],
+  print: [],
+};
+
+/** A whole sweep this often regardless, in case a message was lost on the way. */
+export const FULL_PULL_EVERY_MS = 30 * 60_000;
+
+/**
+ * What the next sweep should fetch: everything, or only the steps named.
+ *
+ * Everything when there is no signal to trust — the socket is down, it came up
+ * after the last whole sweep (anything said while it was down is lost), or the
+ * half hour is up.
+ */
+export function planPull(s: {
+  signalUp: boolean;
+  upSince: number;
+  lastFullAt: number;
+  now: number;
+  heard: Iterable<TillSignal>;
+}): "all" | Set<StepId> {
+  if (!s.signalUp || s.lastFullAt === 0 || s.upSince > s.lastFullAt) return "all";
+  if (s.now - s.lastFullAt >= FULL_PULL_EVERY_MS) return "all";
+  const only = new Set<StepId>();
+  for (const kind of s.heard) for (const id of STEPS_FOR[kind] ?? []) only.add(id);
+  return only;
+}
+
+// When this machine last finished a whole sweep with every step done.
+let lastFullAt = 0;
+
+/**
+ * The timer's sweep: the parts a signal named, or everything when planPull
+ * says so. `ran` is false when there was nothing to fetch.
+ */
+export async function pullChanged(
+  companyId: string,
+  heard: Iterable<TillSignal>,
+  signalUp: boolean,
+  upSince: number,
+): Promise<{ ok: boolean; ran: boolean }> {
+  const plan = planPull({ signalUp, upSince, lastFullAt, now: Date.now(), heard });
+  if (plan !== "all" && plan.size === 0) return { ok: true, ran: false };
+  const { ok } = await pullAll(companyId, undefined, plan === "all" ? undefined : plan);
+  return { ok, ran: true };
 }
 
 /**
@@ -337,6 +450,7 @@ export interface SyncOutcome {
 export async function pullAll(
   companyId: string,
   onProgress?: (steps: StepProgress[]) => void,
+  only?: Set<StepId>,
 ): Promise<SyncOutcome> {
   const db = till();
   if (!db) return { ok: false, steps: [] };
@@ -345,11 +459,13 @@ export async function pullAll(
   // but an unset context is a bug waiting to pick the wrong company.
   setCompanyContext(companyId);
 
-  const steps = stepList();
+  const startedAt = Date.now();
+  const chosen = only ? STEPS.filter(s => only.has(s.id)) : STEPS;
+  const steps: StepProgress[] = chosen.map(s => ({ id: s.id, label: s.label, state: "pending" }));
   const report = () => onProgress?.(steps.map(s => ({ ...s })));
   report();
 
-  for (const [i, step] of STEPS.entries()) {
+  for (const [i, step] of chosen.entries()) {
     steps[i].state = "running";
     report();
     try {
@@ -362,7 +478,9 @@ export async function pullAll(
     report();
   }
 
-  return { ok: steps.every(s => s.state === "done"), steps };
+  const ok = steps.every(s => s.state === "done");
+  if (ok && !only) lastFullAt = startedAt;
+  return { ok, steps };
 }
 
 /** Has this machine ever been filled for this company? */

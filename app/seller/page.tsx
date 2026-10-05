@@ -33,7 +33,8 @@ import { drainPrintQueue, isDesktop, nextLocalOrderNumber, printKitchenNow, prin
 import StationPrinters from '@/components/StationPrinters';
 import { postOrQueue, isOnline, startConnectivityWatch, onConnectivityChange } from '@/lib/offline-net';
 import { tillFetch, hasLocalDb, localCourierCollections, siteGet } from '@/lib/till-data';
-import { hasLocalData, pullAll, pullStationReady } from '@/lib/till-sync';
+import { hasLocalData, pullAll, pullChanged, pullNewOrders, pullStationReady } from '@/lib/till-sync';
+import { SAFETY_NET_MS, listenTill, onTillSignalStatus, tillSignalUp, timerDue, type TillSignal } from '@/lib/till-signal';
 import TillSetup from '@/components/TillSetup';
 import SyncStatus from '@/components/SyncStatus';
 import OrderSyncDot from '@/components/OrderSyncDot';
@@ -69,6 +70,10 @@ const RETRY_SEND_MS = 15_000;
 // realtime socket is doing. Food going cold is measured in minutes, so this is
 // the number that decides whether the waiter is told in time.
 const READY_EVERY_MS = 10_000;
+// How often the desktop till asks for orders placed elsewhere — the menu link,
+// another till. See pullNewOrders. The answer is almost always empty, so this
+// is one tiny request per tick.
+const NEW_ORDERS_EVERY_MS = 20_000;
 
 /**
  * The terminal's read of the room, or null when it did not get an answer.
@@ -730,15 +735,62 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   // missed.
   //
   // Desktop only. A browser reads Supabase directly and has nothing to catch up.
+  //
+  // With the restaurant's signal up (lib/till-signal.ts) the kitchen's tap
+  // arrives on it, and this only runs once a minute as a safety net.
+  const lastReadyAt = useRef(0);
   useEffect(() => {
     if (!hasLocalDb()) return;
     const id = setInterval(() => {
       if (document.visibilityState === 'hidden') return;
       if (!isOnline()) return;
+      if (!timerDue(lastReadyAt.current, Date.now(), tillSignalUp(), SAFETY_NET_MS)) return;
+      lastReadyAt.current = Date.now();
       void refreshReady();
     }, READY_EVERY_MS);
     return () => clearInterval(id);
   }, [refreshReady]);
+
+  // Orders placed somewhere else reach the desktop till's screen within seconds,
+  // not at the five-minute sweep. The screen is redrawn only when one arrived.
+  // Same safety-net rule as above while the signal is up.
+  const lastNewOrdersAt = useRef(0);
+  const pullNew = useCallback(async () => {
+    const companyId = overrideCompanyId ?? getSession()?.companyId ?? null;
+    if (!companyId) return;
+    lastNewOrdersAt.current = Date.now();
+    if ((await pullNewOrders(companyId)) > 0) void refreshOrders({ silent: true });
+  }, [overrideCompanyId, refreshOrders]);
+  useEffect(() => {
+    if (!hasLocalDb()) return;
+    const id = setInterval(() => {
+      if (document.visibilityState === 'hidden' || !isOnline()) return;
+      if (!timerDue(lastNewOrdersAt.current, Date.now(), tillSignalUp(), SAFETY_NET_MS)) return;
+      void pullNew();
+    }, NEW_ORDERS_EVERY_MS);
+    return () => clearInterval(id);
+  }, [pullNew]);
+
+  // The restaurant's signal: the database says what changed, and only then does
+  // the till go and look. For the desktop till (which reads its own copy) and
+  // the browser terminal link (which has no realtime of its own). A signed-in
+  // browser already hears postgres_changes and is left as it was.
+  useEffect(() => {
+    if (!hasLocalDb() && !overrideCompanyId) return;
+    const companyId = overrideCompanyId ?? getSession()?.companyId ?? null;
+    if (!companyId) return;
+    return listenTill(companyId, kind => {
+      if (kind === 'orders') {
+        if (hasLocalDb()) void pullNew();
+        else void refreshOrders({ silent: true });
+      } else if (kind === 'ready') {
+        lastReadyAt.current = Date.now();
+        void refreshReady();
+      } else if (kind === 'shift') {
+        window.dispatchEvent(new Event('till-shift-signal'));
+      }
+    });
+  }, [overrideCompanyId, pullNew, refreshOrders, refreshReady]);
 
   // ── The line ────────────────────────────────────────────────────────────────
   // Watch the connection for as long as the till is open, and the moment it comes
@@ -848,6 +900,14 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     const companyId = overrideCompanyId ?? getSession()?.companyId ?? null;
     if (!companyId) return;
 
+    // What the signal said changed since the last sweep, so the sweep fetches
+    // only that (planPull in lib/till-sync.ts). upSince: anything said before
+    // the socket came up was never heard, so the sweep after it is a whole one.
+    const heard = new Set<TillSignal>();
+    let upSince = Date.now();
+    const offSignal = listenTill(companyId, kind => { heard.add(kind); });
+    const offStatus = onTillSignalStatus(up => { if (up) upSince = Date.now(); });
+
     const t = setInterval(async () => {
       if (!isOnline()) return;
       // Same rule as above: never pull over writes that have not been sent.
@@ -861,12 +921,17 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       setPendingCount(left);
       setUnsent(await pendingOrderIds());
       if (left !== 0) return;
-      await pullAll(companyId);
+      const kinds = [...heard];
+      heard.clear();
+      const { ok, ran } = await pullChanged(companyId, kinds, tillSignalUp(), upSince);
+      // A step that failed is asked for again next time.
+      if (!ok) for (const k of kinds) heard.add(k);
+      if (!ran) return;
       setDataVersion(v => v + 1);
       void refreshOrders({ silent: true });
     }, PULL_EVERY_MS);
 
-    return () => clearInterval(t);
+    return () => { clearInterval(t); offSignal(); offStatus(); };
   }, [overrideCompanyId, refreshOrders]);
 
   // The badge would otherwise only move on a connection change, leaving a waiter
@@ -1199,10 +1264,21 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   // so poll the public endpoints on an interval and on tab-focus. This propagates admin-side
   // changes (hidden menu items, deactivated sellers) to an open terminal without a manual refresh.
   // (The wrapper page handles token revalidation / link revocation separately.)
+  //
+  // New orders arrive on the restaurant's signal; while it is up this full
+  // re-read only has the menu and the staff left to catch, so it runs every few
+  // minutes instead of every 40 s.
   useEffect(() => {
     if (!overrideCompanyId) return;
-    const sync = () => { if (document.visibilityState !== 'hidden') refreshAll({ silent: true }); };
-    const id = setInterval(sync, 40000);
+    let last = Date.now();
+    const sync = () => {
+      if (document.visibilityState === 'hidden') return;
+      last = Date.now();
+      refreshAll({ silent: true });
+    };
+    const id = setInterval(() => {
+      if (timerDue(last, Date.now(), tillSignalUp(), 3 * SAFETY_NET_MS)) sync();
+    }, 40000);
     const onVisible = () => { if (document.visibilityState === 'visible') refreshAll({ silent: true }); };
     window.addEventListener('focus', sync);
     document.addEventListener('visibilitychange', onVisible);
@@ -2297,14 +2373,23 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   }, [view, shift, overrideCompanyId]);
 
   // Detect when admin closes the shift externally
+  // — at once on the restaurant's signal, and on a clock that slows to once a
+  // minute while the signal is up.
   useEffect(() => {
-    const id = setInterval(async () => {
+    let last = Date.now();
+    const check = async () => {
+      last = Date.now();
       const open = overrideCompanyId
         ? await tillFetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.shift ?? null).catch(() => undefined)
         : await fetchOpenShift();
       if (open === null && shift) { setShift(null); setView('orders'); }
+    };
+    const id = setInterval(() => {
+      if (timerDue(last, Date.now(), tillSignalUp(), SAFETY_NET_MS)) void check();
     }, 30_000);
-    return () => clearInterval(id);
+    const onSignal = () => void check();
+    window.addEventListener('till-shift-signal', onSignal);
+    return () => { clearInterval(id); window.removeEventListener('till-shift-signal', onSignal); };
   }, [shift, overrideCompanyId]);
 
   // Today's orders, or one kassa shift's when one is picked in Tarixçə.
