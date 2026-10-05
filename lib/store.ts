@@ -2,7 +2,7 @@ import { guardQuery, refusal } from './order-rules';
 import { CashShift, Category, Courier, CourierLedger, CourierPayMethod, CourierPayment, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
-import { courierPending, courierSold, courierStillOut, type ShiftSales } from './courier-pending';
+import { courierPending, courierSold, courierStillOut, sumCollections, type Collections, type ShiftSales } from './courier-pending';
 import { printedStationColumn } from './stations';
 import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
@@ -1691,16 +1691,12 @@ export async function fetchCourierCollections(
   from: string,
   to: string,
   opts?: ReadOpts,
-): Promise<{ nagd: number; kart: number }> {
+): Promise<Collections> {
   try {
     const { data, error } = await supabase.from('courier_payments')
-      .select('amount, method').gte('created_at', from).lt('created_at', to);
+      .select('amount, method, order_ids').gte('created_at', from).lt('created_at', to);
     if (error) throw error;
-    return (data ?? []).reduce((acc, p) => {
-      if (p.method === 'kart') acc.kart += Number(p.amount ?? 0);
-      else acc.nagd += Number(p.amount ?? 0);
-      return acc;
-    }, { nagd: 0, kart: 0 });
+    return sumCollections(data ?? []);
   } catch {
     const local = await fromLocal(opts, (till, companyId) =>
       till.courierCollections(companyId, from, to) as Promise<{ nagd: number; kart: number }>);

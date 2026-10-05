@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { refuseTillRead } from '@/lib/till-read-auth';
+import { sumCollections } from '@/lib/courier-pending';
 
 // Public: what couriers handed over between `from` and `to` (exclusive), split
 // by how it arrived. For the seller terminal, which has no Supabase auth session
@@ -17,16 +18,12 @@ export async function GET(req: NextRequest) {
 
   const db = createServerClient();
   const { data, error } = await db.from('courier_payments')
-    .select('amount, method')
+    .select('amount, method, order_ids')
     .eq('company_id', companyId)
     .gte('created_at', from)
     .lt('created_at', to);
 
   if (error || !data) return Response.json({ nagd: 0, kart: 0 });
 
-  return Response.json(data.reduce((acc, p) => {
-    if (p.method === 'kart') acc.kart += Number(p.amount ?? 0);
-    else acc.nagd += Number(p.amount ?? 0);
-    return acc;
-  }, { nagd: 0, kart: 0 }));
+  return Response.json(sumCollections(data));
 }

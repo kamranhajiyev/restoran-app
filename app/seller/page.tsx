@@ -23,8 +23,8 @@ import { unlockSound, armSoundOnFirstGesture, playOrderReady } from '@/lib/sound
 import { applyBrand } from '@/lib/branding';
 import { orderClosedAt } from '@/lib/order-items';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
-import { courierOwed, kassaSales } from '@/lib/courier-pending';
-import { courierOutstanding, ordersOfShift, shiftLoadWindow, shiftsOfDay, shiftWindow, type HistoryShift } from '@/lib/history-shifts';
+import { courierOwed, kassaSales, type Collections } from '@/lib/courier-pending';
+import { historyTotals, ordersOfShift, shiftLoadWindow, shiftsOfDay, shiftWindow, type HistoryShift } from '@/lib/history-shifts';
 import { CashShift, Category, Courier, CourierPayMethod, CourierPendingOrder, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, openCashDrawer } from '@/lib/printer';
@@ -122,7 +122,7 @@ async function courierCollections(
   from: string,
   to: string,
   companyId: string | null | undefined,
-): Promise<{ nagd: number; kart: number }> {
+): Promise<Collections> {
   if (!companyId) return fetchCourierCollections(from, to);
   try {
     // siteGet, not fetch: this route is not one the local database answers, and
@@ -135,7 +135,7 @@ async function courierCollections(
     );
     if (!r.ok) throw new Error('bad response');
     const d = await r.json();
-    return { nagd: Number(d.nagd ?? 0), kart: Number(d.kart ?? 0) };
+    return { nagd: Number(d.nagd ?? 0), kart: Number(d.kart ?? 0), paidOrderIds: d.paidOrderIds };
   } catch {
     return (await localCourierCollections(companyId, from, to)) ?? { nagd: 0, kart: 0 };
   }
@@ -508,7 +508,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   // Courier money that reached the restaurant today. Separate from the orders
   // because it is not attached to them: a rider settles when they get back, which
   // may be days after the delivery closed.
-  const [historyCollected, setHistoryCollected] = useState({ nagd: 0, kart: 0 });
+  const [historyCollected, setHistoryCollected] = useState<Collections>({ nagd: 0, kart: 0 });
   const [loadingMore, setLoadingMore]       = useState(false);
 
   // cancel modal — preset reason required, free text only for "Digər"
@@ -2165,7 +2165,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       ? { ...c, outstanding: owed - paidTotal, pending: (c.pending ?? []).filter(p => !share.has(p.id)) }
       : c));
     // The history screen is showing a number this just changed.
-    setHistoryCollected(prev => ({ nagd: prev.nagd + paidCash, kart: prev.kart + paidCard }));
+    setHistoryCollected(prev => ({
+      nagd: prev.nagd + paidCash, kart: prev.kart + paidCard,
+      paidOrderIds: prev.paidOrderIds && [...prev.paidOrderIds, ...share.keys()],
+    }));
     // Show it in the drawer immediately — the seller is standing at the Kassa
     // screen a tap away, and "Kassada olmalıdır" that lags by a refresh is the
     // number they will trust least.
@@ -2381,9 +2384,12 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       ? tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&from=${encodeURIComponent(fetchWin.from)}&to=${encodeURIComponent(fetchWin.to)}&limit=1000`)
           .then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
       : fetchOrders({ from: fetchWin.from, to: fetchWin.to, limit: 1000 });
-    load.then(list => setHistoryOrders(picked ? ordersOfShift(list, picked, now) : list))
-      .finally(() => setHistoryLoading(false));
-    courierCollections(from, to, overrideCompanyId).then(setHistoryCollected);
+    // The boxes need both: which deliveries were paid back in view decides
+    // their Nağd / Kart / Kuryer split, so neither is shown without the other.
+    Promise.all([
+      load.then(list => setHistoryOrders(picked ? ordersOfShift(list, picked, now) : list)),
+      courierCollections(from, to, overrideCompanyId).then(setHistoryCollected),
+    ]).finally(() => setHistoryLoading(false));
     // siteGet, not tillFetch: the till keeps only the open shift, and closed
     // ones are what this list is for. Offline the picker simply stays hidden.
     const shiftsLoad: Promise<HistoryShift[]> = overrideCompanyId
@@ -2611,21 +2617,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       orderSearchText(o).includes(historyQuery) ||
       (o.sellerName ?? '').toLowerCase().includes(historyQuery) ||
       orderPlace(o).toLowerCase().includes(historyQuery)));
-  const paidHistoryOrders = historyOrders.filter(o => o.status === 'ödənilib');
-  // Nağd and Kart are "money that arrived", not "what today's orders came to":
-  // a courier order tenders nothing at close, so its total only shows up here
-  // once the rider hands it over. That is the number a restaurant without kassa
-  // shifts is looking for — what should be in the drawer and on the card account.
-  const { historyNagd, historyKart } = paidHistoryOrders.reduce((acc, o) => {
-    const t = orderTotal(o);
-    const cardPart = Math.min(o.cardAmount ?? 0, t);
-    acc.historyKart += cardPart;
-    acc.historyNagd += Math.min(o.cashAmount ?? 0, t - cardPart);
-    return acc;
-  }, { historyNagd: historyCollected.nagd, historyKart: historyCollected.kart });
-  const historyCollectedTotal = historyCollected.nagd + historyCollected.kart;
-  const historyRevenue = paidHistoryOrders.reduce((s, o) => s + orderTotal(o), 0);
-  const historyKuryerde = courierOutstanding(historyOrders);
+  // Only the sales in view: Nağd + Kart + Kuryer = Cəmi. Courier money for
+  // orders outside the view is in Kassa's Mədaxil, not here.
+  const historyPaidIds = historyCollected.paidOrderIds ? new Set(historyCollected.paidOrderIds) : undefined;
+  const { nagd: historyNagd, kart: historyKart, kuryer: historyKuryer, cemi: historyRevenue } =
+    historyTotals(historyOrders, orderTotal, historyPaidIds);
 
   // ── sidebar (desktop only) ────────────────────────────────────────────────
 
@@ -3179,7 +3175,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
               )}
 
               {/* Nağd / Kart summary */}
-              {!historyLoading && (historyOrders.length > 0 || historyCollectedTotal > 0) && (
+              {!historyLoading && historyOrders.length > 0 && (
                 <div className="px-4 md:px-6 pb-2">
                   <div className="flex gap-3">
                     <div className="flex-1 bg-white rounded-xl border border-stone-100 px-4 py-3">
@@ -3190,12 +3186,12 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                       <p className="text-xs text-stone-500 mb-0.5">Kart</p>
                       <p className="text-lg font-bold text-stone-800">{historyKart.toFixed(2)} ₼</p>
                     </div>
-                    {/* The part of Cəmi the riders still have — without it the
+                    {/* Deliveries not paid back inside this view — without it the
                         boxes do not add up and the screen looks wrong. */}
-                    {historyKuryerde > 0.005 && (
+                    {historyKuryer > 0.005 && (
                       <div className="flex-1 bg-white rounded-xl border border-stone-100 px-4 py-3">
-                        <p className="text-xs text-stone-500 mb-0.5">Kuryerdə</p>
-                        <p className="text-lg font-bold text-amber-700">{historyKuryerde.toFixed(2)} ₼</p>
+                        <p className="text-xs text-stone-500 mb-0.5">Kuryer</p>
+                        <p className="text-lg font-bold text-amber-700">{historyKuryer.toFixed(2)} ₼</p>
                       </div>
                     )}
                     <div className="flex-1 bg-primary-50 rounded-xl border border-primary-100 px-4 py-3">
@@ -3203,17 +3199,6 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                       <p className="text-lg font-bold text-primary-800">{historyRevenue.toFixed(2)} ₼</p>
                     </div>
                   </div>
-                  {/* Said out loud, because otherwise the three boxes look broken:
-                      Cəmi is today's orders, while Nağd and Kart are today's
-                      money — and a rider settling for Sunday's delivery lands in
-                      the second but not the first. */}
-                  {historyCollectedTotal > 0.005 && (
-                    <p className="text-xs text-stone-500 mt-2">
-                      Nağd və Kart məbləğinə kuryerlərdən yığılan {historyCollectedTotal.toFixed(2)} ₼ daxildir
-                      {historyCollected.kart > 0.005 && ` (${historyCollected.nagd.toFixed(2)} ₼ nağd · ${historyCollected.kart.toFixed(2)} ₼ kart)`}.
-                      Cəmi isə yalnız bu günün sifarişləridir.
-                    </p>
-                  )}
                 </div>
               )}
 

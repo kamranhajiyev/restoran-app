@@ -69,3 +69,43 @@ export function courierOutstanding(
 ): number {
   return orders.reduce((s, o) => s + (o.status === 'ödənilib' ? courierOwed(o) : 0), 0);
 }
+
+/**
+ * Tarixçə's boxes: only these orders' sales, so Nağd + Kart + Kuryer = Cəmi
+ * in every view (Test Restoran, 2026-10-05).
+ *
+ * A courier order's money counts as Nağd or Kart only when the rider paid it
+ * back inside the view — `paidInView` holds the orders named by payments made
+ * in it. Paid later, or not yet, it stays under Kuryer. Money a rider brings
+ * for an order outside the view is not a sale here at all; Kassa shows it under
+ * Mədaxil. Without `paidInView` (offline, the payment list unknown) every
+ * settlement so far counts.
+ */
+export function historyTotals<T extends { id: string; status: string; cashAmount?: number; cardAmount?: number;
+  courierDebt?: number; courierCash?: number; courierCard?: number }>(
+  orders: T[],
+  total: (o: T) => number,
+  paidInView?: ReadonlySet<string>,
+): { nagd: number; kart: number; kuryer: number; cemi: number } {
+  const acc = { nagd: 0, kart: 0, kuryer: 0, cemi: 0 };
+  for (const o of orders) {
+    if (o.status !== 'ödənilib') continue;
+    const t = total(o);
+    acc.cemi += t;
+    const debt = Math.min(o.courierDebt ?? 0, t);
+    if (debt > 0) {
+      const counts = !paidInView || paidInView.has(o.id);
+      const card = counts ? Math.min(o.courierCard ?? 0, debt) : 0;
+      const cash = counts ? Math.min(o.courierCash ?? 0, debt - card) : 0;
+      acc.kart += card;
+      acc.nagd += cash;
+      acc.kuryer += debt - card - cash;
+    }
+    // What was paid at the till, card first — any change went back in cash.
+    const rest = t - debt;
+    const cardPart = Math.min(o.cardAmount ?? 0, rest);
+    acc.kart += cardPart;
+    acc.nagd += Math.min(o.cashAmount ?? 0, rest - cardPart);
+  }
+  return acc;
+}

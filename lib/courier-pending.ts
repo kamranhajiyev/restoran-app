@@ -96,3 +96,21 @@ export function kassaSales(
   const kart = r2(s.card - (s.courierCard ?? 0));
   return { nagd: r2(s.cash), kart, kuryer: s.courierSales, kuryerOut: s.courier ?? 0, total: r2(s.cash + kart + s.courierSales) };
 }
+
+/** What couriers handed over in a window: the money by road, and the orders
+ *  those payments named — so Tarixçə can tell a delivery paid back inside a
+ *  shift from one paid in a later one. */
+export type Collections = { nagd: number; kart: number; paidOrderIds?: string[] };
+
+export function sumCollections(
+  rows: { amount: unknown; method: string | null; order_ids?: string[] | null }[],
+): Collections {
+  const ids = new Set<string>();
+  const acc = { nagd: 0, kart: 0 };
+  for (const p of rows) {
+    if (p.method === 'kart') acc.kart += Number(p.amount ?? 0);
+    else acc.nagd += Number(p.amount ?? 0);
+    for (const id of p.order_ids ?? []) ids.add(id);
+  }
+  return { ...acc, paidOrderIds: [...ids] };
+}
