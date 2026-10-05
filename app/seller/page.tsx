@@ -24,7 +24,7 @@ import { applyBrand } from '@/lib/branding';
 import { orderClosedAt } from '@/lib/order-items';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
 import { courierOwed } from '@/lib/courier-pending';
-import { courierOutstanding, shiftsOfDay, shiftWindow, type HistoryShift } from '@/lib/history-shifts';
+import { courierOutstanding, ordersOfShift, shiftLoadWindow, shiftsOfDay, shiftWindow, type HistoryShift } from '@/lib/history-shifts';
 import { CashShift, Category, Courier, CourierPayMethod, CourierPendingOrder, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, openCashDrawer } from '@/lib/printer';
@@ -2373,11 +2373,15 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     // leave Tarixçə empty. A shift can only be picked once the list is in.
     const picked = historyShifts.find(s => s.id === historyShiftId);
     const { from, to } = picked ? shiftWindow(picked, now) : { from: dayStart, to: now };
-    const load = overrideCompanyId
-      ? tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=500`)
+    // A shift's orders are the ones it was paid in (ordersOfShift), so the
+    // fetch reaches back for orders opened before it began.
+    const fetchWin = picked ? shiftLoadWindow(picked, now) : { from, to };
+    const load: Promise<Order[]> = overrideCompanyId
+      ? tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&from=${encodeURIComponent(fetchWin.from)}&to=${encodeURIComponent(fetchWin.to)}&limit=1000`)
           .then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
-      : fetchOrders({ from, to, limit: 500 });
-    load.then(setHistoryOrders).finally(() => setHistoryLoading(false));
+      : fetchOrders({ from: fetchWin.from, to: fetchWin.to, limit: 1000 });
+    load.then(list => setHistoryOrders(picked ? ordersOfShift(list, picked, now) : list))
+      .finally(() => setHistoryLoading(false));
     courierCollections(from, to, overrideCompanyId).then(setHistoryCollected);
     // siteGet, not tillFetch: the till keeps only the open shift, and closed
     // ones are what this list is for. Offline the picker simply stays hidden.
@@ -3166,7 +3170,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                         onClick={() => setHistoryShiftId(s?.id ?? null)}
                         className={`px-3 py-1.5 text-sm rounded-xl border whitespace-nowrap transition-colors ${on ? 'bg-primary-800 border-primary-800 text-white font-medium' : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'}`}
                       >
-                        {s ? `Smen ${i} · ${time(s.openedAt)}–${s.closedAt ? time(s.closedAt) : ''}` : 'Bütün gün'}
+                        {s ? `Növbə ${i} · ${time(s.openedAt)}–${s.closedAt ? time(s.closedAt) : ''}` : 'Bütün gün'}
                       </button>
                     );
                   })}

@@ -5,7 +5,7 @@
 // open its receipts one by one.
 
 import { describe, expect, it } from 'vitest';
-import { courierOutstanding, shiftsOfDay, shiftWindow } from '@/lib/history-shifts';
+import { courierOutstanding, ordersOfShift, shiftLoadWindow, shiftsOfDay, shiftWindow } from '@/lib/history-shifts';
 
 const dayStart = '2026-10-05T04:00:00.000Z';
 const now = '2026-10-05T18:00:00.000Z';
@@ -47,5 +47,37 @@ describe('courierOutstanding', () => {
       { status: 'gözləyir', courierDebt: 12 },                      // not closed yet
     ];
     expect(courierOutstanding(orders)).toBe(40);
+  });
+});
+
+// Latte Art, 2026-10-05: the morning cashier left orders open and the evening
+// one took the money. Kassa counted them in the evening, Tarixçə in the
+// morning, and the two screens disagreed by exactly those orders.
+describe('ordersOfShift', () => {
+  const morning = { id: 'm', openedBy: 'A', openedAt: '2026-10-05T06:00:00.000Z', closedAt: '2026-10-05T14:00:00.000Z' };
+  const evening = { id: 'e', openedBy: 'B', openedAt: '2026-10-05T14:00:00.000Z' };
+  const paidLater = { id: 'x', status: 'ödənilib' as const, createdAt: '2026-10-05T13:00:00.000Z', paidAt: '2026-10-05T15:00:00.000Z' };
+  const paidMorning = { id: 'y', status: 'ödənilib' as const, createdAt: '2026-10-05T08:00:00.000Z', paidAt: '2026-10-05T09:00:00.000Z' };
+  const stillOpen = { id: 'z', status: 'gözləyir' as const, createdAt: '2026-10-05T12:00:00.000Z' };
+  const atHandover = { id: 'h', status: 'ödənilib' as const, createdAt: '2026-10-05T13:30:00.000Z', paidAt: '2026-10-05T14:00:00.000Z' };
+  const all = [paidLater, paidMorning, stillOpen, atHandover];
+  const ids = (s: typeof morning | typeof evening) => ordersOfShift(all, s, now).map(o => o.id).sort();
+
+  it('puts an order in the shift that took the money, not the one that opened it', () => {
+    expect(ids(morning)).toEqual(['y']);
+    expect(ids(evening)).toContain('x');
+  });
+
+  it('keeps an order still open in the shift still running', () => {
+    expect(ids(evening)).toContain('z');
+    expect(ids(morning)).not.toContain('z');
+  });
+
+  it('gives an order paid at the handover to one shift only', () => {
+    expect([...ids(morning), ...ids(evening)].filter(id => id === 'h')).toHaveLength(1);
+  });
+
+  it('fetches far enough back to find an order opened the day before', () => {
+    expect(shiftLoadWindow(evening, now).from).toBe('2026-10-04T14:00:00.000Z');
   });
 });
