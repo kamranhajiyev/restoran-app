@@ -653,7 +653,6 @@ function AdminPageContent() {
   const [placeFilter, setPlaceFilter] = useState<PlaceKind | ''>('');
   const [courierFilter, setCourierFilter] = useState('');
   const [payFilter, setPayFilter] = useState<'' | 'cash' | 'card'>('');
-  const [onlyOnline, setOnlyOnline] = useState(false);
   // Date range for the orders tab. The presets above only filter the loaded page,
   // so a picked range is fetched from the server instead — that's the only way to
   // reach orders older than the last 200.
@@ -2084,7 +2083,6 @@ function AdminPageContent() {
     // A link order with nobody sent yet has no courier id, so filtering by a
     // named rider correctly leaves it out — it is not theirs until it is.
     (!courierFilter || o.courierId === courierFilter) &&
-    (!onlyOnline || !!o.online) &&
     // A courier's money is booked on courierCash/courierCard, not the till
     // fields, so both roads count. A split payment belongs to both filters.
     (!payFilter || (payFilter === 'cash'
@@ -3116,13 +3114,14 @@ function AdminPageContent() {
                     onChange={e => {
                       const next = e.target.value as PlaceKind | '';
                       setPlaceFilter(next);
-                      if (next !== 'delivery') setCourierFilter('');
+                      if (next !== 'delivery' && next !== 'online') setCourierFilter('');
                     }}
                     className={`text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors focus:outline-none focus:border-primary-300 ${placeFilter ? 'bg-primary-50 border-primary-300 text-primary-900' : 'bg-white border-stone-200 text-stone-600'}`}
                   >
                     <option value="">Hamısı</option>
                     {tablesOn && <option value="masa">Masa</option>}
                     {deliveryOn && <option value="delivery">Çatdırılma</option>}
+                    {deliveryOn && <option value="online">Onlayn sifariş</option>}
                     <option value="takeaway">Takeaway</option>
                   </select>
                 )}
@@ -3130,7 +3129,7 @@ function AdminPageContent() {
                 {/* Only once the list is deliveries. Asking "which courier"
                     about masa and takeaway orders is asking about rows that by
                     definition have none. */}
-                {deliveryOn && placeFilter === 'delivery' && courierOptions.length > 0 && (
+                {deliveryOn && (placeFilter === 'delivery' || placeFilter === 'online') && courierOptions.length > 0 && (
                   <select
                     value={courierFilter}
                     onChange={e => setCourierFilter(e.target.value)}
@@ -3151,19 +3150,9 @@ function AdminPageContent() {
                   <option value="card">Kart</option>
                 </select>
 
-                {deliveryOn && (
+                {(placeFilter || courierFilter || payFilter) && (
                   <button
-                    onClick={() => setOnlyOnline(v => !v)}
-                    title="Onlayn sifariş linkindən gələn sifarişlər"
-                    className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${onlyOnline ? 'bg-primary-800 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}
-                  >
-                    Onlayn
-                  </button>
-                )}
-
-                {(placeFilter || courierFilter || payFilter || onlyOnline) && (
-                  <button
-                    onClick={() => { setPlaceFilter(''); setCourierFilter(''); setPayFilter(''); setOnlyOnline(false); }}
+                    onClick={() => { setPlaceFilter(''); setCourierFilter(''); setPayFilter(''); }}
                     className="text-xs font-medium px-3 py-1.5 rounded-lg bg-white border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors"
                   >
                     Filtri sıfırla

@@ -6,6 +6,8 @@
 // width. We lay out to 47 rather than 48 on purpose: a line that exactly fills
 // the carriage makes the printer wrap on its own, and that wrap lands on top of
 // our own newline — which is what pushed every price one row below its name.
+import { PLACE_WORDS } from './order-place';
+
 export const WIDTH = 47;
 
 // CP857 (IBM Turkish) carries every Azerbaijani letter except ə. The index is
@@ -116,10 +118,29 @@ export interface TicketPayload {
   // Set on a courier order. Without it the ticket says "Takeaway" and the food
   // waits on the counter for a guest who is not coming.
   courier?: string | null;
+  // A guest's order from the menu link. With no rider on it yet it is still a
+  // delivery, and "Takeaway" sent the food to the counter (Latte Art,
+  // 2026-10-05).
+  online?: boolean;
   waiter: string | null;
   note?: string | null;
   at: string;
   items: TicketItem[];
+}
+
+/**
+ * Where the food goes, in the words the till's screen uses (PLACE_WORDS):
+ * the table, or "Onlayn sifariş" / "Çatdırılma" / "Takeaway", with the rider
+ * on a line of his own once there is one. A move slip names both tables.
+ */
+export function placeLines(p: TicketPayload, place: (table: number) => string): string[] {
+  if (p.kind === 'move') {
+    const name = (t: number | null | undefined) => (t ? place(t) : PLACE_WORDS.takeaway);
+    return [`${name(p.fromTable)} -> ${name(p.table)}`];
+  }
+  if (p.table) return [place(p.table)];
+  const head = p.online ? PLACE_WORDS.online : p.courier ? PLACE_WORDS.delivery : PLACE_WORDS.takeaway;
+  return p.courier ? [head, `Kuryer: ${p.courier}`] : [head];
 }
 
 const HEADING: Record<TicketPayload['kind'], string> = {
@@ -157,22 +178,13 @@ export function buildStationTicket(p: TicketPayload): Uint8Array {
     lines.push(ESC.BOLD_ON, `${HEADING[p.kind]}\n`, ESC.BOLD_OFF);
   }
 
-  const tableLabel = (t: number | null | undefined) => (t ? String(t) : 'Takeaway');
-
   lines.push(
     '-'.repeat(WIDTH) + '\n',
     ESC.LEFT,
     `Sifariş #${p.orderNumber ?? '-'}\n`,
   );
-  // The old table is the whole point of a move slip: the ticket already at this
-  // station names it, and that's the one being corrected.
-  if (p.kind === 'move') {
-    lines.push(ESC.BOLD_ON, `Masa: ${tableLabel(p.fromTable)} -> ${tableLabel(p.table)}\n`, ESC.BOLD_OFF);
-  } else if (p.courier) {
-    lines.push(ESC.BOLD_ON, `KURYER: ${p.courier}\n`, ESC.BOLD_OFF);
-  } else {
-    lines.push(`Masa: ${tableLabel(p.table)}\n`);
-  }
+  // Bold: across a hot kitchen this line says where the plate goes.
+  lines.push(ESC.BOLD_ON, ...placeLines(p, t => `Masa ${t}`).map(l => `${l}\n`), ESC.BOLD_OFF);
   lines.push(`${when}\n`);
   if (p.waiter) lines.push(`Ofisiant: ${p.waiter}\n`);
   lines.push('='.repeat(WIDTH) + '\n');

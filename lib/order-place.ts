@@ -11,8 +11,16 @@
 
 import type { Order, RestaurantTable } from '@/types';
 
-/** The three destinations, for filtering. Naming them is `orderPlace`'s job. */
-export type PlaceKind = 'masa' | 'delivery' | 'takeaway';
+/** The words for an order with no table — on the screen and on every ticket,
+ *  so the kitchen reads what the till shows. */
+export const PLACE_WORDS = {
+  online: 'Onlayn sifariş',
+  delivery: 'Çatdırılma',
+  takeaway: 'Takeaway',
+} as const;
+
+/** The destinations, for filtering. Naming them is `orderPlace`'s job. */
+export type PlaceKind = 'masa' | 'delivery' | 'online' | 'takeaway';
 
 /** What the company actually runs. Both toggles off is a valid setup — a shop
  *  that only ever hands food across the counter. */
@@ -26,6 +34,9 @@ type PlaceOrder = Pick<Order, 'tableNumber' | 'courierId' | 'online'>;
 
 export function orderPlaceKind(order: PlaceOrder, cfg: Pick<PlaceConfig, 'deliveryOn'>): PlaceKind {
   if (order.tableNumber) return 'masa';
+  // A guest who ordered through the menu link is told apart from a delivery the
+  // seller took on the phone: nobody at the counter has spoken to them yet.
+  if (order.online) return 'online';
   // A courier is assigned when the seller takes a delivery; a link order has no
   // courier until someone is sent, and is a delivery from the moment it lands.
   // Both read the same to the waiter, so both get the same word.
@@ -62,9 +73,7 @@ export function orderPlace(order: PlaceOrder, cfg: PlaceConfig): string {
   if (kind === 'masa') {
     return cfg.tables.find(t => t.id === order.tableNumber)?.name ?? `Masa ${order.tableNumber}`;
   }
-  // A guest who ordered through the menu link is told apart from a delivery the
-  // seller took on the phone: nobody at the counter has spoken to them yet.
-  if (order.online) return 'Onlayn sifariş';
-  if (kind === 'delivery') return 'Çatdırılma';
-  return cfg.tablesOn || cfg.deliveryOn ? 'Takeaway' : '';
+  if (kind === 'online') return PLACE_WORDS.online;
+  if (kind === 'delivery') return PLACE_WORDS.delivery;
+  return cfg.tablesOn || cfg.deliveryOn ? PLACE_WORDS.takeaway : '';
 }

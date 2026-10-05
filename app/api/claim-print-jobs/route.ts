@@ -62,5 +62,30 @@ export async function POST(req: NextRequest) {
   // The update returns rows in no particular order; tickets must come out in
   // the order they were made.
   const sorted = (jobs ?? []).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
-  return Response.json({ ok: true, jobs: sorted });
+  return Response.json({ ok: true, jobs: await withDelivery(db, companyId, sorted) });
+}
+
+type Job = { order_id: string | null; payload: Record<string, unknown> | null };
+
+/**
+ * The database's tickets name the table and nothing else, so a delivery —
+ * a guest's order from the menu link, or one handed to a rider — printed as
+ * "Takeaway" and the food went to the counter (Latte Art, 2026-10-05). Added
+ * here, at hand-out, so the tickets need no new trigger.
+ */
+async function withDelivery<T extends Job>(db: ReturnType<typeof createServerClient>, companyId: string, jobs: T[]): Promise<T[]> {
+  const ids = [...new Set(jobs.map(j => j.order_id).filter((id): id is string => !!id))];
+  if (ids.length === 0) return jobs;
+  const { data: orders } = await db.from('orders')
+    .select('id, online, courier_id').eq('company_id', companyId).in('id', ids);
+  const courierIds = [...new Set((orders ?? []).map(o => o.courier_id).filter((id): id is string => !!id))];
+  const { data: couriers } = courierIds.length
+    ? await db.from('couriers').select('id, name').eq('company_id', companyId).in('id', courierIds)
+    : { data: [] as { id: string; name: string }[] };
+  return jobs.map(j => {
+    const o = (orders ?? []).find(r => r.id === j.order_id);
+    if (!o || !j.payload) return j;
+    const courier = (couriers ?? []).find(c => c.id === o.courier_id)?.name ?? null;
+    return { ...j, payload: { ...j.payload, online: o.online === true, courier: j.payload.courier ?? courier } };
+  });
 }

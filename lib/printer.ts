@@ -3,6 +3,7 @@ import { stringToBytes, ESC, WIDTH } from './escpos';
 import { rasterize, type Line, type Logo } from './raster';
 import { loadLogo } from './logo';
 import { orderLabel } from './order-label';
+import { PLACE_WORDS } from './order-place';
 
 // Any USB printer, not one model. The till first ran an XP-Q806K (1FC9:2016)
 // and the next one is an XP-S200M, whose ID nobody wrote down; a filter on one
@@ -153,7 +154,10 @@ function head(order: Order, companyName: string, heading?: string, table?: strin
     { text: `Sifariş #${orderLabel(order)}`, center: true },
     // The table's name, not its id — see tableTitle in lib/order-place.ts. The id
     // is only there for a caller that has no table list to look it up in.
-    { text: order.tableNumber === 0 ? 'Masa: Takeaway' : table ?? `Masa: ${order.tableNumber}`, center: true },
+    // The same words as the till's screen (PLACE_WORDS).
+    { text: order.tableNumber === 0
+        ? (order.online ? PLACE_WORDS.online : order.courierId ? PLACE_WORDS.delivery : PLACE_WORDS.takeaway)
+        : table ?? `Masa: ${order.tableNumber}`, center: true },
     { text: date, center: true },
     { text: `Ofisiant: ${order.sellerName}`, center: true },
     { text: '='.repeat(WIDTH) },

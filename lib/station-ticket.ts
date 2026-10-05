@@ -11,7 +11,7 @@
 // agent/ runs in Node with no DOM and keeps using the character path. Both
 // build the same layout, so a change to one belongs in the other.
 
-import { ESC, WIDTH, itemRows, noteRows, stringToBytes, wrap, type TicketPayload } from './escpos';
+import { ESC, placeLines, WIDTH, itemRows, noteRows, stringToBytes, wrap, type TicketPayload } from './escpos';
 import { rasterize, type Line } from './raster';
 
 // Dish names a step up from `big`, wider as well as taller, so the cook can read
@@ -38,8 +38,7 @@ const HEADING: Record<TicketPayload['kind'], string> = {
  * "Masa 1" at id 51, and a ticket that said 51 sent the cook nowhere.
  */
 export function buildStationTicketRaster(p: TicketPayload, tableName?: (id: number) => string): Uint8Array {
-  const place = (t: number | null | undefined) =>
-    !t ? 'Takeaway' : tableName ? tableName(t) : `Masa ${t}`;
+  const place = (t: number) => (tableName ? tableName(t) : `Masa ${t}`);
 
   const when = new Date(p.at).toLocaleString('az-AZ', {
     day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
@@ -60,17 +59,7 @@ export function buildStationTicketRaster(p: TicketPayload, tableName?: (id: numb
     p.kind === 'note' ? { text: number, scale: NOTE_NUMBER_SCALE } : { text: number },
   );
 
-  // The old table is the whole point of a move slip: the ticket already at this
-  // station names it, and that's the one being corrected.
-  lines.push(
-    p.kind === 'move'
-      ? { text: `${place(p.fromTable)} -> ${place(p.table)}` }
-      // A courier order has no table, and "Takeaway" would send the food to the
-      // counter instead of to the rider waiting for it.
-      : p.courier
-      ? { text: `KURYER: ${p.courier}` }
-      : { text: place(p.table) },
-  );
+  lines.push(...placeLines(p, place).map(text => ({ text })));
 
   lines.push({ text: when });
   if (p.waiter) lines.push({ text: `Ofisiant: ${p.waiter}` });
