@@ -1,9 +1,16 @@
 #!/bin/sh
-# Runs every test before a push. A red test means a restaurant would get the
-# bug, so the push stops. Skip only in an emergency: git push --no-verify
+# Runs the tests and the type check before a push. Either failing means the
+# restaurants would get the bug, or Vercel would refuse the build, so the push
+# stops. Skip only in an emergency: git push --no-verify
 echo "Running tests before push..."
 npm test --silent || {
   echo ""
   echo "Tests failed — push stopped. Fix them, or in an emergency: git push --no-verify"
+  exit 1
+}
+echo "Type checking..."
+npx tsc --noEmit -p . || {
+  echo ""
+  echo "Type check failed — Vercel would refuse this build. Push stopped."
   exit 1
 }
