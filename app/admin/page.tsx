@@ -63,6 +63,7 @@ import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt } from '
 import { isDesktop } from '@/lib/desktopPrint';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
 import { orderPlace, orderPlaceKind, PlaceKind, tableTitle } from '@/lib/order-place';
+import { placeSales, tableSales } from '@/lib/place-sales';
 import OrderNote from '@/components/OrderNote';
 
 // RPC raise messages are machine codes — translated here for display
@@ -652,6 +653,7 @@ function AdminPageContent() {
   // already loaded — no refetch — and neither touches the statistics tab, which
   // reads statsOrders and never these.
   const [placeFilter, setPlaceFilter] = useState<PlaceKind | ''>('');
+  const [tablesOpen, setTablesOpen] = useState(false);
   const [courierFilter, setCourierFilter] = useState('');
   const [payFilter, setPayFilter] = useState<'' | 'cash' | 'card'>('');
   // Date range for the orders tab. The presets above only filter the loaded page,
@@ -2864,6 +2866,50 @@ function AdminPageContent() {
                               <div className={`h-full rounded-full transition-all ${profit >= 0 ? 'bg-green-400' : 'bg-red-400'}`}
                                 style={{ width: `${(Math.abs(profit) / maxRepCatProfit) * 100}%` }} />
                             </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-white rounded-xl border border-stone-100 card p-5">
+                  <h3 className="font-semibold text-stone-800 text-sm mb-4">Satış tipləri</h3>
+                  {chartRevenue === 0 ? (
+                    <p className="text-sm text-stone-400 text-center py-4">Məlumat yoxdur</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {placeSales(chartPaid, deliveryOn, orderTotal).map(ps => {
+                        const pct = (ps.rev / chartRevenue) * 100;
+                        const isMasa = ps.kind === 'masa';
+                        return (
+                          <div key={ps.kind}>
+                            <div
+                              className={`flex justify-between items-center mb-1.5 ${isMasa ? 'cursor-pointer select-none' : ''}`}
+                              onClick={isMasa ? () => setTablesOpen(v => !v) : undefined}
+                            >
+                              <span className="text-sm text-stone-600 flex items-center gap-1">
+                                {isMasa && <ChevronDown className={`w-3.5 h-3.5 text-stone-400 transition-transform ${tablesOpen ? '' : '-rotate-90'}`} />}
+                                {ps.label} <span className="text-xs text-stone-400">({ps.count})</span>
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-stone-500">{pct.toFixed(0)}%</span>
+                                <span className="font-semibold text-stone-800 text-sm">{ps.rev.toFixed(2)} ₼</span>
+                              </div>
+                            </div>
+                            <div className="h-1.5 bg-stone-100 rounded-full overflow-hidden">
+                              <div className="h-full bg-primary-700 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                            </div>
+                            {isMasa && tablesOpen && (
+                              <div className="mt-2 ml-5 space-y-1">
+                                {tableSales(chartPaid, tables, orderTotal).map(t => (
+                                  <div key={t.name} className="flex justify-between text-xs text-stone-600">
+                                    <span>{t.name} <span className="text-stone-400">({t.count})</span></span>
+                                    <span className="font-semibold text-stone-700">{t.rev.toFixed(2)} ₼</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
