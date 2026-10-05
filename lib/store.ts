@@ -2,7 +2,7 @@ import { guardQuery, refusal } from './order-rules';
 import { CashShift, Category, Courier, CourierLedger, CourierPayMethod, CourierPayment, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
-import { courierPending } from './courier-pending';
+import { courierPending, courierStillOut, type ShiftSales } from './courier-pending';
 import { printedStationColumn } from './stations';
 import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
@@ -2632,19 +2632,19 @@ export async function closeShift(
 // Cash/card taken since the shift opened (paid orders only, by payment time —
 // an order created yesterday but paid during this shift counts). cash_amount is
 // net of change — i.e. exactly what went into the drawer.
-export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promise<{ cash: number; card: number }> {
+export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promise<ShiftSales> {
   // Payments made during an outage exist only on this machine until they sync,
   // so a drawer reconciled against the server would read short by exactly what
   // the till took while the line was down.
   const local = await fromLocal(opts, (till, companyId) =>
-    till.shiftSales(companyId, openedAt) as Promise<{ cash: number; card: number }>);
+    till.shiftSales(companyId, openedAt) as Promise<ShiftSales>);
   if (local) return local;
 
   try {
     const [{ data, error }, { data: courierCard }] = await Promise.all([
       supabase
         .from('orders')
-        .select('cash_amount, card_amount')
+        .select('cash_amount, card_amount, courier_debt, courier_cash, courier_card')
         .eq('status', 'ödənilib')
         .gte('paid_at', openedAt),
       // Courier settlements by card land on the bank terminal — see
@@ -2655,11 +2655,12 @@ export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promis
         .eq('method', 'kart')
         .gte('created_at', openedAt),
     ]);
-    if (error || !data) return { cash: 0, card: 0 };
+    if (error || !data) return { cash: 0, card: 0, courier: 0 };
     return {
       cash: data.reduce((s, o) => s + Number(o.cash_amount ?? 0), 0),
       card: data.reduce((s, o) => s + Number(o.card_amount ?? 0), 0)
         + (courierCard ?? []).reduce((s, p) => s + Number(p.amount ?? 0), 0),
+      courier: courierStillOut(data),
     };
-  } catch { return { cash: 0, card: 0 }; }
+  } catch { return { cash: 0, card: 0, courier: 0 }; }
 }

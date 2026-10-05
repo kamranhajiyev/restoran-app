@@ -112,4 +112,17 @@ describe("exe till", () => {
     expect(pay("A", "pay:A", "company-2")).toEqual({ ok: false, error: "not_found" });
     expect(repo.getOrder("A")?.status).toBe("gözləyir");
   });
+
+  // Latte Art, 2026-10-05: Tarixçə said 60 ₼ (20 cash, 10 card, 30 on the
+  // courier) and the Kassa said 30, because the rider's 30 was in no figure the
+  // Kassa added up.
+  it("counts what the courier still holds in the shift's sales", () => {
+    const openedAt = new Date(Date.now() - 60_000).toISOString();
+    newOrder("A");
+    till.applyWrite("pay:A", PAY, { orderId: "A", status: "ödənilib", cashAmount: 0, cardAmount: 0, courierDebt: 30 }, C);
+    newOrder("B");
+    pay("B");
+
+    expect(repo.getShiftSales(C, openedAt)).toEqual({ cash: 4.5, card: 0, courier: 30 });
+  });
 });

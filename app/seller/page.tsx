@@ -550,7 +550,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [shiftChecked, setShiftChecked] = useState(false);
   const [openCashInput, setOpenCashInput] = useState('');
   const [shiftBusy, setShiftBusy]       = useState(false);
-  const [shiftSales, setShiftSales]     = useState({ cash: 0, card: 0 });
+  const [shiftSales, setShiftSales]     = useState<{ cash: number; card: number; courier?: number }>({ cash: 0, card: 0 });
   const [countedInput, setCountedInput] = useState('');
   const [terminalInput, setTerminalInput] = useState('');
   const [movAmount, setMovAmount]       = useState('');
@@ -3451,6 +3451,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   const courierCash = shift.movements
                     .filter(m => m.reason === 'Kuryer ödənişi')
                     .reduce((t, m) => t + m.amount, 0);
+                  // Sold, but still with the rider: in neither the drawer nor
+                  // the terminal. Counted in the total so Kassa matches
+                  // Tarixçə; when he pays it moves into Nağd and the total
+                  // stays put. Absent from an older exe's answer, hence ?? 0.
+                  const courierOut = shiftSales.courier ?? 0;
                   return (
                     <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5 space-y-2.5">
                       <div className="flex justify-between text-sm text-stone-600">
@@ -3462,8 +3467,13 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                       <div className="flex justify-between text-sm text-stone-600">
                         <span>Kart satışı</span><span className="font-semibold">{shiftSales.card.toFixed(2)} ₼</span>
                       </div>
+                      {courierOut > 0.005 && (
+                        <div className="flex justify-between text-sm text-stone-600">
+                          <span>Kuryerdə (ödənməyib)</span><span className="font-semibold">{courierOut.toFixed(2)} ₼</span>
+                        </div>
+                      )}
                       <div className="flex justify-between items-center border-t pt-3 font-bold text-lg">
-                        <span>Ümumi satış</span><span className="text-primary-700">{(shiftSales.cash + courierCash + shiftSales.card).toFixed(2)} ₼</span>
+                        <span>Ümumi satış</span><span className="text-primary-700">{(shiftSales.cash + courierCash + shiftSales.card + courierOut).toFixed(2)} ₼</span>
                       </div>
                     </div>
                   );

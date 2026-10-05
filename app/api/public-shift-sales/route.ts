@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { refuseTillRead } from '@/lib/till-read-auth';
+import { courierStillOut } from '@/lib/courier-pending';
 
 export async function GET(req: NextRequest) {
   const companyId = req.nextUrl.searchParams.get('companyId');
@@ -13,7 +14,7 @@ export async function GET(req: NextRequest) {
   const [{ data, error }, { data: courierCard }] = await Promise.all([
     db
       .from('orders')
-      .select('cash_amount, card_amount')
+      .select('cash_amount, card_amount, courier_debt, courier_cash, courier_card')
       .eq('company_id', companyId)
       .eq('status', 'ödənilib')
       .gte('paid_at', openedAt),
@@ -28,11 +29,12 @@ export async function GET(req: NextRequest) {
       .gte('created_at', openedAt),
   ]);
 
-  if (error || !data) return Response.json({ cash: 0, card: 0 });
+  if (error || !data) return Response.json({ cash: 0, card: 0, courier: 0 });
 
   return Response.json({
     cash: data.reduce((s, o) => s + Number(o.cash_amount ?? 0), 0),
     card: data.reduce((s, o) => s + Number(o.card_amount ?? 0), 0)
       + (courierCard ?? []).reduce((s, p) => s + Number(p.amount ?? 0), 0),
+    courier: courierStillOut(data),
   });
 }

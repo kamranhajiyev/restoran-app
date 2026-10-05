@@ -38,3 +38,21 @@ export function courierPending(rows: Row[]): Record<string, CourierPendingOrder[
 export function courierOwed(o: { courierDebt?: number; courierCash?: number; courierCard?: number }): number {
   return Math.max(0, (o.courierDebt ?? 0) - (o.courierCash ?? 0) - (o.courierCard ?? 0));
 }
+
+/** The kassa's shift sales: drawer cash, terminal card, and what riders still hold. */
+export type ShiftSales = { cash: number; card: number; courier: number };
+
+/**
+ * What riders still hold for these paid orders, as the server rows have it.
+ *
+ * The Kassa's "Ümumi satış" left it out, so a shift with 30 ₼ on a courier read
+ * 30 short of Tarixçə until the rider paid (Latte Art, 2026-10-05). Once he
+ * pays, it leaves this figure and arrives in the cash — the total stays put.
+ */
+export function courierStillOut(
+  rows: { courier_debt?: number | string | null; courier_cash?: number | string | null; courier_card?: number | string | null }[],
+): number {
+  const sum = rows.reduce((s, o) => s + Math.max(0,
+    Number(o.courier_debt ?? 0) - Number(o.courier_cash ?? 0) - Number(o.courier_card ?? 0)), 0);
+  return Math.round(sum * 100) / 100;
+}

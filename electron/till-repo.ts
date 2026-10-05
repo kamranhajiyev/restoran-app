@@ -376,7 +376,7 @@ export function putShift(companyId: string, shift: CashShift): void {
 }
 
 /** Cash and card taken since the shift opened. Mirrors /api/public-shift-sales. */
-export function getShiftSales(companyId: string, openedAt: string): { cash: number; card: number } {
+export function getShiftSales(companyId: string, openedAt: string): { cash: number; card: number; courier: number } {
   const row = db()
     .prepare(
       `select coalesce(sum(cash_amount), 0) as cash, coalesce(sum(card_amount), 0) as card
@@ -395,5 +395,23 @@ export function getShiftSales(companyId: string, openedAt: string): { cash: numb
     )
     .get(companyId, openedAt);
 
-  return { cash: Number(row?.cash ?? 0), card: Number(row?.card ?? 0) + Number(courier?.card ?? 0) };
+  // What the riders still hold for this shift's sales — sold, but in neither
+  // the drawer nor the terminal yet. Same rule as courierOwed in
+  // lib/courier-pending.ts; the amounts live in the doc.
+  const owed = db()
+    .prepare(
+      `select coalesce(sum(max(0,
+          coalesce(json_extract(doc, '$.courierDebt'), 0)
+        - coalesce(json_extract(doc, '$.courierCash'), 0)
+        - coalesce(json_extract(doc, '$.courierCard'), 0))), 0) as owed
+       from orders
+       where company_id = ? and status = 'ödənilib' and paid_at >= ?`,
+    )
+    .get(companyId, openedAt);
+
+  return {
+    cash: Number(row?.cash ?? 0),
+    card: Number(row?.card ?? 0) + Number(courier?.card ?? 0),
+    courier: Math.round(Number(owed?.owed ?? 0) * 100) / 100,
+  };
 }
