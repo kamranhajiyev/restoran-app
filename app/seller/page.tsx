@@ -23,7 +23,7 @@ import { unlockSound, armSoundOnFirstGesture, playOrderReady } from '@/lib/sound
 import { applyBrand } from '@/lib/branding';
 import { orderClosedAt } from '@/lib/order-items';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
-import { courierOwed } from '@/lib/courier-pending';
+import { courierOwed, kassaSales } from '@/lib/courier-pending';
 import { courierOutstanding, ordersOfShift, shiftLoadWindow, shiftsOfDay, shiftWindow, type HistoryShift } from '@/lib/history-shifts';
 import { CashShift, Category, Courier, CourierPayMethod, CourierPendingOrder, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
@@ -550,7 +550,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [shiftChecked, setShiftChecked] = useState(false);
   const [openCashInput, setOpenCashInput] = useState('');
   const [shiftBusy, setShiftBusy]       = useState(false);
-  const [shiftSales, setShiftSales]     = useState<{ cash: number; card: number; courier?: number }>({ cash: 0, card: 0 });
+  const [shiftSales, setShiftSales]     = useState<{ cash: number; card: number; courierCard?: number; courierSales?: number; courier?: number }>({ cash: 0, card: 0 });
   const [countedInput, setCountedInput] = useState('');
   const [terminalInput, setTerminalInput] = useState('');
   const [movAmount, setMovAmount]       = useState('');
@@ -3448,36 +3448,31 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   <p className="text-xs text-stone-500 mt-1">Kassaya daxil deyil — bank terminalından keçir</p>
                 </div>
 
-                {/* Sales — a rider settling a debt in cash reaches the drawer as a
-                    'Kuryer ödənişi' movement rather than an order payment, so it is
-                    added back here. Card settlements are already in shiftSales.card. */}
+                {/* Sales — each sale once: cash, card and this shift's courier
+                    deliveries. A rider paying back an earlier shift's delivery
+                    is money for the drawer, not a sale (kassaSales). */}
                 {(() => {
-                  const courierCash = shift.movements
+                  const k = kassaSales(shiftSales, shift.movements
                     .filter(m => m.reason === 'Kuryer ödənişi')
-                    .reduce((t, m) => t + m.amount, 0);
-                  // Sold, but still with the rider: in neither the drawer nor
-                  // the terminal. Counted in the total so Kassa matches
-                  // Tarixçə; when he pays it moves into Nağd and the total
-                  // stays put. Absent from an older exe's answer, hence ?? 0.
-                  const courierOut = shiftSales.courier ?? 0;
+                    .reduce((t, m) => t + m.amount, 0));
                   return (
                     <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5 space-y-2.5">
                       <div className="flex justify-between text-sm text-stone-600">
-                        <span>Nağd satış</span><span className="font-semibold">{(shiftSales.cash + courierCash).toFixed(2)} ₼</span>
+                        <span>Nağd satış</span><span className="font-semibold">{k.nagd.toFixed(2)} ₼</span>
                       </div>
-                      {Math.abs(courierCash) > 0.005 && (
-                        <p className="text-xs text-stone-400 text-right -mt-1.5">{courierCash.toFixed(2)} ₼ kuryerlərdən</p>
-                      )}
                       <div className="flex justify-between text-sm text-stone-600">
-                        <span>Kart satışı</span><span className="font-semibold">{shiftSales.card.toFixed(2)} ₼</span>
+                        <span>Kart satışı</span><span className="font-semibold">{k.kart.toFixed(2)} ₼</span>
                       </div>
-                      {courierOut > 0.005 && (
+                      {k.kuryer > 0.005 && (
                         <div className="flex justify-between text-sm text-stone-600">
-                          <span>Kuryerdə (ödənməyib)</span><span className="font-semibold">{courierOut.toFixed(2)} ₼</span>
+                          <span>Kuryer satışı</span><span className="font-semibold">{k.kuryer.toFixed(2)} ₼</span>
                         </div>
                       )}
+                      {k.kuryerOut > 0.005 && (
+                        <p className="text-xs text-stone-400 text-right -mt-1.5">{k.kuryerOut.toFixed(2)} ₼ hələ kuryerdədir</p>
+                      )}
                       <div className="flex justify-between items-center border-t pt-3 font-bold text-lg">
-                        <span>Ümumi satış</span><span className="text-primary-700">{(shiftSales.cash + courierCash + shiftSales.card + courierOut).toFixed(2)} ₼</span>
+                        <span>Ümumi satış</span><span className="text-primary-700">{k.total.toFixed(2)} ₼</span>
                       </div>
                     </div>
                   );

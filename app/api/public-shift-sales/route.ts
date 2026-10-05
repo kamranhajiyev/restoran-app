@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { refuseTillRead } from '@/lib/till-read-auth';
-import { courierStillOut } from '@/lib/courier-pending';
+import { courierSold, courierStillOut } from '@/lib/courier-pending';
 
 export async function GET(req: NextRequest) {
   const companyId = req.nextUrl.searchParams.get('companyId');
@@ -29,12 +29,14 @@ export async function GET(req: NextRequest) {
       .gte('created_at', openedAt),
   ]);
 
-  if (error || !data) return Response.json({ cash: 0, card: 0, courier: 0 });
+  if (error || !data) return Response.json({ cash: 0, card: 0, courierCard: 0, courierSales: 0, courier: 0 });
 
+  const settledByCard = (courierCard ?? []).reduce((s, p) => s + Number(p.amount ?? 0), 0);
   return Response.json({
     cash: data.reduce((s, o) => s + Number(o.cash_amount ?? 0), 0),
-    card: data.reduce((s, o) => s + Number(o.card_amount ?? 0), 0)
-      + (courierCard ?? []).reduce((s, p) => s + Number(p.amount ?? 0), 0),
+    card: data.reduce((s, o) => s + Number(o.card_amount ?? 0), 0) + settledByCard,
+    courierCard: settledByCard,
+    courierSales: courierSold(data),
     courier: courierStillOut(data),
   });
 }

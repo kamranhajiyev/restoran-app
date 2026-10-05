@@ -123,6 +123,6 @@ describe("exe till", () => {
     newOrder("B");
     pay("B");
 
-    expect(repo.getShiftSales(C, openedAt)).toEqual({ cash: 4.5, card: 0, courier: 30 });
+    expect(repo.getShiftSales(C, openedAt)).toEqual({ cash: 4.5, card: 0, courierCard: 0, courierSales: 30, courier: 30 });
   });
 });

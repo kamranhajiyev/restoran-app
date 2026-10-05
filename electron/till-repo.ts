@@ -376,7 +376,9 @@ export function putShift(companyId: string, shift: CashShift): void {
 }
 
 /** Cash and card taken since the shift opened. Mirrors /api/public-shift-sales. */
-export function getShiftSales(companyId: string, openedAt: string): { cash: number; card: number; courier: number } {
+export function getShiftSales(
+  companyId: string, openedAt: string,
+): { cash: number; card: number; courierCard: number; courierSales: number; courier: number } {
   const row = db()
     .prepare(
       `select coalesce(sum(cash_amount), 0) as cash, coalesce(sum(card_amount), 0) as card
@@ -403,15 +405,19 @@ export function getShiftSales(companyId: string, openedAt: string): { cash: numb
       `select coalesce(sum(max(0,
           coalesce(json_extract(doc, '$.courierDebt'), 0)
         - coalesce(json_extract(doc, '$.courierCash'), 0)
-        - coalesce(json_extract(doc, '$.courierCard'), 0))), 0) as owed
+        - coalesce(json_extract(doc, '$.courierCard'), 0))), 0) as owed,
+        coalesce(sum(coalesce(json_extract(doc, '$.courierDebt'), 0)), 0) as sold
        from orders
        where company_id = ? and status = 'ödənilib' and paid_at >= ?`,
     )
     .get(companyId, openedAt);
 
+  const r2 = (n: unknown) => Math.round(Number(n ?? 0) * 100) / 100;
   return {
     cash: Number(row?.cash ?? 0),
     card: Number(row?.card ?? 0) + Number(courier?.card ?? 0),
-    courier: Math.round(Number(owed?.owed ?? 0) * 100) / 100,
+    courierCard: r2(courier?.card),
+    courierSales: r2(owed?.sold),
+    courier: r2(owed?.owed),
   };
 }

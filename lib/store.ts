@@ -2,7 +2,7 @@ import { guardQuery, refusal } from './order-rules';
 import { CashShift, Category, Courier, CourierLedger, CourierPayMethod, CourierPayment, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
-import { courierPending, courierStillOut, type ShiftSales } from './courier-pending';
+import { courierPending, courierSold, courierStillOut, type ShiftSales } from './courier-pending';
 import { printedStationColumn } from './stations';
 import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
@@ -2655,12 +2655,14 @@ export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promis
         .eq('method', 'kart')
         .gte('created_at', openedAt),
     ]);
-    if (error || !data) return { cash: 0, card: 0, courier: 0 };
+    if (error || !data) return { cash: 0, card: 0, courierCard: 0, courierSales: 0, courier: 0 };
+    const settledByCard = (courierCard ?? []).reduce((s, p) => s + Number(p.amount ?? 0), 0);
     return {
       cash: data.reduce((s, o) => s + Number(o.cash_amount ?? 0), 0),
-      card: data.reduce((s, o) => s + Number(o.card_amount ?? 0), 0)
-        + (courierCard ?? []).reduce((s, p) => s + Number(p.amount ?? 0), 0),
+      card: data.reduce((s, o) => s + Number(o.card_amount ?? 0), 0) + settledByCard,
+      courierCard: settledByCard,
+      courierSales: courierSold(data),
       courier: courierStillOut(data),
     };
-  } catch { return { cash: 0, card: 0, courier: 0 }; }
+  } catch { return { cash: 0, card: 0, courierCard: 0, courierSales: 0, courier: 0 }; }
 }
