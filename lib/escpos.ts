@@ -85,6 +85,21 @@ export function wrap(text: string, cols: number): string[] {
   return rows;
 }
 
+// An order's note as ticket rows, word-wrapped. An online order's note is
+// "Tel: … · Ünvan: … · what the guest wrote", and printed as one line it ran
+// off the paper and took the guest's words with it (Test Restoran, 2026-10-05,
+// "Dolmaları sarımsaqsız…"). Phone and address get a row each, and the guest's
+// words come last under Qeyd, where the cook looks for them.
+export function noteRows(note: string, cols = WIDTH): string[] {
+  const parts = note.split(/\n| · /).map(s => s.trim()).filter(Boolean);
+  const contact = parts.filter(s => /^(Tel|Ünvan):/.test(s));
+  const rest = parts.filter(s => !/^(Tel|Ünvan):/.test(s)).join(' · ');
+  return [
+    ...contact.flatMap(s => wrap(s, cols)),
+    ...(rest ? wrap(`Qeyd: ${rest}`, cols) : []),
+  ];
+}
+
 // What the trigger froze into print_jobs.payload.
 export interface TicketItem {
   name: string;
@@ -178,7 +193,7 @@ export function buildStationTicket(p: TicketPayload): Uint8Array {
   }
 
   lines.push('='.repeat(WIDTH) + '\n');
-  if (p.note && p.kind !== 'note') lines.push(`Qeyd: ${p.note}\n`);
+  if (p.note && p.kind !== 'note') for (const row of noteRows(p.note)) lines.push(`${row}\n`);
   lines.push('\n\n\n', ESC.CUT);
 
   return encode(lines);

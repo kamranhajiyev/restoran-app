@@ -11,7 +11,7 @@
 // agent/ runs in Node with no DOM and keeps using the character path. Both
 // build the same layout, so a change to one belongs in the other.
 
-import { ESC, WIDTH, itemRows, stringToBytes, wrap, type TicketPayload } from './escpos';
+import { ESC, WIDTH, itemRows, noteRows, stringToBytes, wrap, type TicketPayload } from './escpos';
 import { rasterize, type Line } from './raster';
 
 // Dish names a step up from `big`, wider as well as taller, so the cook can read
@@ -92,7 +92,7 @@ export function buildStationTicketRaster(p: TicketPayload, tableName?: (id: numb
   }
 
   lines.push({ text: '='.repeat(WIDTH) });
-  if (p.note && p.kind !== 'note') lines.push({ text: `Qeyd: ${p.note}` });
+  if (p.note && p.kind !== 'note') for (const row of noteRows(p.note)) lines.push({ text: row });
 
   const head = new Uint8Array(stringToBytes(ESC.INIT + ESC.LEFT));
   const image = rasterize(lines, WIDTH);

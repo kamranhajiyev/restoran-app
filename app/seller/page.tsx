@@ -12,7 +12,7 @@ import { getSession, logout, validateSession, clearLocalSession, homeFor } from 
 import { supabase } from '@/lib/supabase';
 import {
   fetchMenu, addOrder, addItemsToOrder, removeOrderItems, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, fetchCategories, setCompanyContext, fetchTables, fetchHalls,
-  fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchOpenShift, openShift, closeShift, addShiftMovement, fetchShiftSales,
+  fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchOpenShift, fetchShifts, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, fetchStaff, verifyStaffPin, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
   fetchStations, fetchStationReady, fetchStationReadyOrNull, fetchModifierGroups, type StationReady,
@@ -24,6 +24,7 @@ import { applyBrand } from '@/lib/branding';
 import { orderClosedAt } from '@/lib/order-items';
 import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
 import { courierOwed } from '@/lib/courier-pending';
+import { courierOutstanding, shiftsOfDay, shiftWindow, type HistoryShift } from '@/lib/history-shifts';
 import { CashShift, Category, Courier, CourierPayMethod, CourierPendingOrder, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
 import OrderItemHistory from '@/components/OrderItemHistory';
@@ -494,6 +495,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   // order history
   const [historySearch, setHistorySearch]   = useState('');
   const [historyPay, setHistoryPay]         = useState<'all' | 'nagd' | 'kart' | 'kuryer'>('all');
+  const [historyShifts, setHistoryShifts]   = useState<HistoryShift[]>([]);
+  const [historyShiftId, setHistoryShiftId] = useState<string | null>(null);
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   // when set, the menu view appends items to this existing order instead of creating a new one
   const [appendOrderId, setAppendOrderId]   = useState<string | null>(null);
@@ -2304,19 +2307,36 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     return () => clearInterval(id);
   }, [shift, overrideCompanyId]);
 
-  useEffect(() => {
-    if (view !== 'history' || !bizSettings.timezone) return;
-    const todayStr = businessToday(bizSettings);
-    const from = businessDayStartUtc(todayStr, bizSettings).toISOString();
-    const to = new Date().toISOString();
+  // Today's orders, or one kassa shift's when one is picked in Tarixçə.
+  const loadHistory = useCallback(() => {
+    if (!bizSettings.timezone) return;
+    const dayStart = businessDayStartUtc(businessToday(bizSettings), bizSettings).toISOString();
+    const now = new Date().toISOString();
     setHistoryLoading(true);
+    // The orders never wait on the shift list: a slow line there must not
+    // leave Tarixçə empty. A shift can only be picked once the list is in.
+    const picked = historyShifts.find(s => s.id === historyShiftId);
+    const { from, to } = picked ? shiftWindow(picked, now) : { from: dayStart, to: now };
     const load = overrideCompanyId
       ? tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=500`)
           .then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
       : fetchOrders({ from, to, limit: 500 });
     load.then(setHistoryOrders).finally(() => setHistoryLoading(false));
     courierCollections(from, to, overrideCompanyId).then(setHistoryCollected);
-  }, [view, bizSettings, overrideCompanyId]);
+    // siteGet, not tillFetch: the till keeps only the open shift, and closed
+    // ones are what this list is for. Offline the picker simply stays hidden.
+    const shiftsLoad: Promise<HistoryShift[]> = overrideCompanyId
+      ? siteGet(`/api/public-shifts?companyId=${overrideCompanyId}&from=${encodeURIComponent(dayStart)}&to=${encodeURIComponent(now)}`)
+          .then(r => r.json()).then(d => d.shifts ?? []).catch(() => [])
+      : fetchShifts(20);
+    shiftsLoad.then(list => setHistoryShifts(shiftsOfDay(list, dayStart, now)));
+    // historyShifts is read, not watched: a fresh list must not reload the orders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bizSettings, overrideCompanyId, historyShiftId]);
+
+  useEffect(() => {
+    if (view === 'history') loadHistory();
+  }, [view, loadHistory]);
 
   async function handleOpenShift() {
     const cash = parseFloat(openCashInput) || 0;
@@ -2544,6 +2564,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   }, { historyNagd: historyCollected.nagd, historyKart: historyCollected.kart });
   const historyCollectedTotal = historyCollected.nagd + historyCollected.kart;
   const historyRevenue = paidHistoryOrders.reduce((s, o) => s + orderTotal(o), 0);
+  const historyKuryerde = courierOutstanding(historyOrders);
 
   // ── sidebar (desktop only) ────────────────────────────────────────────────
 
@@ -3065,18 +3086,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   </p>
                 </div>
                 <button
-                  onClick={() => {
-                    const todayStr = businessToday(bizSettings);
-                    const from = businessDayStartUtc(todayStr, bizSettings).toISOString();
-                    const to = new Date().toISOString();
-                    setHistoryLoading(true);
-                    const load = overrideCompanyId
-                      ? tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=500`)
-                          .then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
-                      : fetchOrders({ from, to, limit: 500 });
-                    load.then(setHistoryOrders).finally(() => setHistoryLoading(false));
-                    courierCollections(from, to, overrideCompanyId).then(setHistoryCollected);
-                  }}
+                  onClick={loadHistory}
                   disabled={historyLoading}
                   className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
                 >
@@ -3086,6 +3096,26 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   Yenilə
                 </button>
               </div>
+
+              {/* One kassa shift at a time — the owner checks a shift's money
+                  against its receipts, and the day view mixes two shifts. */}
+              {historyShifts.length > 0 && (
+                <div className="px-4 md:px-6 pb-2 flex gap-2 overflow-x-auto">
+                  {[null, ...historyShifts].map((s, i) => {
+                    const time = (iso: string) => new Date(iso).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone });
+                    const on = (s?.id ?? null) === historyShiftId;
+                    return (
+                      <button
+                        key={s?.id ?? 'all'}
+                        onClick={() => setHistoryShiftId(s?.id ?? null)}
+                        className={`px-3 py-1.5 text-sm rounded-xl border whitespace-nowrap transition-colors ${on ? 'bg-primary-800 border-primary-800 text-white font-medium' : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'}`}
+                      >
+                        {s ? `Smen ${i} · ${time(s.openedAt)}–${s.closedAt ? time(s.closedAt) : ''}` : 'Bütün gün'}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Nağd / Kart summary */}
               {!historyLoading && (historyOrders.length > 0 || historyCollectedTotal > 0) && (
@@ -3099,6 +3129,14 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                       <p className="text-xs text-stone-500 mb-0.5">Kart</p>
                       <p className="text-lg font-bold text-stone-800">{historyKart.toFixed(2)} ₼</p>
                     </div>
+                    {/* The part of Cəmi the riders still have — without it the
+                        boxes do not add up and the screen looks wrong. */}
+                    {historyKuryerde > 0.005 && (
+                      <div className="flex-1 bg-white rounded-xl border border-stone-100 px-4 py-3">
+                        <p className="text-xs text-stone-500 mb-0.5">Kuryerdə</p>
+                        <p className="text-lg font-bold text-amber-700">{historyKuryerde.toFixed(2)} ₼</p>
+                      </div>
+                    )}
                     <div className="flex-1 bg-primary-50 rounded-xl border border-primary-100 px-4 py-3">
                       <p className="text-xs text-primary-700 mb-0.5">Cəmi</p>
                       <p className="text-lg font-bold text-primary-800">{historyRevenue.toFixed(2)} ₼</p>
