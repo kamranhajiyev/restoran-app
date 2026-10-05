@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
+import { refusal } from '@/lib/order-rules';
 
 // Public terminal: remove one line from an open (unpaid) order. Token-gated; scoped to the order
 // and company so a stale/forged token or wrong company can't touch it.
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
     .eq('company_id', companyId)
     .single();
   if (orderErr || !order) return Response.json({ ok: false }, { status: 404 });
-  if (order.status === 'ödənilib' || order.status === 'ləğv edildi' || order.status === 'silinib') {
+  if (refusal('edit', order)) {
     return Response.json({ ok: false, error: 'closed' }, { status: 409 });
   }
 

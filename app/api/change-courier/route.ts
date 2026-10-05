@@ -11,6 +11,7 @@
 import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 import { claim, idempotencyKey } from '@/lib/idempotency';
+import { guardQuery } from '@/lib/order-rules';
 
 export async function POST(req: NextRequest) {
   const { orderId, courierId, companyId, token } = await req.json();
@@ -42,16 +43,12 @@ export async function POST(req: NextRequest) {
   // yet: it has to be able to gain its first rider here, which is the one case
   // where courier_id starts null. A takeaway still may not — nothing is being
   // carried anywhere — so the guard stays, widened by exactly that case.
-  const { data, error } = await db
-    .from('orders')
-    .update({ courier_id: courierId })
-    .eq('id', orderId)
-    .eq('company_id', companyId)
-    .or('courier_id.not.is.null,online.is.true')
-    .neq('status', 'ödənilib')
-    .neq('status', 'ləğv edildi')
-    .neq('status', 'silinib')
-    .select('id');
+  //
+  // The rule itself is lib/order-rules.ts, shared with the exe and lib/store.ts.
+  const { data, error } = await guardQuery(
+    db.from('orders').update({ courier_id: courierId }).eq('id', orderId).eq('company_id', companyId),
+    'courier',
+  ).select('id');
   if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
   const result = { ok: (data?.length ?? 0) > 0 };
   await held.commit(result);

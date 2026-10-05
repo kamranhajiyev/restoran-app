@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 import { claim, idempotencyKey } from '@/lib/idempotency';
+import { guardQuery } from '@/lib/order-rules';
 
 export async function POST(req: NextRequest) {
   const { orderId, status, cashAmount, cardAmount, changeAmount, discountAmount, discountType, courierDebt, companyId, token } = await req.json();
@@ -32,10 +33,12 @@ export async function POST(req: NextRequest) {
   }
   if (status === 'ödənilib') updates.paid_at = new Date().toISOString();
 
-  let q = db.from('orders').update(updates).eq('id', orderId).eq('company_id', companyId);
-  if (status === 'ödənilib') q = q.neq('status', 'ödənilib');
-  q = q.neq('status', 'ləğv edildi');
-  const { data, error } = await q.select('id');
+  // Paid and cancelled orders are final (lib/order-rules.ts) — the guard that
+  // stops a second tap charging twice.
+  const { data, error } = await guardQuery(
+    db.from('orders').update(updates).eq('id', orderId).eq('company_id', companyId),
+    'status',
+  ).select('id');
   if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
   let ok = (data?.length ?? 0) > 0;
   // Retrying a payment that died after its claim: if the order is already paid,

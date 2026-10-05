@@ -91,6 +91,21 @@ describe("exe till", () => {
     expect(repo.getOrder("A")?.status).toBe("ödənilib");
   });
 
+  // Test Restoran, 2026-10-05: the exe refused every rider for a link order,
+  // from the payment sheet and from "Kuryer təyin et" alike.
+  it("gives an online order its first courier, but not a takeaway", () => {
+    repo.replaceReference("couriers", C, [{ id: "k1", name: "Əli" }]);
+    till.applyWrite("order:W", till.ADD_ORDER, { ...order("W"), online: true } as never, C);
+    newOrder("T");
+
+    const assign = (id: string) =>
+      till.applyWrite(`courier:${id}:k1`, "/api/change-courier", { orderId: id, courierId: "k1" }, C);
+
+    expect(assign("W")).toEqual({ ok: true });
+    expect(repo.getOrder("W")?.courierId).toBe("k1");
+    expect(assign("T")).toEqual({ ok: false, error: "not_courier" });
+  });
+
   it("does not let one restaurant pay another's order", () => {
     newOrder("A");
 

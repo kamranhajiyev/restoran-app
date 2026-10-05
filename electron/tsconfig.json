@@ -14,5 +14,5 @@
     "sourceMap": true,
     "types": ["node"]
   },
-  "include": ["./**/*.ts", "../lib/tcp-print.ts"]
+  "include": ["./**/*.ts", "../lib/tcp-print.ts", "../lib/order-rules.ts"]
 }

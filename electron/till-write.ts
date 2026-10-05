@@ -26,6 +26,7 @@
 // changes, change its twin here; the comment on each one says which.
 
 import type { CashShift, Order, OrderItem, ShiftMovement } from '../types';
+import { refusal, type OrderAction } from '../lib/order-rules';
 import { db, getMeta, setMeta, transact } from './db';
 import {
   addCourierPayment, applyCourierSettlement, getOpenShift, getOrder, hasCourierPayment, putOrder, putShift,
@@ -42,7 +43,6 @@ export interface WriteResult {
   error?: string;
 }
 
-const CLOSED = new Set(['ödənilib', 'ləğv edildi', 'silinib']);
 
 // ── The outbox ───────────────────────────────────────────────────────────────
 
@@ -122,11 +122,15 @@ function belongsTo(orderId: string, companyId: string): boolean {
   return String(row?.company_id ?? '') === companyId;
 }
 
-/** The order this write is about, if it is still open to being written to. */
-function openOrder(orderId: string, companyId: string): Order | { error: string } {
+/**
+ * The order this write is about, if `action` is allowed on it. The rule is
+ * lib/order-rules.ts — the one the site's routes and lib/store.ts use too.
+ */
+function openOrder(orderId: string, companyId: string, action: OrderAction = 'edit'): Order | { error: string } {
   const order = getOrder(orderId);
   if (!order || !belongsTo(orderId, companyId)) return { error: 'not_found' };
-  if (CLOSED.has(order.status)) return { error: 'closed' };
+  const refused = refusal(action, order);
+  if (refused) return { error: refused };
   return order;
 }
 
@@ -331,12 +335,9 @@ function applyStatus(id: string, body: Record<string, unknown>, companyId: strin
   const status = str(body.status) as Order['status'] | undefined;
   if (!orderId || !status) return { ok: false, error: 'bad_request' };
 
-  const order = getOrder(orderId);
-  if (!order || !belongsTo(orderId, companyId)) return { ok: false, error: 'not_found' };
-  // Not the full CLOSED set: 'silinib' can still be given a status back, which is
-  // how the admin panel restores a deleted order. Paid and cancelled cannot —
-  // that guard is what stops a second tap charging the guest twice.
-  if (order.status === 'ödənilib' || order.status === 'ləğv edildi') return { ok: false, error: 'closed' };
+  // Paid and cancelled refuse it — see BLOCKED_BY.status in lib/order-rules.ts.
+  const order = openOrder(orderId, companyId, 'status');
+  if ('error' in order) return { ok: false, error: order.error };
 
   const hasAmounts =
     body.cashAmount !== undefined || body.cardAmount !== undefined || body.changeAmount !== undefined;
@@ -372,7 +373,7 @@ function applyCancel(id: string, body: Record<string, unknown>, companyId: strin
   const by = str(body.by);
   if (!orderId || !reason || !by) return { ok: false, error: 'bad_request' };
 
-  const found = openOrder(orderId, companyId);
+  const found = openOrder(orderId, companyId, 'cancel');
   if ('error' in found) return { ok: false, error: found.error };
 
   putOrder(companyId, {
@@ -399,7 +400,7 @@ function applyMove(id: string, body: Record<string, unknown>, companyId: string)
     .get(tableId, companyId);
   if (!table) return { ok: false, error: 'table' };
 
-  const found = openOrder(orderId, companyId);
+  const found = openOrder(orderId, companyId, 'move');
   if ('error' in found) return { ok: false, error: found.error };
 
   putOrder(companyId, { ...found, tableNumber: tableId });
@@ -419,11 +420,10 @@ function applyChangeCourier(id: string, body: Record<string, unknown>, companyId
     .get(courierId, companyId);
   if (!courier) return { ok: false, error: 'courier' };
 
-  const found = openOrder(orderId, companyId);
+  // Refuses a takeaway ('not_courier') as well as a closed order — see
+  // canTakeCourier in lib/order-rules.ts.
+  const found = openOrder(orderId, companyId, 'courier');
   if ('error' in found) return { ok: false, error: found.error };
-  // Not a way to turn a takeaway into a delivery: only an order that already has
-  // a rider can change riders.
-  if (!found.courierId) return { ok: false, error: 'not_courier' };
 
   putOrder(companyId, { ...found, courierId });
   enqueue(id, '/api/change-courier', { ...body, companyId }, companyId);

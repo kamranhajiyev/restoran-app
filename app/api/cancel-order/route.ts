@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 import { claim, idempotencyKey } from '@/lib/idempotency';
+import { guardQuery } from '@/lib/order-rules';
 
 export async function POST(req: NextRequest) {
   const { orderId, reason, by, companyId, token } = await req.json();
@@ -15,7 +16,7 @@ export async function POST(req: NextRequest) {
   const held = await claim(db, idempotencyKey(req), companyId, 'cancel-order');
   if (held.applied) return Response.json(held.result);
 
-  const { data, error } = await db
+  const cancelQ = db
     .from('orders')
     .update({
       status: 'ləğv edildi',
@@ -24,10 +25,8 @@ export async function POST(req: NextRequest) {
       cancel_reason: reason,
     })
     .eq('id', orderId)
-    .eq('company_id', companyId)
-    .neq('status', 'ödənilib')
-    .neq('status', 'ləğv edildi')
-    .select('id');
+    .eq('company_id', companyId);
+  const { data, error } = await guardQuery(cancelQ, 'cancel').select('id');
   if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
   const result = { ok: (data?.length ?? 0) > 0 };
   await held.commit(result);

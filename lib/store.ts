@@ -1,3 +1,4 @@
+import { guardQuery, refusal } from './order-rules';
 import { CashShift, Category, Courier, CourierLedger, CourierPayMethod, CourierPayment, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
@@ -792,7 +793,7 @@ export async function addItemsToOrder(
     const { data: ord, error: ordError } = await supabase
       .from('orders').select('status').eq('id', orderId).eq('company_id', _companyId).single();
     if (ordError || !ord) { console.error('[addItemsToOrder order]', ordError); return ordError?.message ?? 'closed'; }
-    if (['ödənilib', 'ləğv edildi', 'silinib'].includes(ord.status)) return 'closed';
+    if (refusal('edit', ord)) return 'closed';
 
     if (items.length > 0) {
       const rows = items.map(oi => ({
@@ -865,12 +866,12 @@ export async function updateOrderStatus(
     updates.courier_debt = courierDebt ?? 0;
   }
   if (status === 'ödənilib') updates.paid_at = new Date().toISOString();
-  let q = supabase.from('orders').update(updates).eq('id', orderId);
-  // An order can only be paid once, and a cancelled order can't be paid or
-  // revived — concurrent conflicting updates become no-ops
-  if (status === 'ödənilib') q = q.neq('status', 'ödənilib');
-  q = q.neq('status', 'ləğv edildi');
-  const { data, error } = await q.select('id');
+  // An order can only be paid once, and a closed one can't be revived —
+  // concurrent conflicting updates become no-ops. Rule: lib/order-rules.ts.
+  const { data, error } = await guardQuery(
+    supabase.from('orders').update(updates).eq('id', orderId).eq('company_id', _companyId),
+    'status',
+  ).select('id');
   if (error) { console.error('[updateOrderStatus]', error.message); return false; }
   return (data?.length ?? 0) > 0;
 }
@@ -886,14 +887,10 @@ export async function moveOrderTable(orderId: string, tableId: number): Promise<
   const local = await toLocal(undefined, `move:${orderId}:${tableId}`, '/api/move-table', { orderId, tableId });
   if (local) return local.ok;
 
-  const { data, error } = await supabase.from('orders')
-    .update({ table_id: tableId })
-    .eq('id', orderId)
-    .eq('company_id', _companyId)
-    .neq('status', 'ödənilib')
-    .neq('status', 'ləğv edildi')
-    .neq('status', 'silinib')
-    .select('id');
+  const { data, error } = await guardQuery(
+    supabase.from('orders').update({ table_id: tableId }).eq('id', orderId).eq('company_id', _companyId),
+    'move',
+  ).select('id');
   if (error) { console.error('[moveOrderTable]', error.message); return false; }
   return (data?.length ?? 0) > 0;
 }
@@ -909,17 +906,11 @@ export async function changeOrderCourier(orderId: string, courierId: string): Pr
   const local = await toLocal(undefined, `courier:${orderId}:${courierId}`, '/api/change-courier', { orderId, courierId });
   if (local) return local.ok;
 
-  const { data, error } = await supabase.from('orders')
-    .update({ courier_id: courierId })
-    .eq('id', orderId)
-    .eq('company_id', _companyId)
-    // Null only on a link order, which is a delivery waiting for its first
-    // rider. See /api/change-courier for why a takeaway is still refused.
-    .or('courier_id.not.is.null,online.is.true')
-    .neq('status', 'ödənilib')
-    .neq('status', 'ləğv edildi')
-    .neq('status', 'silinib')
-    .select('id');
+  // A takeaway is refused as well as a closed order — see canTakeCourier.
+  const { data, error } = await guardQuery(
+    supabase.from('orders').update({ courier_id: courierId }).eq('id', orderId).eq('company_id', _companyId),
+    'courier',
+  ).select('id');
   if (error) { console.error('[changeOrderCourier]', error.message); return false; }
   return (data?.length ?? 0) > 0;
 }
@@ -930,7 +921,7 @@ export async function cancelOrder(orderId: string, reason: string, by: string): 
   const local = await toLocal(undefined, `cancel:${orderId}`, '/api/cancel-order', { orderId, reason, by });
   if (local) return local.ok;
 
-  const { data, error } = await supabase.from('orders')
+  const cancelQ = supabase.from('orders')
     .update({
       status: 'ləğv edildi',
       cancelled_at: new Date().toISOString(),
@@ -938,9 +929,8 @@ export async function cancelOrder(orderId: string, reason: string, by: string): 
       cancel_reason: reason,
     })
     .eq('id', orderId)
-    .neq('status', 'ödənilib')
-    .neq('status', 'ləğv edildi')
-    .select('id');
+    .eq('company_id', _companyId);
+  const { data, error } = await guardQuery(cancelQ, 'cancel').select('id');
   if (error) { console.error('[cancelOrder]', error.message); return false; }
   return (data?.length ?? 0) > 0;
 }

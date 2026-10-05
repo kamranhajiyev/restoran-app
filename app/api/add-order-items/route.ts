@@ -3,6 +3,7 @@ import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 import { claim, idempotencyKey } from '@/lib/idempotency';
 import { printedStationColumn, printedStationList } from '@/lib/stations';
 import type { SelectedModifier } from '@/types';
+import { refusal } from '@/lib/order-rules';
 
 interface IncomingItem {
   // The desktop till names its own lines so it can edit them during an outage;
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
     .eq('company_id', companyId)
     .single();
   if (orderErr || !order) return Response.json({ ok: false }, { status: 404 });
-  if (order.status === 'ödənilib' || order.status === 'ləğv edildi' || order.status === 'silinib') {
+  if (refusal('edit', order)) {
     return Response.json({ ok: false, error: 'closed' }, { status: 409 });
   }
 
