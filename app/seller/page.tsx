@@ -42,6 +42,7 @@ import { CartItems } from '@/components/seller/CartItems';
 import { OrderRow } from '@/components/seller/OrderRow';
 import { PrintKitchenToggle } from '@/components/seller/PrintKitchenToggle';
 import { STATUS_COLORS, STATUS_LABELS, orderTotal, round2 } from '@/components/seller/order-format';
+import { otherPart } from '@/lib/pay-split';
 import { canLink, checkLink, clearLink, readLink, saveLink, type Terminal } from '@/lib/terminal-link';
 import { tillImage } from '@/lib/till-image';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
@@ -534,6 +535,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   // Until the seller types into Kart, it follows Nağd: whatever cash leaves
   // unpaid lands on the card, so a split payment is one number, not two.
   const [cardTyped, setCardTyped]     = useState(false);
+  const [cashTyped, setCashTyped]     = useState(false);
   const [discountInput, setDiscountInput] = useState('');
   const [discountType, setDiscountType]   = useState<'%' | '₼'>('₼');
   // Courier orders only: which of the two ways this one is closing.
@@ -1988,6 +1990,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     setCashInput(orderTotal(order).toFixed(2));
     setCardInput('');
     setCardTyped(false);
+    setCashTyped(false);
     setDiscountInput('');
     setDiscountType('₼');
     // A courier order opens on the debt path, because that is the ordinary case:
@@ -3428,7 +3431,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                 {/* Terminal (card) — separate from drawer math */}
                 <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5">
                   <div className="flex justify-between items-center font-bold">
-                    <span className="text-stone-800">💳 Terminal (kart satışı)</span>
+                    <span className="text-stone-800">💳 Terminal (kart məbləği)</span>
                     <span className="text-primary-700 text-lg">{shiftSales.card.toFixed(2)} ₼</span>
                   </div>
                   <p className="text-xs text-stone-500 mt-1">Kassaya daxil deyil — bank terminalından keçir</p>
@@ -4424,18 +4427,21 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         const total = round2(fullTotal - discountAmt);
         const cash = round2(parseFloat(cashInput) || 0);
         const card = round2(parseFloat(cardInput) || 0);
-        // Kart follows Nağd until typed into; it has to follow the bill too, or a
-        // discount given after the cash leaves the card part sized for the old total.
+        // Each box follows the other until typed into (lib/pay-split); it has to
+        // follow the bill too, or a discount given after one box was typed leaves
+        // the other sized for the old total.
         const followCard = (cashStr: string, billTotal: number) => {
-          if (cardTyped) return;
-          const c = round2(parseFloat(cashStr) || 0);
-          // Cash at or over the total means change is due, not a card part.
-          setCardInput(c > 0 && c < billTotal ? round2(billTotal - c).toFixed(2) : '');
+          if (!cardTyped) setCardInput(otherPart(cashStr, billTotal));
+        };
+        const followCash = (cardStr: string, billTotal: number) => {
+          if (!cashTyped) setCashInput(otherPart(cardStr, billTotal));
         };
         const followDiscount = (raw: string, type: '%' | '₼') => {
           const r = parseFloat(raw) || 0;
           const d = type === '%' ? round2(Math.min(fullTotal, (fullTotal * r) / 100)) : round2(Math.min(fullTotal, r));
-          followCard(cashInput, round2(fullTotal - d));
+          const billTotal = round2(fullTotal - d);
+          if (cardTyped && !cashTyped) followCash(cardInput, billTotal);
+          else followCard(cashInput, billTotal);
         };
         const paid = round2(cash + card);
         const missing = round2(total - paid);
@@ -4492,7 +4498,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
               {isCourier && (
                 <div className="grid grid-cols-2 gap-2 mb-4">
                   <button
-                    onClick={() => { setCourierMode('paid'); setCashInput(total.toFixed(2)); setCardInput(''); setCardTyped(false); }}
+                    onClick={() => { setCourierMode('paid'); setCashInput(total.toFixed(2)); setCardInput(''); setCardTyped(false); setCashTyped(false); }}
                     className={`px-3 py-3 rounded-xl text-sm font-semibold border-2 transition-colors ${courierMode === 'paid' ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 bg-white text-stone-600'}`}
                   >
                     Ödənilib
@@ -4558,7 +4564,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   <input
                     type="number" min="0" step="0.01" placeholder="0.00"
                     value={cashInput}
-                    onChange={e => { setCashInput(e.target.value); followCard(e.target.value, total); }}
+                    onChange={e => { setCashInput(e.target.value); setCashTyped(true); followCard(e.target.value, total); }}
                     onFocus={e => {
                       const el = e.target;
                       if (!(parseFloat(cashInput) || 0) && (parseFloat(cardInput) || 0) === total) {
@@ -4576,7 +4582,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   <input
                     type="number" min="0" step="0.01" placeholder="0.00"
                     value={cardInput}
-                    onChange={e => { setCardInput(e.target.value); setCardTyped(true); }}
+                    onChange={e => { setCardInput(e.target.value); setCardTyped(true); followCash(e.target.value, total); }}
                     onFocus={e => {
                       const el = e.target;
                       if (!(parseFloat(cardInput) || 0) && (parseFloat(cashInput) || 0) === total) {
