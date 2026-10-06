@@ -3,6 +3,7 @@ import { CashShift, Category, Courier, CourierLedger, CourierPayMethod, CourierP
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
 import { courierPending, courierSold, courierStillOut, sumCollections, type Collections, type ShiftSales } from './courier-pending';
+import { courierDeleteBlock } from './couriers';
 import { printedStationColumn } from './stations';
 import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
@@ -105,14 +106,14 @@ function isValidUUID(id: string): boolean {
 let _menuLoaded = false;
 let _categoriesLoaded = false;
 
-export async function fetchMenu(opts?: ReadOpts): Promise<MenuItem[]> {
+export async function fetchMenuOrNull(opts?: ReadOpts): Promise<MenuItem[] | null> {
   const local = await fromLocal(opts, async (till, companyId) =>
     ((await till.menu(companyId)) as { items: MenuItem[] }).items);
   if (local) return local;
 
   try {
     const { data, error } = await supabase.from('menu_items').select('*').order('position');
-    if (error || !data) return [];
+    if (error || !data) return null;
     _menuLoaded = true;
 
     // Which reusable modifier sets each item offers. A failed link read must not
@@ -146,8 +147,14 @@ export async function fetchMenu(opts?: ReadOpts): Promise<MenuItem[]> {
       modifierGroupIds: linkError ? undefined : (byItem.get(r.id) ?? []),
     }));
   } catch {
-    return [];
+    return null;
   }
+}
+
+/** fetchMenuOrNull, with a failed read as an empty list — for screens that
+ *  only show it. A screen that keeps what it has on a failure uses the OrNull. */
+export async function fetchMenu(opts?: ReadOpts): Promise<MenuItem[]> {
+  return (await fetchMenuOrNull(opts)) ?? [];
 }
 
 // Returns an error message (for the UI to show) or null on success — a failed
@@ -227,7 +234,7 @@ export async function setMenuItemAvailable(id: string, available: boolean): Prom
 // until a fetch has succeeded at least once.
 let _modifiersLoaded = false;
 
-export async function fetchModifierGroups(opts?: ReadOpts): Promise<ModifierGroup[]> {
+export async function fetchModifierGroupsOrNull(opts?: ReadOpts): Promise<ModifierGroup[] | null> {
   const local = await fromLocal(opts, async (till, companyId) =>
     ((await till.modifiers(companyId)) as { groups: ModifierGroup[] }).groups);
   if (local) return local;
@@ -237,7 +244,7 @@ export async function fetchModifierGroups(opts?: ReadOpts): Promise<ModifierGrou
       supabase.from('modifier_groups').select('*').order('position'),
       supabase.from('modifier_options').select('*').order('position'),
     ]);
-    if (gError || !groups || oError || !options) return [];
+    if (gError || !groups || oError || !options) return null;
     _modifiersLoaded = true;
 
     const byGroup = new Map<string, ModifierOption[]>();
@@ -262,8 +269,14 @@ export async function fetchModifierGroups(opts?: ReadOpts): Promise<ModifierGrou
       options: byGroup.get(g.id) ?? [],
     }));
   } catch {
-    return [];
+    return null;
   }
+}
+
+/** fetchModifierGroupsOrNull, with a failed read as an empty list — for screens that
+ *  only show it. A screen that keeps what it has on a failure uses the OrNull. */
+export async function fetchModifierGroups(opts?: ReadOpts): Promise<ModifierGroup[]> {
+  return (await fetchModifierGroupsOrNull(opts)) ?? [];
 }
 
 // Upsert-then-prune, mirroring saveMenu: a rejected write leaves the existing sets
@@ -329,20 +342,26 @@ export async function saveModifierGroups(groups: ModifierGroup[]): Promise<strin
 // No placeholder fallback: a company with no categories sees an empty list and
 // creates its own. The old default list ("Çay", "Snack", …) looked like real
 // data and got persisted by the next save, polluting the company's categories.
-export async function fetchCategories(opts?: ReadOpts): Promise<Category[]> {
+export async function fetchCategoriesOrNull(opts?: ReadOpts): Promise<Category[] | null> {
   const local = await fromLocal(opts, async (till, companyId) =>
     ((await till.categories(companyId)) as { categories: Category[] }).categories);
   if (local) return local;
 
   try {
     const { data, error } = await supabase.from('categories').select('name, available, qr_visible').order('position');
-    if (error || !data) return [];
+    if (error || !data) return null;
     _categoriesLoaded = true;
     return data.map((r: { name: string; available: boolean; qr_visible: boolean | null }) =>
       ({ name: r.name, available: r.available, qrVisible: r.qr_visible ?? true }));
   } catch {
-    return [];
+    return null;
   }
+}
+
+/** fetchCategoriesOrNull, with a failed read as an empty list — for screens that
+ *  only show it. A screen that keeps what it has on a failure uses the OrNull. */
+export async function fetchCategories(opts?: ReadOpts): Promise<Category[]> {
+  return (await fetchCategoriesOrNull(opts)) ?? [];
 }
 
 // Returns an error message (for the UI to show) or null on success.
@@ -1080,7 +1099,7 @@ export async function editOrderPayment(orderId: string, cashAmount: number, card
 // themselves with a 4-digit PIN. All writes go through owner-only RPCs; the
 // PIN is verified server-side (hashed, company-wide lockout on brute force).
 
-export async function fetchStaff(opts?: ReadOpts): Promise<Staff[]> {
+export async function fetchStaffOrNull(opts?: ReadOpts): Promise<Staff[] | null> {
   const local = await fromLocal(opts, async (till, companyId) =>
     ((await till.staff(companyId)) as { staff: Staff[] }).staff);
   if (local) return local;
@@ -1089,9 +1108,15 @@ export async function fetchStaff(opts?: ReadOpts): Promise<Staff[]> {
     const { data, error } = await supabase.from('staff')
       .select('id, name, active, created_at')
       .order('created_at');
-    if (error || !data) return [];
+    if (error || !data) return null;
     return data.map(s => ({ id: s.id, name: s.name, active: s.active, createdAt: s.created_at }));
-  } catch { return []; }
+  } catch { return null; }
+}
+
+/** fetchStaffOrNull, with a failed read as an empty list — for screens that
+ *  only show it. A screen that keeps what it has on a failure uses the OrNull. */
+export async function fetchStaff(opts?: ReadOpts): Promise<Staff[]> {
+  return (await fetchStaffOrNull(opts)) ?? [];
 }
 
 // RPC errors carry machine codes (bad_pin, pin_taken, …); the UI translates them
@@ -1527,11 +1552,12 @@ export async function fetchCouriers(opts?: ReadOpts): Promise<Courier[]> {
 
   try {
     const { data, error } = await supabase.from('couriers')
-      .select('id, name, phone, active, staff_id, created_at').order('created_at');
+      .select('id, name, phone, active, staff_id, created_at, deleted_at').order('created_at');
     if (error || !data) return [];
     return data.map(c => ({
       id: c.id, name: c.name, phone: c.phone ?? undefined, active: c.active,
       staffId: c.staff_id ?? undefined, createdAt: c.created_at,
+      deletedAt: c.deleted_at ?? undefined,
     }));
   } catch { return []; }
 }
@@ -1550,11 +1576,21 @@ export async function updateCourier(id: string, name: string, phone: string, act
   return null;
 }
 
-// Refused by the database once the courier has carried anything — orders.courier_id
-// is `on delete restrict` on purpose. The panel turns that into "deactivate instead".
+// A courier with no history is removed. One who has carried anything cannot be —
+// orders.courier_id is `on delete restrict` on purpose — so it is marked deleted
+// instead: gone from every list, its name kept for reports and old orders. Not
+// while it still holds money, or the debt would leave the screen with it.
 export async function deleteCourier(id: string): Promise<string | null> {
   const { error } = await supabase.from('couriers').delete().eq('id', id);
-  if (error) { console.error('[deleteCourier]', error); return error.message; }
+  if (!error) return null;
+  if (error.code !== '23503') { console.error('[deleteCourier]', error); return error.message; }
+  const { data: owed, error: owedErr } = await supabase.rpc('courier_outstanding', { p_courier_id: id });
+  if (owedErr) { console.error('[deleteCourier]', owedErr); return owedErr.message; }
+  const block = courierDeleteBlock(Number(owed ?? 0));
+  if (block) return block;
+  const { error: upErr } = await supabase.from('couriers')
+    .update({ deleted_at: new Date().toISOString(), active: false }).eq('id', id);
+  if (upErr) { console.error('[deleteCourier]', upErr); return upErr.message; }
   return null;
 }
 
@@ -2076,14 +2112,14 @@ export async function setKassaEnabled(enabled: boolean): Promise<{ error?: strin
   return {};
 }
 
-export async function fetchTables(opts?: ReadOpts): Promise<RestaurantTable[]> {
+export async function fetchTablesOrNull(opts?: ReadOpts): Promise<RestaurantTable[] | null> {
   const local = await fromLocal(opts, async (till, companyId) =>
     ((await till.tables(companyId)) as { tables: RestaurantTable[] }).tables);
   if (local) return local;
 
   try {
     const { data, error } = await supabase.from('restaurant_tables').select('id, name, capacity, x, y, w, h, shape, hall_id').order('id');
-    if (error || !data) return [];
+    if (error || !data) return null;
     return data.map(r => ({
       id: r.id,
       name: r.name ?? `Masa ${r.id}`,
@@ -2095,7 +2131,13 @@ export async function fetchTables(opts?: ReadOpts): Promise<RestaurantTable[]> {
       shape: (r.shape ?? 'rect') as 'rect' | 'round' | 'rect-v',
       hallId: r.hall_id ?? undefined,
     }));
-  } catch { return []; }
+  } catch { return null; }
+}
+
+/** fetchTablesOrNull, with a failed read as an empty list — for screens that
+ *  only show it. A screen that keeps what it has on a failure uses the OrNull. */
+export async function fetchTables(opts?: ReadOpts): Promise<RestaurantTable[]> {
+  return (await fetchTablesOrNull(opts)) ?? [];
 }
 
 export async function createTable(name: string, capacity: number, shape: string = 'rect', w?: number, h?: number, hallId?: string | null): Promise<string | null> {
@@ -2134,16 +2176,22 @@ export async function moveTableToHall(id: number, hallId: string): Promise<void>
 
 // ─── Zallar ───────────────────────────────────────────────────────────────────
 
-export async function fetchHalls(opts?: ReadOpts): Promise<Hall[]> {
+export async function fetchHallsOrNull(opts?: ReadOpts): Promise<Hall[] | null> {
   const local = await fromLocal(opts, async (till, companyId) =>
     ((await till.tables(companyId)) as { halls: Hall[] }).halls);
   if (local) return local;
 
   try {
     const { data, error } = await supabase.from('halls').select('id, name, position').order('position').order('name');
-    if (error || !data) return [];
+    if (error || !data) return null;
     return data.map(r => ({ id: r.id, name: r.name, position: r.position ?? 0 }));
-  } catch { return []; }
+  } catch { return null; }
+}
+
+/** fetchHallsOrNull, with a failed read as an empty list — for screens that
+ *  only show it. A screen that keeps what it has on a failure uses the OrNull. */
+export async function fetchHalls(opts?: ReadOpts): Promise<Hall[]> {
+  return (await fetchHallsOrNull(opts)) ?? [];
 }
 
 export async function createHall(name: string): Promise<{ id?: string; error?: string }> {
@@ -2487,7 +2535,14 @@ function mapShift(r: {
   };
 }
 
-export async function fetchOpenShift(opts?: ReadOpts): Promise<CashShift | null> {
+/**
+ * The open shift; null when there is none; undefined when the read failed.
+ *
+ * Test Restoran, 2026-10-06: a failed read came back as null, so a seller on
+ * Kassa or Tarixçə was thrown to Sifarişlər ("the admin closed the shift"),
+ * or the whole till turned into "Növbəni aç", on any blip.
+ */
+export async function readOpenShift(opts?: ReadOpts): Promise<CashShift | null | undefined> {
   // A null shift is a real answer here — most of the day there is no open shift
   // — so this cannot use the `?? fall through` shape the others do.
   const till = localTill(opts);
@@ -2503,9 +2558,14 @@ export async function fetchOpenShift(opts?: ReadOpts): Promise<CashShift | null>
       .is('closed_at', null)
       .order('opened_at', { ascending: false })
       .limit(1).maybeSingle();
-    if (error || !data) return null;
-    return mapShift(data);
-  } catch { return null; }
+    if (error) return undefined;
+    return data ? mapShift(data) : null;
+  } catch { return undefined; }
+}
+
+/** readOpenShift, with a failed read as "no open shift". */
+export async function fetchOpenShift(opts?: ReadOpts): Promise<CashShift | null> {
+  return (await readOpenShift(opts)) ?? null;
 }
 
 export async function fetchShifts(limit = 60): Promise<CashShift[]> {

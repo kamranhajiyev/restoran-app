@@ -304,6 +304,9 @@ export interface Courier {
   active: boolean;
   createdAt: string;
   staffId?: string;
+  // Set when the owner deleted a courier who has history: the row stays for the
+  // names in reports and old orders, every list leaves it out (lib/couriers).
+  deletedAt?: string;
   // What the rider is holding right now. Attached by the reads that compute it;
   // absent from a plain list. Negative means the restaurant owes them — they
   // paid, and an order they had already settled then came back.

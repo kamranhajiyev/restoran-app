@@ -66,6 +66,13 @@ export function tzHour(iso: string, tz: string): number {
   return tzParts(new Date(iso), tz).h;
 }
 
+// Clock time 'HH:MM' in the given timezone. Kassa movements show it on the
+// till and in admin, so both read the restaurant's clock, not the computer's.
+export function tzTime(iso: string, tz: string): string {
+  const p = tzParts(new Date(iso), tz);
+  return `${pad(p.h)}:${pad(p.mi)}`;
+}
+
 // Business day a timestamp belongs to: shift back by the cutoff, then take
 // the calendar date in the company timezone.
 export function businessDay(iso: string, s: CompanySettings): string {

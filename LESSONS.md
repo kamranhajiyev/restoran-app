@@ -30,6 +30,13 @@ Notes, names, addresses: no spaces, hundreds of characters. Test Restoran,
 2026-10-06: a note with no spaces pushed the order list off the screen. The
 ticket cut it; the screens did not.
 
+**When something is turned off or deleted, is it gone from every list, and still
+there where history needs it?**
+Pickers, tabs, filters, reports, old orders. One shared rule decides each list
+(`lib/couriers`). Test Restoran, 2026-10-06: a deactivated courier was gone from
+the new-order picker but still in the seller's Kuryerlər tab, and a courier with
+orders could not be deleted at all.
+
 ## 1. Bad internet (most of our bugs)
 
 Restaurants' internet drops for a few seconds at a time, often mid-action.
@@ -59,6 +66,12 @@ never be thrown away silently.
 Sales sat for minutes waiting for the next timer. Anything queued needs a retry
 that keeps going until it is sent.
 
+**If this read fails, does the screen take the failure as the answer?**
+"Failed" is not "empty" and not "closed". Keep what is on screen, and keep where
+the seller is (`lib/keep-on-fail`). Test Restoran, 2026-10-06: on a blip the till
+jumped to Sifarişlər, showed "Növbəni aç", lost the category the seller was in,
+or blanked the menu.
+
 **What does "online" mean here?**
 `navigator.onLine` says "wifi exists", not "the server is reachable". Every
 network call needs a timeout, or one hung request freezes everything behind it.
@@ -81,6 +94,13 @@ A bill that had not loaded could be paid at 0.00.
 **Does every way money moves show up in the shift and day totals?**
 Cash, card, courier cash, courier card, courier debt, deletes and refunds.
 Courier money once never reached the day's cash.
+
+**Is this number counted by the one shared function, or worked out again here?**
+A sale belongs to the shift or range it was made in; a courier paying back an
+older order is money arriving (drawer, terminal), not a sale. Every sales box
+counts with `lib/history-shifts`. Test Restoran, 2026-10-06: a 28 ₼ delivery
+paid back in cash was Nağd in Tarixçə but still Kuryer in Kassa (seller and
+admin), which had its own formula; Statistika had a third.
 
 **Is a label naming the number it really shows?**
 Latte Art, 2026-10-06: the Terminal box said "kart satışı" but holds courier

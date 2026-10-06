@@ -11,20 +11,23 @@ import {
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
-  fetchMenu, addOrder, addItemsToOrder, removeOrderItems, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, fetchCategories, setCompanyContext, fetchTables, fetchHalls,
+  addOrder, addItemsToOrder, removeOrderItems, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, setCompanyContext,
   fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchOpenShift, fetchShifts, openShift, closeShift, addShiftMovement, fetchShiftSales,
-  fetchCompanySettings, fetchStaff, verifyStaffPin, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
+  fetchCompanySettings, verifyStaffPin, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
-  fetchStations, fetchStationReady, fetchStationReadyOrNull, fetchModifierGroups, type StationReady,
+  fetchStations, fetchStationReady, fetchStationReadyOrNull, type StationReady,
   fetchCouriersWithBalance, addCourierPayment, returnCourierOrder, fetchCourierCollections, changeOrderCourier,
+  fetchMenuOrNull, fetchCategoriesOrNull, fetchTablesOrNull, fetchHallsOrNull, fetchStaffOrNull, fetchModifierGroupsOrNull, readOpenShift,
 } from '@/lib/store';
+import { jsonOrNull, keepCategory, listOrNull, shiftOrUnknown } from '@/lib/keep-on-fail';
 import { menuIndex, stationForItem, readyStationIds } from '@/lib/stations';
 import { unlockSound, armSoundOnFirstGesture, playOrderReady } from '@/lib/sound';
 import { applyBrand } from '@/lib/branding';
 import { orderClosedAt } from '@/lib/order-items';
-import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc } from '@/lib/business-day';
-import { courierOwed, kassaSales, type Collections } from '@/lib/courier-pending';
-import { historyTotals, ordersOfShift, shiftLoadWindow, shiftsOfDay, shiftWindow, type HistoryShift } from '@/lib/history-shifts';
+import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc, tzTime } from '@/lib/business-day';
+import { courierOwed, type Collections } from '@/lib/courier-pending';
+import { pickableCouriers, settleableCouriers } from '@/lib/couriers';
+import { historyTotals, ordersOfShift, shiftLoadWindow, shiftTotals, shiftsOfDay, shiftWindow, type HistoryShift } from '@/lib/history-shifts';
 import { CashShift, Category, Courier, CourierPayMethod, CourierPendingOrder, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, openCashDrawer } from '@/lib/printer';
@@ -107,6 +110,14 @@ async function readTerminalOrders(
   }
 }
 
+// The tables and halls the terminal route sends together, or null when the
+// read failed — so a blip keeps the floor plan on screen (lib/keep-on-fail).
+async function readTerminalTables(companyId: string): Promise<{ tables: RestaurantTable[]; halls: Hall[] } | null> {
+  const d = await jsonOrNull(tillFetch(`/api/public-tables?companyId=${companyId}`));
+  if (!Array.isArray(d?.tables)) return null;
+  return { tables: normalizeTables(d.tables), halls: (d.halls ?? []) as Hall[] };
+}
+
 const CANCEL_REASONS =['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
 const AZ_CHARS: Record<string, string> = { 'ç': 'c', 'ə': 'e', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u' };
@@ -140,6 +151,15 @@ async function courierCollections(
   } catch {
     return (await localCourierCollections(companyId, from, to)) ?? { nagd: 0, kart: 0 };
   }
+}
+
+// Orders in a window, the same read for Tarixçə and Kassa so the two count the
+// same orders.
+function ordersBetween(from: string, to: string, companyId: string | null | undefined): Promise<Order[]> {
+  return companyId
+    ? tillFetch(`/api/public-orders?companyId=${companyId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=1000`)
+        .then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
+    : fetchOrders({ from, to, limit: 1000 });
 }
 
 // The station panel reads tables over the public API, which hands back raw DB
@@ -553,6 +573,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [shiftChecked, setShiftChecked] = useState(false);
   const [openCashInput, setOpenCashInput] = useState('');
   const [shiftBusy, setShiftBusy]       = useState(false);
+  // Kassa's Ümumi satış box: the open shift as Tarixçə counts it (Natiq Aslan,
+  // 2026-10-06: "rəqəmləri sadəcə oradan götürməsi lazımdır").
+  const [kassaTotals, setKassaTotals]   = useState<{ nagd: number; kart: number; kuryer: number; cemi: number } | null>(null);
   const [shiftSales, setShiftSales]     = useState<{ cash: number; card: number; courierCard?: number; courierSales?: number; courier?: number }>({ cash: 0, card: 0 });
   const [countedInput, setCountedInput] = useState('');
   const [terminalInput, setTerminalInput] = useState('');
@@ -609,17 +632,20 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         const ordersRead = readTerminalOrders(overrideCompanyId);
         ordersRead.then(d => { if (d) applyOrders(ticket, () => setOrders(d.orders)); });
 
+        // Every read is null on a failure, and a null keeps what the screen has
+        // (lib/keep-on-fail): a blip must not blank the menu or the tables.
         const [m, c, tb, st, rd, mg, kr] = await Promise.all([
-          tillFetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
-          tillFetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
-          tillFetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => ({ tables: normalizeTables(d.tables ?? []), halls: (d.halls ?? []) as Hall[] })).catch(() => ({ tables: [], halls: [] })),
-          tillFetch(`/api/public-staff?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.staff ?? []).catch(() => null),
-          tillFetch(`/api/public-station-ready?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.ready ?? []).catch(() => null),
-          tillFetch(`/api/public-modifiers?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.groups ?? null).catch(() => null),
-          tillFetch(`/api/public-couriers?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.couriers ?? null).catch(() => null),
+          listOrNull<MenuItem>(tillFetch(`/api/public-menu?companyId=${overrideCompanyId}`), 'items'),
+          listOrNull<Category>(tillFetch(`/api/public-categories?companyId=${overrideCompanyId}`), 'categories'),
+          readTerminalTables(overrideCompanyId),
+          listOrNull<Staff>(tillFetch(`/api/public-staff?companyId=${overrideCompanyId}`), 'staff'),
+          listOrNull<StationReady>(tillFetch(`/api/public-station-ready?companyId=${overrideCompanyId}`), 'ready'),
+          listOrNull<ModifierGroup>(tillFetch(`/api/public-modifiers?companyId=${overrideCompanyId}`), 'groups'),
+          listOrNull<Courier>(tillFetch(`/api/public-couriers?companyId=${overrideCompanyId}`), 'couriers'),
         ]);
-        setMenu(m); setTables(tb.tables); setHalls(tb.halls);
-        setAvailableCategories(c.filter((cat: { available: boolean }) => cat.available));
+        if (m) setMenu(m);
+        if (tb) { setTables(tb.tables); setHalls(tb.halls); }
+        if (c) setAvailableCategories(c.filter(cat => cat.available));
         if (st) setPinStaffList(st);
         if (rd) setReadyRows(rd);
         if (kr) setCouriers(kr);
@@ -628,14 +654,17 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         if (mg) setModifierGroups(mg);
       } else {
         const [m, o, c, st, s, mg, tb, hl, kr] = await Promise.all([
-          fetchMenu(), fetchOrdersOrNull({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(), fetchModifierGroups(),
-          fetchTables(), fetchHalls(), fetchCouriersWithBalance(),
+          fetchMenuOrNull(), fetchOrdersOrNull({ limit: 200 }), fetchCategoriesOrNull(), fetchStaffOrNull(), readOpenShift(), fetchModifierGroupsOrNull(),
+          fetchTablesOrNull(), fetchHallsOrNull(), fetchCouriersWithBalance(),
         ]);
-        setMenu(m); setShift(s); setTables(tb); setHalls(hl);
+        if (m) setMenu(m);
+        if (s !== undefined) setShift(s);
+        if (tb) setTables(tb);
+        if (hl) setHalls(hl);
         if (o) applyOrders(ticket, () => setOrders(o));
-        setAvailableCategories(c.filter(cat => cat.available));
-        setPinStaffList(st);
-        setModifierGroups(mg);
+        if (c) setAvailableCategories(c.filter(cat => cat.available));
+        if (st) setPinStaffList(st);
+        if (mg) setModifierGroups(mg);
         setCouriers(kr);
       }
     } catch { /* ignore */ } finally {
@@ -1090,6 +1119,16 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     localStorage.setItem('soundMuted', '1');
   }
 
+  // The menu came back: show its categories, and keep the seller on the one
+  // they are on. Test Restoran, 2026-10-06: every pull put the till back on the
+  // first category, and a seller reaching for a beer tapped something else.
+  const showCategories = useCallback((m: MenuItem[], c: Category[]) => {
+    const available = c.filter(cat => cat.available);
+    setAvailableCategories(available);
+    const cats = available.filter(a => m.some(i => i.category === a.name)).map(a => a.name);
+    setActiveCategory(cur => keepCategory(cur, cats));
+  }, []);
+
   useEffect(() => {
     if (overrideCompanyId) {
       // Public terminal mode — company context comes from the secret URL token,
@@ -1107,37 +1146,39 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       tillFetch(`/api/public-stations?companyId=${overrideCompanyId}`)
         .then(r => r.json()).then(d => setStations(d.stations ?? [])).catch(() => {});
       // Fetch staff and shift together via server-side routes (bypass RLS — no auth session).
+      // This effect runs again after every pull, so a failed read keeps what
+      // the screen has (lib/keep-on-fail) — a blip turned the till into
+      // "Növbəni aç" (Test Restoran, 2026-10-06).
       Promise.all([
-        tillFetch(`/api/public-staff?companyId=${overrideCompanyId}`).then(r => r.json()).catch(() => ({ staff: [] })),
-        tillFetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).catch(() => ({ shift: null })),
-      ]).then(([staffData, shiftData]) => {
-        setPinStaffList(staffData.staff ?? []);
-        setShift(shiftData.shift ?? null);
+        listOrNull<Staff>(tillFetch(`/api/public-staff?companyId=${overrideCompanyId}`), 'staff'),
+        shiftOrUnknown<CashShift>(tillFetch(`/api/public-shift?companyId=${overrideCompanyId}`)),
+      ]).then(([st, s]) => {
+        if (st) setPinStaffList(st);
+        if (s !== undefined) setShift(s);
         setShiftChecked(true);
       });
-      tillFetch(`/api/public-modifiers?companyId=${overrideCompanyId}`)
-        .then(r => r.json()).then(d => setModifierGroups(d.groups ?? [])).catch(() => {});
-      tillFetch(`/api/public-couriers?companyId=${overrideCompanyId}`)
-        .then(r => r.json()).then(d => setCouriers(d.couriers ?? [])).catch(() => {});
+      listOrNull<ModifierGroup>(tillFetch(`/api/public-modifiers?companyId=${overrideCompanyId}`), 'groups')
+        .then(mg => { if (mg) setModifierGroups(mg); });
+      listOrNull<Courier>(tillFetch(`/api/public-couriers?companyId=${overrideCompanyId}`), 'couriers')
+        .then(kr => { if (kr) setCouriers(kr); });
       // Guarded like every other whole-list read: this effect runs again after
       // each pull (dataVersion), by which time the seller has a screen worth
       // keeping.
       const bootTicket = beginOrdersRead();
       Promise.all([
-        tillFetch(`/api/public-menu?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.items ?? []).catch(() => []),
+        listOrNull<MenuItem>(tillFetch(`/api/public-menu?companyId=${overrideCompanyId}`), 'items'),
         readTerminalOrders(overrideCompanyId),
-        tillFetch(`/api/public-categories?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.categories ?? []).catch(() => []),
-        tillFetch(`/api/public-tables?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => ({ tables: normalizeTables(d.tables ?? []), halls: (d.halls ?? []) as Hall[] })).catch(() => ({ tables: [], halls: [] })),
+        listOrNull<Category>(tillFetch(`/api/public-categories?companyId=${overrideCompanyId}`), 'categories'),
+        readTerminalTables(overrideCompanyId),
         fetchTablesEnabled(),
         fetchKassaEnabled(),
         fetchDeliveryEnabled(),
       ]).then(([m, o, c, tb, te, ke, de]) => {
-        setOnline(true); setMenu(m); setTables(tb.tables); setHalls(tb.halls); setTablesOn(te); setKassaOn(ke as boolean); setDeliveryOn(de as boolean);
+        setOnline(true); setTablesOn(te); setKassaOn(ke as boolean); setDeliveryOn(de as boolean);
+        if (m) setMenu(m);
+        if (tb) { setTables(tb.tables); setHalls(tb.halls); }
         if (o) applyOrders(bootTicket, () => setOrders(o.orders));
-        const available = c.filter((cat: { available: boolean }) => cat.available);
-        setAvailableCategories(available);
-        const cats = available.filter((a: { name: string }) => m.some((i: { category: string }) => i.category === a.name)).map((a: { name: string }) => a.name);
-        if (cats.length > 0) setActiveCategory(cats[0]);
+        if (m && c) showCategories(m, c);
       }).catch(() => setOnline(false));
       return;
     }
@@ -1162,25 +1203,27 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     setSellerName(session.name);
     fetchCompanySettings(session.companyId ?? '').then(setBizSettings);
     fetchBranding().then(({ logoUrl: l, brandColor: b }) => { setLogoUrl(l); applyBrand(b); });
-    Promise.all([fetchOpenShift(), fetchStaff()]).then(([s, st]) => {
-      setShift(s); setPinStaffList(st); setShiftChecked(true);
+    // Runs again after every pull: a failed read keeps what the screen has.
+    Promise.all([readOpenShift(), fetchStaffOrNull()]).then(([s, st]) => {
+      if (s !== undefined) setShift(s);
+      if (st) setPinStaffList(st);
+      setShiftChecked(true);
     });
     fetchOrdersCount().then(setTotalOrders);
     fetchStations().then(setStations);
     fetchStationReady().then(setReadyRows);
-    fetchModifierGroups().then(setModifierGroups);
-    fetchHalls().then(setHalls);
+    fetchModifierGroupsOrNull().then(mg => { if (mg) setModifierGroups(mg); });
+    fetchHallsOrNull().then(hl => { if (hl) setHalls(hl); });
     const bootTicket = beginOrdersRead();
-    Promise.all([fetchMenu(), fetchOrdersOrNull({ limit: 200 }), fetchCategories(), fetchTables(), fetchTablesEnabled(), fetchKassaEnabled(), fetchPrintReceipt(), fetchDeliveryEnabled()]).then(([m, o, c, tb, te, ke, pr, de]) => {
-      setOnline(true); setMenu(m); setTables(tb); setTablesOn(te); setKassaOn(ke); setShouldPrintReceipt(pr); setDeliveryOn(de);
+    Promise.all([fetchMenuOrNull(), fetchOrdersOrNull({ limit: 200 }), fetchCategoriesOrNull(), fetchTablesOrNull(), fetchTablesEnabled(), fetchKassaEnabled(), fetchPrintReceipt(), fetchDeliveryEnabled()]).then(([m, o, c, tb, te, ke, pr, de]) => {
+      setOnline(true); setTablesOn(te); setKassaOn(ke); setShouldPrintReceipt(pr); setDeliveryOn(de);
+      if (m) setMenu(m);
+      if (tb) setTables(tb);
       if (o) applyOrders(bootTicket, () => setOrders(o));
-      const available = c.filter(cat => cat.available);
-      setAvailableCategories(available);
-      const cats = available.filter(a => m.some(i => i.category === a.name)).map(a => a.name);
-      if (cats.length > 0) setActiveCategory(cats[0]);
+      if (m && c) showCategories(m, c);
     }).catch(() => setOnline(false));
     return () => authSub.subscription.unsubscribe();
-  }, [router, overrideCompanyId, overrideCompanyName, overrideBrandColor, overrideExpiresAt, dataVersion, beginOrdersRead, applyOrders]);
+  }, [router, overrideCompanyId, overrideCompanyName, overrideBrandColor, overrideExpiresAt, dataVersion, beginOrdersRead, applyOrders, showCategories]);
 
   // ── Kitchen printers ────────────────────────────────────────────────────────
   // Only inside the desktop shell, and only with a real login: claiming tickets
@@ -1215,12 +1258,14 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       const ticket = beginOrdersRead();
       try {
         const [m, o, c, st, s, mg] = await Promise.all([
-          fetchMenu(), fetchOrdersOrNull({ limit: 200 }), fetchCategories(), fetchStaff(), fetchOpenShift(), fetchModifierGroups(),
+          fetchMenuOrNull(), fetchOrdersOrNull({ limit: 200 }), fetchCategoriesOrNull(), fetchStaffOrNull(), readOpenShift(), fetchModifierGroupsOrNull(),
         ]);
-        setMenu(m); setShift(s); setModifierGroups(mg);
+        if (m) setMenu(m);
+        if (s !== undefined) setShift(s);
+        if (mg) setModifierGroups(mg);
         if (o) applyOrders(ticket, () => setOrders(o));
-        setAvailableCategories(c.filter(cat => cat.available));
-        setPinStaffList(st);
+        if (c) setAvailableCategories(c.filter(cat => cat.available));
+        if (st) setPinStaffList(st);
       } catch { /* ignore focus sync errors */ }
     }
     function onVisible() {
@@ -1485,7 +1530,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
 
   // Couriers the seller can pick from, and whether the feature is on screen at
   // all. A restaurant with no couriers on file never sees any of it.
-  const activeCouriers = useMemo(() => couriers.filter(c => c.active), [couriers]);
+  const activeCouriers = useMemo(() => pickableCouriers(couriers), [couriers]);
+  // The Kuryerlər tab: these, plus a deactivated or deleted rider still holding money.
+  const settleCouriers = useMemo(() => settleableCouriers(couriers), [couriers]);
   const courierNames = useMemo(
     () => Object.fromEntries(couriers.map(c => [c.id, c.name])) as Record<string, string>,
     [couriers],
@@ -2347,6 +2394,14 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       } else {
         fetchShiftSales(shift.openedAt).then(setShiftSales);
       }
+      const now = new Date().toISOString();
+      const hs: HistoryShift = { id: shift.id, openedAt: shift.openedAt, openedBy: shift.openedBy };
+      const win = shiftLoadWindow(hs, now);
+      Promise.all([
+        ordersBetween(win.from, win.to, overrideCompanyId),
+        courierCollections(shift.openedAt, now, overrideCompanyId),
+      ]).then(([list, collected]) => setKassaTotals(shiftTotals(list, hs, now, orderTotal,
+        collected.paidOrderIds ? new Set(collected.paidOrderIds) : undefined)));
     }
   }, [view, shift, overrideCompanyId]);
 
@@ -2358,8 +2413,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     const check = async () => {
       last = Date.now();
       const open = overrideCompanyId
-        ? await tillFetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.shift ?? null).catch(() => undefined)
-        : await fetchOpenShift();
+        ? await shiftOrUnknown<CashShift>(tillFetch(`/api/public-shift?companyId=${overrideCompanyId}`))
+        : await readOpenShift();
+      // undefined is a failed read, not a closed shift: on a blip the seller was
+      // thrown to Sifarişlər from Kassa or Tarixçə (Test Restoran, 2026-10-06).
       if (open === null && shift) { setShift(null); setView('orders'); }
     };
     const id = setInterval(() => {
@@ -2383,10 +2440,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     // A shift's orders are the ones it was paid in (ordersOfShift), so the
     // fetch reaches back for orders opened before it began.
     const fetchWin = picked ? shiftLoadWindow(picked, now) : { from, to };
-    const load: Promise<Order[]> = overrideCompanyId
-      ? tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&from=${encodeURIComponent(fetchWin.from)}&to=${encodeURIComponent(fetchWin.to)}&limit=1000`)
-          .then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
-      : fetchOrders({ from: fetchWin.from, to: fetchWin.to, limit: 1000 });
+    const load = ordersBetween(fetchWin.from, fetchWin.to, overrideCompanyId);
     // The boxes need both: which deliveries were paid back in view decides
     // their Nağd / Kart / Kuryer split, so neither is shown without the other.
     Promise.all([
@@ -3437,35 +3491,32 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   <p className="text-xs text-stone-500 mt-1">Kassaya daxil deyil — bank terminalından keçir</p>
                 </div>
 
-                {/* Sales — each sale once: cash, card and this shift's courier
-                    deliveries. A rider paying back an earlier shift's delivery
-                    is money for the drawer, not a sale (kassaSales). */}
-                {(() => {
-                  const k = kassaSales(shiftSales, shift.movements
-                    .filter(m => m.reason === 'Kuryer ödənişi')
-                    .reduce((t, m) => t + m.amount, 0));
-                  return (
-                    <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5 space-y-2.5">
+                {/* Sales — the same numbers Tarixçə shows for this shift
+                    (shiftTotals): Nağd + Kart + Kuryer = Ümumi satış. */}
+                <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5 space-y-2.5">
+                  {!kassaTotals ? (
+                    <div className="flex justify-center py-2">
+                      <span className="w-5 h-5 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
+                    </div>
+                  ) : (
+                    <>
                       <div className="flex justify-between text-sm text-stone-600">
-                        <span>Nağd satış</span><span className="font-semibold">{k.nagd.toFixed(2)} ₼</span>
+                        <span>Nağd satış</span><span className="font-semibold">{kassaTotals.nagd.toFixed(2)} ₼</span>
                       </div>
                       <div className="flex justify-between text-sm text-stone-600">
-                        <span>Kart satışı</span><span className="font-semibold">{k.kart.toFixed(2)} ₼</span>
+                        <span>Kart satışı</span><span className="font-semibold">{kassaTotals.kart.toFixed(2)} ₼</span>
                       </div>
-                      {k.kuryer > 0.005 && (
+                      {kassaTotals.kuryer > 0.005 && (
                         <div className="flex justify-between text-sm text-stone-600">
-                          <span>Kuryer satışı</span><span className="font-semibold">{k.kuryer.toFixed(2)} ₼</span>
+                          <span>Kuryer</span><span className="font-semibold">{kassaTotals.kuryer.toFixed(2)} ₼</span>
                         </div>
                       )}
-                      {k.kuryerOut > 0.005 && (
-                        <p className="text-xs text-stone-400 text-right -mt-1.5">{k.kuryerOut.toFixed(2)} ₼ hələ kuryerdədir</p>
-                      )}
                       <div className="flex justify-between items-center border-t pt-3 font-bold text-lg">
-                        <span>Ümumi satış</span><span className="text-primary-700">{k.total.toFixed(2)} ₼</span>
+                        <span>Ümumi satış</span><span className="text-primary-700">{kassaTotals.cemi.toFixed(2)} ₼</span>
                       </div>
-                    </div>
-                  );
-                })()}
+                    </>
+                  )}
+                </div>
 
                 {/* Movements */}
                 <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5">
@@ -3516,7 +3567,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                             <span className="text-stone-600 truncate mr-3">
                               {m.reason}
                               <span className="text-xs text-stone-500 ml-1.5">
-                                {new Date(m.at).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })} · {m.by}
+                                {tzTime(m.at, bizSettings.timezone)} · {m.by}
                               </span>
                             </span>
                             <span className={`font-semibold shrink-0 ${m.amount < 0 ? 'text-red-500' : 'text-green-600'}`}>
@@ -3747,7 +3798,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
               <div className="space-y-2 max-w-md">
                 {/* Whoever owes something first, largest first — the seller is
                     looking for a name they can see, not scrolling a roster. */}
-                {[...couriers]
+                {[...settleCouriers]
                   .sort((a, b) => Math.abs(b.outstanding ?? 0) - Math.abs(a.outstanding ?? 0))
                   .map(c => {
                     const owed = c.outstanding ?? 0;
@@ -3791,7 +3842,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                       </button>
                     );
                   })}
-                {couriers.length === 0 && (
+                {settleCouriers.length === 0 && (
                   <p className="text-sm text-stone-500">Kuryer yoxdur — admin paneldən əlavə edin.</p>
                 )}
               </div>

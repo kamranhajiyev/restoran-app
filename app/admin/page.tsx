@@ -42,12 +42,12 @@ import {
 } from '@/lib/store';
 import { applyBrand, BRAND_PRESETS, DEFAULT_BRAND } from '@/lib/branding';
 import { orderClosedAt, orderSuspicion, isSuspiciousOrder } from '@/lib/order-items';
-import { shiftLoadWindow, shiftTotals } from '@/lib/history-shifts';
-import { kassaSales, type ShiftSales } from '@/lib/courier-pending';
+import { historyTotals, shiftLoadWindow, shiftTotals } from '@/lib/history-shifts';
+import { type Collections, type ShiftSales } from '@/lib/courier-pending';
 import { orderTotal as saleTotal } from '@/components/seller/order-format';
 import {
   CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc,
-  addDays, dayDiff, dayOfWeek, dayToDate, tzHour, cutoffMinutes,
+  addDays, dayDiff, dayOfWeek, dayToDate, tzHour, tzTime, cutoffMinutes,
 } from '@/lib/business-day';
 import { supabase } from '@/lib/supabase';
 import { CashShift, Category, Hall, MenuItem, MenuItemVariant, ModifierGroup, Order, OrderStatus, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, TrashItem, isOrderOpen } from '@/types';
@@ -625,8 +625,8 @@ function AdminPageContent() {
   const [shifts, setShifts] = useState<CashShift[]>([]);
   const [shiftsLoading, setShiftsLoading] = useState(false);
   const [openShiftSales, setOpenShiftSales] = useState<ShiftSales>({ cash: 0, card: 0, courierCard: 0, courierSales: 0, courier: 0 });
-  // A closed shift's sales, the same numbers Tarixçə shows for it. Loaded when
-  // the shift is opened; absent while loading.
+  // A shift's sales, the same numbers Tarixçə shows for it. Loaded for the open
+  // shift and when a closed one is opened; absent while loading.
   const [closedShiftTotals, setClosedShiftTotals] = useState<Record<string, { nagd: number; kart: number; kuryer: number; cemi: number }>>({});
   const closedTotalsAsked = useRef(new Set<string>());
   const [expandedShiftId, setExpandedShiftId] = useState<string | null>(null);
@@ -697,7 +697,7 @@ function AdminPageContent() {
   // What couriers handed over inside the selected range, split by how it arrived.
   // Kept beside the orders rather than derived from them: a settlement is dated by
   // when the money reached the counter, which is rarely the day of the delivery.
-  const [courierCollected, setCourierCollected] = useState({ nagd: 0, kart: 0 });
+  const [courierCollected, setCourierCollected] = useState<Collections>({ nagd: 0, kart: 0 });
   const collectedCache = useRef<Map<string, { at: number; data: { nagd: number; kart: number } }>>(new Map());
   const refreshRef = useRef<() => void>(() => {});
   const refreshAllRef = useRef<() => void>(() => {});
@@ -1002,11 +1002,9 @@ function AdminPageContent() {
     }).finally(() => { setDataLoading(false); setStatsLoaded(true); });
   }, [sessionReady, customFrom, customTo, bizSettings, statsRefreshKey]);
 
-  // Courier settlements for the same window, cached the same way. Deliberately a
-  // second read rather than a widened orders query: the payments carry no order
-  // id, so there is nothing to join them onto — see the header of
-  // supabase/migrations/20260905_couriers.sql. A failure leaves the totals at
-  // zero, which is exactly what the page showed before this existed.
+  // Courier settlements for the same window, cached the same way — the orders
+  // they name tell Ödəniş üsulları which deliveries were paid back inside the
+  // range. A failure leaves every settlement counted, as offline Tarixçə does.
   useEffect(() => {
     if (!sessionReady) return;
     const bizT = businessToday(bizSettings);
@@ -1041,24 +1039,9 @@ function AdminPageContent() {
     return () => { cancelled = true; clearTimeout(t); };
   }, [sessionReady, ordersRangeKey, ordersFrom, ordersTo, bizSettings, rangeRefreshKey]);
 
-  useEffect(() => {
-    if (!sessionReady || tab !== 'kassa') return;
-    setShiftsLoading(true);
-    fetchShifts().then(async s => {
-      setShifts(s);
-      const open = s.find(x => !x.closedAt);
-      if (open) setOpenShiftSales(await fetchShiftSales(open.openedAt));
-    }).finally(() => setShiftsLoading(false));
-    const interval = setInterval(async () => {
-      const open = await fetchOpenShift();
-      if (open) setOpenShiftSales(await fetchShiftSales(open.openedAt));
-    }, 30_000);
-    return () => clearInterval(interval);
-  }, [sessionReady, tab]);
-
-  // Closed shifts are counted like Tarixçə counts them (lib/history-shifts), not
-  // from the drawer money — that holds courier payments for older shifts.
-  const loadClosedShiftTotals = useCallback(async (s: CashShift) => {
+  // Shifts are counted like Tarixçə counts them (lib/history-shifts), not from
+  // the drawer money — that holds courier payments for older shifts.
+  const loadShiftTotals = useCallback(async (s: CashShift) => {
     closedTotalsAsked.current.add(s.id);
     const now = new Date().toISOString();
     const win = shiftLoadWindow(s, now);
@@ -1071,9 +1054,24 @@ function AdminPageContent() {
   }, []);
 
   useEffect(() => {
+    if (!sessionReady || tab !== 'kassa') return;
+    setShiftsLoading(true);
+    fetchShifts().then(async s => {
+      setShifts(s);
+      const open = s.find(x => !x.closedAt);
+      if (open) { void loadShiftTotals(open); setOpenShiftSales(await fetchShiftSales(open.openedAt)); }
+    }).finally(() => setShiftsLoading(false));
+    const interval = setInterval(async () => {
+      const open = await fetchOpenShift();
+      if (open) { void loadShiftTotals(open); setOpenShiftSales(await fetchShiftSales(open.openedAt)); }
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [sessionReady, tab, loadShiftTotals]);
+
+  useEffect(() => {
     const s = shifts.find(x => x.id === expandedShiftId && x.closedAt);
-    if (s && !closedTotalsAsked.current.has(s.id)) void loadClosedShiftTotals(s);
-  }, [expandedShiftId, shifts, loadClosedShiftTotals]);
+    if (s && !closedTotalsAsked.current.has(s.id)) void loadShiftTotals(s);
+  }, [expandedShiftId, shifts, loadShiftTotals]);
 
   async function refreshKassa() {
     const s = await fetchShifts();
@@ -1081,7 +1079,7 @@ function AdminPageContent() {
     closedTotalsAsked.current.clear();
     setClosedShiftTotals({});
     const open = s.find(x => !x.closedAt);
-    if (open) setOpenShiftSales(await fetchShiftSales(open.openedAt));
+    if (open) { void loadShiftTotals(open); setOpenShiftSales(await fetchShiftSales(open.openedAt)); }
   }
 
   async function handleAdminCloseShift(open: CashShift) {
@@ -1247,7 +1245,10 @@ function AdminPageContent() {
           }
           return (
             <li key={m.id ?? i} className="group flex items-center justify-between text-xs text-stone-600">
-              <span className="truncate mr-3">{m.reason} · {m.by}</span>
+              <span className="truncate mr-3">
+                {m.reason}
+                <span className="text-stone-500 ml-1.5">{tzTime(m.at, bizSettings.timezone)} · {m.by}</span>
+              </span>
               <span className="flex items-center gap-1.5 shrink-0">
                 <span className={`font-semibold ${m.amount < 0 ? 'text-red-500' : 'text-green-600'}`}>
                   {m.amount > 0 ? '+' : ''}{m.amount.toFixed(2)} ₼
@@ -2218,36 +2219,17 @@ function AdminPageContent() {
   const chartMarginPct = chartRevenue > 0 ? (chartProfit / chartRevenue) * 100 : 0;
   const chartAvg = chartPaid.length > 0 ? chartRevenue / chartPaid.length : 0;
 
-  // Per-method revenue: excess beyond the order total is attributed card-first.
-  // Orders saved before payment tracking (no amounts) contribute nothing.
-  const methodRev = chartPaid.reduce((acc, o) => {
-    const t = orderTotal(o);
-    const cashPaid = o.cashAmount ?? 0;
-    const cardPaid = o.cardAmount ?? 0;
-    // A delivery the courier is collecting for tenders nothing, so it would fall
-    // through the guard below and vanish from this breakdown while still
-    // counting as revenue — the percentages would stop adding up to the day.
-    const debt = o.courierDebt ?? 0;
-    if (debt > 0) { acc.courier += Math.min(debt, t); return acc; }
-    if (cashPaid + cardPaid === 0) return acc;
-    const cardPart = Math.min(cardPaid, t);
-    acc.card += cardPart;
-    acc.cash += Math.min(cashPaid, t - cardPart);
-    return acc;
-  }, { cash: 0, card: 0, courier: 0 });
-  // Nağd and Kart are "money that arrived", so a courier settlement belongs in
-  // them from the moment the rider hands it over — the same definition the seller
-  // history uses, and the two screens have to agree.
-  //
-  // The collected amount is then taken back off the debt line, or the same money
-  // would be counted twice in any range that contains both the delivery and the
-  // settlement. Clamped at 0 because the subtraction can legitimately overshoot:
-  // a rider settling today for last week's order, or an order cancelled after it
-  // was paid for, leaves payments in the range with no matching debt.
-  const collectedTotal = courierCollected.nagd + courierCollected.kart;
-  const cashRev = methodRev.cash + courierCollected.nagd;
-  const cardRev = methodRev.card + courierCollected.kart;
-  const courierRev = Math.max(0, methodRev.courier - collectedTotal);
+  // Counted like Tarixçə (lib/history-shifts): only the range's own sales. A
+  // delivery the rider paid back inside the range is Nağd or Kart, otherwise
+  // Kuryer borcu; a rider settling today for last week's order is not today's
+  // sale. Test Restoran, 2026-10-06: Kassa kept a paid-back delivery under
+  // Kuryer while Tarixçə had it in Nağd. Orders saved before payment tracking
+  // (no amounts) count in no bar, so the bars still add up to 100%.
+  const payTotals = historyTotals(chartPaid, orderTotal,
+    courierCollected.paidOrderIds ? new Set(courierCollected.paidOrderIds) : undefined);
+  const cashRev = payTotals.nagd;
+  const cardRev = payTotals.kart;
+  const courierRev = payTotals.kuryer;
   const totalPayRev = cashRev + cardRev + courierRev;
   const sellerRevMap: Record<string, { orders: number; rev: number }> = {};
   chartPaid.forEach(o => {
@@ -2859,15 +2841,6 @@ function AdminPageContent() {
                           </div>
                         );
                       })}
-                      {/* Without this the owner reads Nağd + Kart > Ümumi satış as a
-                          bug. It isn't: a rider settling today for yesterday's
-                          delivery puts that money in today's takings. */}
-                      {collectedTotal > 0.005 && (
-                        <p className="text-[11px] text-stone-400 leading-snug pt-1">
-                          Nağd və Kart məbləğinə kuryerlərdən yığılan {collectedTotal.toFixed(2)} ₼ daxildir
-                          {courierCollected.kart > 0.005 && ` (${courierCollected.nagd.toFixed(2)} ₼ nağd · ${courierCollected.kart.toFixed(2)} ₼ kart)`}.
-                        </p>
-                      )}
                     </div>
                   )}
                 </div>
@@ -3538,15 +3511,8 @@ function AdminPageContent() {
                 const movTotal = (s: CashShift) => s.movements.reduce((t, m) => t + m.amount, 0);
                 const expected = open ? open.openingCash + openShiftSales.cash + movTotal(open) : 0;
                 const closed = shifts.filter(s => s.closedAt);
-                // A rider settling a debt in cash reaches the drawer as a 'Kuryer ödənişi'
-                // movement, not as an order payment — so it is sales, even though it sits
-                // in the movement list next to the expenses. Card settlements are already
-                // inside the shift's card total.
-                const courierCash = (s: CashShift) => s.movements
-                  .filter(m => m.reason === 'Kuryer ödənişi')
-                  .reduce((t, m) => t + m.amount, 0);
-                // The same boxes as the till: Kassa's for the open shift, Tarixçə's
-                // for a closed one — Nağd + Kart + Kuryer = Ümumi.
+                // The same boxes as Tarixçə, open shift or closed — Nağd + Kart +
+                // Kuryer = Ümumi.
                 const renderSales = (t: { nagd: number; kart: number; kuryer: number; total: number } | null | undefined) => (
                   <div className="border-t pt-2.5 space-y-1 text-sm text-stone-600">
                     {!t ? (
@@ -3567,7 +3533,7 @@ function AdminPageContent() {
                     )}
                   </div>
                 );
-                const closedSales = (s: CashShift) => {
+                const shiftSalesOf = (s: CashShift) => {
                   const t = closedShiftTotals[s.id];
                   return t && { nagd: t.nagd, kart: t.kart, kuryer: t.kuryer, total: t.cemi };
                 };
@@ -3613,7 +3579,7 @@ function AdminPageContent() {
                           <span>💳 Terminal (kart məbləği)</span><span className="text-primary-800">{openShiftSales.card.toFixed(2)} ₼</span>
                         </div>
                         <p className="text-xs text-stone-500 -mt-1.5">Kassaya daxil deyil — bank terminalından keçir</p>
-                        {renderSales(kassaSales(openShiftSales, courierCash(open)))}
+                        {renderSales(shiftSalesOf(open))}
                         {renderMovements(open)}
                         {renderEditTrail(open)}
                         {kassaEditError && (
@@ -3775,7 +3741,7 @@ function AdminPageContent() {
                                       )}
                                     </>
                                   )}
-                                  {renderSales(closedSales(s))}
+                                  {renderSales(shiftSalesOf(s))}
                                   {renderMovements(s)}
                                   {renderEditTrail(s)}
                                   {kassaEditError && (

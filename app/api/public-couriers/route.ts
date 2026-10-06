@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
 
   const db = createServerClient();
   const [couriers, orders, payments] = await Promise.all([
-    db.from('couriers').select('id, name, phone, active, staff_id, created_at')
+    db.from('couriers').select('id, name, phone, active, staff_id, created_at, deleted_at')
       .eq('company_id', companyId).order('created_at'),
     // 'ödənilib' only: a returned order stops owing the moment it is cancelled.
     db.from('orders').select('id, order_number, created_at, courier_id, courier_debt, courier_cash, courier_card')
@@ -47,6 +47,7 @@ export async function GET(req: NextRequest) {
       active: c.active,
       staffId: c.staff_id ?? undefined,
       createdAt: c.created_at,
+      deletedAt: c.deleted_at ?? undefined,
       outstanding: balance[c.id] ?? 0,
       pending: pending[c.id] ?? [],
     })),

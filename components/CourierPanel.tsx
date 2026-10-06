@@ -17,6 +17,7 @@ import {
   setCourierPaymentMethod, deleteCourierPayment,
 } from '@/lib/store';
 import { getSession } from '@/lib/auth';
+import { listedCouriers } from '@/lib/couriers';
 import { Courier, CourierLedger, CourierPayMethod, CourierPayment } from '@/types';
 import { DialogState } from '@/components/AppDialog';
 import { inputCls, btnPrimary, btnGhost, Modal } from '@/components/panel-ui';
@@ -106,6 +107,9 @@ function CouriersTab({ couriers, reload, flash, fail, setDialog }: {
   const [balance, setBalance] = useState<Record<string, number>>({});
 
   useEffect(() => { fetchCourierOutstanding().then(setBalance); }, [couriers]);
+  // Deleted couriers stay in the list the panel loads, for the names in
+  // Ödənişlər and Hesabat, but not here.
+  const shown = listedCouriers(couriers);
 
   function open(c: Courier | 'new') {
     setEditing(c);
@@ -125,16 +129,12 @@ function CouriersTab({ couriers, reload, flash, fail, setDialog }: {
 
   function remove(c: Courier) {
     setDialog({
-      title: 'Kuryeri sil?', message: `«${c.name}» silinəcək.`, onConfirm: async () => {
+      title: 'Kuryeri sil?', message: `«${c.name}» siyahılardan silinəcək. Köhnə sifarişlərdə və hesabatda adı qalacaq.`, onConfirm: async () => {
         const err = await deleteCourier(c.id);
-        // orders.courier_id is `on delete restrict`, so a courier who has ever
-        // carried anything cannot be removed — the history would rewrite itself.
-        // Deactivation is the answer, and the message has to say so.
-        if (err) {
-          fail(/foreign|violates/.test(err)
-            ? 'Bu kuryerin sifarişləri var — silinə bilməz. Əvəzinə deaktiv edin.'
-            : err);
-        } else { await reload(); flash('Silindi'); }
+        // A courier with history is marked deleted rather than removed
+        // (deleteCourier); the only refusal left is money still on them.
+        if (err) fail(err);
+        else { await reload(); flash('Silindi'); }
       },
     });
   }
@@ -146,8 +146,8 @@ function CouriersTab({ couriers, reload, flash, fail, setDialog }: {
         <button className={btnPrimary} onClick={() => open('new')}><Plus className="w-4 h-4" /> Yeni kuryer</button>
       </div>
       <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
-        {couriers.length === 0 && <p className="text-sm text-stone-400 p-6 text-center">Kuryer yoxdur</p>}
-        {couriers.map(c => {
+        {shown.length === 0 && <p className="text-sm text-stone-400 p-6 text-center">Kuryer yoxdur</p>}
+        {shown.map(c => {
           const owed = balance[c.id] ?? 0;
           return (
             <div key={c.id} className="flex items-center justify-between px-4 py-3 gap-3">
@@ -281,7 +281,7 @@ function PaymentsTab({ couriers, flash, fail, setDialog }: {
           <select value={courierId} onChange={e => setCourierId(e.target.value)}
             className="px-3 py-2 text-sm rounded-lg border border-stone-200 focus:outline-none focus:ring-2 focus:ring-stone-300">
             <option value="">Bütün kuryerlər</option>
-            {couriers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {couriers.map(c => <option key={c.id} value={c.id}>{c.name}{c.deletedAt ? ' (silinib)' : ''}</option>)}
           </select>
           <span className="text-sm text-stone-500">Cəmi: <b className="tabular-nums text-emerald-600">{total.toFixed(2)} ₼</b></span>
         </div>
