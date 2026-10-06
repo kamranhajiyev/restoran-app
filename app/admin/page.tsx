@@ -42,6 +42,9 @@ import {
 } from '@/lib/store';
 import { applyBrand, BRAND_PRESETS, DEFAULT_BRAND } from '@/lib/branding';
 import { orderClosedAt, orderSuspicion, isSuspiciousOrder } from '@/lib/order-items';
+import { shiftLoadWindow, shiftTotals } from '@/lib/history-shifts';
+import { kassaSales, type ShiftSales } from '@/lib/courier-pending';
+import { orderTotal as saleTotal } from '@/components/seller/order-format';
 import {
   CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc,
   addDays, dayDiff, dayOfWeek, dayToDate, tzHour, cutoffMinutes,
@@ -621,7 +624,11 @@ function AdminPageContent() {
   // kassa tab
   const [shifts, setShifts] = useState<CashShift[]>([]);
   const [shiftsLoading, setShiftsLoading] = useState(false);
-  const [openShiftSales, setOpenShiftSales] = useState({ cash: 0, card: 0 });
+  const [openShiftSales, setOpenShiftSales] = useState<ShiftSales>({ cash: 0, card: 0, courierCard: 0, courierSales: 0, courier: 0 });
+  // A closed shift's sales, the same numbers Tarixçə shows for it. Loaded when
+  // the shift is opened; absent while loading.
+  const [closedShiftTotals, setClosedShiftTotals] = useState<Record<string, { nagd: number; kart: number; kuryer: number; cemi: number }>>({});
+  const closedTotalsAsked = useRef(new Set<string>());
   const [expandedShiftId, setExpandedShiftId] = useState<string | null>(null);
   const [adminCountedInput, setAdminCountedInput] = useState('');
   const [adminTerminalInput, setAdminTerminalInput] = useState('');
@@ -1049,9 +1056,30 @@ function AdminPageContent() {
     return () => clearInterval(interval);
   }, [sessionReady, tab]);
 
+  // Closed shifts are counted like Tarixçə counts them (lib/history-shifts), not
+  // from the drawer money — that holds courier payments for older shifts.
+  const loadClosedShiftTotals = useCallback(async (s: CashShift) => {
+    closedTotalsAsked.current.add(s.id);
+    const now = new Date().toISOString();
+    const win = shiftLoadWindow(s, now);
+    const [orders, collected] = await Promise.all([
+      fetchOrders({ from: win.from, to: win.to, limit: 1000 }),
+      fetchCourierCollections(s.openedAt, s.closedAt ?? now),
+    ]);
+    const paid = collected.paidOrderIds ? new Set(collected.paidOrderIds) : undefined;
+    setClosedShiftTotals(prev => ({ ...prev, [s.id]: shiftTotals(orders, s, now, saleTotal, paid) }));
+  }, []);
+
+  useEffect(() => {
+    const s = shifts.find(x => x.id === expandedShiftId && x.closedAt);
+    if (s && !closedTotalsAsked.current.has(s.id)) void loadClosedShiftTotals(s);
+  }, [expandedShiftId, shifts, loadClosedShiftTotals]);
+
   async function refreshKassa() {
     const s = await fetchShifts();
     setShifts(s);
+    closedTotalsAsked.current.clear();
+    setClosedShiftTotals({});
     const open = s.find(x => !x.closedAt);
     if (open) setOpenShiftSales(await fetchShiftSales(open.openedAt));
   }
@@ -3517,18 +3545,32 @@ function AdminPageContent() {
                 const courierCash = (s: CashShift) => s.movements
                   .filter(m => m.reason === 'Kuryer ödənişi')
                   .reduce((t, m) => t + m.amount, 0);
-                const renderSales = (cash: number, courier: number, card: number) => (
+                // The same boxes as the till: Kassa's for the open shift, Tarixçə's
+                // for a closed one — Nağd + Kart + Kuryer = Ümumi.
+                const renderSales = (t: { nagd: number; kart: number; kuryer: number; total: number } | null | undefined) => (
                   <div className="border-t pt-2.5 space-y-1 text-sm text-stone-600">
-                    <div className="flex justify-between"><span>Nağd satış</span><span>{(cash + courier).toFixed(2)} ₼</span></div>
-                    {Math.abs(courier) > 0.005 && (
-                      <p className="text-xs text-stone-400 text-right -mt-1">{courier.toFixed(2)} ₼ kuryerlərdən</p>
+                    {!t ? (
+                      <div className="flex justify-center py-1">
+                        <span className="w-4 h-4 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex justify-between"><span>Nağd satış</span><span>{t.nagd.toFixed(2)} ₼</span></div>
+                        <div className="flex justify-between"><span>Kart satışı</span><span>{t.kart.toFixed(2)} ₼</span></div>
+                        {t.kuryer > 0.005 && (
+                          <div className="flex justify-between"><span>Kuryer satışı</span><span>{t.kuryer.toFixed(2)} ₼</span></div>
+                        )}
+                        <div className="flex justify-between font-bold text-stone-800">
+                          <span>Ümumi satış</span><span>{t.total.toFixed(2)} ₼</span>
+                        </div>
+                      </>
                     )}
-                    <div className="flex justify-between"><span>Kart satışı</span><span>{card.toFixed(2)} ₼</span></div>
-                    <div className="flex justify-between font-bold text-stone-800">
-                      <span>Ümumi satış</span><span>{(cash + courier + card).toFixed(2)} ₼</span>
-                    </div>
                   </div>
                 );
+                const closedSales = (s: CashShift) => {
+                  const t = closedShiftTotals[s.id];
+                  return t && { nagd: t.nagd, kart: t.kart, kuryer: t.kuryer, total: t.cemi };
+                };
                 return (
                   <>
                     {/* Current shift */}
@@ -3568,10 +3610,10 @@ function AdminPageContent() {
                           <span>Kassada olmalıdır</span><span className="text-primary-800 text-lg">{expected.toFixed(2)} ₼</span>
                         </div>
                         <div className="flex justify-between items-center border-t pt-2.5 font-bold">
-                          <span>💳 Terminal (kart satışı)</span><span className="text-primary-800">{openShiftSales.card.toFixed(2)} ₼</span>
+                          <span>💳 Terminal (kart məbləği)</span><span className="text-primary-800">{openShiftSales.card.toFixed(2)} ₼</span>
                         </div>
                         <p className="text-xs text-stone-500 -mt-1.5">Kassaya daxil deyil — bank terminalından keçir</p>
-                        {renderSales(openShiftSales.cash, courierCash(open), openShiftSales.card)}
+                        {renderSales(kassaSales(openShiftSales, courierCash(open)))}
                         {renderMovements(open)}
                         {renderEditTrail(open)}
                         {kassaEditError && (
@@ -3654,9 +3696,9 @@ function AdminPageContent() {
                                     Düzəliş edilib
                                   </span>
                                 )}
-                                {s.expectedCash !== undefined && (
+                                {closedShiftTotals[s.id] && (
                                   <span className="text-xs text-stone-500 shrink-0">
-                                    Satış: {(s.expectedCash - s.openingCash - movTotal(s) + courierCash(s) + (s.cardSales ?? 0)).toFixed(2)} ₼
+                                    Satış: {closedShiftTotals[s.id]!.cemi.toFixed(2)} ₼
                                   </span>
                                 )}
                                 <span className="text-sm font-semibold text-stone-700 shrink-0">{(s.countedCash ?? 0).toFixed(2)} ₼</span>
@@ -3686,7 +3728,7 @@ function AdminPageContent() {
                                         />
                                       </div>
                                       {s.cardSales !== undefined && (
-                                        <div className="flex justify-between"><span>💳 Kart satışı</span><span>{s.cardSales.toFixed(2)} ₼</span></div>
+                                        <div className="flex justify-between"><span>💳 Kart məbləği</span><span>{s.cardSales.toFixed(2)} ₼</span></div>
                                       )}
                                       <div className="flex justify-between items-center gap-3">
                                         <span>💳 Terminal (Z-hesabat)</span>
@@ -3720,7 +3762,7 @@ function AdminPageContent() {
                                         </span>
                                       </div>
                                       {s.cardSales !== undefined && (
-                                        <div className="flex justify-between"><span>💳 Kart satışı</span><span>{s.cardSales.toFixed(2)} ₼</span></div>
+                                        <div className="flex justify-between"><span>💳 Kart məbləği</span><span>{s.cardSales.toFixed(2)} ₼</span></div>
                                       )}
                                       {s.countedCard !== undefined && (
                                         <div className="flex justify-between">
@@ -3733,13 +3775,7 @@ function AdminPageContent() {
                                       )}
                                     </>
                                   )}
-                                  {/* Order cash isn't stored on a closed shift; it's what the
-                                      drawer expected minus the float and every movement. */}
-                                  {s.expectedCash !== undefined && renderSales(
-                                    s.expectedCash - s.openingCash - movTotal(s),
-                                    courierCash(s),
-                                    s.cardSales ?? 0,
-                                  )}
+                                  {renderSales(closedSales(s))}
                                   {renderMovements(s)}
                                   {renderEditTrail(s)}
                                   {kassaEditError && (

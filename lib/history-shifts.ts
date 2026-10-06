@@ -109,3 +109,20 @@ export function historyTotals<T extends { id: string; status: string; cashAmount
   }
   return acc;
 }
+
+/**
+ * One shift's Nağd / Kart / Kuryer / Cəmi — the numbers Tarixçə shows when the
+ * shift is picked. Admin's closed shifts use this too: Latte Art, 2026-10-06,
+ * admin worked a shift's sales out from the drawer money, which holds courier
+ * payments for older shifts, and the two screens disagreed.
+ */
+export function shiftTotals<T extends { id: string; status: OrderStatus; createdAt: string; paidAt?: string; cancelledAt?: string;
+  cashAmount?: number; cardAmount?: number; courierDebt?: number; courierCash?: number; courierCard?: number }>(
+  orders: T[],
+  shift: HistoryShift,
+  now: string,
+  total: (o: T) => number,
+  paidInView?: ReadonlySet<string>,
+): { nagd: number; kart: number; kuryer: number; cemi: number } {
+  return historyTotals(ordersOfShift(orders, shift, now), total, paidInView);
+}

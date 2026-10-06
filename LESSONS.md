@@ -12,8 +12,23 @@ How to use this file:
   forcing it. A lesson describes a past bug, not every future case.
 - If a lesson turns out to be wrong or outdated, fix or delete it here.
 - Keep it short. Add a lesson only after a real bug, with the date and customer.
+- Write the lesson as a general question that would catch the next bug of the
+  same kind, not only this one. The real bug is the example under it.
 
 ---
+
+## 0. Every change
+
+**Fixed or built one side? Check the other side.**
+Nağd and Kart, kassa and admin, exe and browser, first and second, before and
+after. Latte Art, 2026-10-06: Tarixçə was fixed but admin still counted shifts
+its own way; Kart filled itself from Nağd, but clicking Kart first left Nağd
+empty ("Çatışmır 8.00").
+
+**Can what a person types be longer than you planned for?**
+Notes, names, addresses: no spaces, hundreds of characters. Test Restoran,
+2026-10-06: a note with no spaces pushed the order list off the screen. The
+ticket cut it; the screens did not.
 
 ## 1. Bad internet (most of our bugs)
 
@@ -66,6 +81,10 @@ A bill that had not loaded could be paid at 0.00.
 **Does every way money moves show up in the shift and day totals?**
 Cash, card, courier cash, courier card, courier debt, deletes and refunds.
 Courier money once never reached the day's cash.
+
+**Is a label naming the number it really shows?**
+Latte Art, 2026-10-06: the Terminal box said "kart satışı" but holds courier
+card payments for older shifts too, so it is "kart məbləği".
 
 **Which day does this belong to?**
 A business day ends at the company's `work_close` in its own timezone, not at
