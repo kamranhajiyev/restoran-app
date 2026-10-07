@@ -68,6 +68,7 @@ import { orderLabel, orderSearchText } from '@/lib/order-label';
 import { orderPlace, orderPlaceKind, PlaceKind, tableTitle } from '@/lib/order-place';
 import { placeSales, tableSales } from '@/lib/place-sales';
 import { insertCopyAfter } from '@/lib/menu-copy';
+import { moneyDiff, shiftCheck } from '@/lib/shift-check';
 import OrderNote from '@/components/OrderNote';
 
 // RPC raise messages are machine codes — translated here for display
@@ -3613,19 +3614,17 @@ function AdminPageContent() {
                           </button>
                         </div>
                         {adminCountedInput !== '' && (
-                          <p className={`text-xs font-semibold text-right ${
-                            Math.abs((parseFloat(adminCountedInput) || 0) - expected) < 0.005 ? 'text-green-600'
-                            : (parseFloat(adminCountedInput) || 0) < expected ? 'text-red-500' : 'text-primary-600'
-                          }`}>
-                            Nağd fərq: {((parseFloat(adminCountedInput) || 0) - expected).toFixed(2)} ₼
+                          <p className={`text-xs font-semibold text-right ${{
+                            exact: 'text-green-600', short: 'text-red-500', over: 'text-primary-600',
+                          }[moneyDiff(parseFloat(adminCountedInput) || 0, expected).state]}`}>
+                            Nağd fərq: {moneyDiff(parseFloat(adminCountedInput) || 0, expected).diff.toFixed(2)} ₼
                           </p>
                         )}
                         {adminTerminalInput !== '' && (
-                          <p className={`text-xs font-semibold text-right ${
-                            Math.abs((parseFloat(adminTerminalInput) || 0) - openShiftSales.card) < 0.005 ? 'text-green-600'
-                            : (parseFloat(adminTerminalInput) || 0) < openShiftSales.card ? 'text-red-500' : 'text-primary-600'
-                          }`}>
-                            Terminal fərq: {((parseFloat(adminTerminalInput) || 0) - openShiftSales.card).toFixed(2)} ₼
+                          <p className={`text-xs font-semibold text-right ${{
+                            exact: 'text-green-600', short: 'text-red-500', over: 'text-primary-600',
+                          }[moneyDiff(parseFloat(adminTerminalInput) || 0, openShiftSales.card).state]}`}>
+                            Terminal fərq: {moneyDiff(parseFloat(adminTerminalInput) || 0, openShiftSales.card).diff.toFixed(2)} ₼
                           </p>
                         )}
                       </div>
@@ -3641,7 +3640,7 @@ function AdminPageContent() {
                       <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
                         <div className="px-4 py-3 border-b border-stone-50 text-xs font-semibold text-stone-500 uppercase tracking-wide">Bağlanmış növbələr</div>
                         {closed.map((s, i) => {
-                          const diff = (s.countedCash ?? 0) - (s.expectedCash ?? 0);
+                          const check = shiftCheck(s);
                           const isExp = expandedShiftId === s.id;
                           return (
                             <div key={s.id} className={i < closed.length - 1 ? 'border-b border-stone-50' : ''}>
@@ -3668,11 +3667,11 @@ function AdminPageContent() {
                                   </span>
                                 )}
                                 <span className="text-sm font-semibold text-stone-700 shrink-0">{(s.countedCash ?? 0).toFixed(2)} ₼</span>
-                                <span className={`text-xs px-2 py-0.5 rounded-full font-semibold shrink-0 w-20 text-center ${
-                                  Math.abs(diff) < 0.005 ? 'bg-green-50 text-green-600'
-                                  : diff < 0 ? 'bg-red-50 text-red-600' : 'bg-primary-50 text-primary-700'
+                                <span className={`text-xs px-2 py-0.5 rounded-full font-semibold shrink-0 min-w-20 text-center whitespace-nowrap ${
+                                  check.state === 'exact' ? 'bg-green-50 text-green-600'
+                                  : check.state === 'short' ? 'bg-red-50 text-red-600' : 'bg-primary-50 text-primary-700'
                                 }`}>
-                                  {Math.abs(diff) < 0.005 ? 'Dəqiq ✓' : `${diff > 0 ? '+' : ''}${diff.toFixed(2)} ₼`}
+                                  {check.label}
                                 </span>
                               </button>
                               {isExp && (
@@ -3733,10 +3732,9 @@ function AdminPageContent() {
                                       {s.countedCard !== undefined && (
                                         <div className="flex justify-between">
                                           <span>💳 Terminal (Z-hesabat)</span>
-                                          <span className={
-                                            Math.abs(s.countedCard - (s.cardSales ?? 0)) < 0.005 ? 'text-green-600'
-                                            : s.countedCard < (s.cardSales ?? 0) ? 'text-red-500' : 'text-primary-600'
-                                          }>{s.countedCard.toFixed(2)} ₼</span>
+                                          <span className={{
+                                            exact: 'text-green-600', short: 'text-red-500', over: 'text-primary-600',
+                                          }[moneyDiff(s.countedCard, s.cardSales ?? 0).state]}>{s.countedCard.toFixed(2)} ₼</span>
                                         </div>
                                       )}
                                     </>

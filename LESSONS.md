@@ -106,6 +106,12 @@ admin), which had its own formula; Statistika had a third.
 Latte Art, 2026-10-06: the Terminal box said "kart satışı" but holds courier
 card payments for older shifts too, so it is "kart məbləği".
 
+**Does an "all good" mark check everything it sums up?**
+A badge on a collapsed row stands for the whole row. Latte Art, 2026-10-07: a
+closed shift said "Dəqiq ✓" because cash matched, while the terminal was 1 ₼
+short on card; it showed only after opening the row. `lib/shift-check` checks
+both.
+
 **Which day does this belong to?**
 A business day ends at the company's `work_close` in its own timezone, not at
 midnight or in UTC.

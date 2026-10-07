@@ -55,6 +55,7 @@ import { verifyPinOffline, rememberPin, forgetPins } from '@/lib/offline-pin';
 import { queueSize, enqueue, onEnqueue } from '@/lib/offline-queue';
 import { onLocalWrite, pendingWrites, tillPost } from '@/lib/till-write';
 import OrderNote from '@/components/OrderNote';
+import { moneyDiff } from '@/lib/shift-check';
 
 // How many writes the server has not seen. Two stores answer that question — the
 // browser till's IndexedDB queue and the desktop till's SQLite outbox — but only
@@ -3592,40 +3593,35 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                     value={countedInput} onChange={e => setCountedInput(e.target.value)}
                     className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-700 mb-3"
                   />
-                  {countedInput !== '' && (
-                    <div className={`flex justify-between items-center px-4 py-2.5 rounded-xl font-semibold text-sm mb-3 ${
-                      Math.abs((parseFloat(countedInput) || 0) - expectedCash) < 0.005
-                        ? 'bg-green-50 text-green-700'
-                        : (parseFloat(countedInput) || 0) < expectedCash ? 'bg-red-50 text-red-600' : 'bg-primary-50 text-primary-700'
-                    }`}>
-                      <span>
-                        {Math.abs((parseFloat(countedInput) || 0) - expectedCash) < 0.005
-                          ? 'Dəqiq ✓'
-                          : (parseFloat(countedInput) || 0) < expectedCash ? 'Kəsir' : 'Artıq'}
-                      </span>
-                      <span>{((parseFloat(countedInput) || 0) - expectedCash).toFixed(2)} ₼</span>
-                    </div>
-                  )}
+                  {countedInput !== '' && (() => {
+                    // Only the cash: "Dəqiq" here read as the whole shift being right.
+                    const m = moneyDiff(parseFloat(countedInput) || 0, expectedCash);
+                    return (
+                      <div className={`flex justify-between items-center px-4 py-2.5 rounded-xl font-semibold text-sm mb-3 ${
+                        { exact: 'bg-green-50 text-green-700', short: 'bg-red-50 text-red-600', over: 'bg-primary-50 text-primary-700' }[m.state]
+                      }`}>
+                        <span>{{ exact: 'Nağd düz gəlir ✓', short: 'Nağd kəsir', over: 'Nağd artıq' }[m.state]}</span>
+                        <span>{m.diff.toFixed(2)} ₼</span>
+                      </div>
+                    );
+                  })()}
                   <label className="block text-xs font-medium text-stone-600 mb-1.5">💳 Terminal məbləği (Z-hesabat, ₼)</label>
                   <input
                     type="number" min="0" step="0.01" placeholder="0.00"
                     value={terminalInput} onChange={e => setTerminalInput(e.target.value)}
                     className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-base font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary-700 mb-3"
                   />
-                  {terminalInput !== '' && (
-                    <div className={`flex justify-between items-center px-4 py-2.5 rounded-xl font-semibold text-sm mb-3 ${
-                      Math.abs((parseFloat(terminalInput) || 0) - shiftSales.card) < 0.005
-                        ? 'bg-green-50 text-green-700'
-                        : (parseFloat(terminalInput) || 0) < shiftSales.card ? 'bg-red-50 text-red-600' : 'bg-primary-50 text-primary-700'
-                    }`}>
-                      <span>
-                        {Math.abs((parseFloat(terminalInput) || 0) - shiftSales.card) < 0.005
-                          ? 'Terminal düz gəlir ✓'
-                          : (parseFloat(terminalInput) || 0) < shiftSales.card ? 'Terminal kəsir' : 'Terminal artıq'}
-                      </span>
-                      <span>{((parseFloat(terminalInput) || 0) - shiftSales.card).toFixed(2)} ₼</span>
-                    </div>
-                  )}
+                  {terminalInput !== '' && (() => {
+                    const m = moneyDiff(parseFloat(terminalInput) || 0, shiftSales.card);
+                    return (
+                      <div className={`flex justify-between items-center px-4 py-2.5 rounded-xl font-semibold text-sm mb-3 ${
+                        { exact: 'bg-green-50 text-green-700', short: 'bg-red-50 text-red-600', over: 'bg-primary-50 text-primary-700' }[m.state]
+                      }`}>
+                        <span>{{ exact: 'Terminal düz gəlir ✓', short: 'Terminal kəsir', over: 'Terminal artıq' }[m.state]}</span>
+                        <span>{m.diff.toFixed(2)} ₼</span>
+                      </div>
+                    );
+                  })()}
                   <button
                     onClick={handleCloseShift}
                     disabled={shiftBusy || countedInput === ''}
