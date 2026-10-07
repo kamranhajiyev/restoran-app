@@ -37,6 +37,12 @@ Pickers, tabs, filters, reports, old orders. One shared rule decides each list
 the new-order picker but still in the seller's Kuryerlər tab, and a courier with
 orders could not be deleted at all.
 
+**Does the code read a column or function that only a new migration adds? Is
+that migration on production before the code reaches main?**
+A failed read shows an empty list, not an error. İXLAS CAFE, 2026-10-07: the
+courier list asked for `deleted_at`, the migration was only on testing, and
+every courier vanished from the seller page, admin and exe.
+
 ## 1. Bad internet (most of our bugs)
 
 Restaurants' internet drops for a few seconds at a time, often mid-action.
