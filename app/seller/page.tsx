@@ -56,6 +56,7 @@ import { queueSize, enqueue, onEnqueue } from '@/lib/offline-queue';
 import { onLocalWrite, pendingWrites, tillPost } from '@/lib/till-write';
 import OrderNote from '@/components/OrderNote';
 import { moneyDiff } from '@/lib/shift-check';
+import { coalesce, REFRESH_GATHER_MS } from '@/lib/coalesce';
 
 // How many writes the server has not seen. Two stores answer that question — the
 // browser till's IndexedDB queue and the desktop till's SQLite outbox — but only
@@ -1318,21 +1319,18 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [rtAttempt, setRtAttempt] = useState(0);
 
   useEffect(() => {
+    const refreshSoon = coalesce(() => { void refreshOrders(); }, REFRESH_GATHER_MS);
     const channel = supabase
       .channel('seller-orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-        refreshOrders();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, () => {
-        refreshOrders();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, refreshSoon)
       // A sex finishing its part is the one change the seller doesn't make himself,
       // so it's the one he'd never learn about without this.
       .on('postgres_changes', { event: '*', schema: 'public', table: 'order_station_ready' }, () => {
         void refreshReady();
       })
       .subscribe(status => setRealtimeUp(status === 'SUBSCRIBED'));
-    return () => { setRealtimeUp(false); supabase.removeChannel(channel); };
+    return () => { refreshSoon.cancel(); setRealtimeUp(false); supabase.removeChannel(channel); };
   }, [refreshOrders, refreshReady, rtAttempt]);
 
   useEffect(() => {

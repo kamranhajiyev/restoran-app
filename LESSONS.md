@@ -128,6 +128,12 @@ any log.
 **Is every query and every queued write scoped to one company?**
 A till moved to another restaurant must not send the first one's orders.
 
+**If ten changes arrive at once, does the screen download ten times?**
+One sale is several realtime changes (order, dishes, payment). Gather them
+(`lib/coalesce`) and refresh once. Production logs, 2026-10-07: admin, the
+browser till and the kitchen screen re-downloaded 200 orders on every change;
+it was most of the egress, and the reads, with no company filter, timed out.
+
 **Could this break when two tills work offline at once?**
 Order numbers are guessed on the device while offline, so two tills can pick
 the same number.

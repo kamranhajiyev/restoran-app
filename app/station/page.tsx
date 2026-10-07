@@ -23,6 +23,7 @@ import { MenuItem, Order, OrderItem, RestaurantTable, Station, isOrderOpen } fro
 import { orderLabel } from '@/lib/order-label';
 import { tableTitle } from '@/lib/order-place';
 import OrderNote from '@/components/OrderNote';
+import { coalesce, REFRESH_GATHER_MS } from '@/lib/coalesce';
 
 // A card older than this is late. Newest-first puts the oldest at the BOTTOM, so
 // the colour is what stops it being forgotten — the sort can't be relied on to
@@ -205,16 +206,17 @@ export default function StationPage() {
 
   useEffect(() => {
     if (!companyId) return;
+    const refreshSoon = coalesce(() => { void refreshOrders(); }, REFRESH_GATHER_MS);
     const channel = supabase
       .channel(`station-${companyId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `company_id=eq.${companyId}` }, () => refreshOrders())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `company_id=eq.${companyId}` }, refreshSoon)
       // order_items has no company_id of its own — it hangs off the order — so this
       // one cannot be filtered. RLS still scopes what actually arrives.
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, () => refreshOrders())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_station_ready', filter: `company_id=eq.${companyId}` }, () => refreshOrders())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_station_ready', filter: `company_id=eq.${companyId}` }, refreshSoon)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items', filter: `company_id=eq.${companyId}` }, () => { fetchMenu().then(setMenu); })
       .subscribe(status => setRealtimeUp(status === 'SUBSCRIBED'));
-    return () => { setRealtimeUp(false); supabase.removeChannel(channel); };
+    return () => { refreshSoon.cancel(); setRealtimeUp(false); supabase.removeChannel(channel); };
   }, [companyId, refreshOrders, rtAttempt]);
 
   useEffect(() => {

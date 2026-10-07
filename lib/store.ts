@@ -555,7 +555,9 @@ export async function emptyTrash(): Promise<string | null> {
 
 export async function fetchOrdersCount(): Promise<number> {
   try {
-    const { count } = await supabase.from('orders').select('*', { count: 'exact', head: true });
+    let q = supabase.from('orders').select('id', { count: 'exact', head: true });
+    if (_companyId) q = q.eq('company_id', _companyId);
+    const { count } = await q;
     return count ?? 0;
   } catch { return 0; }
 }
@@ -608,6 +610,10 @@ async function readOrders(opts?: OrderQuery): Promise<Order[]> {
         .order('created_at', { ascending: false })
         .order('created_at', { referencedTable: 'order_items', ascending: true })
         .range(start, end);
+      // RLS alone keeps other restaurants out, but checks it row by row over the
+      // whole table: 4 s on average, and 68 reads hit the statement timeout on
+      // 2026-10-07. Naming the company lets the index do the work.
+      if (_companyId) q = q.eq('company_id', _companyId);
       if (opts?.from) q = q.gte('created_at', opts.from);
       if (opts?.to) q = q.lte('created_at', opts.to);
       const { data, error } = await q;

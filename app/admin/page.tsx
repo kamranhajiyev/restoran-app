@@ -69,6 +69,7 @@ import { orderPlace, orderPlaceKind, PlaceKind, tableTitle } from '@/lib/order-p
 import { placeSales, tableSales } from '@/lib/place-sales';
 import { insertCopyAfter } from '@/lib/menu-copy';
 import { moneyDiff, shiftCheck } from '@/lib/shift-check';
+import { coalesce, REFRESH_GATHER_MS } from '@/lib/coalesce';
 import OrderNote from '@/components/OrderNote';
 
 // RPC raise messages are machine codes — translated here for display
@@ -1357,13 +1358,12 @@ function AdminPageContent() {
   refreshAllRef.current = refreshAll;
 
   useEffect(() => {
+    const refreshSoon = coalesce(() => refreshRef.current(), REFRESH_GATHER_MS);
     const channel = supabase
       .channel('admin-orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-        refreshRef.current();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, refreshSoon)
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => { refreshSoon.cancel(); supabase.removeChannel(channel); };
   }, []);
 
   useEffect(() => {
