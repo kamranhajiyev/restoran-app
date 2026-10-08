@@ -12,6 +12,7 @@
 // tablets and phones that will never see a printer.
 
 import { supabase } from './supabase';
+import { markPrinted, wasPrinted } from './printed-jobs';
 import { SAFETY_NET_MS, listenTill, tillSignalUp, timerDue } from './till-signal';
 import { type TicketPayload } from './escpos';
 import { buildStationTicketRaster } from './station-ticket';
@@ -303,6 +304,9 @@ async function tables() {
 }
 
 async function runJob(job: ClaimedJob): Promise<void> {
+  // Printed here before, its report lost: say so again, do not print again.
+  if (wasPrinted(job.id)) return source.report(job.id, { result: 'printed' });
+
   // Back into the queue, untouched, when this machine cannot print the job for
   // a reason that is nobody's fault and costs no attempt.
   const native = window.posNative;
@@ -318,7 +322,6 @@ async function runJob(job: ClaimedJob): Promise<void> {
     const known = await tables();
     await printTo(native, station.ip, station.port,
       buildStationTicketRaster(job.payload, id => tableTitle(known, id)));
-    await source.report(job.id, { result: 'printed' });
   } catch (err) {
     const attempts = job.attempts + 1;
     const message = err instanceof Error ? err.message : String(err);
@@ -329,7 +332,12 @@ async function runJob(job: ClaimedJob): Promise<void> {
       result: 'failed', attempts, error: message, giveUp: attempts >= MAX_ATTEMPTS,
     });
     console.error(`[print] ${job.kind} → ${station.name}: ${message}`);
+    return;
   }
+  // On paper: remembered first, so a report that fails is not a reprint, and
+  // outside the catch, so it is not counted as a failed print either.
+  markPrinted(job.id);
+  await source.report(job.id, { result: 'printed' });
 }
 
 // ── Printing at the till ──────────────────────────────────────────────────────
