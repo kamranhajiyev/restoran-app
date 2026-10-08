@@ -11,6 +11,7 @@ import {
   fetchReceiptLines, fetchWriteoffs,
   fetchTransfers, fetchTransferLines, recordTransfer, voidTransfer,
   fetchMenu, fetchRecipeLines, saveRecipe, fetchSalesWarehouse, setSalesWarehouse,
+  fetchStockFailures, retryOrderStock, StockFailure,
 } from '@/lib/store';
 import { Warehouse as Wh, Supplier, StockItem, StockBalance, StockReceipt, ReceiptLine, ReceiptLineDetail, StockTransfer, TransferLine, TransferLineDetail, WriteoffEntry, SupplierLedger, SupplierPayment, MenuItem, RecipeLineRow, RecipeIngredient } from '@/types';
 import { DialogState } from '@/components/AppDialog';
@@ -70,6 +71,8 @@ export default function AnbarPanel({ setDialog }: { setDialog: (d: DialogState |
 
   return (
     <div className="space-y-4">
+      <StockFailures flash={flash} fail={fail} />
+
       {/* sub-tabs */}
       <div className="flex flex-wrap gap-1.5">
         {subs.map(s => {
@@ -117,6 +120,59 @@ export default function AnbarPanel({ setDialog }: { setDialog: (d: DialogState |
 
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] px-4 py-2 rounded-lg bg-stone-800 text-white text-sm shadow-lg">{toast}</div>
+      )}
+    </div>
+  );
+}
+
+// ─── Satışdan çıxılmayan anbar ─────────────────────────────────────────────────
+
+// A sale whose ingredients could not be taken off stock still goes through, so
+// the owner has to be told, or the balances drift with nobody knowing
+// (code review, 2026-10-08). Shown above every sub-tab until each one is fixed.
+function StockFailures({ flash, fail }: { flash: (m: string) => void; fail: (m: string | null) => void }) {
+  const [list, setList] = useState<StockFailure[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+
+  async function reload() {
+    const l = await fetchStockFailures();
+    if (l) setList(l);
+  }
+  useEffect(() => { reload(); }, []);
+
+  async function retry(id: string) {
+    setBusy(id);
+    const err = await retryOrderStock(id);
+    setBusy(null);
+    if (err) fail('Anbar yenə çıxılmadı: ' + err);
+    else flash('Anbar çıxıldı');
+    await reload();
+  }
+
+  if (list.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between gap-2 font-medium">
+        <span>{list.length} satışın anbarı çıxılmayıb — qalıqlar düz deyil</span>
+        <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <ul className="mt-2 space-y-1.5">
+          {list.map(f => (
+            <li key={f.id} className="flex items-center justify-between gap-2 bg-white rounded-lg px-3 py-2 border border-red-100">
+              <span className="min-w-0 break-words">
+                №{f.orderNumber}
+                {f.paidAt && <span className="text-stone-500"> · {new Date(f.paidAt).toLocaleString('az-AZ', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>}
+                <span className="block text-xs text-red-500">{f.error}</span>
+              </span>
+              <button onClick={() => retry(f.id)} disabled={busy !== null}
+                className="shrink-0 px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-medium disabled:opacity-50">
+                {busy === f.id ? '…' : 'Yenidən çıx'}
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

@@ -172,7 +172,9 @@ Production only when the owner says so, each time.
 `apply_stock_on_payment` swallowed exceptions, so damage arrived with nothing in
 any log. Code review, 2026-10-08: it still lets the payment through, but now
 raises a warning ("stock not applied"). Catching is fine; catching silently is
-not.
+not. And a log nobody reads is still silent: the same day the order got
+`stock_error`, shown in Anbar with a retry. Who will see this failure, and what
+can they do about it?
 
 **Can a save that lost its reply be pressed again?**
 Not only the till retries: an owner presses Save again too. Code review,

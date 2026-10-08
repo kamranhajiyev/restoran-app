@@ -1873,6 +1873,40 @@ export async function recordWriteoff(warehouseId: string, stockItemId: string, q
   return null;
 }
 
+/** A paid sale whose stock could not be taken off (orders.stock_error). */
+export interface StockFailure {
+  id: string;
+  orderNumber: number;
+  paidAt: string | null;
+  error: string;
+}
+
+/** Sales whose stock did not move, or null when the read failed. */
+export async function fetchStockFailures(): Promise<StockFailure[] | null> {
+  if (!_companyId) return null;
+  const { data, error } = await supabase
+    .from('orders')
+    .select('id, order_number, paid_at, stock_error')
+    .eq('company_id', _companyId)
+    .not('stock_error', 'is', null)
+    .order('paid_at', { ascending: false })
+    .limit(100);
+  if (error || !data) return null;
+  return data.map(r => ({
+    id: r.id,
+    orderNumber: r.order_number ?? 0,
+    paidAt: r.paid_at ?? null,
+    error: String(r.stock_error),
+  }));
+}
+
+/** Try taking one sale's stock off again. Null on success, else why not. */
+export async function retryOrderStock(orderId: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc('retry_order_stock', { p_order_id: orderId });
+  if (error) { console.error('[retryOrderStock]', error); return error.message; }
+  return typeof data === 'string' && data ? data : null;
+}
+
 export async function recordCount(warehouseId: string, stockItemId: string, countedQty: number): Promise<string | null> {
   const { error } = await supabase.rpc('record_count', {
     p_warehouse_id: warehouseId, p_stock_item_id: stockItemId, p_counted_qty: countedQty,
