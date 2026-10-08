@@ -215,11 +215,19 @@ export async function saveMenu(menu: MenuItem[]): Promise<string | null> {
     // Replace the modifier-set links of the items we were given a list for. Items
     // deleted above took their links with them (FK cascade), so nothing is orphaned.
     if (relinkedItemIds.length > 0) {
+      // A link to a set deleted since (a dish back from the trash, a stale
+      // screen) would fail the whole insert after the delete below has already
+      // run, and every dish would lose its sets. Drop such links first.
+      const { data: groups, error: groupsError } = await supabase
+        .from('modifier_groups').select('id').eq('company_id', _companyId);
+      if (groupsError || !groups) { console.error('[saveMenu groups]', groupsError); return groupsError?.message ?? 'Modifikatorlar oxunmadı'; }
+      const liveGroups = new Set(groups.map(g => g.id));
+      const liveLinks = linkRows.filter(l => liveGroups.has(l.group_id));
       const { error: unlinkError } = await supabase
         .from('menu_item_modifier_groups').delete().in('menu_item_id', relinkedItemIds);
       if (unlinkError) { console.error('[saveMenu unlink]', unlinkError); return unlinkError.message; }
-      if (linkRows.length > 0) {
-        const { error: linkError } = await supabase.from('menu_item_modifier_groups').insert(linkRows);
+      if (liveLinks.length > 0) {
+        const { error: linkError } = await supabase.from('menu_item_modifier_groups').insert(liveLinks);
         if (linkError) { console.error('[saveMenu link]', linkError); return linkError.message; }
       }
     }
@@ -536,22 +544,113 @@ export async function fetchTrash(): Promise<TrashItem[]> {
   } catch { return []; }
 }
 
-export async function moveToTrash(type: string, item: Record<string, unknown>): Promise<void> {
+export async function moveToTrash(type: string, item: Record<string, unknown>): Promise<string | null> {
   try {
-    await supabase.from('trash_items').insert({ type, data: item, company_id: _companyId });
-  } catch (e) { console.error('[moveToTrash]', e); }
+    const { error } = await supabase.from('trash_items').insert({ type, data: item, company_id: _companyId });
+    if (error) { console.error('[moveToTrash]', error); return error.message; }
+    return null;
+  } catch (e) {
+    console.error('[moveToTrash]', e);
+    return 'Şəbəkə xətası — zibil qutusuna köçürülmədi';
+  }
 }
 
-export async function restoreFromTrash(id: string): Promise<void> {
+// What a deleted dish needs to come back whole. Deleting a menu item deletes its
+// recipe (FK cascade), so the recipe rides along in the trash row; without it a
+// restored dish sells without ever taking stock.
+export interface TrashedRecipeLine { stock_item_id: string; qty: number; variant_id: string | null }
+
+export async function trashMenuItems(items: MenuItem[]): Promise<string | null> {
+  if (items.length === 0) return null;
+  if (!_companyId) return 'Şirkət konteksti yoxdur';
   try {
-    await supabase.from('trash_items').delete().eq('id', id);
-  } catch (e) { console.error('[restoreFromTrash]', e); }
+    const { data: lines, error: readErr } = await supabase.from('recipe_lines')
+      .select('menu_item_id, stock_item_id, qty, variant_id')
+      .eq('company_id', _companyId)
+      .in('menu_item_id', items.map(m => m.id));
+    if (readErr || !lines) { console.error('[trashMenuItems]', readErr); return readErr?.message ?? 'Resept oxunmadı'; }
+    const rows = items.map(m => ({
+      type: 'menu',
+      company_id: _companyId,
+      data: {
+        ...m,
+        _recipe: lines.filter(l => l.menu_item_id === m.id)
+          .map(l => ({ stock_item_id: l.stock_item_id, qty: Number(l.qty), variant_id: l.variant_id ?? null })),
+      },
+    }));
+    const { error } = await supabase.from('trash_items').insert(rows);
+    if (error) { console.error('[trashMenuItems]', error); return error.message; }
+    return null;
+  } catch (e) {
+    console.error('[trashMenuItems]', e);
+    return 'Şəbəkə xətası — zibil qutusuna köçürülmədi';
+  }
 }
 
-export async function permanentlyDeleteFromTrash(id: string): Promise<void> {
+/** The dish as the menu stores it, and the recipe it had when deleted. */
+export function trashedMenuItem(data: Record<string, unknown>): { item: MenuItem; recipe: TrashedRecipeLine[] } {
+  const { _recipe, ...item } = data;
+  return { item: item as unknown as MenuItem, recipe: Array.isArray(_recipe) ? _recipe as TrashedRecipeLine[] : [] };
+}
+
+// Puts a restored dish's recipe back. Ingredients deleted since are skipped
+// (their count is returned) rather than failing the restore.
+export async function restoreRecipe(menuItemId: string, recipe: TrashedRecipeLine[]): Promise<{ error: string | null; skipped: number }> {
+  if (recipe.length === 0) return { error: null, skipped: 0 };
+  if (!_companyId) return { error: 'Şirkət konteksti yoxdur', skipped: 0 };
   try {
-    await supabase.from('trash_items').delete().eq('id', id);
-  } catch (e) { console.error('[permanentlyDeleteFromTrash]', e); }
+    const { data: alive, error: readErr } = await supabase.from('stock_items')
+      .select('id').in('id', recipe.map(l => l.stock_item_id));
+    if (readErr || !alive) return { error: readErr?.message ?? 'Anbar oxunmadı', skipped: 0 };
+    const ids = new Set(alive.map(s => s.id));
+    const rows = recipe.filter(l => ids.has(l.stock_item_id)).map(l => ({
+      company_id: _companyId, menu_item_id: menuItemId, stock_item_id: l.stock_item_id, qty: l.qty, variant_id: l.variant_id,
+    }));
+    if (rows.length > 0) {
+      // Pressed twice: the first restore already put them back.
+      const { error } = await supabase.from('recipe_lines').upsert(rows, { onConflict: 'menu_item_id,stock_item_id', ignoreDuplicates: true });
+      if (error) { console.error('[restoreRecipe]', error); return { error: error.message, skipped: 0 }; }
+    }
+    return { error: null, skipped: recipe.length - rows.length };
+  } catch (e) {
+    console.error('[restoreRecipe]', e);
+    return { error: 'Şəbəkə xətası — resept bərpa olunmadı', skipped: 0 };
+  }
+}
+
+export async function restoreFromTrash(id: string): Promise<string | null> {
+  try {
+    const { error } = await supabase.from('trash_items').delete().eq('id', id);
+    if (error) { console.error('[restoreFromTrash]', error); return error.message; }
+    return null;
+  } catch (e) {
+    console.error('[restoreFromTrash]', e);
+    return 'Şəbəkə xətası';
+  }
+}
+
+// Storage paths of the photos that can go with these trash items. Called only
+// after their rows are deleted: a photo removed first, with the row delete then
+// failing, would come back as a dish with a broken picture. A photo a live dish
+// still shows (a duplicate shares its original's) stays.
+export function trashPhotoPaths(items: TrashItem[], menu: MenuItem[]): string[] {
+  const marker = '/menu-images/';
+  const inUse = new Set(menu.map(m => m.image).filter(Boolean));
+  return items
+    .map(t => (t.data as Record<string, unknown>).image as string | undefined)
+    .filter((img): img is string => !!img && img.includes(marker) && !inUse.has(img))
+    .map(img => img.slice(img.indexOf(marker) + marker.length));
+}
+
+export async function permanentlyDeleteFromTrash(id: string): Promise<string | null> {
+  try {
+    const { error } = await supabase.from('trash_items').delete().eq('id', id);
+    if (error) { console.error('[permanentlyDeleteFromTrash]', error); return error.message; }
+    return null;
+  } catch (e) {
+    console.error('[permanentlyDeleteFromTrash]', e);
+    return 'Şəbəkə xətası — silinmədi';
+  }
 }
 
 export async function emptyTrash(): Promise<string | null> {

@@ -43,6 +43,15 @@ Only a field the sender really sent may change. Code review, 2026-10-08: a menu
 import with only name and price wiped every matched dish's cost and sizes and
 showed hidden dishes again, because a missing column read as empty.
 
+**When something is restored, does everything that left with it come back?**
+And is the only copy kept until the new one is saved? Code review, 2026-10-08:
+deleting a dish deleted its recipe (cascade); "Bərpa et" brought the dish back
+without it, so it sold without taking stock and nothing said so. Restore also
+threw the trash copy away before saving the dish, and a link to a deleted
+modifier set made the menu save drop every dish's sets. Deleting from the trash
+removed the photo before the row, so a failed delete left a dish with a broken
+picture, and the photo of a duplicate's original went with it.
+
 **Does the code read a column or function that only a new migration adds? Is
 that migration on production before the code reaches main?**
 A failed read shows an empty list, not an error. İXLAS CAFE, 2026-10-07: the

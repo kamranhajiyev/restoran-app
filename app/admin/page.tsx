@@ -25,6 +25,7 @@ import {
   updateShiftMovement, deleteShiftMovement, correctShiftTotals,
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash, emptyTrash,
+  trashMenuItems, trashedMenuItem, restoreRecipe, trashPhotoPaths,
   setCompanyContext, updateUser,
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, moveTableToHall, fetchCompanySlug,
   fetchHalls, createHall, renameHall, deleteHall, adoptOrphanTables,
@@ -1652,29 +1653,62 @@ function AdminPageContent() {
     setMenu(updated);
     persistMenu(updated);
   }
-  function deleteItem(id: string) {
+  // The trash copy is written first: if it fails, the dish stays, since deleting
+  // it would lose it and its recipe for good.
+  async function deleteItem(id: string) {
     const item = menu.find(m => m.id === id);
     if (!item) return;
-    moveToTrash('menu', item as unknown as Record<string, unknown>).then(() =>
-      fetchTrash().then(setTrash)
-    );
+    const err = await trashMenuItems([item]);
+    if (err) { setDialog({ title: 'Xəta', message: 'Silinmədi: ' + err }); return; }
+    fetchTrash().then(setTrash);
     const updated = menu.filter(m => m.id !== id);
     setMenu(updated);
     persistMenu(updated);
   }
+  // The trash row goes last: until the dish and its recipe are saved back, it is
+  // the only copy. Already in the menu (double click / re-restore) is skipped —
+  // a duplicate would poison every following save.
+  async function restoreTrashItem(item: TrashItem) {
+    if (item.type === 'menu') {
+      const { item: restored, recipe } = trashedMenuItem(item.data);
+      if (!menu.some(m => m.id === restored.id)) {
+        // Its category was deleted too: bring it back, or the dish has nowhere to show.
+        if (!categories.some(c => c.name === restored.category)) {
+          const updatedCats = [...categories, { name: restored.category, available: true }];
+          const catErr = await saveCategories(updatedCats);
+          if (catErr) { setDialog({ title: 'Xəta', message: 'Bərpa olunmadı: ' + catErr }); return; }
+          setCategories(updatedCats);
+        }
+        const updatedMenu = [...menu, restored];
+        const err = await saveMenu(updatedMenu);
+        if (err) { setDialog({ title: 'Xəta', message: 'Bərpa olunmadı: ' + err }); return; }
+        setMenu(updatedMenu);
+      }
+      const { error, skipped } = await restoreRecipe(restored.id, recipe);
+      if (error) { setDialog({ title: 'Xəta', message: 'Məhsul qayıtdı, resepti yox: ' + error + '. Yenidən "Bərpa et" basın.' }); return; }
+      if (skipped > 0) setDialog({ title: 'Diqqət', message: `"${restored.name}" qayıtdı, amma reseptindən ${skipped} xammal artıq anbarda yoxdur. Resepti yoxlayın.` });
+    } else if (item.type === 'category') {
+      const restored = item.data as unknown as Category;
+      if (!categories.some(c => c.name === restored.name)) {
+        const updatedCats = [...categories, restored];
+        const err = await saveCategories(updatedCats);
+        if (err) { setDialog({ title: 'Xəta', message: 'Bərpa olunmadı: ' + err }); return; }
+        setCategories(updatedCats);
+      }
+    }
+    await restoreFromTrash(item.id);
+    setTrash(t => t.filter(x => x.id !== item.id));
+  }
   async function handleEmptyTrash() {
     setEmptyingTrash(true);
-    // Same cleanup the per-item "Sil" does: trashed product images leave storage too
-    const marker = '/menu-images/';
-    const paths = trash
-      .map(t => (t.data as Record<string, unknown>).image as string | undefined)
-      .filter((img): img is string => !!img && img.includes(marker))
-      .map(img => img.slice(img.indexOf(marker) + marker.length));
-    if (paths.length > 0) await supabase.storage.from('menu-images').remove(paths);
+    // Same cleanup the per-item "Sil" does: trashed product images leave storage
+    // too, but only once the rows are gone.
     const err = await emptyTrash();
     setEmptyingTrash(false);
     setConfirmEmptyTrash(false);
     if (err) { setDialog({ title: 'Xəta', message: 'Zibil qutusu boşaldılmadı: ' + err }); return; }
+    const paths = trashPhotoPaths(trash, menu);
+    if (paths.length > 0) await supabase.storage.from('menu-images').remove(paths);
     setTrash([]);
   }
 
@@ -1740,14 +1774,16 @@ function AdminPageContent() {
       el?.focus();
     });
   }
-  function deleteCategory(cat: string) {
+  async function deleteCategory(cat: string) {
     const catObj = categories.find(c => c.name === cat);
     const itemsInCat = menu.filter(m => m.category === cat);
-    const trashMoves = [
+    const errs = await Promise.all([
       ...(catObj ? [moveToTrash('category', catObj as unknown as Record<string, unknown>)] : []),
-      ...itemsInCat.map(m => moveToTrash('menu', m as unknown as Record<string, unknown>)),
-    ];
-    Promise.all(trashMoves).then(() => fetchTrash().then(setTrash));
+      trashMenuItems(itemsInCat),
+    ]);
+    const err = errs.find(Boolean);
+    fetchTrash().then(setTrash);
+    if (err) { setDialog({ title: 'Xəta', message: 'Silinmədi: ' + err }); return; }
     const updatedCats = categories.filter(c => c.name !== cat);
     const updatedMenu = menu.filter(m => m.category !== cat);
     setCategories(updatedCats);
@@ -5391,41 +5427,17 @@ function AdminPageContent() {
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <button
-                        onClick={async () => {
-                          await restoreFromTrash(item.id);
-                          // Skip if already in the menu (double click / re-restore) —
-                          // a duplicate would poison every following save
-                          if (item.type === 'menu') {
-                            const restored = item.data as unknown as MenuItem;
-                            if (!menu.some(m => m.id === restored.id)) {
-                              const updatedMenu = [...menu, restored];
-                              setMenu(updatedMenu);
-                              await persistMenu(updatedMenu);
-                            }
-                          } else if (item.type === 'category') {
-                            const restored = item.data as unknown as Category;
-                            if (!categories.some(c => c.name === restored.name)) {
-                              const updatedCats = [...categories, restored];
-                              setCategories(updatedCats);
-                              await persistCategories(updatedCats);
-                            }
-                          }
-                          setTrash(t => t.filter(x => x.id !== item.id));
-                        }}
+                        onClick={() => restoreTrashItem(item)}
                         className="flex items-center gap-1 text-xs text-green-600 hover:text-green-800 px-2 py-1 rounded-lg hover:bg-green-50 transition-colors font-medium"
                       >
                         <RotateCcw className="w-3 h-3" /> Bərpa et
                       </button>
                       <button
                         onClick={async () => {
-                          const d2 = item.data as Record<string, unknown>;
-                          const img = d2.image as string | undefined;
-                          if (img) {
-                            const marker = '/menu-images/';
-                            const idx = img.indexOf(marker);
-                            if (idx !== -1) supabase.storage.from('menu-images').remove([img.slice(idx + marker.length)]);
-                          }
-                          await permanentlyDeleteFromTrash(item.id);
+                          const err = await permanentlyDeleteFromTrash(item.id);
+                          if (err) { setDialog({ title: 'Xəta', message: 'Silinmədi: ' + err }); return; }
+                          const paths = trashPhotoPaths([item], menu);
+                          if (paths.length > 0) supabase.storage.from('menu-images').remove(paths);
                           setTrash(t => t.filter(x => x.id !== item.id));
                         }}
                         className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors font-medium"
