@@ -19,6 +19,16 @@ async function authHeaders(): Promise<HeadersInit> {
 
 let _companyId: string | null = null;
 
+// Where an uploaded photo goes: under its company's folder, the only place the
+// storage policies let that company's signed-in users write or delete
+// (20261008_menu_images_per_company.sql). Null without a company.
+export function imagePath(kind: 'menu' | 'logo' | 'modifier', fileName: string): string | null {
+  if (!_companyId) return null;
+  const ext = (fileName.split('.').pop() ?? 'jpg').replace(/[^\w]/g, '').slice(0, 8) || 'jpg';
+  const sub = kind === 'menu' ? '' : kind === 'logo' ? 'logos/' : 'modifiers/';
+  return `${_companyId}/${sub}${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
+}
+
 export function setCompanyContext(id: string | null) {
   _companyId = id;
 }

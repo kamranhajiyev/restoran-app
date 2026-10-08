@@ -25,7 +25,7 @@ import {
   updateShiftMovement, deleteShiftMovement, correctShiftTotals,
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash, emptyTrash,
-  trashMenuItems, trashedMenuItem, restoreRecipe, trashPhotoPaths,
+  trashMenuItems, trashedMenuItem, restoreRecipe, trashPhotoPaths, imagePath,
   setCompanyContext, updateUser,
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, moveTableToHall, fetchCompanySlug,
   fetchHalls, createHall, renameHall, deleteHall, adoptOrphanTables, fetchTablesOrNull, fetchHallsOrNull,
@@ -762,7 +762,6 @@ function AdminPageContent() {
   const canvasRef = useRef<HTMLDivElement>(null);
 
   // users tab
-  const [companyId, setCompanyId] = useState<string | null>(null);
   const [companySlug, setCompanySlug] = useState<string | null>(null);
   const [sellerToken, setSellerToken] = useState<string | null>(null);
   const [tokenCopied, setTokenCopied] = useState(false);
@@ -945,7 +944,6 @@ function AdminPageContent() {
     setCompanyContext(session.companyId);
     setAdminName(session.name);
     setCompanyName(session.companyName ?? '');
-    setCompanyId(session.companyId);
     setUserId(session.id);
     setSessionReady(true);
     fetchOrdersCount().then(setTotalOrders);
@@ -1480,9 +1478,9 @@ function AdminPageContent() {
   async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const ext = file.name.split('.').pop();
-    const path = `${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('menu-images').upload(path, file, { upsert: true });
+    const path = imagePath('menu', file.name);
+    if (!path) return;
+    const { error } = await supabase.storage.from('menu-images').upload(path, file);
     if (error) { setDialog({ title: 'Xəta', message: 'Şəkil yüklənmədi: ' + error.message }); return; }
     const { data } = supabase.storage.from('menu-images').getPublicUrl(path);
     setForm(f => ({ ...f, image: data.publicUrl }));
@@ -1493,9 +1491,9 @@ function AdminPageContent() {
     const file = e.target.files?.[0];
     if (!file) return;
     setLogoBusy(true);
-    const ext = file.name.split('.').pop();
-    const path = `logos/${companyId}-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('menu-images').upload(path, file, { upsert: true });
+    const path = imagePath('logo', file.name);
+    if (!path) { setLogoBusy(false); return; }
+    const { error } = await supabase.storage.from('menu-images').upload(path, file);
     if (error) { setLogoBusy(false); setDialog({ title: 'Xəta', message: 'Loqo yüklənmədi: ' + error.message }); return; }
     const { data } = supabase.storage.from('menu-images').getPublicUrl(path);
     setLogoState(data.publicUrl);

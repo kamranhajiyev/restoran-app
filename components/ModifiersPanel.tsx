@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from 'react';
 import { Plus, Pencil, Trash2, X, Check, SlidersHorizontal, ImagePlus } from 'lucide-react';
-import { saveModifierGroups } from '@/lib/store';
+import { imagePath, saveModifierGroups } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
 import { MenuItem, ModifierGroup, ModifierOption } from '@/types';
 import { DialogState } from '@/components/AppDialog';
@@ -78,8 +78,9 @@ export default function ModifiersPanel({
     const idx = imgTargetIdx.current;
     setUploadingIdx(idx);
     try {
-      const path = `modifiers/${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, '')}`;
-      const { error } = await supabase.storage.from('menu-images').upload(path, file, { upsert: true });
+      const path = imagePath('modifier', file.name);
+      if (!path) return;
+      const { error } = await supabase.storage.from('menu-images').upload(path, file);
       if (error) { setDialog({ title: 'Xəta', message: 'Şəkil yüklənmədi: ' + error.message }); return; }
       const { data } = supabase.storage.from('menu-images').getPublicUrl(path);
       setOptions(prev => prev.map((o, i) => i === idx ? { ...o, image: data.publicUrl } : o));
