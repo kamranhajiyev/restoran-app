@@ -1948,10 +1948,14 @@ export async function fetchCompanySlug(id: string): Promise<string | null> {
   } catch { return null; }
 }
 
+// Through the server: the browser can no longer read seller_token, which let
+// anyone with the public key take every restaurant's till link.
 export async function fetchSellerToken(companyId: string): Promise<string | null> {
+  if (!companyId) return null;
   try {
-    const { data } = await supabase.from('companies').select('seller_token').eq('id', companyId).single();
-    return data?.seller_token ?? null;
+    const res = await fetch('/api/seller-token', { headers: await authHeaders() });
+    if (!res.ok) return null;
+    return ((await res.json()) as { token?: string | null }).token ?? null;
   } catch { return null; }
 }
 
@@ -2257,7 +2261,7 @@ export async function adoptOrphanTables(hallId: string): Promise<void> {
 
 export async function fetchCompanies(): Promise<{ id: string; name: string; slug: string; active: boolean; createdAt: string; expiresAt: string | null; ownerName: string | null; address: string | null; phone: string | null; timezone: string }[]> {
   try {
-    const { data, error } = await supabase.from('companies').select('*').is('trashed_at', null).order('created_at');
+    const { data, error } = await supabase.from('companies').select('id, name, slug, active, created_at, expires_at, owner_name, address, phone, timezone, trashed_at').is('trashed_at', null).order('created_at');
     if (error || !data) return [];
     return data.map(c => ({ id: c.id, name: c.name, slug: c.slug, active: c.active, createdAt: c.created_at, expiresAt: c.expires_at ?? null, ownerName: c.owner_name ?? null, address: c.address ?? null, phone: c.phone ?? null, timezone: c.timezone || DEFAULT_TZ }));
   } catch { return []; }
@@ -2276,7 +2280,7 @@ export async function fetchCompanyTrash(): Promise<TrashItem[]> {
   try {
     // auto-purge: anything in the bin longer than 30 days is gone for good
     await supabase.from('companies').delete().not('trashed_at', 'is', null).lt('trashed_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
-    const { data, error } = await supabase.from('companies').select('*').not('trashed_at', 'is', null).order('trashed_at', { ascending: false });
+    const { data, error } = await supabase.from('companies').select('id, name, slug, active, created_at, expires_at, owner_name, address, phone, timezone, trashed_at').not('trashed_at', 'is', null).order('trashed_at', { ascending: false });
     if (error || !data) return [];
     return data.map(c => ({
       id: c.id,

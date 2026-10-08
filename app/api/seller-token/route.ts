@@ -5,6 +5,10 @@ import { createServerClient, requireAuth } from '@/lib/supabase-server';
 export async function GET(req: NextRequest) {
   const slug  = req.nextUrl.searchParams.get('slug');
   const token = req.nextUrl.searchParams.get('token');
+  // No slug and no token: a signed-in user asking for their own company's link.
+  // The column is closed to the browser (20261008_hide_seller_token.sql), so
+  // admin gets it here.
+  if (!slug && !token) return ownToken(req);
   if (!slug || !token) return Response.json({ error: 'invalid' }, { status: 400 });
 
   const db = createServerClient();
@@ -40,4 +44,13 @@ export async function POST(req: NextRequest) {
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ token: newToken });
+}
+
+async function ownToken(req: NextRequest) {
+  const auth = await requireAuth(req);
+  if (auth instanceof Response) return auth;
+  if (!auth.companyId) return Response.json({ token: null });
+  const { data } = await createServerClient()
+    .from('companies').select('seller_token').eq('id', auth.companyId).maybeSingle();
+  return Response.json({ token: data?.seller_token ?? null });
 }
