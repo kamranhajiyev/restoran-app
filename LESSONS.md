@@ -152,6 +152,12 @@ Production only when the owner says so, each time.
 `apply_stock_on_payment` swallows exceptions, so damage arrives with nothing in
 any log.
 
+**Who can call this without logging in, and what does it give them?**
+A company id is not a secret — it sits in links and pages. Code review,
+2026-10-08: the /api/public-* reads checked the till link only when one was
+sent, so the id alone gave out orders, phone numbers and staff
+(`READS_NEED_TOKEN`). A safety switch left off is no safety.
+
 **Is every query and every queued write scoped to one company?**
 A till moved to another restaurant must not send the first one's orders.
 

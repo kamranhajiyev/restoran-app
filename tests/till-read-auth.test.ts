@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const verifySellerToken = vi.fn();
 vi.mock('@/lib/supabase-server', () => ({ verifySellerToken: (...a: unknown[]) => verifySellerToken(...a) }));
 
-import { refuseTillRead } from '@/lib/till-read-auth';
+import { READS_NEED_TOKEN, refuseTillRead } from '@/lib/till-read-auth';
 import { TILL_TOKEN_HEADER, tokenFromLink, withTillToken } from '@/lib/till-read-token';
 
 const read = (token?: string) =>
@@ -46,9 +46,11 @@ describe('a till read', () => {
     expect(verifySellerToken.mock.calls.length).toBe(before + 1);
   });
 
-  it('without a token still works for old exes, until the switch is on', async () => {
-    expect(await refuseTillRead(read(), 'c1')).toBeNull();
-    expect((await refuseTillRead(read(), 'c1', Date.now(), true))?.status).toBe(401);
+  // 2026-10-08: the switch was left off, so a company id alone still read every
+  // order, phone number and staff name.
+  it('without a token is refused', async () => {
+    expect(READS_NEED_TOKEN).toBe(true);
+    expect((await refuseTillRead(read(), 'c1'))?.status).toBe(401);
   });
 });
 

@@ -11,10 +11,10 @@ import { TILL_TOKEN_HEADER } from '@/lib/till-read-token';
 const TRUST_MS = 60_000;
 const trusted = new Map<string, number>();
 
-// The lock. False while some tills still run an exe that sends no token; set
-// it to true once every till has the new exe, and a read without a token is
-// refused.
-export const READS_NEED_TOKEN = false;
+// The lock. On since 2026-10-08: a company id alone opened its orders, staff
+// and customers to anyone. Exes before 0.4.3 send no token, and must update
+// before this reaches main or their reads stop.
+export const READS_NEED_TOKEN = true;
 
 async function tokenGood(companyId: string, token: string, now: number): Promise<boolean> {
   const key = `${companyId}:${token}`;
