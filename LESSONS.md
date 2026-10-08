@@ -89,6 +89,12 @@ They take different paths (the exe has a local database and a `pay:` key
 replay; the browser has its own IndexedDB queue). A fix in one path often
 misses the other.
 
+**When data refreshes in the background, does a screen someone is reading start
+over?**
+A re-read that says the same thing must not count as a change. Exe, 2026-10-08:
+every 5-minute pull re-read the company settings into a new object, and Tarixçə
+reloaded on it — "Yüklənir...", back to the top (`keepSettings`).
+
 ## 3. Money
 
 **Can the screen calculate a total from data that has not loaded yet?**

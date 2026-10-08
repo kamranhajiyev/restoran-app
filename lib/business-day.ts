@@ -17,6 +17,16 @@ export interface CompanySettings {
 
 export const DEFAULT_SETTINGS: CompanySettings = { timezone: DEFAULT_TZ, workOpen: '00:00', workClose: '00:00' };
 
+/** The settings to keep after a re-read: the old object while nothing in it
+ *  changed. The exe re-reads them on every pull, and a new object each time
+ *  reloaded Tarixçə every five minutes — "Yüklənir...", back to the top —
+ *  under the seller reading it. */
+export function keepSettings(prev: CompanySettings, next: CompanySettings): CompanySettings {
+  return prev.timezone === next.timezone && prev.workOpen === next.workOpen && prev.workClose === next.workClose
+    ? prev
+    : next;
+}
+
 function parseHM(s: string): number {
   const m = /^(\d{1,2}):(\d{2})/.exec(s ?? '');
   if (!m) return 0;

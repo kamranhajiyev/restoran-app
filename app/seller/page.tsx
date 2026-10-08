@@ -24,7 +24,7 @@ import { menuIndex, stationForItem, readyStationIds } from '@/lib/stations';
 import { unlockSound, armSoundOnFirstGesture, playOrderReady } from '@/lib/sound';
 import { applyBrand } from '@/lib/branding';
 import { orderClosedAt } from '@/lib/order-items';
-import { CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc, tzTime } from '@/lib/business-day';
+import { CompanySettings, DEFAULT_SETTINGS, keepSettings, businessDay, businessToday, businessDayStartUtc, tzTime } from '@/lib/business-day';
 import { courierOwed, type Collections } from '@/lib/courier-pending';
 import { pickableCouriers, settleableCouriers } from '@/lib/couriers';
 import { historyTotals, ordersOfShift, shiftLoadWindow, shiftTotals, shiftsOfDay, shiftWindow, type HistoryShift } from '@/lib/history-shifts';
@@ -1142,7 +1142,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       // No session here, so the expiry the banner reads has to be handed in by the
       // route. Without it the terminal is the one screen that never warns.
       setExpiresAt(overrideExpiresAt ?? null);
-      fetchCompanySettings(overrideCompanyId).then(setBizSettings);
+      fetchCompanySettings(overrideCompanyId).then(next => setBizSettings(prev => keepSettings(prev, next)));
       tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=1`)
         .then(r => r.json()).then(d => setTotalOrders(d.total ?? 0)).catch(() => {});
       // Sexes change about once a year — fetched once at boot, not per refresh.
@@ -1204,7 +1204,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     });
     setCompanyContext(session.companyId);
     setSellerName(session.name);
-    fetchCompanySettings(session.companyId ?? '').then(setBizSettings);
+    fetchCompanySettings(session.companyId ?? '').then(next => setBizSettings(prev => keepSettings(prev, next)));
     fetchBranding().then(({ logoUrl: l, brandColor: b }) => { setLogoUrl(l); applyBrand(b); });
     // Runs again after every pull: a failed read keeps what the screen has.
     Promise.all([readOpenShift(), fetchStaffOrNull()]).then(([s, st]) => {
