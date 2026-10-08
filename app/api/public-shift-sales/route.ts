@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   if (refused) return refused;
 
   const db = createServerClient();
-  const [{ data, error }, { data: courierCard }] = await Promise.all([
+  const [{ data, error }, { data: courierCard, error: courierError }] = await Promise.all([
     db
       .from('orders')
       .select('cash_amount, card_amount, courier_debt, courier_cash, courier_card')
@@ -32,6 +32,9 @@ export async function GET(req: NextRequest) {
   // A 500, not zeros: zeros read as "nothing sold", and closing the shift on
   // them wrote 0 ₼ into its expected cash.
   if (error || !data) return Response.json({ error: error?.message ?? 'read failed' }, { status: 500 });
+  // The same for the courier card read: without it the Terminal figure is short
+  // by every courier card payment, and the shift closes on it.
+  if (courierError || !courierCard) return Response.json({ error: courierError?.message ?? 'read failed' }, { status: 500 });
 
   const settledByCard = (courierCard ?? []).reduce((s, p) => s + Number(p.amount ?? 0), 0);
   return Response.json({

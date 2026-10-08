@@ -109,6 +109,16 @@ async function readLocally(url: URL): Promise<Response | null> {
     case "/api/public-shift-sales": {
       const openedAt = url.searchParams.get("openedAt");
       if (!openedAt) return null;
+      // The server first, when this till has nothing unsent: it counts every
+      // till's courier card payments, and this machine only holds the ones it
+      // took — with two tills, the Terminal figure came out short. Unsent
+      // sales, or no line, and the machine's own count is the right one.
+      if ((await till.outbox().then(o => o.pending, () => 1)) === 0) {
+        try {
+          const res = await till.api(url.pathname + url.search);
+          if (res.ok) return new Response(res.body, { status: 200, headers: { "Content-Type": "application/json" } });
+        } catch { /* fall through to the machine */ }
+      }
       return reply(await till.shiftSales(companyId, openedAt));
     }
     default:
