@@ -18,7 +18,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } 
 import { CSS } from '@dnd-kit/utilities';
 import { getSession, logout, validateSession, clearLocalSession, updateSession, lockAdmin, unlockAdmin, isAdminLocked, rememberTill, forgetTill } from '@/lib/auth';
 import {
-  fetchMenu, saveMenu, fetchOrders, fetchOrdersCount, updateOrderStatus, cancelOrder, editOrderPayment, editCourierOrderSplit, deleteOrder, restoreOrder,
+  fetchMenu, saveMenu, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, editOrderPayment, editCourierOrderSplit, deleteOrder, restoreOrder,
   fetchShifts, fetchShiftSales, closeShift, fetchOpenShift,
   updateShiftMovement, deleteShiftMovement, correctShiftTotals,
   fetchCategories, saveCategories,
@@ -71,6 +71,7 @@ import { insertCopyAfter } from '@/lib/menu-copy';
 import { moneyDiff, shiftCheck } from '@/lib/shift-check';
 import { coalesce, REFRESH_GATHER_MS } from '@/lib/coalesce';
 import { KASSA_GATHER_MS, KASSA_TICK_MS, kassaTickDue } from '@/lib/kassa-refresh';
+import { changedOrderId, gatherOrderIds, patchOrders } from '@/lib/order-patch';
 import OrderNote from '@/components/OrderNote';
 
 // RPC raise messages are machine codes — translated here for display
@@ -704,6 +705,7 @@ function AdminPageContent() {
   const collectedCache = useRef<Map<string, { at: number; data: { nagd: number; kart: number } }>>(new Map());
   const refreshRef = useRef<() => void>(() => {});
   const refreshAllRef = useRef<() => void>(() => {});
+  const refreshChangedRef = useRef<(ids: Set<string>) => Promise<void>>(async () => {});
   const [sessionReady, setSessionReady] = useState(false);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
 
@@ -1376,14 +1378,29 @@ function AdminPageContent() {
     } catch { /* ignore */ } finally { setPullRefreshing(false); }
   }
 
+  // A realtime change names its order: download that one and patch the list
+  // (lib/order-patch), instead of the last 200 on every change.
+  async function refreshChanged(ids: Set<string>) {
+    const [fresh, total] = await Promise.all([fetchOrdersOrNull({ ids: [...ids] }), fetchOrdersCount()]);
+    if (!fresh) { await refresh(); return; }
+    setOrders(prev => patchOrders(prev, ids, fresh));
+    setTotalOrders(total);
+    invalidateTodayStatsCache();
+    if (rangeOrders && ordersTo >= businessToday(bizSettings)) setRangeRefreshKey(k => k + 1);
+  }
+
   refreshRef.current = refresh;
+  refreshChangedRef.current = refreshChanged;
   refreshAllRef.current = refreshAll;
 
   useEffect(() => {
-    const refreshSoon = coalesce(() => refreshRef.current(), REFRESH_GATHER_MS);
+    const refreshSoon = gatherOrderIds(ids => {
+      if (ids) void refreshChangedRef.current(ids);
+      else void refreshRef.current();
+    }, REFRESH_GATHER_MS);
     const channel = supabase
       .channel('admin-orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, p => refreshSoon(changedOrderId('orders', p)))
       .subscribe();
     return () => { refreshSoon.cancel(); supabase.removeChannel(channel); };
   }, []);

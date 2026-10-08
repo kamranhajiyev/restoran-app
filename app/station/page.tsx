@@ -23,12 +23,17 @@ import { MenuItem, Order, OrderItem, RestaurantTable, Station, isOrderOpen } fro
 import { orderLabel } from '@/lib/order-label';
 import { tableTitle } from '@/lib/order-place';
 import OrderNote from '@/components/OrderNote';
-import { coalesce, REFRESH_GATHER_MS } from '@/lib/coalesce';
+import { REFRESH_GATHER_MS } from '@/lib/coalesce';
+import { changedOrderId, gatherOrderIds, patchOrders, patchReady } from '@/lib/order-patch';
 
 // A card older than this is late. Newest-first puts the oldest at the BOTTOM, so
 // the colour is what stops it being forgotten — the sort can't be relied on to
 // surface it.
 const LATE_MS = 15 * 60 * 1000;
+
+/** Whether `rows` already holds this sex's ready mark for this order. */
+const hasReady = (rows: StationReady[], p: StationReady) =>
+  rows.some(x => x.orderId === p.orderId && x.stationId === p.stationId);
 // Re-renders the waiting times. Nothing else would: a quiet realtime channel means
 // a card's clock would otherwise freeze at whatever it said when it arrived.
 const CLOCK_MS = 10 * 1000;
@@ -142,13 +147,25 @@ export default function StationPage() {
     ]);
     if (o) setOrders(o);
     if (r) {
-      const has = (rows: StationReady[], p: StationReady) =>
-        rows.some(x => x.orderId === p.orderId && x.stationId === p.stationId);
-      pendingReady.current = pendingReady.current.filter(p => !has(r, p));
+      pendingReady.current = pendingReady.current.filter(p => !hasReady(r, p));
       setReadyRows([...r, ...pendingReady.current]);
     }
     setOnline(true);
   }, []);
+
+  // A change names its order: download that one and its ready marks and patch
+  // the board (lib/order-patch), instead of the last 200 and every mark ever.
+  const refreshChanged = useCallback(async (ids: Set<string>) => {
+    const list = [...ids];
+    const [o, r] = await Promise.all([fetchOrdersOrNull({ ids: list }), fetchStationReadyOrNull(list)]);
+    // Same null rule as the full read; let it decide what a failure shows.
+    if (!o || !r) { await refreshOrders(); return; }
+    setOrders(prev => patchOrders(prev, ids, o));
+    pendingReady.current = pendingReady.current.filter(p => !hasReady(r, p));
+    const pending = pendingReady.current;
+    setReadyRows(prev => [...patchReady(prev, ids, r).filter(x => !hasReady(pending, x)), ...pending]);
+    setOnline(true);
+  }, [refreshOrders]);
 
   // ── Session guard ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -206,18 +223,21 @@ export default function StationPage() {
 
   useEffect(() => {
     if (!companyId) return;
-    const refreshSoon = coalesce(() => { void refreshOrders(); }, REFRESH_GATHER_MS);
+    const refreshSoon = gatherOrderIds(ids => {
+      if (ids) void refreshChanged(ids);
+      else void refreshOrders();
+    }, REFRESH_GATHER_MS);
     const channel = supabase
       .channel(`station-${companyId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `company_id=eq.${companyId}` }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `company_id=eq.${companyId}` }, p => refreshSoon(changedOrderId('orders', p)))
       // order_items has no company_id of its own — it hangs off the order — so this
       // one cannot be filtered. RLS still scopes what actually arrives.
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, refreshSoon)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_station_ready', filter: `company_id=eq.${companyId}` }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, p => refreshSoon(changedOrderId('order_items', p)))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_station_ready', filter: `company_id=eq.${companyId}` }, p => refreshSoon(changedOrderId('order_station_ready', p)))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items', filter: `company_id=eq.${companyId}` }, () => { fetchMenu().then(setMenu); })
       .subscribe(status => setRealtimeUp(status === 'SUBSCRIBED'));
     return () => { refreshSoon.cancel(); setRealtimeUp(false); supabase.removeChannel(channel); };
-  }, [companyId, refreshOrders, rtAttempt]);
+  }, [companyId, refreshOrders, refreshChanged, rtAttempt]);
 
   useEffect(() => {
     if (realtimeUp) return;

@@ -56,7 +56,8 @@ import { queueSize, enqueue, onEnqueue } from '@/lib/offline-queue';
 import { onLocalWrite, pendingWrites, tillPost } from '@/lib/till-write';
 import OrderNote from '@/components/OrderNote';
 import { moneyDiff } from '@/lib/shift-check';
-import { coalesce, REFRESH_GATHER_MS } from '@/lib/coalesce';
+import { REFRESH_GATHER_MS } from '@/lib/coalesce';
+import { changedOrderId, gatherOrderIds, patchOrders, patchReady } from '@/lib/order-patch';
 
 // How many writes the server has not seen. Two stores answer that question — the
 // browser till's IndexedDB queue and the desktop till's SQLite outbox — but only
@@ -1318,20 +1319,38 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [realtimeUp, setRealtimeUp] = useState(false);
   const [rtAttempt, setRtAttempt] = useState(0);
 
+  // A change names its order. The browser downloads that order and its ready
+  // marks and patches the list (lib/order-patch) instead of the last 200. The
+  // exe and the terminal link reread in full: the exe from its own disk, and
+  // the link has no realtime of its own.
+  const refreshChanged = useCallback(async (ids: Set<string>) => {
+    const list = [...ids];
+    const ticket = beginOrdersRead();
+    const [o, total, r] = await Promise.all([fetchOrdersOrNull({ ids: list }), fetchOrdersCount(), fetchStationReadyOrNull(list)]);
+    if (!o) { await refreshOrders({ silent: true }); return; }
+    applyOrders(ticket, () => { setOrders(prev => patchOrders(prev, ids, o)); setTotalOrders(total); });
+    if (r) setReadyRows(prev => patchReady(prev, ids, r));
+  }, [beginOrdersRead, applyOrders, refreshOrders]);
+
   useEffect(() => {
-    const refreshSoon = coalesce(() => { void refreshOrders(); }, REFRESH_GATHER_MS);
+    const patching = !hasLocalDb() && !overrideCompanyId;
+    const refreshSoon = gatherOrderIds(ids => {
+      if (ids && patching) void refreshChanged(ids);
+      else void refreshOrders();
+    }, REFRESH_GATHER_MS);
     const channel = supabase
       .channel('seller-orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, refreshSoon)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, refreshSoon)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, p => refreshSoon(changedOrderId('orders', p)))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, p => refreshSoon(changedOrderId('order_items', p)))
       // A sex finishing its part is the one change the seller doesn't make himself,
       // so it's the one he'd never learn about without this.
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_station_ready' }, () => {
-        void refreshReady();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_station_ready' }, p => {
+        if (patching) refreshSoon(changedOrderId('order_station_ready', p));
+        else void refreshReady();
       })
       .subscribe(status => setRealtimeUp(status === 'SUBSCRIBED'));
     return () => { refreshSoon.cancel(); setRealtimeUp(false); supabase.removeChannel(channel); };
-  }, [refreshOrders, refreshReady, rtAttempt]);
+  }, [refreshOrders, refreshReady, refreshChanged, overrideCompanyId, rtAttempt]);
 
   useEffect(() => {
     if (realtimeUp) return;

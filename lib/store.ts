@@ -562,7 +562,8 @@ export async function fetchOrdersCount(): Promise<number> {
   } catch { return 0; }
 }
 
-type OrderQuery = { from?: string; to?: string; limit?: number; offset?: number } & ReadOpts;
+// `ids`: only these orders — what a realtime change named (lib/order-patch).
+type OrderQuery = { from?: string; to?: string; limit?: number; offset?: number; ids?: string[] } & ReadOpts;
 
 /**
  * The orders, or null when the read did not get an answer.
@@ -592,11 +593,13 @@ export async function fetchOrders(opts?: OrderQuery): Promise<Order[]> {
 }
 
 async function readOrders(opts?: OrderQuery): Promise<Order[]> {
+  // Nothing asked for is an answer, not a read of everything.
+  if (opts?.ids && opts.ids.length === 0) return [];
   const local = await fromLocal(opts, async (till, companyId) =>
     ((await till.orders(companyId, {
       from: opts?.from, to: opts?.to, limit: opts?.limit, offset: opts?.offset,
     })) as { orders: Order[] }).orders);
-  if (local) return local;
+  if (local) return opts?.ids ? local.filter(o => opts.ids!.includes(o.id)) : local;
 
   {
     const PAGE = 1000;
@@ -616,6 +619,7 @@ async function readOrders(opts?: OrderQuery): Promise<Order[]> {
       if (_companyId) q = q.eq('company_id', _companyId);
       if (opts?.from) q = q.gte('created_at', opts.from);
       if (opts?.to) q = q.lte('created_at', opts.to);
+      if (opts?.ids) q = q.in('id', opts.ids);
       const { data, error } = await q;
       if (error || !data) throw error ?? new Error('fetchOrders: no data');
       return data;
