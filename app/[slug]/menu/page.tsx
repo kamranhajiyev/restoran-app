@@ -1,7 +1,7 @@
 'use client';
 import { use, useEffect, useState } from 'react';
 import { ShoppingCart, X, Plus, Minus, Coffee } from 'lucide-react';
-import { fetchCompanyBySlug, setCompanyContext, addOrder, fetchTablesEnabled, fetchQrEnabled, fetchMenuOnly } from '@/lib/store';
+import { fetchCompanyBySlug, setCompanyContext, fetchTablesEnabled, fetchQrEnabled, fetchMenuOnly } from '@/lib/store';
 import { applyBrand } from '@/lib/branding';
 import { supabase } from '@/lib/supabase';
 import { MenuItem, MenuItemVariant, RestaurantTable } from '@/types';
@@ -45,6 +45,9 @@ export default function CustomerMenuPage({
   const [phone, setPhone]         = useState('');
   const [address, setAddress]     = useState('');
   const [menuOnly, setMenuOnly] = useState(false);
+  const [companyId, setCompanyId] = useState('');
+  // One id per order, so pressing again after a lost reply sends the same one.
+  const [orderId, setOrderId] = useState(() => crypto.randomUUID());
 
   // Variant picker state
   const [variantItem, setVariantItem] = useState<MenuItem | null>(null);
@@ -58,6 +61,7 @@ export default function CustomerMenuPage({
       setLogoUrl(company.logoUrl);
       applyBrand(company.brandColor);
       setCompanyContext(company.id);
+      setCompanyId(company.id);
       const [menuRes, catRes, tableRes, tablesEnabled, qrEnabled, menuOnlyVal] = await Promise.all([
         supabase.rpc('get_public_menu_items', { p_company_id: company.id }),
         supabase.rpc('get_public_categories', { p_company_id: company.id }),
@@ -177,25 +181,27 @@ export default function CustomerMenuPage({
       orderNote.trim(),
     ].filter(Boolean).join(' · ');
     setSubmitting(true);
-    await addOrder({
-      id: crypto.randomUUID(),
-      orderNumber: 0,
-      tableNumber: table?.id ?? 0,
-      // No table means the guest opened the plain link — from Instagram, a
-      // bio, a message — rather than scanning a QR code on a table. That order
-      // has to go out to them, and the seller's list says so.
-      online: !table,
-      sellerName: 'Müştəri',
-      status: 'gözləyir',
-      createdAt: new Date().toISOString(),
-      note: note || undefined,
-      items: cart.map(c => ({
-        menuItem: c.menuItem,
-        quantity: c.quantity,
-        modifiers: c.variantName,
-        variantId: c.variantId,
-      })),
-    });
+    // Through the server, which prices the order from the menu: the guest sends
+    // only what they picked (app/api/guest-order).
+    const ok = await fetch('/api/guest-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: orderId,
+        companyId,
+        tableId: table?.id ?? null,
+        note: note || undefined,
+        lines: cart.map(c => ({ menuItemId: c.menuItem.id, variantId: c.variantId ?? null, quantity: c.quantity })),
+      }),
+      signal: AbortSignal.timeout(20000),
+    }).then(r => r.ok, () => false);
+    if (!ok) {
+      // Not "accepted": the guest would wait for food nobody saw.
+      setSubmitting(false);
+      alert('Sifariş göndərilmədi. İnternet bağlantısını yoxlayıb yenidən cəhd edin.');
+      return;
+    }
+    setOrderId(crypto.randomUUID());
     setSubmitting(false);
     setCart([]);
     setCartOpen(false);
