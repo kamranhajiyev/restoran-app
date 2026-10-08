@@ -207,7 +207,11 @@ trigger `security definer` together.
 
 **Could this break when two tills work offline at once?**
 Order numbers are guessed on the device while offline, so two tills can pick
-the same number.
+the same number. Test Restoran, №3436, 2026-09-19: the taken number refused the
+sale; now the server renumbers it (`app/api/add-order`, tested 2026-10-08).
+A renumbered order no longer matches its paper, so the exes also tell each
+other their highest number over the Wi-Fi (`electron/till-peers`). Does a
+number the till picks on its own have a way to hear what the other tills used?
 
 ## 5. Before shipping, try it like a restaurant would
 

@@ -22,6 +22,8 @@ import {
 } from './printer-driver';
 import { scanPrinters } from './printer-scan';
 import { registerTillHandlers } from './till-ipc';
+import { startTillPeers } from './till-peers';
+import { highestOrderNumber } from './till-write';
 import { startUpdater } from './updater';
 
 // ── The till, served off the disk ────────────────────────────────────────────
@@ -403,6 +405,8 @@ if (isDriverHelper()) {
       // synced from.
       openDb(app.getPath('userData'));
       registerTillHandlers(API_URL);
+      // Share order numbers with the other tills on the Wi-Fi; see till-peers.ts.
+      startTillPeers(highestOrderNumber);
     }
     console.log(BUNDLED ? `[pos] serving the bundled till from ${BUNDLE}` : `[pos] loading ${APP_URL}`);
     if (BUNDLED) console.log(`[pos] syncing with ${API_URL}`);

@@ -28,6 +28,7 @@
 import type { CashShift, Order, OrderItem, ShiftMovement } from '../types';
 import { refusal, type OrderAction } from '../lib/order-rules';
 import { db, getMeta, setMeta, transact } from './db';
+import { announce, heardMax } from './till-peers';
 import {
   addCourierPayment, applyCourierSettlement, getOpenShift, getOrder, hasCourierPayment, putOrder, putShift,
 } from './till-repo';
@@ -166,6 +167,8 @@ function applyAddOrder(body: Record<string, unknown>, companyId: string): WriteR
 
   putOrder(companyId, stamped);
   enqueue(`order:${stamped.id}`, ADD_ORDER, stamped, companyId);
+  // Tell the other tills straight away, not at the next tick.
+  announce();
   return { ok: true };
 }
 
@@ -196,11 +199,17 @@ function thisTillNumber(): number {
   }
 }
 
-export function nextOrderNumber(companyId: string): number {
+export function highestOrderNumber(companyId: string): number {
   const row = db()
     .prepare('select coalesce(max(order_number), 0) as n from orders where company_id = ?')
     .get(companyId);
-  return Number(row?.n ?? 0) + 1;
+  return Number(row?.n ?? 0);
+}
+
+// Above what this machine holds and what the other tills on the Wi-Fi have said
+// they gave out (till-peers.ts), so two tills do not print the same number.
+export function nextOrderNumber(companyId: string): number {
+  return Math.max(highestOrderNumber(companyId), heardMax(companyId)) + 1;
 }
 
 // Mirrors app/api/add-order-items/route.ts.
