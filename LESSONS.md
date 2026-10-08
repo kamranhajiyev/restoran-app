@@ -60,6 +60,11 @@ an answer that will not change. "Order not found yet" can change.
 Lost replies mean the till sends the same thing again. Paying twice must not
 charge twice, and adding items twice must not double them.
 
+**Did it happen, but the "done" got lost?**
+Paper cannot be taken back. Code review, 2026-10-08: a kitchen ticket printed,
+its "printed" report was lost, and two minutes later it printed again. Remember
+the done thing locally before telling the server (`lib/printed-jobs`).
+
 **If the internet drops halfway through, what is left behind?**
 A send that died halfway was told it had already arrived, and an order reached
 the server with no dishes (Test Restoran, 2026-09-14).
@@ -122,6 +127,11 @@ A bill that had not loaded could be paid at 0.00.
 Cash, card, courier cash, courier card, courier debt, deletes and refunds.
 Courier money once never reached the day's cash.
 
+**Does this machine hold all of it, or only its own part?**
+The exe's database has every order but only the courier payments it took.
+Code review, 2026-10-08: with two tills, a shift's Terminal figure counted on
+the machine was short; it now asks the server when nothing is unsent.
+
 **Is this number counted by the one shared function, or worked out again here?**
 A sale belongs to the shift or range it was made in; a courier paying back an
 older order is money arriving (drawer, terminal), not a sale. Every sales box
@@ -149,8 +159,15 @@ midnight or in UTC.
 Production only when the owner says so, each time.
 
 **Does a trigger hide its own errors?**
-`apply_stock_on_payment` swallows exceptions, so damage arrives with nothing in
-any log.
+`apply_stock_on_payment` swallowed exceptions, so damage arrived with nothing in
+any log. Code review, 2026-10-08: it still lets the payment through, but now
+raises a warning ("stock not applied"). Catching is fine; catching silently is
+not.
+
+**Can a save that lost its reply be pressed again?**
+Not only the till retries: an owner presses Save again too. Code review,
+2026-10-08: a stock receipt, write-off or transfer was recorded twice; each
+screen now sends one id, and the database keeps the first.
 
 **Who can call this without logging in, and what does it give them?**
 The public anon key is in every browser; treat it as anyone. It gets only what
@@ -165,7 +182,12 @@ link itself, `companies.seller_token`, was readable by anyone through the
 public key, because the table is open for the slug lookup. A secret must not
 sit in a column the browser can read. And a check that runs only "if someone is
 signed in" lets the public key straight past it: `add_courier_payment` and
-`cancel_courier_order` worked on any restaurant for anon.
+`cancel_courier_order` worked on any restaurant for anon. The QR menu inserted
+orders with the public key, so anyone could post a paid order at any price
+into any restaurant; a guest now sends only what they picked, and the server
+sets the price and the status (`/api/guest-order`). Signed-in is not trusted
+either: `staff.pin_hash` was readable by every employee, and a four-digit
+PIN's hash is guessed in seconds.
 
 **Is every query and every queued write scoped to one company?**
 A till moved to another restaurant must not send the first one's orders.
