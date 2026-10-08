@@ -39,7 +39,7 @@ import {
   fetchStaff, createStaff, updateStaff, setStaffPin, deleteStaff,
   fetchSellerToken, linkProductStock,
   fetchBranding, setLogoUrl as saveLogoUrl, setBrandColor as saveBrandColor,
-  fetchStations, fetchModifierGroups,
+  fetchStations, fetchModifierGroupsOrNull,
   fetchAllUsers, createEmployee, updateEmployee, deleteUser, toggleUserActive,
   fetchCouriers, fetchCourierCollections, fetchCourierCollectionsOrNull,
 } from '@/lib/store';
@@ -122,7 +122,7 @@ type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
 
 function emptyForm(cat: string) {
-  return { name: '', price: '', costPrice: '', category: cat, image: '', stationId: '', kind: 'meal' as 'product' | 'meal', hasVariants: false, variants: [] as FormVariant[], modifierGroupIds: [] as string[] };
+  return { name: '', price: '', costPrice: '', category: cat, image: '', stationId: '', kind: 'meal' as 'product' | 'meal', hasVariants: false, variants: [] as FormVariant[], modifierGroupIds: [] as string[], modifiersKnown: true };
 }
 
 const AZ_MON_SHORT = ['Yan','Fev','Mar','Apr','May','İyn','İyl','Avq','Sen','Okt','Noy','Dek'];
@@ -557,6 +557,9 @@ function AdminPageContent() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [stations, setStations] = useState<Station[]>([]);
   const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([]);
+  // False until the sets have loaded: an empty list from a failed read must not
+  // become "this dish has no sets" on the next save.
+  const [modifiersLoaded, setModifiersLoaded] = useState(false);
   const [menuView, setMenuView] = useState<'items' | 'stations' | 'modifiers'>('items');
   const [adminName, setAdminName] = useState('Admin');
   const [companyName, setCompanyName] = useState('');
@@ -956,7 +959,7 @@ function AdminPageContent() {
     fetchStaff().then(setPinStaff);
     fetchCouriers().then(cs => setCourierNames(Object.fromEntries(cs.map(c => [c.id, c.name]))));
     fetchStations().then(setStations);
-    fetchModifierGroups().then(setModifierGroups);
+    fetchModifierGroupsOrNull().then(g => { if (g) { setModifierGroups(g); setModifiersLoaded(true); } });
     fetchHalls().then(setHalls);
     reloadEmployees();
     fetchSellerToken(session.companyId ?? '').then(setSellerToken);
@@ -1526,6 +1529,8 @@ function AdminPageContent() {
       hasVariants: !!item.variants?.length,
       variants: item.variants?.map(v => ({ id: v.id, name: v.name, price: String(v.price), costPrice: v.costPrice ? String(v.costPrice) : '' })) ?? [],
       modifierGroupIds: item.modifierGroupIds ?? [],
+      // Undefined: this dish's links did not load, so the form must not save them.
+      modifiersKnown: item.modifierGroupIds !== undefined,
     });
     setShowForm(false);
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
@@ -1551,9 +1556,10 @@ function AdminPageContent() {
       image: form.image || undefined,
       stationId: form.stationId || null,
       kind: form.kind,
-      // Only sets that still exist — a set deleted since the form opened would
-      // otherwise be re-linked and fail the insert's foreign key.
-      modifierGroupIds: form.modifierGroupIds.filter(id => modifierGroups.some(g => g.id === id)),
+      // Undefined leaves the dish's links alone (saveMenu): what the form shows is
+      // only an answer when both the sets and this dish's links loaded. Sets
+      // deleted since the form opened are dropped by saveMenu.
+      modifierGroupIds: modifiersLoaded && form.modifiersKnown ? form.modifierGroupIds : undefined,
     };
     const updated = editingId ? menu.map(m => m.id === editingId ? item : m) : [...menu, item];
     setMenu(updated);
@@ -2137,7 +2143,10 @@ function AdminPageContent() {
           </div>
         )}
 
-        {modifierGroups.length > 0 && (
+        {(!modifiersLoaded || !form.modifiersKnown) && editingId && (
+          <p className="text-xs text-stone-500">Modifikatorlar yüklənmədi — bu məhsulun dəstləri dəyişməyəcək. Səhifəni yeniləyin.</p>
+        )}
+        {modifiersLoaded && form.modifiersKnown && modifierGroups.length > 0 && (
           <div>
             <label className="text-xs font-medium text-stone-600 mb-1.5 block">
               Modifikatorlar

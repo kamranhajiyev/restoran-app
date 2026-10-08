@@ -115,7 +115,9 @@ The same day, worse: admin's menu reload failed, the menu became [], and the
 next edit saved that list, which deletes every dish not in it. A failed read
 must never reach a save that removes what is missing (`saveMenu` now refuses).
 Statistics showed 0 ₼ for a failed day and cached it; the kitchen screen stayed
-empty after a failed first load and never tried again.
+empty after a failed first load and never tried again. A filter against a list
+that failed to load is the same bug: saving a dish dropped every modifier set
+not in the (empty) list of sets.
 
 **Is a server that failed read as a server that said no?**
 A 5xx, a timeout, a revoked link or an unknown company will change; a refusal
