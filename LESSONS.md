@@ -45,6 +45,15 @@ and the server routes still took its token (`get_my_company_id` never checked
 "active"). Now the database finds no company for an account that is off
 (`20261010_inactive_accounts_closed.sql`) and `requireAuth` refuses it too.
 
+**Does the database know who may do this, or only the screen?**
+Hiding a button is not a rule. Code review, 2026-10-08: cashier and kitchen
+logins only saw their own screens, but the database checked "same restaurant",
+never "owner", so either could change prices, tables, couriers and stock, or
+delete orders, from the browser. Setup writes now need the owner
+(`20261011_owner_only_writes.sql`). A new admin-only table or function goes on
+that list, and `tests/owner-only-writes.test.ts` fails if the till starts to
+need one.
+
 **Does the screen say "saved" only after the save said so?**
 Supabase returns its errors, it does not throw them; a `try/catch` around it
 catches nothing. Code review, 2026-10-08: table edits, hall moves and drags
