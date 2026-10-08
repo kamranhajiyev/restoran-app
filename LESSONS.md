@@ -37,6 +37,14 @@ Pickers, tabs, filters, reports, old orders. One shared rule decides each list
 the new-order picker but still in the seller's Kuryerlər tab, and a courier with
 orders could not be deleted at all.
 
+**When an account or a restaurant is switched off, is it off everywhere, or only
+on the screen?**
+Logging the screen out is not taking the key back. Code review, 2026-10-08:
+a deactivated user or restaurant was logged out of the app, but the database
+and the server routes still took its token (`get_my_company_id` never checked
+"active"). Now the database finds no company for an account that is off
+(`20261010_inactive_accounts_closed.sql`) and `requireAuth` refuses it too.
+
 **Does the screen say "saved" only after the save said so?**
 Supabase returns its errors, it does not throw them; a `try/catch` around it
 catches nothing. Code review, 2026-10-08: table edits, hall moves and drags

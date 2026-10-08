@@ -44,6 +44,13 @@ export async function requireAuth(req: Request): Promise<{ id: string; role: str
   if (!profile) return Response.json({ error: 'Unauthorized' }, { status: 401 });
   if (profile.active === false) return Response.json({ error: 'Hesab deaktivdir' }, { status: 403 });
 
+  // A restaurant switched off or trashed is off for its accounts too, here as in
+  // the database (get_my_company_id, 20261010_inactive_accounts_closed.sql).
+  if (profile.company_id) {
+    const { data: company } = await db.from('companies').select('active, trashed_at').eq('id', profile.company_id).maybeSingle();
+    if (!company?.active || company.trashed_at) return Response.json({ error: 'Hesab deaktivdir' }, { status: 403 });
+  }
+
   return { id: user.id, role: profile.role, companyId: profile.company_id ?? null };
 }
 
