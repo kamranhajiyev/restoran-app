@@ -37,6 +37,12 @@ Pickers, tabs, filters, reports, old orders. One shared rule decides each list
 the new-order picker but still in the seller's Kuryerlər tab, and a courier with
 orders could not be deleted at all.
 
+**When an update leaves something out, does that mean "clear it" or "not
+given"?**
+Only a field the sender really sent may change. Code review, 2026-10-08: a menu
+import with only name and price wiped every matched dish's cost and sizes and
+showed hidden dishes again, because a missing column read as empty.
+
 **Does the code read a column or function that only a new migration adds? Is
 that migration on production before the code reaches main?**
 A failed read shows an empty list, not an error. İXLAS CAFE, 2026-10-07: the

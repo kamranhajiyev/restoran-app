@@ -223,6 +223,10 @@ export async function parseMenuFile(
     }
   }
 
+  // A column the file does not have leaves that field alone on existing products:
+  // a short price list must not wipe costs, sizes or hidden dishes.
+  const present = new Set(Object.keys(rows[0] ?? {}).map(headerKey).filter(Boolean));
+
   const byName = new Map(existingMenu.map(m => [m.name.trim().toLowerCase(), m]));
   // Canonical casing: "çay" in the file maps onto the existing "Çay" category
   const existingCatByLower = new Map(existingCategories.map(c => [c.name.trim().toLowerCase(), c.name]));
@@ -281,9 +285,9 @@ export async function parseMenuFile(
         ...existing,
         category,
         price,
-        available,
-        costPrice: cost ?? undefined,
-        variants: reconciledVariants,
+        ...(present.has('available') ? { available } : {}),
+        ...(present.has('cost') ? { costPrice: cost ?? undefined } : {}),
+        ...(present.has('variants') ? { variants: reconciledVariants } : {}),
         ...(kind ? { kind } : {}),
       });
     } else {
