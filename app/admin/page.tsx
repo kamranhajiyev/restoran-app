@@ -70,6 +70,7 @@ import { placeSales, tableSales } from '@/lib/place-sales';
 import { insertCopyAfter } from '@/lib/menu-copy';
 import { moneyDiff, shiftCheck } from '@/lib/shift-check';
 import { coalesce, REFRESH_GATHER_MS } from '@/lib/coalesce';
+import { KASSA_GATHER_MS, KASSA_TICK_MS, kassaTickDue } from '@/lib/kassa-refresh';
 import OrderNote from '@/components/OrderNote';
 
 // RPC raise messages are machine codes — translated here for display
@@ -1063,11 +1064,32 @@ function AdminPageContent() {
       const open = s.find(x => !x.closedAt);
       if (open) { void loadShiftTotals(open); setOpenShiftSales(await fetchShiftSales(open.openedAt)); }
     }).finally(() => setShiftsLoading(false));
-    const interval = setInterval(async () => {
+    // An order change brings the news; the timer is only a safety net
+    // (lib/kassa-refresh). It used to re-download the shift every 30 s.
+    let last = Date.now();
+    let realtimeUp = false;
+    const reload = async () => {
+      last = Date.now();
       const open = await fetchOpenShift();
       if (open) { void loadShiftTotals(open); setOpenShiftSales(await fetchShiftSales(open.openedAt)); }
-    }, 30_000);
-    return () => clearInterval(interval);
+    };
+    const reloadSoon = coalesce(() => { void reload(); }, KASSA_GATHER_MS);
+    const channel = supabase
+      .channel('admin-kassa-orders')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, reloadSoon)
+      .subscribe(status => { realtimeUp = status === 'SUBSCRIBED'; });
+    const interval = setInterval(() => {
+      const visible = document.visibilityState !== 'hidden';
+      if (kassaTickDue({ lastRun: last, now: Date.now(), realtimeUp, visible })) void reload();
+    }, KASSA_TICK_MS);
+    const onVisible = () => { if (document.visibilityState === 'visible') void reload(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      reloadSoon.cancel();
+      supabase.removeChannel(channel);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [sessionReady, tab, loadShiftTotals]);
 
   useEffect(() => {
