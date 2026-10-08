@@ -153,10 +153,19 @@ Production only when the owner says so, each time.
 any log.
 
 **Who can call this without logging in, and what does it give them?**
+The public anon key is in every browser; treat it as anyone. It gets only what
+the QR menu needs. Every new table, column or function is closed to it (RLS on,
+`revoke execute ... from public, anon`); a till goes through a server route
+that checks its link. Four holes on 2026-10-08 were each one of these forgotten.
 A company id is not a secret — it sits in links and pages. Code review,
 2026-10-08: the /api/public-* reads checked the till link only when one was
 sent, so the id alone gave out orders, phone numbers and staff
-(`READS_NEED_TOKEN`). A safety switch left off is no safety.
+(`READS_NEED_TOKEN`). A safety switch left off is no safety. The same day: the
+link itself, `companies.seller_token`, was readable by anyone through the
+public key, because the table is open for the slug lookup. A secret must not
+sit in a column the browser can read. And a check that runs only "if someone is
+signed in" lets the public key straight past it: `add_courier_payment` and
+`cancel_courier_order` worked on any restaurant for anon.
 
 **Is every query and every queued write scoped to one company?**
 A till moved to another restaurant must not send the first one's orders.

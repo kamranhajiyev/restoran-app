@@ -12,6 +12,14 @@ Before finishing any change, read `LESSONS.md` and go through the questions that
 
 Every customer bug fix also adds its question to `LESSONS.md` (date and customer) in the same commit, unless one already covers it. Fixed bugs that never reached the file were made again.
 
+# The public key gets nothing
+
+The Supabase anon key is in every browser, so treat it as anyone. New tables,
+sequences and functions are closed to it by default (`20261008_closed_by_default.sql`);
+every new table turns on row level security, and anything given back to anon
+needs a `-- anon:` line saying why. A till without a login goes through a server
+route that checks its link, never straight to the database.
+
 # Three places
 
 A change can show up in three places: the seller page (browser till), the admin page, and the exe. Before calling work done:
