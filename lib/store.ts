@@ -435,6 +435,7 @@ export async function fetchStationsOrNull(opts?: ReadOpts): Promise<Station[] | 
       .order('created_at');
     if (error || !data) return null;
     _stationsLoaded = true;
+    _stationIpsSeen = new Map(data.map(r => [r.id as string, (r.printer_ip as string | null) ?? null]));
     return data.map(r => ({
       id: r.id,
       name: r.name,
@@ -446,6 +447,12 @@ export async function fetchStationsOrNull(opts?: ReadOpts): Promise<Station[] | 
   }
 }
 
+// The printer IPs as admin last read them. A till can set a station's IP
+// (/api/update-station-printer) while admin is open; saving admin's whole list
+// wrote its old IP back over it, and the kitchen tickets stopped coming out.
+// Only an IP admin itself changed is written.
+let _stationIpsSeen = new Map<string, string | null>();
+
 // Same upsert-then-prune contract as saveMenu: a failed write leaves the
 // existing rows alone. Pruning a station nulls its items' station_id (FK is
 // ON DELETE SET NULL) — the items themselves are never touched.
@@ -454,23 +461,27 @@ export async function saveStations(stations: Station[]): Promise<string | null> 
   try {
     const seen = new Set<string>();
     const rows: Record<string, unknown>[] = [];
+    // Two upserts, each with the same columns in every row: a row without
+    // printer_ip in a mixed batch would be written as null.
+    const withIp: Record<string, unknown>[] = [];
+    const withoutIp: Record<string, unknown>[] = [];
     for (const s of stations) {
       const name = s.name.trim();
       if (!name || seen.has(name)) continue;   // the (company_id, name) unique index would reject the whole write
       seen.add(name);
-      rows.push({
-        id: isValidUUID(s.id) ? s.id : crypto.randomUUID(),
-        name,
-        printer_ip: s.printerIp?.trim() || null,
-        printer_port: s.printerPort ?? 9100,
-        position: rows.length,
-        company_id: _companyId,
-      });
+      const id = isValidUUID(s.id) ? s.id : crypto.randomUUID();
+      const ip = s.printerIp?.trim() || null;
+      const row = { id, name, printer_port: s.printerPort ?? 9100, position: rows.length, company_id: _companyId };
+      rows.push(row);
+      if (!_stationIpsSeen.has(id) || _stationIpsSeen.get(id) !== ip) withIp.push({ ...row, printer_ip: ip });
+      else withoutIp.push(row);
     }
-    if (rows.length > 0) {
-      const { error } = await supabase.from('stations').upsert(rows, { onConflict: 'id' });
+    for (const batch of [withIp, withoutIp]) {
+      if (batch.length === 0) continue;
+      const { error } = await supabase.from('stations').upsert(batch, { onConflict: 'id' });
       if (error) { console.error('[saveStations upsert]', error); return error.message; }
     }
+    for (const r of withIp) _stationIpsSeen.set(r.id as string, r.printer_ip as string | null);
     let del = supabase.from('stations').delete().eq('company_id', _companyId);
     if (rows.length > 0) del = del.not('id', 'in', `(${rows.map(r => `"${r.id}"`).join(',')})`);
     const { error: delError } = await del;

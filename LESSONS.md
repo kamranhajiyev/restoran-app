@@ -47,6 +47,9 @@ given"?**
 Only a field the sender really sent may change. Code review, 2026-10-08: a menu
 import with only name and price wiped every matched dish's cost and sizes and
 showed hidden dishes again, because a missing column read as empty.
+The other way round: a save that sends back the whole list writes old values
+over what someone else changed meanwhile. The same day, admin's station save
+undid a printer IP just set at the till, and kitchen tickets stopped.
 
 **When something is restored, does everything that left with it come back?**
 And is the only copy kept until the new one is saved? Code review, 2026-10-08:
