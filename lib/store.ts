@@ -877,7 +877,7 @@ export async function updateOrderStatus(
     undefined,
     status === 'ödənilib' ? `pay:${orderId}` : `status:${orderId}:${status}`,
     '/api/update-order-status',
-    { orderId, status, cashAmount, cardAmount, changeAmount, discountAmount, discountType, courierDebt },
+    { orderId, status, cashAmount, cardAmount, changeAmount, discountAmount, discountType, courierDebt, paidAt: new Date().toISOString() },
   );
   if (local) return local.ok;
 
@@ -1738,15 +1738,24 @@ export async function fetchCourierCollections(
   to: string,
   opts?: ReadOpts,
 ): Promise<Collections> {
+  return (await fetchCourierCollectionsOrNull(from, to, opts)) ?? { nagd: 0, kart: 0 };
+}
+
+// Null when neither the server nor this machine could answer. Admin keeps the
+// numbers on screen then; a blip used to show couriers at 0 ₼.
+export async function fetchCourierCollectionsOrNull(
+  from: string,
+  to: string,
+  opts?: ReadOpts,
+): Promise<Collections | null> {
   try {
     const { data, error } = await supabase.from('courier_payments')
       .select('amount, method, order_ids').gte('created_at', from).lt('created_at', to);
     if (error) throw error;
     return sumCollections(data ?? []);
   } catch {
-    const local = await fromLocal(opts, (till, companyId) =>
+    return fromLocal(opts, (till, companyId) =>
       till.courierCollections(companyId, from, to) as Promise<{ nagd: number; kart: number }>);
-    return local ?? { nagd: 0, kart: 0 };
   }
 }
 
@@ -2404,10 +2413,11 @@ export interface LoginEvent {
   role: string;
 }
 
-export async function fetchLoginEvents(): Promise<LoginEvent[]> {
+// Null when the read failed, so the screen keeps what it shows.
+export async function fetchLoginEvents(): Promise<LoginEvent[] | null> {
   try {
     const res = await fetch('/api/login-events', { headers: await authHeaders() });
-    if (!res.ok) return [];
+    if (!res.ok) return null;
     const data = await res.json();
     return data.map((e: Record<string, unknown>) => {
       const p = (e.profiles ?? {}) as Record<string, unknown>;
@@ -2421,18 +2431,19 @@ export async function fetchLoginEvents(): Promise<LoginEvent[]> {
         role: p.role ?? '',
       };
     });
-  } catch { return []; }
+  } catch { return null; }
 }
 
 // ─── Superadmin: Users ────────────────────────────────────────────────────────
 
-export async function fetchAllUsers(): Promise<{ id: string; username: string; name: string; role: string; companyId: string | null; active: boolean; createdAt: string; stationId: string | null }[]> {
+// Null when the read failed, so the screen keeps what it shows.
+export async function fetchAllUsers(): Promise<{ id: string; username: string; name: string; role: string; companyId: string | null; active: boolean; createdAt: string; stationId: string | null }[] | null> {
   try {
     const res = await fetch('/api/users', { headers: await authHeaders() });
-    if (!res.ok) return [];
+    if (!res.ok) return null;
     const data = await res.json();
     return data.map((u: Record<string, unknown>) => ({ id: u.id, username: u.username, name: u.name, role: u.role, companyId: u.company_id ?? null, active: u.active, createdAt: u.created_at, stationId: (u.station_id as string | null) ?? null }));
-  } catch { return []; }
+  } catch { return null; }
 }
 
 // ─── Owner: sex employees ─────────────────────────────────────────────────────
@@ -2698,7 +2709,9 @@ export async function closeShift(
 // Cash/card taken since the shift opened (paid orders only, by payment time —
 // an order created yesterday but paid during this shift counts). cash_amount is
 // net of change — i.e. exactly what went into the drawer.
-export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promise<ShiftSales> {
+/** Sales since the shift opened, or null when they could not be read — never
+ *  zeros for a failure, which closing the shift would save as the takings. */
+export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promise<ShiftSales | null> {
   // Payments made during an outage exist only on this machine until they sync,
   // so a drawer reconciled against the server would read short by exactly what
   // the till took while the line was down.
@@ -2721,7 +2734,7 @@ export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promis
         .eq('method', 'kart')
         .gte('created_at', openedAt),
     ]);
-    if (error || !data) return { cash: 0, card: 0, courierCard: 0, courierSales: 0, courier: 0 };
+    if (error || !data) return null;
     const settledByCard = (courierCard ?? []).reduce((s, p) => s + Number(p.amount ?? 0), 0);
     return {
       cash: data.reduce((s, o) => s + Number(o.cash_amount ?? 0), 0),
@@ -2730,5 +2743,5 @@ export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promis
       courierSales: courierSold(data),
       courier: courierStillOut(data),
     };
-  } catch { return { cash: 0, card: 0, courierCard: 0, courierSales: 0, courier: 0 }; }
+  } catch { return null; }
 }

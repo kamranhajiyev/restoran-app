@@ -17,7 +17,9 @@ export async function GET(req: NextRequest) {
     .eq('company_id', companyId)
     .order('created_at');
 
-  if (error) return Response.json({ staff: [] });
+  // A 500, not an empty list: the exe saves this list over its own, and an
+  // empty one left nobody able to sign in with a PIN.
+  if (error) return Response.json({ staff: [], error: error.message }, { status: 500 });
   return Response.json({
     staff: (data ?? []).map(s => ({ id: s.id, name: s.name, active: s.active, createdAt: s.created_at })),
   });

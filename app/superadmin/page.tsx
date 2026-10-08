@@ -121,10 +121,11 @@ export default function SuperadminPage() {
   async function loadData(): Promise<Company[]> {
     setLoading(true);
     const [comps, usrs] = await Promise.all([fetchCompanies(), fetchAllUsers()]);
-    const owners = usrs.filter(u => u.role === 'owner');
+    const owners = (usrs ?? []).filter(u => u.role === 'owner');
     const withOwners: Company[] = comps.map(c => ({
       ...c,
-      ownerUser: owners.find(u => u.companyId === c.id),
+      // A failed users read keeps each company's owner as it was.
+      ownerUser: usrs ? owners.find(u => u.companyId === c.id) : companies.find(p => p.id === c.id)?.ownerUser,
     }));
     setCompanies(withOwners);
     setLoading(false);

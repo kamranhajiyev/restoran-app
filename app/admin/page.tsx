@@ -1,5 +1,7 @@
 'use client';
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// One order total for the till, admin and Excel — rounded the same everywhere.
+import { orderTotal } from '@/components/seller/order-format';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   LayoutDashboard,
@@ -38,7 +40,7 @@ import {
   fetchBranding, setLogoUrl as saveLogoUrl, setBrandColor as saveBrandColor,
   fetchStations, fetchModifierGroups,
   fetchAllUsers, createEmployee, updateEmployee, deleteUser, toggleUserActive,
-  fetchCouriers, fetchCourierCollections,
+  fetchCouriers, fetchCourierCollections, fetchCourierCollectionsOrNull,
 } from '@/lib/store';
 import { applyBrand, BRAND_PRESETS, DEFAULT_BRAND } from '@/lib/branding';
 import { orderClosedAt, orderSuspicion, isSuspiciousOrder } from '@/lib/order-items';
@@ -125,10 +127,6 @@ function emptyForm(cat: string) {
 const AZ_MON_SHORT = ['Yan','Fev','Mar','Apr','May','İyn','İyl','Avq','Sen','Okt','Noy','Dek'];
 const AZ_MON_LONG  = ['Yanvar','Fevral','Mart','Aprel','May','İyun','İyul','Avqust','Sentyabr','Oktyabr','Noyabr','Dekabr'];
 
-function orderTotal(order: Order) {
-  const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
-  return gross - (order.discountAmount ?? 0);
-}
 
 // A courier order is paid by the rider, so its cash/card split is over what
 // they have handed back so far, not over the order's total.
@@ -793,6 +791,7 @@ function AdminPageContent() {
 
   const reloadEmployees = useCallback(async () => {
     const users = await fetchAllUsers();
+    if (!users) return; // a failed read keeps the list on screen
     setEmployees(users
       .filter(u => u.role === 'employee')
       .map(u => ({ id: u.id, username: u.username, name: u.name, active: u.active, stationId: u.stationId })));
@@ -979,7 +978,7 @@ function AdminPageContent() {
   // Login history is rarely opened — fetched once, on first visit to the tab.
   useEffect(() => {
     if (tab !== 'logins' || !sessionReady || loginsLoaded) return;
-    fetchLoginEvents().then(ev => { setLoginEvents(ev); setLoginsLoaded(true); });
+    fetchLoginEvents().then(ev => { if (ev) { setLoginEvents(ev); setLoginsLoaded(true); } });
   }, [tab, sessionReady, loginsLoaded]);
 
   // Stats orders are fetched per selected range — only the period being viewed is downloaded.
@@ -1023,11 +1022,12 @@ function AdminPageContent() {
       return;
     }
     let cancelled = false;
-    fetchCourierCollections(from, to).then(c => {
-      if (cancelled) return;
+    // A failed read keeps what is on screen; it is not 0 ₼.
+    fetchCourierCollectionsOrNull(from, to).then(c => {
+      if (cancelled || !c) return;
       collectedCache.current.set(key, { at: Date.now(), data: c });
       setCourierCollected(c);
-    }).catch(() => { if (!cancelled) setCourierCollected({ nagd: 0, kart: 0 }); });
+    }).catch(() => {});
     return () => { cancelled = true; };
   }, [sessionReady, customFrom, customTo, bizSettings, statsRefreshKey]);
 
@@ -1064,7 +1064,7 @@ function AdminPageContent() {
     fetchShifts().then(async s => {
       setShifts(s);
       const open = s.find(x => !x.closedAt);
-      if (open) { void loadShiftTotals(open); setOpenShiftSales(await fetchShiftSales(open.openedAt)); }
+      if (open) { void loadShiftTotals(open); const s = await fetchShiftSales(open.openedAt); if (s) setOpenShiftSales(s); }
     }).finally(() => setShiftsLoading(false));
     // An order change brings the news; the timer is only a safety net
     // (lib/kassa-refresh). It used to re-download the shift every 30 s.
@@ -1073,7 +1073,7 @@ function AdminPageContent() {
     const reload = async () => {
       last = Date.now();
       const open = await fetchOpenShift();
-      if (open) { void loadShiftTotals(open); setOpenShiftSales(await fetchShiftSales(open.openedAt)); }
+      if (open) { void loadShiftTotals(open); const s = await fetchShiftSales(open.openedAt); if (s) setOpenShiftSales(s); }
     };
     const reloadSoon = coalesce(() => { void reload(); }, KASSA_GATHER_MS);
     const channel = supabase
@@ -1105,7 +1105,7 @@ function AdminPageContent() {
     closedTotalsAsked.current.clear();
     setClosedShiftTotals({});
     const open = s.find(x => !x.closedAt);
-    if (open) { void loadShiftTotals(open); setOpenShiftSales(await fetchShiftSales(open.openedAt)); }
+    if (open) { void loadShiftTotals(open); const s = await fetchShiftSales(open.openedAt); if (s) setOpenShiftSales(s); }
   }
 
   async function handleAdminCloseShift(open: CashShift) {
@@ -1119,6 +1119,8 @@ function AdminPageContent() {
         return;
       }
       const sales = await fetchShiftSales(fresh.openedAt);
+      // Closing on unread sales would save 0 ₼ as the shift's takings.
+      if (!sales) { alert('Satışlar oxunmadı — internet bağlantısını yoxlayıb yenidən cəhd edin.'); return; }
       const expected = fresh.openingCash + sales.cash + fresh.movements.reduce((t, m) => t + m.amount, 0);
       const countedCard = adminTerminalInput === '' ? undefined : parseFloat(adminTerminalInput) || 0;
       await closeShift(fresh.id, expected, parseFloat(adminCountedInput) || 0, adminName, sales.card, countedCard);

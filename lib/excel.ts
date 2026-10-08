@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { orderTotal } from '@/components/seller/order-format';
 import { Category, MenuItem, MenuItemVariant, Order } from '@/types';
 import { orderClosedAt } from '@/lib/order-items';
 import { orderLabel } from './order-label';
@@ -48,8 +49,8 @@ export function exportMenuExcel(menu: MenuItem[], categories: Category[]): void 
 
 export function exportOrdersExcel(orders: Order[], timezone: string, courierNames: Record<string, string> = {}): void {
   const rows = orders.map(o => {
-    const gross = o.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
-    const total = gross - (o.discountAmount ?? 0);
+    // The till's own total, so a row matches what the seller charged.
+    const total = orderTotal(o);
     const closed = orderClosedAt(o);
     return {
       // The label, so two tills' 45s are two rows an owner can tell apart.

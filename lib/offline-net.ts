@@ -175,6 +175,9 @@ export async function postOrQueue(
         method: "POST",
         headers: { "Content-Type": "application/json", "Idempotency-Key": id },
         body: JSON.stringify(body),
+        // A request that never answers would hold the button; past this it is
+        // queued like any other lost send, and the key makes a late arrival safe.
+        signal: AbortSignal.timeout(15000),
       });
       const data = await res.json().catch(() => ({ ok: res.ok }));
       if (res.ok && data.ok !== false) return { ok: true, queued: false };

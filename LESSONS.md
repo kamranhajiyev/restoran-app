@@ -76,11 +76,26 @@ that keeps going until it is sent.
 "Failed" is not "empty" and not "closed". Keep what is on screen, and keep where
 the seller is (`lib/keep-on-fail`). Test Restoran, 2026-10-06: on a blip the till
 jumped to Sifarişlər, showed "Növbəni aç", lost the category the seller was in,
-or blanked the menu.
+or blanked the menu. Code review, 2026-10-08: a route that answers its own
+failure with 200 and an empty list is the same bug on the server — the exe saved
+an empty staff list over its own, and nobody could sign in with a PIN.
+
+**Is a server that failed read as a server that said no?**
+A 5xx, a timeout, a revoked link or an unknown company will change; a refusal
+will not. Code review, 2026-10-08: the queue dropped payments on a 502, on a
+new till link, and every write of a signed-in exe (`lib/sync.ts`); closing a
+shift on a failed sales read saved 0 ₼ as its takings.
+
+**Whose clock says when this happened?**
+A write that waited in the queue arrives late. Stamped on arrival, a sale paid
+offline at 23:50 counted in the next shift and the next day. Code review,
+2026-10-08: the till now sends its own time (`lib/client-time`).
 
 **What does "online" mean here?**
 `navigator.onLine` says "wifi exists", not "the server is reachable". Every
 network call needs a timeout, or one hung request freezes everything behind it.
+Code review, 2026-10-08: the queue's send, the direct send and "Növbəni aç" had
+none, and two drains could run at once and send each write twice.
 
 ## 2. Exe and browser
 
@@ -145,6 +160,13 @@ One sale is several realtime changes (order, dishes, payment). Gather them
 (`lib/coalesce`) and refresh once. Production logs, 2026-10-07: admin, the
 browser till and the kitchen screen re-downloaded 200 orders on every change;
 it was most of the egress, and the reads, with no company filter, timed out.
+
+**Can the public key read or change this table? And does anything that needs
+it run as the caller?**
+Code review, 2026-10-08: `company_order_counters` had no row level security,
+so anyone could reset order numbers; locking it alone broke numbering, because
+the trigger ran as the person inserting the order. Lock the table and make the
+trigger `security definer` together.
 
 **Could this break when two tills work offline at once?**
 Order numbers are guessed on the device while offline, so two tills can pick

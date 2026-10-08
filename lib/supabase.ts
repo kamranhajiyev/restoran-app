@@ -1,9 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
+import { READ_MS, withTimeout } from './timeout';
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-export const supabase = createClient(url, key);
+// Every request gets a time limit (lib/timeout).
+export const supabase = createClient(url, key, {
+  global: { fetch: (input, init) => fetch(input, withTimeout(init, READ_MS)) },
+});
 
 export async function isOnline(): Promise<boolean> {
   if (typeof window === 'undefined') return false;

@@ -29,7 +29,9 @@ export async function GET(req: NextRequest) {
       .gte('created_at', openedAt),
   ]);
 
-  if (error || !data) return Response.json({ cash: 0, card: 0, courierCard: 0, courierSales: 0, courier: 0 });
+  // A 500, not zeros: zeros read as "nothing sold", and closing the shift on
+  // them wrote 0 ₼ into its expected cash.
+  if (error || !data) return Response.json({ error: error?.message ?? 'read failed' }, { status: 500 });
 
   const settledByCard = (courierCard ?? []).reduce((s, p) => s + Number(p.amount ?? 0), 0);
   return Response.json({

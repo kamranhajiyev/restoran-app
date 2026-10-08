@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     q = q.eq('company_id', auth.companyId);
   }
   const { data, error } = await q;
-  if (error) return Response.json([]);
+  if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json(data ?? []);
 }
 

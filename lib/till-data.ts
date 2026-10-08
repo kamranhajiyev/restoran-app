@@ -15,6 +15,7 @@
 
 import type { PosNative } from "./desktopPrint";
 import { withTillToken } from "./till-read-token";
+import { READ_MS, withTimeout } from "./timeout";
 
 // The terminal's token, so a read that goes to the network can prove which
 // till it is (lib/till-read-token.ts). Set by the seller page; inside the exe
@@ -25,10 +26,17 @@ export function setTillToken(token: string | null | undefined): void {
   tillToken = token || null;
 }
 
+/** The terminal's token as the page knows it now, or null. */
+export function getTillToken(): string | null {
+  return tillToken;
+}
+
 /** fetch() with the token added when `path` is a till read. */
 function networkFetch(path: string, init?: RequestInit): Promise<Response> {
   const headers = withTillToken(path, init?.headers as Record<string, string> | undefined, tillToken);
-  return fetch(path, headers ? { ...init, headers } : init);
+  // A time limit, so a hung connection is a failed read and not an endless
+  // "Yüklənir..." (lib/supabase withTimeout).
+  return fetch(path, withTimeout(headers ? { ...init, headers } : init, READ_MS));
 }
 
 /** The local database, or null in a browser (and in a --url= shell). */

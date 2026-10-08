@@ -30,6 +30,7 @@ import {
 } from "@/lib/till-write";
 import type { PosNative } from "@/lib/desktopPrint";
 import { readLink } from "@/lib/terminal-link";
+import { getTillToken } from "@/lib/till-data";
 
 /** The machine's own bridge, or null in a browser. */
 function tillDb(): NonNullable<PosNative["till"]> | null {
@@ -52,6 +53,66 @@ export const ADD_ORDER = "supabase:addOrder";
 // with the badge going green because the queue really was empty.
 const NETWORK = /fetch|network|failed to fetch|load failed|timeout|econnrefused|aborted|net::err|enotfound|unreachable|disconnected|offline/i;
 const ALREADY_APPLIED = /duplicate key|unique constraint|already exists/i;
+
+/** How long one write may take before the queue gives up on it for now. */
+export const SEND_MS = 15000;
+
+/**
+ * The promise, or a "timeout" error once `ms` has passed. A request that never
+ * answers — a router that took the packet and did nothing — used to hold the
+ * whole queue behind it until the till was restarted. The loser is abandoned,
+ * not cancelled; every write carries an Idempotency-Key, so a late arrival is
+ * harmless.
+ */
+export function withDeadline<T>(p: Promise<T>, ms = SEND_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("timeout")), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Whether a refusal is the server failing rather than the server saying no.
+ *
+ * A 502 from Vercel or a 500 from a Supabase hiccup used to be read as "no",
+ * and every write but an order was dropped on it — a payment included, so the
+ * till showed the order paid while the server never heard of it. These answers
+ * change on their own, so the write is kept and tried again.
+ */
+export function serverFailed(status: number | undefined): boolean {
+  return status !== undefined && (status >= 500 || status === 408 || status === 429);
+}
+
+/**
+ * Whether the server refused the link the write was sent with. The owner made
+ * a new link, or the till is being re-linked: the write is still the
+ * restaurant's sale, so it waits for a link that works instead of being dropped.
+ */
+export function linkRefused(r: { reason: string; status?: number }): boolean {
+  return r.status === 401 || r.status === 403 || /revoked/i.test(r.reason);
+}
+
+/**
+ * The body with the link the till holds now. A write queued before the owner
+ * made a new link carries the old token, and would be refused for ever after.
+ */
+export function withCurrentToken(body: unknown, token: string | null): unknown {
+  if (!token || !body || typeof body !== "object" || !("token" in body)) return body;
+  return { ...(body as Record<string, unknown>), token };
+}
+
+/**
+ * Whether a queued write belongs to another restaurant than the one open now.
+ * Unknown on either side is not "another": a till signed in with an account
+ * has no link company, and dropping on that deleted every sale it made.
+ */
+export function otherCompany(written: string | null, current: string | null): boolean {
+  return !!written && !!current && written !== current;
+}
+
+/** Why an entry was not applied, and the HTTP status that said so, if any. */
+type Refusal = { reason: string; status?: number };
 
 /** The fields the replay needs. Both queues supply them under these names. */
 export interface Pending {
@@ -87,8 +148,8 @@ export async function pendingEntries(): Promise<Pending[]> {
   return queue().all();
 }
 
-/** Send one entry. Resolves to null on success, or a reason to keep it. */
-async function replay(item: Pending, base: string, local: boolean): Promise<string | null> {
+/** Send one entry. Resolves to null on success, or why it was not applied. */
+async function replay(item: Pending, base: string, local: boolean, token: string | null): Promise<Refusal | null> {
   if (item.kind === ADD_ORDER) {
     // `keepOrderNumber` only where the number is real. The desktop till assigned
     // it from its own database and has already printed it; a browser's queued
@@ -104,7 +165,7 @@ async function replay(item: Pending, base: string, local: boolean): Promise<stri
     // never seen — three of them, answering ok:false to a till showing green.
     if (till) {
       const link = await readLink();
-      if (!link) return "link yoxdur";
+      if (!link) return { reason: "link yoxdur" };
       const res = await till.api("/api/add-order", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Idempotency-Key": item.id },
@@ -120,7 +181,7 @@ async function replay(item: Pending, base: string, local: boolean): Promise<stri
         catch { return { ok: res.ok }; }
       })();
       if (res.ok && data.ok !== false) return null;
-      return data.error ? String(data.error) : `http ${res.status}`;
+      return { reason: data.error ? String(data.error) : `http ${res.status}`, status: res.status };
     }
 
     // A browser tab still has the waiter's own session, so it inserts as itself.
@@ -128,11 +189,11 @@ async function replay(item: Pending, base: string, local: boolean): Promise<stri
     // till-generated id, which is the same answer as success.
     const error = await addOrder(item.body as Order, { server: true, keepOrderNumber: local });
     if (error === null || ALREADY_APPLIED.test(error)) return null;
-    return error;
+    return { reason: error };
   }
 
   const headers = { "Content-Type": "application/json", "Idempotency-Key": item.id };
-  const body = JSON.stringify(item.body);
+  const body = JSON.stringify(withCurrentToken(item.body, token));
 
   // Out through the main process on the desktop till. The page is served from
   // app://till, so this fetch is cross-origin and the browser refuses it before
@@ -154,16 +215,27 @@ async function replay(item: Pending, base: string, local: boolean): Promise<stri
   })();
 
   if (res.ok && data.ok !== false) return null;
-  return data.error ? String(data.error) : `http ${res.status}`;
+  return { reason: data.error ? String(data.error) : `http ${res.status}`, status: res.status };
 }
 
-export async function flushQueue(currentCompanyId: string | null): Promise<SyncResult> {
+// The send already running, if any. The reconnect drain and the timer both
+// call flushQueue; two at once read the same queue and sent each write twice.
+let running: Promise<SyncResult> | null = null;
+
+export function flushQueue(currentCompanyId: string | null): Promise<SyncResult> {
+  if (running) return running;
+  running = flushOnce(currentCompanyId).finally(() => { running = null; });
+  return running;
+}
+
+async function flushOnce(currentCompanyId: string | null): Promise<SyncResult> {
   const local = hasLocalDb();
   const q = queue();
   const pending = await q.all();
   if (pending.length === 0) return { synced: 0, failed: 0, stillQueued: 0 };
 
   const base = await apiBase();
+  const token = tillDb() ? (await readLink())?.token ?? null : getTillToken();
 
   let synced = 0;
   let failed = 0;
@@ -171,7 +243,7 @@ export async function flushQueue(currentCompanyId: string | null): Promise<SyncR
   for (const item of pending) {
     // A till that was re-pointed at another restaurant must not post the first
     // one's orders into it.
-    if (item.companyId !== currentCompanyId) {
+    if (otherCompany(item.companyId, currentCompanyId)) {
       await q.drop(item.id);
       failed++;
       continue;
@@ -180,15 +252,18 @@ export async function flushQueue(currentCompanyId: string | null): Promise<SyncR
     await q.attempted(item.id);
 
     try {
-      const error = await replay(item, base, local);
-      if (error === null) {
+      const refusal = await withDeadline(replay(item, base, local, token));
+      if (refusal === null) {
         await q.drop(item.id);
         synced++;
         continue;
       }
 
-      // Still no line. Stop: the rest of the queue sits behind this one.
-      if (NETWORK.test(error)) {
+      const error = refusal.reason;
+
+      // Still no line, or the server failed on its side. Stop: the answer will
+      // change, and the rest of the queue sits behind this one.
+      if (NETWORK.test(error) || serverFailed(refusal.status) || linkRefused(refusal)) {
         failed++;
         break;
       }

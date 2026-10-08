@@ -19,13 +19,13 @@ import {
   fetchCouriersWithBalance, addCourierPayment, returnCourierOrder, fetchCourierCollections, changeOrderCourier,
   fetchMenuOrNull, fetchCategoriesOrNull, fetchTablesOrNull, fetchHallsOrNull, fetchStaffOrNull, fetchModifierGroupsOrNull, readOpenShift,
 } from '@/lib/store';
-import { jsonOrNull, keepCategory, listOrNull, shiftOrUnknown } from '@/lib/keep-on-fail';
+import { jsonOrNull, keepCategory, listOrNull, salesOrNull, shiftOrUnknown } from '@/lib/keep-on-fail';
 import { menuIndex, stationForItem, readyStationIds } from '@/lib/stations';
 import { unlockSound, armSoundOnFirstGesture, playOrderReady } from '@/lib/sound';
 import { applyBrand } from '@/lib/branding';
 import { orderClosedAt } from '@/lib/order-items';
 import { CompanySettings, DEFAULT_SETTINGS, keepSettings, businessDay, businessToday, businessDayStartUtc, tzTime } from '@/lib/business-day';
-import { courierOwed, type Collections } from '@/lib/courier-pending';
+import { courierOwed, type Collections, type ShiftSales } from '@/lib/courier-pending';
 import { pickableCouriers, settleableCouriers } from '@/lib/couriers';
 import { historyTotals, ordersOfShift, shiftLoadWindow, shiftTotals, shiftsOfDay, shiftWindow, type HistoryShift } from '@/lib/history-shifts';
 import { CashShift, Category, Courier, CourierPayMethod, CourierPendingOrder, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
@@ -158,11 +158,11 @@ async function courierCollections(
 
 // Orders in a window, the same read for Tarixçə and Kassa so the two count the
 // same orders.
-function ordersBetween(from: string, to: string, companyId: string | null | undefined): Promise<Order[]> {
+// Null when the read failed: a blip must not show Tarixçə empty or Kassa at 0 ₼.
+function ordersBetween(from: string, to: string, companyId: string | null | undefined): Promise<Order[] | null> {
   return companyId
-    ? tillFetch(`/api/public-orders?companyId=${companyId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=1000`)
-        .then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
-    : fetchOrders({ from, to, limit: 1000 });
+    ? listOrNull<Order>(tillFetch(`/api/public-orders?companyId=${companyId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=1000`), 'orders')
+    : fetchOrdersOrNull({ from, to, limit: 1000 });
 }
 
 // The station panel reads tables over the public API, which hands back raw DB
@@ -810,7 +810,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     const drain = async (pull = true) => {
       setSending(true);
       try {
-        await flushQueue(overrideCompanyId ?? null);
+        await flushQueue(overrideCompanyId ?? getSession()?.companyId ?? null);
       } finally {
         setSending(false);
       }
@@ -1146,8 +1146,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=1`)
         .then(r => r.json()).then(d => setTotalOrders(d.total ?? 0)).catch(() => {});
       // Sexes change about once a year — fetched once at boot, not per refresh.
-      tillFetch(`/api/public-stations?companyId=${overrideCompanyId}`)
-        .then(r => r.json()).then(d => setStations(d.stations ?? [])).catch(() => {});
+      // A failed read keeps the stations it has, not none.
+      listOrNull<Station>(tillFetch(`/api/public-stations?companyId=${overrideCompanyId}`), 'stations')
+        .then(list => { if (list) setStations(list); });
       // Fetch staff and shift together via server-side routes (bypass RLS — no auth session).
       // This effect runs again after every pull, so a failed read keeps what
       // the screen has (lib/keep-on-fail) — a blip turned the till into
@@ -2090,6 +2091,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     const change = Math.min(overpay, cash);
     const cashKept = round2(cash - change);
     const courierDebt = onDebt ? total : 0;
+    const paidAt = new Date().toISOString(); // sent along: a queued payment keeps its time
     setPayingOrder(null);
     // The DB update is conditional — a no-op if someone else already paid this order
     // One key per order: whether this payment goes now or waits in the queue,
@@ -2098,14 +2100,14 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       ? (await postOrQueue(
           `pay:${order.id}`,
           '/api/update-order-status',
-          { orderId: order.id, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined, courierDebt, companyId: overrideCompanyId, token: overrideToken },
+          { orderId: order.id, status: 'ödənilib', cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined, courierDebt, paidAt, companyId: overrideCompanyId, token: overrideToken },
           overrideCompanyId,
         )).ok
       : await updateOrderStatus(order.id, 'ödənilib', cashKept, card, change, discountAmt || undefined, discountAmt ? discountType : undefined, courierDebt);
     if (paid) {
       // paidAt mirrors what the DB just wrote, so the history shows a closing time
       // straight away instead of a dash until the next fetch
-      const paidOrder = { ...order, status: 'ödənilib' as const, paidAt: new Date().toISOString(), cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined, courierDebt: courierDebt || undefined };
+      const paidOrder = { ...order, status: 'ödənilib' as const, paidAt, cashAmount: cashKept, cardAmount: card, changeAmount: change, discountAmount: discountAmt || undefined, discountType: discountAmt ? discountType : undefined, courierDebt: courierDebt || undefined };
       mutateOrders(prev => prev.map(o => o.id === order.id ? paidOrder : o));
       // The rider now owes this, and the Kuryerlər screen is one tap away —
       // wait for a refresh and it shows yesterday's figure.
@@ -2407,10 +2409,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   useEffect(() => {
     if (view === 'kassa' && shift) {
       if (overrideCompanyId) {
-        tillFetch(`/api/public-shift-sales?companyId=${overrideCompanyId}&openedAt=${encodeURIComponent(shift.openedAt)}`)
-          .then(r => r.json()).then(setShiftSales).catch(() => {});
+        salesOrNull<ShiftSales>(tillFetch(`/api/public-shift-sales?companyId=${overrideCompanyId}&openedAt=${encodeURIComponent(shift.openedAt)}`))
+          .then(s => { if (s) setShiftSales(s); });
       } else {
-        fetchShiftSales(shift.openedAt).then(setShiftSales);
+        fetchShiftSales(shift.openedAt).then(s => { if (s) setShiftSales(s); });
       }
       const now = new Date().toISOString();
       const hs: HistoryShift = { id: shift.id, openedAt: shift.openedAt, openedBy: shift.openedBy };
@@ -2418,8 +2420,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       Promise.all([
         ordersBetween(win.from, win.to, overrideCompanyId),
         courierCollections(shift.openedAt, now, overrideCompanyId),
-      ]).then(([list, collected]) => setKassaTotals(shiftTotals(list, hs, now, orderTotal,
-        collected.paidOrderIds ? new Set(collected.paidOrderIds) : undefined)));
+      ]).then(([list, collected]) => {
+        if (list) setKassaTotals(shiftTotals(list, hs, now, orderTotal,
+          collected.paidOrderIds ? new Set(collected.paidOrderIds) : undefined));
+      });
     }
   }, [view, shift, overrideCompanyId]);
 
@@ -2462,7 +2466,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     // The boxes need both: which deliveries were paid back in view decides
     // their Nağd / Kart / Kuryer split, so neither is shown without the other.
     Promise.all([
-      load.then(list => setHistoryOrders(picked ? ordersOfShift(list, picked, now) : list)),
+      load.then(list => { if (list) setHistoryOrders(picked ? ordersOfShift(list, picked, now) : list); }),
       courierCollections(from, to, overrideCompanyId).then(setHistoryCollected),
     ]).finally(() => setHistoryLoading(false));
     // siteGet, not tillFetch: the till keeps only the open shift, and closed
@@ -2503,6 +2507,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `shift:${shiftId}` },
           body: JSON.stringify(body),
+          // Weak internet must not leave "Növbəni aç" spinning forever.
+          signal: AbortSignal.timeout(15000),
         }).then(r => r.json()).catch(() => ({ shift: null }));
         if (d.shift) s = { id: d.shift.id, openedAt: d.shift.opened_at, openedBy: d.shift.opened_by, openingCash: Number(d.shift.opening_cash), closedAt: d.shift.closed_at ?? undefined, movements: Array.isArray(d.shift.movements) ? d.shift.movements : [], edits: [] };
       } else {
@@ -2583,11 +2589,17 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       ? await tillFetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.shift ?? shift).catch(() => shift)
       : (await fetchOpenShift()) ?? shift;
     const sales = overrideCompanyId
-      ? await tillFetch(`/api/public-shift-sales?companyId=${overrideCompanyId}&openedAt=${encodeURIComponent(fresh.openedAt)}`).then(r => r.json()).catch(() => ({ cash: 0, card: 0 }))
+      ? await salesOrNull<ShiftSales>(tillFetch(`/api/public-shift-sales?companyId=${overrideCompanyId}&openedAt=${encodeURIComponent(fresh.openedAt)}`))
       : await fetchShiftSales(fresh.openedAt);
+    // Closing on unread sales would save 0 ₼ as the shift's takings.
+    if (!sales) {
+      setShiftBusy(false);
+      alert('Satışlar oxunmadı — internet bağlantısını yoxlayıb yenidən cəhd edin.');
+      return;
+    }
     const expected = fresh.openingCash + sales.cash + movementsTotal(fresh);
     if (overrideCompanyId) {
-      const closeBody = { shiftId: fresh.id, expectedCash: expected, countedCash: counted, closedBy: effectiveSeller, cardSales: sales.card, countedCard, companyId: overrideCompanyId, token: overrideToken };
+      const closeBody = { shiftId: fresh.id, expectedCash: expected, countedCash: counted, closedBy: effectiveSeller, cardSales: sales.card, countedCard, closedAt: new Date().toISOString(), companyId: overrideCompanyId, token: overrideToken };
       // Local-first on the desktop, so the till's own shift closes with the same
       // figures it just sent rather than reading open until the next pull. The
       // guard above already proved the line is up and the outbox empty.
@@ -2603,9 +2615,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   async function loadMoreOrders() {
     setLoadingMore(true);
     try {
+      // A failed read is not "no more orders": say so instead of adding nothing.
       const more = overrideCompanyId
-        ? await tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200&offset=${orders.length}`).then(r => r.json()).then(d => d.orders ?? []).catch(() => [])
-        : await fetchOrders({ limit: 200, offset: orders.length });
+        ? await listOrNull<Order>(tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200&offset=${orders.length}`), 'orders')
+        : await fetchOrdersOrNull({ limit: 200, offset: orders.length });
+      if (!more) { alert('Sifarişlər yüklənmədi — internet bağlantısını yoxlayıb yenidən cəhd edin.'); return; }
       mutateOrders(prev => [...prev, ...more.filter((m: { id: string }) => !prev.some(p => p.id === m.id))]);
     } finally { setLoadingMore(false); }
   }
@@ -2617,7 +2631,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       ? (await postOrQueue(
           `status:${id}:${status}`,
           '/api/update-order-status',
-          { orderId: id, status, companyId: overrideCompanyId, token: overrideToken },
+          { orderId: id, status, paidAt: new Date().toISOString(), companyId: overrideCompanyId, token: overrideToken },
           overrideCompanyId,
         )).ok
       : await updateOrderStatus(id, status);

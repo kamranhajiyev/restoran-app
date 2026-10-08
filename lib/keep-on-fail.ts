@@ -39,6 +39,14 @@ export async function shiftOrUnknown<T>(res: Promise<Response>): Promise<T | nul
   }
 }
 
+/** The shift's sales from /api/public-shift-sales, or null when the read
+ *  failed. A failed read used to answer 0 ₼, and closing the shift then wrote
+ *  that 0 into the shift's expected cash. */
+export async function salesOrNull<T extends { cash: number; card: number }>(res: Promise<Response>): Promise<T | null> {
+  const d = await jsonOrNull(res);
+  return d && typeof d.cash === 'number' && typeof d.card === 'number' ? (d as T) : null;
+}
+
 /** The category to show after the menu reloads: the seller's own while it
  *  still exists, otherwise the first. */
 export function keepCategory(current: string, cats: string[]): string {

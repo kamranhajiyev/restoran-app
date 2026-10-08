@@ -2,9 +2,10 @@ import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 import { claim, idempotencyKey } from '@/lib/idempotency';
 import { guardQuery } from '@/lib/order-rules';
+import { clientTime } from '@/lib/client-time';
 
 export async function POST(req: NextRequest) {
-  const { orderId, status, cashAmount, cardAmount, changeAmount, discountAmount, discountType, courierDebt, companyId, token } = await req.json();
+  const { orderId, status, cashAmount, cardAmount, changeAmount, discountAmount, discountType, courierDebt, paidAt, companyId, token } = await req.json();
   if (!orderId || !status) return Response.json({ ok: false }, { status: 400 });
   if (!(await verifySellerToken(companyId, token))) return Response.json({ ok: false, error: 'revoked' }, { status: 403 });
 
@@ -31,7 +32,8 @@ export async function POST(req: NextRequest) {
     // both paid in cash and owed by a courier.
     updates.courier_debt = courierDebt ?? 0;
   }
-  if (status === 'ödənilib') updates.paid_at = new Date().toISOString();
+  // The till's own time, so a sale paid offline counts in the shift it was paid in.
+  if (status === 'ödənilib') updates.paid_at = clientTime(paidAt);
 
   // Paid and cancelled orders are final (lib/order-rules.ts) — the guard that
   // stops a second tap charging twice.
