@@ -2325,28 +2325,39 @@ export async function createTable(name: string, capacity: number, shape: string 
   return null;
 }
 
-export async function updateTable(id: number, name: string, capacity: number): Promise<void> {
+// Table writes answer with their error: the screen showed "saved" even when the
+// write never landed (supabase returns its errors, it does not throw them).
+async function tableUpdate(tag: string, id: number, patch: Record<string, unknown>): Promise<string | null> {
   try {
-    await supabase.from('restaurant_tables').update({ name, capacity }).eq('id', id);
-  } catch (e) { console.error('[updateTable]', e); }
+    const { error } = await supabase.from('restaurant_tables').update(patch).eq('id', id);
+    if (error) { console.error(`[${tag}]`, error); return error.message; }
+    return null;
+  } catch (e) {
+    console.error(`[${tag}]`, e);
+    return 'Şəbəkə xətası — masa yadda saxlanmadı';
+  }
 }
 
-export async function updateTableLayout(id: number, x: number, y: number, w: number, h: number, shape: string): Promise<void> {
-  try {
-    await supabase.from('restaurant_tables').update({ x, y, w, h, shape }).eq('id', id);
-  } catch (e) { console.error('[updateTableLayout]', e); }
+export function updateTable(id: number, name: string, capacity: number): Promise<string | null> {
+  return tableUpdate('updateTable', id, { name, capacity });
+}
+
+export function updateTableLayout(id: number, x: number, y: number, w: number, h: number, shape: string): Promise<string | null> {
+  return tableUpdate('updateTableLayout', id, { x, y, w, h, shape });
+}
+
+export function moveTableToHall(id: number, hallId: string): Promise<string | null> {
+  return tableUpdate('moveTableToHall', id, { hall_id: hallId });
 }
 
 export async function deleteTable(id: number): Promise<string | null> {
   const { error } = await supabase.from('restaurant_tables').delete().eq('id', id);
-  if (error) { console.error('[deleteTable]', error); return error.message; }
+  if (error) {
+    console.error('[deleteTable]', error);
+    // 23503: orders.table_id still points here. Old orders keep their table.
+    return error.code === '23503' ? 'Bu masada köhnə sifarişlər var — silmək olmaz.' : error.message;
+  }
   return null;
-}
-
-export async function moveTableToHall(id: number, hallId: string): Promise<void> {
-  try {
-    await supabase.from('restaurant_tables').update({ hall_id: hallId }).eq('id', id);
-  } catch (e) { console.error('[moveTableToHall]', e); }
 }
 
 // ─── Zallar ───────────────────────────────────────────────────────────────────

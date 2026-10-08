@@ -28,7 +28,7 @@ import {
   trashMenuItems, trashedMenuItem, restoreRecipe, trashPhotoPaths,
   setCompanyContext, updateUser,
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, moveTableToHall, fetchCompanySlug,
-  fetchHalls, createHall, renameHall, deleteHall, adoptOrphanTables,
+  fetchHalls, createHall, renameHall, deleteHall, adoptOrphanTables, fetchTablesOrNull, fetchHallsOrNull,
   fetchTablesEnabled, setTablesEnabled,
   fetchDeliveryEnabled, setDeliveryEnabled,
   fetchQrEnabled, setQrEnabled, fetchMenuOnly, setMenuOnly,
@@ -1387,12 +1387,14 @@ function AdminPageContent() {
       // Null is a failed read: keep what is on screen. An empty menu here was
       // saved by the next edit, and that deleted every dish (2026-10-08).
       const [m, o, c, tb, total, hl] = await Promise.all([
-        fetchMenuOrNull(), fetchOrdersOrNull({ limit: 200 }), fetchCategoriesOrNull(), fetchTables(), fetchOrdersCount(), fetchHalls(),
+        fetchMenuOrNull(), fetchOrdersOrNull({ limit: 200 }), fetchCategoriesOrNull(), fetchTablesOrNull(), fetchOrdersCount(), fetchHallsOrNull(),
       ]);
       if (m) setMenu(m);
       if (o) setOrders(o);
       if (c) setCategories(c);
-      setTables(tb); setTotalOrders(total); setHalls(hl);
+      if (tb) setTables(tb);
+      if (hl) setHalls(hl);
+      setTotalOrders(total);
       invalidateTodayStatsCache();
     } catch { /* ignore */ } finally { setPullRefreshing(false); }
   }
@@ -1909,8 +1911,10 @@ function AdminPageContent() {
       if (error || !id) { setDialog({ title: 'Yaradılmadı', message: error ?? 'Xəta' }); setHallSaving(false); return; }
       // First hall of the venue: pull in any table still sitting outside a hall.
       if (halls.length === 0) await adoptOrphanTables(id);
-      const [hl, tb] = await Promise.all([fetchHalls(), fetchTables()]);
-      setHalls(hl); setTables(tb); setActiveHallId(id);
+      const [hl, tb] = await Promise.all([fetchHallsOrNull(), fetchTablesOrNull()]);
+      if (hl) setHalls(hl);
+      if (tb) setTables(tb);
+      setActiveHallId(id);
     }
     setHallSaving(false);
     setShowHallForm(null);
@@ -2000,11 +2004,13 @@ function AdminPageContent() {
       setDragging(null);
       setTables(prev => {
         const updated = prev.find(x => x.id === dragState.id);
-        if (updated) updateTableLayout(updated.id, updated.x ?? 20, updated.y ?? 20, updated.w ?? 100, updated.h ?? 70, updated.shape ?? 'rect');
+        if (updated) updateTableLayout(updated.id, updated.x ?? 20, updated.y ?? 20, updated.w ?? 100, updated.h ?? 70, updated.shape ?? 'rect').then(err => {
+          if (err) { setDialog({ title: 'Saxlanmadı', message: 'Masanın yeri yadda saxlanmadı: ' + err }); return; }
+          setTableSavedToast(true);
+          setTimeout(() => setTableSavedToast(false), 2000);
+        });
         return prev;
       });
-      setTableSavedToast(true);
-      setTimeout(() => setTableSavedToast(false), 2000);
     }
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -4987,16 +4993,18 @@ function AdminPageContent() {
                 const sw = tShape === 'round' ? 90 : tShape === 'rect-v' ? 70 : 100;
                 const sh = tShape === 'round' ? 90 : tShape === 'rect-v' ? 100 : 70;
                 if (editingTable) {
-                  await updateTable(editingTable.id, tName.trim(), cap);
-                  await updateTableLayout(editingTable.id, editingTable.x ?? 20, editingTable.y ?? 20, sw, sh, tShape);
                   const targetHall = tHallId || editingTable.hallId || activeHallId;
-                  if (targetHall && targetHall !== editingTable.hallId) await moveTableToHall(editingTable.id, targetHall);
+                  const err = await updateTable(editingTable.id, tName.trim(), cap)
+                    ?? await updateTableLayout(editingTable.id, editingTable.x ?? 20, editingTable.y ?? 20, sw, sh, tShape)
+                    ?? (targetHall && targetHall !== editingTable.hallId ? await moveTableToHall(editingTable.id, targetHall) : null);
+                  if (err) { setDialog({ title: 'Saxlanmadı', message: err }); setTSaving(false); return; }
                   setTables(prev => prev.map(x => x.id === editingTable.id ? { ...x, name: tName.trim(), capacity: cap, shape: tShape, w: sw, h: sh, hallId: targetHall ?? undefined } : x));
                 } else {
                   const err = await createTable(tName.trim(), cap, tShape, sw, sh, activeHallId);
                   if (err) { setDialog({ title: 'Xəta', message: err }); setTSaving(false); return; }
-                  const fresh = await fetchTables();
-                  setTables(fresh);
+                  // A failed reload keeps the list on screen, not a blank one.
+                  const fresh = await fetchTablesOrNull();
+                  if (fresh) setTables(fresh);
                 }
                 setTSaving(false);
                 setShowTableForm(false);

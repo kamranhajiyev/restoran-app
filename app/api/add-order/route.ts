@@ -45,6 +45,12 @@ export async function POST(req: NextRequest) {
   const held = await claim(db, idempotencyKey(req), companyId, 'add-order', { repeatable: true });
   if (held.applied) return Response.json(held.result);
 
+  // What the order points to. Each is dropped below if it was deleted meanwhile.
+  const refs: { table_id: number | null; staff_id: string | null; courier_id: string | null } = {
+    table_id: order.tableNumber === 0 ? null : order.tableNumber,
+    staff_id: order.staffId ?? null,
+    courier_id: order.courierId ?? null,
+  };
   const insertOrder = (keepNumber: boolean) => db.from('orders').insert({
     id: order.id,
     // Absent on every other path, where the assign_order_number trigger fills it
@@ -55,10 +61,8 @@ export async function POST(req: NextRequest) {
     // Travels with the number it qualifies, and only then: an order the server
     // numbered belongs to no till and must stay null.
     ...(keepNumber && order.tillNumber ? { till_number: order.tillNumber } : {}),
-    table_id: order.tableNumber === 0 ? null : order.tableNumber,
+    ...refs,
     waiter_name: order.sellerName,
-    staff_id: order.staffId ?? null,
-    courier_id: order.courierId ?? null,
     online: order.online ?? false,
     status: order.status,
     note: order.note ?? null,
@@ -77,6 +81,22 @@ export async function POST(req: NextRequest) {
   // server number it instead; a relabelled order beats one that never arrives.
   if (orderError && /order_number/i.test(orderError.message)) {
     ({ error: orderError } = await insertOrder(false));
+  }
+
+  // The table, staff member or courier was deleted while this till still had it
+  // (offline, or the exe had not pulled the change yet). Refused, the sale went
+  // back to the queue for good and held every payment behind it. It arrives
+  // without that link instead — the seller's name stays in waiter_name. The
+  // money matters more than where the party sat or who carried it.
+  for (let i = 0; i < 3 && orderError; i++) {
+    const gone = (Object.keys(refs) as (keyof typeof refs)[])
+      .find(k => refs[k] !== null && orderError!.message.includes(`orders_${k}_fkey`));
+    if (!gone) break;
+    refs[gone] = null;
+    ({ error: orderError } = await insertOrder(!!keepOrderNumber));
+    if (orderError && /order_number/i.test(orderError.message)) {
+      ({ error: orderError } = await insertOrder(false));
+    }
   }
 
   // The till's own id is the primary key, so a replay that already landed trips

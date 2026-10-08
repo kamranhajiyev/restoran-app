@@ -37,6 +37,11 @@ Pickers, tabs, filters, reports, old orders. One shared rule decides each list
 the new-order picker but still in the seller's Kuryerlər tab, and a courier with
 orders could not be deleted at all.
 
+**Does the screen say "saved" only after the save said so?**
+Supabase returns its errors, it does not throw them; a `try/catch` around it
+catches nothing. Code review, 2026-10-08: table edits, hall moves and drags
+showed "saved" while the write had failed.
+
 **When an update leaves something out, does that mean "clear it" or "not
 given"?**
 Only a field the sender really sent may change. Code review, 2026-10-08: a menu
@@ -66,6 +71,13 @@ Restaurants' internet drops for a few seconds at a time, often mid-action.
 A payment reached the server before its order and was refused (Latte Art
 №4171/№4172, 2026-10-04; №3867, 2026-09-26). If an earlier write for the same
 order is still waiting, a later one usually has to wait behind it.
+
+**Can what this write points to be gone by the time it arrives?**
+A queued write is sent minutes or hours later; the owner may have deleted the
+table, dish or courier meanwhile. Code review, 2026-10-08: an order on a deleted
+table was refused, retried forever, and held every payment behind it. It now
+arrives without the table (or deleted seller, or courier). Losing a detail
+beats losing the sale.
 
 **If this fails, does the till save the failure and stop trying?**
 A saved "no" was replayed forever, so the order could never be paid. Only save
