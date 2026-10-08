@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  LogOut, Plus, Building2, Trash2, EyeOff, Eye, X, ShieldCheck, UserCircle, MapPin, Phone, User, KeyRound, RotateCcw, PanelLeftClose, PanelLeftOpen, Menu, Calendar, Globe,
+  LogOut, Plus, Building2, Trash2, EyeOff, Eye, X, ShieldCheck, UserCircle, MapPin, Phone, User, KeyRound, RotateCcw, PanelLeftClose, PanelLeftOpen, Menu, Calendar, Globe, Activity,
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
 import {
@@ -14,6 +14,7 @@ import { DEFAULT_TZ } from '@/lib/business-day';
 import { TrashItem } from '@/types';
 import AppDialog, { DialogState } from '@/components/AppDialog';
 import PasswordField from '@/components/PasswordField';
+import HealthReportPanel from '@/components/HealthReportPanel';
 import { validatePassword } from '@/lib/password';
 
 // Each company's clock for statistics — superadmin picks it per company
@@ -62,6 +63,7 @@ export default function SuperadminPage() {
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [view, setView] = useState<'companies' | 'report'>('companies');
 
   // inline name edit
   const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
@@ -349,23 +351,30 @@ export default function SuperadminPage() {
         </div>
 
         <nav className={`flex flex-col gap-1 p-3 flex-1 ${collapsed ? 'items-center' : ''}`}>
-          {collapsed ? (
+          {([
+            { id: 'companies', label: 'Şirkətlər', Icon: Building2 },
+            { id: 'report', label: 'Hesabat', Icon: Activity },
+          ] as const).map(({ id, label, Icon }) => collapsed ? (
             <button
-              title="Şirkətlər"
-              onClick={() => onNavigate?.()}
-              className="relative flex items-center justify-center w-9 h-9 rounded-lg bg-[#2779a7]/10 text-[#2779a7] before:absolute before:left-[-9px] before:top-1/2 before:-translate-y-1/2 before:w-[3px] before:h-4 before:rounded-r-full before:bg-[#2779a7]"
+              key={id}
+              title={label}
+              onClick={() => { setView(id); onNavigate?.(); }}
+              className={view === id
+                ? 'relative flex items-center justify-center w-9 h-9 rounded-lg bg-[#2779a7]/10 text-[#2779a7] before:absolute before:left-[-9px] before:top-1/2 before:-translate-y-1/2 before:w-[3px] before:h-4 before:rounded-r-full before:bg-[#2779a7]'
+                : 'flex items-center justify-center w-9 h-9 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition-colors'}
             >
-              <Building2 className="w-4 h-4" />
+              <Icon className="w-4 h-4" />
             </button>
           ) : (
             <button
-              onClick={() => onNavigate?.()}
-              className="flex items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium transition-colors w-full bg-[#2779a7] text-white shadow-sm"
+              key={id}
+              onClick={() => { setView(id); onNavigate?.(); }}
+              className={`flex items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium transition-colors w-full ${view === id ? 'bg-[#2779a7] text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100'}`}
             >
-              <Building2 className="w-4 h-4 shrink-0" />
-              <span className="flex-1 text-left">Şirkətlər</span>
+              <Icon className="w-4 h-4 shrink-0" />
+              <span className="flex-1 text-left">{label}</span>
             </button>
-          )}
+          ))}
         </nav>
 
         {!collapsed ? (
@@ -462,6 +471,13 @@ export default function SuperadminPage() {
 
         {/* Main content */}
         <main className="flex-1 min-w-0 bg-gray-50 rounded-tl-2xl border-l border-t border-gray-100/60 p-6 md:p-8 overflow-y-auto">
+          {view === 'report' ? (<>
+          <div className="mb-6">
+            <h1 className="text-lg font-semibold text-gray-900">Hesabat</h1>
+            <p className="text-sm text-gray-500 mt-0.5">Gecəlik yoxlama</p>
+          </div>
+          <HealthReportPanel />
+          </>) : (<>
           <div className="mb-6">
             <h1 className="text-lg font-semibold text-gray-900">Şirkətlər</h1>
             <p className="text-sm text-gray-500 mt-0.5">Şirkətləri idarə et</p>
@@ -577,6 +593,7 @@ export default function SuperadminPage() {
               </div>
             )}
           </div>
+          </>)}
         </main>
       </div>
 

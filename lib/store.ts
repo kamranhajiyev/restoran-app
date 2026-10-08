@@ -8,6 +8,7 @@ import { printedStationColumn } from './stations';
 import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
 import type { TillSettings } from './desktopPrint';
+import type { HealthProblem, HealthReport } from './health-report';
 
 async function authHeaders(): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -2439,6 +2440,31 @@ export async function adoptOrphanTables(hallId: string): Promise<void> {
   try {
     await supabase.from('restaurant_tables').update({ hall_id: hallId }).is('hall_id', null);
   } catch (e) { console.error('[adoptOrphanTables]', e); }
+}
+
+// ─── Superadmin: Health report ────────────────────────────────────────────────
+
+function toHealthReport(r: { id: number; run_at: string; problems: unknown }): HealthReport {
+  return { id: r.id, runAt: r.run_at, problems: Array.isArray(r.problems) ? r.problems as HealthProblem[] : [] };
+}
+
+/** The last nights, newest first; null when the read failed (not "no problems"). */
+export async function fetchHealthReportsOrNull(limit = 14): Promise<HealthReport[] | null> {
+  try {
+    const { data, error } = await supabase.from('health_reports')
+      .select('id, run_at, problems').order('run_at', { ascending: false }).limit(limit);
+    if (error || !data) return null;
+    return data.map(toHealthReport);
+  } catch { return null; }
+}
+
+/** Runs the check now and saves it like a night's report. */
+export async function runHealthReport(): Promise<{ report: HealthReport | null; error: string | null }> {
+  try {
+    const { data, error } = await supabase.rpc('save_health_report');
+    if (error || !data) return { report: null, error: error?.message ?? 'no report' };
+    return { report: toHealthReport(data), error: null };
+  } catch (e) { return { report: null, error: String(e) }; }
 }
 
 // ─── Superadmin: Companies ────────────────────────────────────────────────────
