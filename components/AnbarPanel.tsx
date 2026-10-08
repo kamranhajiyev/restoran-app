@@ -529,11 +529,13 @@ function WriteoffModal({ balance, warehouseId, onClose, onDone, fail }: { balanc
   const [qty, setQty] = useState('');
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  // One id per opened screen, so Save pressed again after a lost reply is recorded once.
+  const [saveId] = useState(() => crypto.randomUUID());
   async function save() {
     const n = parseFloat(qty);
     if (!n || n <= 0) return;
     setBusy(true);
-    const err = await recordWriteoff(warehouseId, balance.stockItemId, n, reason);
+    const err = await recordWriteoff(warehouseId, balance.stockItemId, n, reason, saveId);
     setBusy(false);
     if (err) { fail(err); return; }
     onDone();
@@ -725,6 +727,8 @@ function NewReceipt({ activeWh, suppliers, items, initial, initialLines, onClose
     initialLines && initialLines.length ? seedLines(initialLines) : [{ stockItemId: items[0]?.id ?? '', qty: '', unitCost: '' }]
   );
   const [busy, setBusy] = useState(false);
+  // One id per opened screen, so Save pressed again after a lost reply is recorded once.
+  const [saveId] = useState(() => crypto.randomUUID());
   // When editing, the cache may still be loading (empty). Always refetch the
   // authoritative lines so a save can never wipe the purchase with a blank form.
   const [linesReady, setLinesReady] = useState(!editing || !!(initialLines && initialLines.length));
@@ -756,7 +760,7 @@ function NewReceipt({ activeWh, suppliers, items, initial, initialLines, onClose
     setBusy(true);
     const err = editing
       ? await updateReceipt(initial!.id, whId, supId || null, valid, note, paidNum)
-      : await recordReceipt(whId, supId || null, valid, note, paidNum);
+      : await recordReceipt(whId, supId || null, valid, note, paidNum, saveId);
     setBusy(false);
     if (err) { fail(err); return; }
     onDone();
@@ -941,6 +945,8 @@ function TransferModal({ activeWh, items, initialFrom, initialItemId, onClose, o
   const [note, setNote] = useState('');
   const [lines, setLines] = useState<{ stockItemId: string; qty: string }[]>([{ stockItemId: initialItemId ?? items[0]?.id ?? '', qty: '' }]);
   const [busy, setBusy] = useState(false);
+  // One id per opened screen, so Save pressed again after a lost reply is recorded once.
+  const [saveId] = useState(() => crypto.randomUUID());
   // What the source actually holds — the transfer is refused server-side if a line exceeds it, so
   // show the ceiling here and block the save before the user hits that error.
   const [avail, setAvail] = useState<Record<string, number> | null>(null);
@@ -974,7 +980,7 @@ function TransferModal({ activeWh, items, initialFrom, initialItemId, onClose, o
     const payload: TransferLine[] = valid.map(l => ({ stockItemId: l.stockItemId, qty: parseFloat(l.qty) }));
     if (!payload.length) return;
     setBusy(true);
-    const err = await recordTransfer(fromId, toId, payload, note);
+    const err = await recordTransfer(fromId, toId, payload, note, saveId);
     setBusy(false);
     if (err) { fail(err); return; }
     onDone();

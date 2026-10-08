@@ -1335,8 +1335,11 @@ export async function fetchMovements(stockItemId: string): Promise<StockMovement
   } catch { return []; }
 }
 
-export async function recordReceipt(warehouseId: string, supplierId: string | null, lines: ReceiptLine[], note: string, paidAmount = 0): Promise<string | null> {
+// `id` is chosen when the screen opens: a Save pressed again after a lost reply
+// sends the same one, and the database records it once.
+export async function recordReceipt(warehouseId: string, supplierId: string | null, lines: ReceiptLine[], note: string, paidAmount = 0, id?: string): Promise<string | null> {
   const { error } = await supabase.rpc('record_receipt', {
+    p_id: id ?? null,
     p_warehouse_id: warehouseId,
     p_supplier_id: supplierId,
     p_lines: lines.map(l => ({ stock_item_id: l.stockItemId, qty: l.qty, unit_cost: l.unitCost ?? null })),
@@ -1431,8 +1434,9 @@ function transferError(msg: string): string {
   return msg;
 }
 
-export async function recordTransfer(fromId: string, toId: string, lines: TransferLine[], note: string): Promise<string | null> {
+export async function recordTransfer(fromId: string, toId: string, lines: TransferLine[], note: string, id?: string): Promise<string | null> {
   const { error } = await supabase.rpc('record_transfer', {
+    p_id: id ?? null,
     p_from: fromId,
     p_to: toId,
     p_lines: lines.map(l => ({ stock_item_id: l.stockItemId, qty: l.qty })),
@@ -1846,11 +1850,11 @@ export async function returnCourierOrder(orderId: string, reason: string, by: st
   return data === true;
 }
 
-export async function recordWriteoff(warehouseId: string, stockItemId: string, qty: number, reason: string): Promise<string | null> {
+export async function recordWriteoff(warehouseId: string, stockItemId: string, qty: number, reason: string, id?: string): Promise<string | null> {
   const { error } = await supabase.rpc('record_writeoff', {
-    p_warehouse_id: warehouseId, p_stock_item_id: stockItemId, p_qty: qty, p_reason: reason || null,
+    p_warehouse_id: warehouseId, p_stock_item_id: stockItemId, p_qty: qty, p_reason: reason || null, p_id: id ?? null,
   });
-  if (error) { console.error('[recordWriteoff]', error); return error.message; }
+  if (error) { console.error('[recordWriteoff]', error); return transferError(error.message); }
   return null;
 }
 
