@@ -154,7 +154,13 @@ export async function fetchMenuOrNull(opts?: ReadOpts): Promise<MenuItem[] | nul
 /** fetchMenuOrNull, with a failed read as an empty list — for screens that
  *  only show it. A screen that keeps what it has on a failure uses the OrNull. */
 export async function fetchMenu(opts?: ReadOpts): Promise<MenuItem[]> {
-  return (await fetchMenuOrNull(opts)) ?? [];
+  const menu = await fetchMenuOrNull(opts);
+  if (menu) return menu;
+  // A screen holding this [] must not be able to save it: saveMenu deletes
+  // every dish missing from the list it is given, so one edit after a failed
+  // read wiped the whole menu (code review, 2026-10-08).
+  _menuLoaded = false;
+  return [];
 }
 
 // Returns an error message (for the UI to show) or null on success — a failed
@@ -361,7 +367,11 @@ export async function fetchCategoriesOrNull(opts?: ReadOpts): Promise<Category[]
 /** fetchCategoriesOrNull, with a failed read as an empty list — for screens that
  *  only show it. A screen that keeps what it has on a failure uses the OrNull. */
 export async function fetchCategories(opts?: ReadOpts): Promise<Category[]> {
-  return (await fetchCategoriesOrNull(opts)) ?? [];
+  const cats = await fetchCategoriesOrNull(opts);
+  if (cats) return cats;
+  // Same as fetchMenu: an empty list from a failed read must not be saved.
+  _categoriesLoaded = false;
+  return [];
 }
 
 // Returns an error message (for the UI to show) or null on success.
@@ -396,6 +406,11 @@ export async function saveCategories(categories: Category[]): Promise<string | n
 let _stationsLoaded = false;
 
 export async function fetchStations(opts?: ReadOpts): Promise<Station[]> {
+  return (await fetchStationsOrNull(opts)) ?? [];
+}
+
+/** The stations, or null when the read failed. */
+export async function fetchStationsOrNull(opts?: ReadOpts): Promise<Station[] | null> {
   const local = await fromLocal(opts, async (till, companyId) =>
     ((await till.stations(companyId)) as { stations: Station[] }).stations);
   if (local) return local;
@@ -410,7 +425,7 @@ export async function fetchStations(opts?: ReadOpts): Promise<Station[]> {
       .select('id, name, printer_ip, printer_port')
       .order('position')
       .order('created_at');
-    if (error || !data) return [];
+    if (error || !data) return null;
     _stationsLoaded = true;
     return data.map(r => ({
       id: r.id,
@@ -419,7 +434,7 @@ export async function fetchStations(opts?: ReadOpts): Promise<Station[]> {
       printerPort: r.printer_port ?? 9100,
     }));
   } catch {
-    return [];
+    return null;
   }
 }
 

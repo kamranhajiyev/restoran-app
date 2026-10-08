@@ -84,6 +84,11 @@ jumped to Sifarişlər, showed "Növbəni aç", lost the category the seller was
 or blanked the menu. Code review, 2026-10-08: a route that answers its own
 failure with 200 and an empty list is the same bug on the server — the exe saved
 an empty staff list over its own, and nobody could sign in with a PIN.
+The same day, worse: admin's menu reload failed, the menu became [], and the
+next edit saved that list, which deletes every dish not in it. A failed read
+must never reach a save that removes what is missing (`saveMenu` now refuses).
+Statistics showed 0 ₼ for a failed day and cached it; the kitchen screen stayed
+empty after a failed first load and never tried again.
 
 **Is a server that failed read as a server that said no?**
 A 5xx, a timeout, a revoked link or an unknown company will change; a refusal
@@ -138,6 +143,11 @@ older order is money arriving (drawer, terminal), not a sale. Every sales box
 counts with `lib/history-shifts`. Test Restoran, 2026-10-06: a 28 ₼ delivery
 paid back in cash was Nağd in Tarixçə but still Kuryer in Kassa (seller and
 admin), which had its own formula; Statistika had a third.
+
+**Does the export add up to the same money as the screen?**
+An owner sums the columns. Code review, 2026-10-08: Excel's total counted
+deleted orders, and its Nağd and Kart left out courier money, which the screen
+counts (`excelMoney`).
 
 **Is a label naming the number it really shows?**
 Latte Art, 2026-10-06: the Terminal box said "kart satışı" but holds courier

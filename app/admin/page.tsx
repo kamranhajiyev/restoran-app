@@ -20,7 +20,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } 
 import { CSS } from '@dnd-kit/utilities';
 import { getSession, logout, validateSession, clearLocalSession, updateSession, lockAdmin, unlockAdmin, isAdminLocked, rememberTill, forgetTill } from '@/lib/auth';
 import {
-  fetchMenu, saveMenu, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, editOrderPayment, editCourierOrderSplit, deleteOrder, restoreOrder,
+  fetchMenu, fetchMenuOrNull, fetchCategoriesOrNull, saveMenu, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, editOrderPayment, editCourierOrderSplit, deleteOrder, restoreOrder,
   fetchShifts, fetchShiftSales, closeShift, fetchOpenShift,
   updateShiftMovement, deleteShiftMovement, correctShiftTotals,
   fetchCategories, saveCategories,
@@ -694,6 +694,8 @@ function AdminPageContent() {
   const [statsOrders, setStatsOrders] = useState<Order[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [statsLoaded, setStatsLoaded] = useState(false);
+  // The last stats read failed: show that, not 0 ₼ (lib/keep-on-fail).
+  const [statsFailed, setStatsFailed] = useState(false);
   const [statsRefreshKey, setStatsRefreshKey] = useState(0);
   const statsCache = useRef<Map<string, { at: number; data: Order[] }>>(new Map());
   // What couriers handed over inside the selected range, split by how it arrived.
@@ -1000,7 +1002,11 @@ function AdminPageContent() {
       return;
     }
     setDataLoading(true);
-    fetchOrders({ from, to }).then(o => {
+    setStatsFailed(false);
+    // A failed read is not a day with no sales. It used to show 0 ₼ and, for a
+    // past day, keep that in the cache until the page reloaded (2026-10-08).
+    fetchOrdersOrNull({ from, to }).then(o => {
+      if (!o) { setStatsFailed(true); return; }
       statsCache.current.set(key, { at: Date.now(), data: o });
       setStatsOrders(o);
     }).finally(() => { setDataLoading(false); setStatsLoaded(true); });
@@ -1038,8 +1044,13 @@ function AdminPageContent() {
     const [from, to] = statsRangeUtc(ordersFrom, ordersTo, bizSettings);
     let cancelled = false;
     const t = setTimeout(() => setRangeLoading(true), 0);
-    fetchOrders({ from, to })
-      .then(o => { if (!cancelled) setRangeResult({ key: ordersRangeKey, data: o }); })
+    // Null is a failed read: say so rather than show the range as having no orders.
+    fetchOrdersOrNull({ from, to })
+      .then(o => {
+        if (cancelled) return;
+        if (o) setRangeResult({ key: ordersRangeKey, data: o });
+        else setDialog({ title: 'Xəta', message: 'Sifarişlər yüklənmədi. Yenidən cəhd edin.' });
+      })
       .finally(() => { if (!cancelled) setRangeLoading(false); });
     return () => { cancelled = true; clearTimeout(t); };
   }, [sessionReady, ordersRangeKey, ordersFrom, ordersTo, bizSettings, rangeRefreshKey]);
@@ -1359,8 +1370,8 @@ function AdminPageContent() {
   async function refresh() {
     setRefreshing(true);
     try {
-      const [o, total] = await Promise.all([fetchOrders({ limit: 200 }), fetchOrdersCount()]);
-      setOrders(o);
+      const [o, total] = await Promise.all([fetchOrdersOrNull({ limit: 200 }), fetchOrdersCount()]);
+      if (o) setOrders(o);
       setTotalOrders(total);
       invalidateTodayStatsCache();
       // Past ranges never change on their own — only refetch one that reaches today.
@@ -1372,10 +1383,15 @@ function AdminPageContent() {
     if (pullRefreshing) return;
     setPullRefreshing(true);
     try {
+      // Null is a failed read: keep what is on screen. An empty menu here was
+      // saved by the next edit, and that deleted every dish (2026-10-08).
       const [m, o, c, tb, total, hl] = await Promise.all([
-        fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTables(), fetchOrdersCount(), fetchHalls(),
+        fetchMenuOrNull(), fetchOrdersOrNull({ limit: 200 }), fetchCategoriesOrNull(), fetchTables(), fetchOrdersCount(), fetchHalls(),
       ]);
-      setMenu(m); setOrders(o); setCategories(c); setTables(tb); setTotalOrders(total); setHalls(hl);
+      if (m) setMenu(m);
+      if (o) setOrders(o);
+      if (c) setCategories(c);
+      setTables(tb); setTotalOrders(total); setHalls(hl);
       invalidateTodayStatsCache();
     } catch { /* ignore */ } finally { setPullRefreshing(false); }
   }
@@ -2119,7 +2135,7 @@ function AdminPageContent() {
 
   // ── stats computations ────────────────────────────────────────────────────
   // While a new range is loading, show empty charts — old orders plotted on the new axis would be misleading
-  const paidOrders = (dataLoading ? [] : statsOrders).filter(o => o.status === 'ödənilib');
+  const paidOrders = (dataLoading || statsFailed ? [] : statsOrders).filter(o => o.status === 'ödənilib');
   const activeOrders = orders.filter(isOrderOpen);
   const orderQuery = orderSearch.trim().toLowerCase();
   const menuQuery = azNormalize(menuSearch.trim());
@@ -2250,7 +2266,7 @@ function AdminPageContent() {
     const d = orderBizDay(o);
     return d >= rangeFrom && d <= rangeTo;
   });
-  const allClosedOrders = (dataLoading ? [] : statsOrders).filter(o => o.status === 'ödənilib' || o.status === 'ləğv edildi');
+  const allClosedOrders = (dataLoading || statsFailed ? [] : statsOrders).filter(o => o.status === 'ödənilib' || o.status === 'ləğv edildi');
   const chartAllOrders = allClosedOrders.filter(o => {
     const d = orderBizDay(o);
     return d >= rangeFrom && d <= rangeTo;
@@ -2764,7 +2780,15 @@ function AdminPageContent() {
             </div>
           )}
           {tab === 'stats' && statsLoaded && (
-            <div className={`relative space-y-5 max-w-5xl transition-opacity duration-300 ${dataLoading ? 'opacity-60' : ''}`}>
+            <div className={`relative space-y-5 max-w-5xl transition-opacity duration-300 ${dataLoading || statsFailed ? 'opacity-60' : ''}`}>
+              {statsFailed && !dataLoading && (
+                <div className="absolute inset-x-0 top-32 z-10 flex justify-center">
+                  <div className="flex flex-col items-center gap-2 bg-white/95 rounded-xl px-8 py-5 shadow-lg border border-red-100">
+                    <p className="text-sm text-red-600">Statistika yüklənmədi</p>
+                    <button onClick={() => setStatsRefreshKey(k => k + 1)} className="text-sm font-medium text-primary-800 underline">Yenidən cəhd et</button>
+                  </div>
+                </div>
+              )}
               {dataLoading && (
                 <div className="absolute inset-x-0 top-32 z-10 flex justify-center pointer-events-none">
                   <div className="flex flex-col items-center gap-2 bg-white/95 rounded-xl px-8 py-5 shadow-lg border border-stone-100">
@@ -3819,7 +3843,7 @@ function AdminPageContent() {
                   stations={stations}
                   setStations={setStations}
                   menu={menu}
-                  reloadMenu={async () => setMenu(await fetchMenu())}
+                  reloadMenu={async () => { const m = await fetchMenuOrNull(); if (m) setMenu(m); }}
                   setDialog={setDialog}
                 />
               )}

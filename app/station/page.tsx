@@ -12,8 +12,8 @@ import { Bell, CircleCheck, Check, Settings } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
-  setCompanyContext, fetchMenu, fetchOrders, fetchOrdersOrNull, fetchStations, fetchTables,
-  fetchStationReady, fetchStationReadyOrNull, markStationReady, unmarkStationReady, StationReady,
+  setCompanyContext, fetchMenuOrNull, fetchOrdersOrNull, fetchStationsOrNull, fetchTables,
+  fetchStationReadyOrNull, markStationReady, unmarkStationReady, StationReady,
 } from '@/lib/store';
 import { menuIndex, sliceForStation, readyStationIds } from '@/lib/stations';
 import { itemBatches } from '@/lib/order-items';
@@ -37,6 +37,8 @@ const hasReady = (rows: StationReady[], p: StationReady) =>
 // Re-renders the waiting times. Nothing else would: a quiet realtime channel means
 // a card's clock would otherwise freeze at whatever it said when it arrived.
 const CLOCK_MS = 10 * 1000;
+// How soon a first load that failed is tried again.
+const LOAD_RETRY_MS = 5 * 1000;
 
 // Card text size, in px, for the whole card: everything inside is sized in `em`, so
 // this one number drives it. Older cooks read the screen from further away than the
@@ -150,7 +152,7 @@ export default function StationPage() {
       pendingReady.current = pendingReady.current.filter(p => !hasReady(r, p));
       setReadyRows([...r, ...pendingReady.current]);
     }
-    setOnline(true);
+    setOnline(!!(o && r));
   }, []);
 
   // A change names its order: download that one and its ready marks and patch
@@ -195,22 +197,34 @@ export default function StationPage() {
       if (!s || s.user.id !== session.id) { clearLocalSession(); router.replace('/login'); }
     });
 
-    Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchStations(), fetchStationReady()])
-      .then(([m, o, st, r]) => {
-        setMenu(m);
-        setOrders(o);
+    // Each read keeps trying until it lands. A failed one used to leave the
+    // board empty with no error, and with realtime up nothing read it again
+    // until the next change — orders nobody was told to cook (2026-10-08).
+    let stopped = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      const [m, o, st, r] = await Promise.all([
+        fetchMenuOrNull(), fetchOrdersOrNull({ limit: 200 }), fetchStationsOrNull(), fetchStationReadyOrNull(),
+      ]);
+      if (stopped) return;
+      if (m) setMenu(m);
+      if (o) setOrders(o);
+      if (st) {
         setStations(st);
-        setReadyRows(r);
         setStation(st.find(s => s.id === session.stationId) ?? null);
-        setOnline(true);
-        setReady(true);
-      })
-      .catch(() => { setOnline(false); setReady(true); });
+      }
+      if (r) setReadyRows(r);
+      const ok = !!(m && o && st && r);
+      setOnline(ok);
+      setReady(true);
+      if (!ok) retry = setTimeout(load, LOAD_RETRY_MS);
+    };
+    void load();
     // Apart from the load above: a failure here must not blank the screen, only
     // fall back to the id.
     fetchTables().then(setTables).catch(() => {});
 
-    return () => { authSub.subscription.unsubscribe(); };
+    return () => { stopped = true; clearTimeout(retry); authSub.subscription.unsubscribe(); };
   }, [router]);
 
   // ── Realtime ────────────────────────────────────────────────────────────────
@@ -234,7 +248,7 @@ export default function StationPage() {
       // one cannot be filtered. RLS still scopes what actually arrives.
       .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, p => refreshSoon(changedOrderId('order_items', p)))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'order_station_ready', filter: `company_id=eq.${companyId}` }, p => refreshSoon(changedOrderId('order_station_ready', p)))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items', filter: `company_id=eq.${companyId}` }, () => { fetchMenu().then(setMenu); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items', filter: `company_id=eq.${companyId}` }, () => { fetchMenuOrNull().then(m => { if (m) setMenu(m); }); })
       .subscribe(status => setRealtimeUp(status === 'SUBSCRIBED'));
     return () => { refreshSoon.cancel(); setRealtimeUp(false); supabase.removeChannel(channel); };
   }, [companyId, refreshOrders, refreshChanged, rtAttempt]);

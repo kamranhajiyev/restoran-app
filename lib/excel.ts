@@ -47,6 +47,16 @@ export function exportMenuExcel(menu: MenuItem[], categories: Category[]): void 
   XLSX.writeFile(wb, `menyu-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
+/** What one order puts in the money columns of the orders export. */
+export function excelMoney(o: Order): { cash: number; card: number; counted: boolean } {
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  return {
+    cash: r2((o.cashAmount ?? 0) + (o.courierCash ?? 0)),
+    card: r2((o.cardAmount ?? 0) + (o.courierCard ?? 0)),
+    counted: o.status !== 'ləğv edildi' && o.status !== 'silinib',
+  };
+}
+
 export function exportOrdersExcel(orders: Order[], timezone: string, courierNames: Record<string, string> = {}): void {
   const rows = orders.map(o => {
     // The till's own total, so a row matches what the seller charged.
@@ -63,14 +73,18 @@ export function exportOrdersExcel(orders: Order[], timezone: string, courierName
       'Status': o.status,
       'Məhsullar': o.items.map(i => `${i.menuItem.name} x${i.quantity}`).join(', '),
       'Endirim (₼)': o.discountAmount ?? 0,
-      'Nağd (₼)': o.cashAmount ?? 0,
-      'Kart (₼)': o.cardAmount ?? 0,
+      // A courier's money is booked on courierCash/courierCard, not the till
+      // fields; without it a paid-back delivery read as never paid.
+      'Nağd (₼)': excelMoney(o).cash,
+      'Kart (₼)': excelMoney(o).card,
       // Blank on every ordinary order. Without these two columns a delivery
       // closed on debt shows 0 nağd, 0 kart and a full total, which reads as a
       // sale that was never paid for.
       'Kuryer': o.courierId ? courierNames[o.courierId] ?? '—' : '',
       'Kuryer borcu (₼)': o.courierDebt ?? 0,
-      'Cəmi (₼)': o.status === 'ləğv edildi' ? '-' : Math.round(total * 100) / 100,
+      // Cancelled and deleted orders are not sales; a full total here was added
+      // up with the rest when the owner summed the column.
+      'Cəmi (₼)': excelMoney(o).counted ? Math.round(total * 100) / 100 : '-',
     };
   });
   const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ 'Sifariş №': '', 'Satıcı': '', 'Tarix': '', 'Bağlanma': '', 'Status': '', 'Məhsullar': '', 'Endirim (₼)': '', 'Nağd (₼)': '', 'Kart (₼)': '', 'Kuryer': '', 'Kuryer borcu (₼)': '', 'Cəmi (₼)': '' }]);
