@@ -85,7 +85,6 @@ export default function CustomerMenuPage({
         available: r.available as boolean,
         qrVisible: (r.qr_visible as boolean) ?? true,
         variants: (r.variants as MenuItem['variants']) ?? undefined,
-        costPrice: r.cost_price ? Number(r.cost_price) : undefined,
         image: (r.image as string) ?? undefined,
       }));
       // Two independent switches, both of which must be on for a customer to see it:
