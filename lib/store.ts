@@ -2916,7 +2916,9 @@ export async function closeShift(
       expected_cash: expectedCash, counted_cash: countedCash,
       card_sales: cardSales ?? null, counted_card: countedCard ?? null,
     })
-    .eq('id', shiftId);
+    .eq('id', shiftId)
+    // A second close must not write over the first (app/api/close-shift).
+    .is('closed_at', null);
   if (error) console.error('[closeShift]', error);
 }
 
@@ -2934,7 +2936,7 @@ export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promis
   if (local) return local;
 
   try {
-    const [{ data, error }, { data: courierCard }] = await Promise.all([
+    const [{ data, error }, { data: courierCard, error: courierError }] = await Promise.all([
       supabase
         .from('orders')
         .select('cash_amount, card_amount, courier_debt, courier_cash, courier_card')
@@ -2949,7 +2951,10 @@ export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promis
         .gte('created_at', openedAt),
     ]);
     if (error || !data) return null;
-    const settledByCard = (courierCard ?? []).reduce((s, p) => s + Number(p.amount ?? 0), 0);
+    // As app/api/public-shift-sales: without the courier card part the Terminal
+    // figure is short by all of it, and closing the shift saved it (2026-10-09).
+    if (courierError || !courierCard) return null;
+    const settledByCard = courierCard.reduce((s, p) => s + Number(p.amount ?? 0), 0);
     return {
       cash: data.reduce((s, o) => s + Number(o.cash_amount ?? 0), 0),
       card: data.reduce((s, o) => s + Number(o.card_amount ?? 0), 0) + settledByCard,

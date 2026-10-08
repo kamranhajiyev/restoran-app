@@ -20,7 +20,11 @@ export async function POST(req: NextRequest) {
       counted_card: countedCard ?? null,
     })
     .eq('id', shiftId)
-    .eq('company_id', companyId);
+    .eq('company_id', companyId)
+    // Only a shift still open. A second close (another till, or one that was
+    // offline) wrote over the counted cash of the first; the shift is closed
+    // either way, so it still answers ok and the queue moves on (2026-10-09).
+    .is('closed_at', null);
 
   if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
   return Response.json({ ok: true });

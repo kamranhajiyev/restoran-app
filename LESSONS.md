@@ -143,7 +143,10 @@ not in the (empty) list of sets.
 A 5xx, a timeout, a revoked link or an unknown company will change; a refusal
 will not. Code review, 2026-10-08: the queue dropped payments on a 502, on a
 new till link, and every write of a signed-in exe (`lib/sync.ts`); closing a
-shift on a failed sales read saved 0 ₼ as its takings.
+shift on a failed sales read saved 0 ₼ as its takings. Code review, 2026-10-09:
+the signed-in path still took a failed courier card read as 0, and the shift
+closed with its Terminal figure short. Every part of a sum must load, not just
+the first.
 
 **Whose clock says when this happened?**
 A write that waited in the queue arrives late. Stamped on arrival, a sale paid
@@ -207,6 +210,11 @@ A badge on a collapsed row stands for the whole row. Latte Art, 2026-10-07: a
 closed shift said "Dəqiq ✓" because cash matched, while the terminal was 1 ₼
 short on card; it showed only after opening the row. `lib/shift-check` checks
 both.
+
+**Once something is finished, can a late copy of it write over the result?**
+Paid orders and closed shifts are final. Code review, 2026-10-09: a second close
+of a shift (another till, or one that was offline) replaced the counted cash of
+the first. Write only while it is still open, and answer the late one "done".
 
 **Which day does this belong to?**
 A business day ends at the company's `work_close` in its own timezone, not at
