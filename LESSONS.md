@@ -234,6 +234,10 @@ either: `staff.pin_hash` was readable by every employee, and a four-digit
 PIN's hash is guessed in seconds. Storage is a table too: the photo bucket let
 anyone upload, replace or delete every restaurant's photos and logos. Files go
 under their company's folder, and the policies check that folder.
+Finding these one at a time kept missing some, so they were closed all at once
+(`20261009_close_anon_doors.sql`): anon keeps reading companies and three QR
+menu functions. Is what you open on the list, with a reason? Run
+`supabase/checks/anon_reach.sql`; empty is the only good answer.
 
 **Is every query and every queued write scoped to one company?**
 A till moved to another restaurant must not send the first one's orders.

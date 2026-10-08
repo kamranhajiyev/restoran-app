@@ -20,6 +20,10 @@ every new table turns on row level security, and anything given back to anon
 needs a `-- anon:` line saying why. A till without a login goes through a server
 route that checks its link, never straight to the database.
 
+What anon may still reach is one list (`20261009_close_anon_doors.sql`,
+`tests/anon-doors.test.ts`). After applying migrations to a database, run
+`supabase/checks/anon_reach.sql` on it: the result must be empty.
+
 # Three places
 
 A change can show up in three places: the seller page (browser till), the admin page, and the exe. Before calling work done:
