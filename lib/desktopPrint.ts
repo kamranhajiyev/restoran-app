@@ -117,6 +117,8 @@ export interface PosNative {
   // Absent when the shell was pointed at a website with --url=: that build is
   // the web app in a window and still reads through the API routes.
   till?: TillDb;
+  /** Give the window keyboard focus back (lib/exe-focus). Absent in older installers. */
+  focusWindow?(): Promise<void>;
   // Absent in installers built before the updater existed.
   update?: {
     status(): Promise<DesktopUpdate | null>;

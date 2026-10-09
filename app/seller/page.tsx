@@ -31,6 +31,7 @@ import { historyTotals, ordersOfShift, shiftLoadWindow, shiftTotals, shiftsOfDay
 import { CashShift, Category, Courier, CourierPayMethod, CourierPendingOrder, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, openCashDrawer } from '@/lib/printer';
+import { installExeFocusFix } from '@/lib/exe-focus';
 import { drainPrintQueue, isDesktop, nextLocalOrderNumber, printKitchenNow, printNoteNow, startKitchenPrinting } from '@/lib/desktopPrint';
 import StationPrinters from '@/components/StationPrinters';
 import { postOrQueue, isOnline, startConnectivityWatch, onConnectivityChange } from '@/lib/offline-net';
@@ -463,6 +464,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     connectPrinter().then(setPrinterConnected);
     return () => { disconnectPrinter(); };
   }, []);
+  // In the exe a click into Kart could fail to take the cursor (lib/exe-focus).
+  useEffect(() => { installExeFocusFix(); }, []);
 
   useEffect(() => {
     if (!pinLocked) return;

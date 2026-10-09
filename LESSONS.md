@@ -166,6 +166,11 @@ They take different paths (the exe has a local database and a `pay:` key
 replay; the browser has its own IndexedDB queue). A fix in one path often
 misses the other.
 
+**When the exe comes back to the front, can the page take a click?**
+Windows can give the window focus back without its page. Latte Art, 2026-10-09:
+sometimes the payment sheet opened with Nağd not selected, and Kart would not
+take a click until the sheet was closed and opened again (`lib/exe-focus`).
+
 **When data refreshes in the background, does a screen someone is reading start
 over?**
 A re-read that says the same thing must not count as a change. Exe, 2026-10-08:

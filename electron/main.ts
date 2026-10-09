@@ -233,6 +233,11 @@ function createWindow(): void {
   win.once('ready-to-show', () => win.show());
   void win.loadURL(startUrl());
 
+  // Windows can give the window focus back without its page: the payment sheet
+  // then opened with Nağd not selected and Kart would not take a click (Latte
+  // Art, 2026-10-09). Hand it to the page each time; see lib/exe-focus.ts.
+  win.on('focus', () => win.webContents.focus());
+
   // Only the remote path can fail to load. The bundled till is on the disk, so
   // there is no outage for it to recover from.
   if (!BUNDLED) keepTryingWhenOffline(win);
@@ -428,6 +433,16 @@ if (isDriverHelper()) {
 
     // The "Axtar" button beside the sexes' printer IPs. See electron/printer-scan.ts.
     ipcMain.handle('printer:scan', () => scanPrinters());
+
+    // Windows can leave the page unable to take a click into a box (after an
+    // alert or confirm above all). Focusing the window and its page again
+    // brings clicks back; see lib/exe-focus.ts.
+    ipcMain.handle('window:focus', event => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (!win) return;
+      win.focus();
+      event.sender.focus();
+    });
 
     startUpdater();
 

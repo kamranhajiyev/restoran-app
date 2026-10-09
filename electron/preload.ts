@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('posNative', {
     ipcRenderer.invoke('printer:send', ip, port, bytes, timeoutMs),
   // The network printers this machine can see, for filling in a sex's IP.
   scanPrinters: (): Promise<string[]> => ipcRenderer.invoke('printer:scan'),
+  // A box that would not take a click; see lib/exe-focus.ts.
+  focusWindow: (): Promise<void> => ipcRenderer.invoke('window:focus'),
 
   // A new version, downloaded and waiting for someone to click "Yenilə". See
   // electron/updater.ts.
