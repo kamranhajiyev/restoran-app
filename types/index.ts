@@ -79,6 +79,12 @@ export interface SelectedModifier {
   price: number;
 }
 
+// One product inside a set, and how many of it.
+export interface SetPart {
+  id: string;   // the menu item inside
+  qty: number;
+}
+
 export interface MenuItem {
   id: string;
   name: string;
@@ -90,8 +96,12 @@ export interface MenuItem {
   costPrice?: number;
   image?: string;
   stationId?: string | null;   // which sex prepares it; null = unassigned
-  kind?: 'product' | 'meal';   // absent = treat as 'product'
+  kind?: 'product' | 'meal' | 'set';   // absent = treat as 'product'; read it with itemKind (lib/set-items)
   modifierGroupIds?: string[]; // which reusable sets this item offers
+  // The products inside, when this item is a set. [] = not a set; absent = not
+  // loaded (a database without the column, the exe's own menu copy), and a save
+  // leaves it alone.
+  setItems?: SetPart[];
 }
 
 export interface OrderItem {
@@ -370,13 +380,6 @@ export interface ReceiptLine {
 
 // One ingredient of a recipe (how much of a stock item a menu item consumes).
 export interface RecipeIngredient {
-  stockItemId: string;
-  qty: number;
-}
-
-// A flat recipe row as stored in recipe_lines.
-export interface RecipeLineRow {
-  menuItemId: string;
   stockItemId: string;
   qty: number;
 }

@@ -1,10 +1,12 @@
 import { guardQuery, refusal } from './order-rules';
-import { CashShift, Category, Courier, CourierLedger, CourierPayMethod, CourierPayment, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RecipeLineRow, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
+import { CashShift, Category, Courier, CourierLedger, CourierPayMethod, CourierPayment, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
 import { courierPending, courierSold, courierStillOut, sumCollections, type Collections, type ShiftSales } from './courier-pending';
 import { courierDeleteBlock } from './couriers';
 import { printedStationColumn } from './stations';
+import { menuRowBatches } from './set-items';
+import { cleanRecipe } from './recipes';
 import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
 import type { TillSettings } from './desktopPrint';
@@ -156,6 +158,7 @@ export async function fetchMenuOrNull(opts?: ReadOpts): Promise<MenuItem[] | nul
       stationId: r.station_id ?? null,
       kind: r.kind ?? 'product',
       modifierGroupIds: linkError ? undefined : (byItem.get(r.id) ?? []),
+      setItems: r.set_items === undefined ? undefined : (r.set_items ?? []),
     }));
   } catch {
     return null;
@@ -212,10 +215,13 @@ export async function saveMenu(menu: MenuItem[]): Promise<string | null> {
         kind: m.kind ?? 'product',
         position: rows.length,
         company_id: _companyId,
+        // Absent = this screen never loaded the set's contents: the key is left
+        // out and menuRowBatches keeps the row away from those that have it.
+        ...(m.setItems ? { set_items: m.setItems.length > 0 ? m.setItems : null } : {}),
       });
     }
-    if (rows.length > 0) {
-      const { error } = await supabase.from('menu_items').upsert(rows, { onConflict: 'id' });
+    for (const batch of menuRowBatches(rows)) {
+      const { error } = await supabase.from('menu_items').upsert(batch, { onConflict: 'id' });
       if (error) { console.error('[saveMenu upsert]', error); return error.message; }
     }
     let del = supabase.from('menu_items').delete().eq('company_id', _companyId);
@@ -2041,12 +2047,28 @@ export async function recordCount(warehouseId: string, stockItemId: string, coun
 // order deducts each ingredient × quantity from the company's sales warehouse
 // (handled by a DB trigger, not here).
 
-export async function fetchRecipeLines(): Promise<RecipeLineRow[]> {
+/** What the menu form needs to show one dish's recipe: its lines and the
+ *  warehouse items to choose from. Null when either read failed, so the form
+ *  shows "not loaded" and saves nothing over a recipe it never saw. */
+export async function fetchRecipeForm(menuItemId: string | null): Promise<{ items: StockItem[]; lines: RecipeIngredient[] } | null> {
   try {
-    const { data, error } = await supabase.from('recipe_lines').select('menu_item_id, stock_item_id, qty');
-    if (error || !data) return [];
-    return data.map(r => ({ menuItemId: r.menu_item_id, stockItemId: r.stock_item_id, qty: Number(r.qty) }));
-  } catch { return []; }
+    const { data: items, error: itemsError } = await supabase.from('stock_items')
+      .select('id, name, unit, type, created_at').is('trashed_at', null).order('name');
+    if (itemsError || !items) return null;
+    let lines: RecipeIngredient[] = [];
+    if (menuItemId) {
+      // A product's per-size lines are kept by the database (sync_product_stock)
+      // and are not part of what the form edits.
+      const { data, error } = await supabase.from('recipe_lines')
+        .select('stock_item_id, qty').eq('menu_item_id', menuItemId).is('variant_id', null);
+      if (error || !data) return null;
+      lines = data.map(r => ({ stockItemId: r.stock_item_id, qty: Number(r.qty) }));
+    }
+    return {
+      items: items.map(s => ({ id: s.id, name: s.name, unit: s.unit, type: s.type ?? 'ingredient', createdAt: s.created_at })),
+      lines,
+    };
+  } catch { return null; }
 }
 
 // Replace one menu item's recipe with `lines`. Upsert-then-prune so a failed
@@ -2054,18 +2076,12 @@ export async function fetchRecipeLines(): Promise<RecipeLineRow[]> {
 export async function saveRecipe(menuItemId: string, lines: RecipeIngredient[]): Promise<string | null> {
   if (!_companyId) return 'Şirkət konteksti yoxdur';
   try {
-    const seen = new Set<string>();
-    const rows: { company_id: string; menu_item_id: string; stock_item_id: string; qty: number }[] = [];
-    for (const l of lines) {
-      if (!l.stockItemId || !(l.qty > 0) || seen.has(l.stockItemId)) continue;
-      seen.add(l.stockItemId);
-      rows.push({ company_id: _companyId, menu_item_id: menuItemId, stock_item_id: l.stockItemId, qty: l.qty });
-    }
+    const rows = cleanRecipe(lines).map(l => ({ company_id: _companyId, menu_item_id: menuItemId, stock_item_id: l.stockItemId, qty: l.qty }));
     if (rows.length > 0) {
       const { error } = await supabase.from('recipe_lines').upsert(rows, { onConflict: 'menu_item_id,stock_item_id' });
       if (error) { console.error('[saveRecipe upsert]', error); return error.message; }
     }
-    let del = supabase.from('recipe_lines').delete().eq('menu_item_id', menuItemId).eq('company_id', _companyId);
+    let del = supabase.from('recipe_lines').delete().eq('menu_item_id', menuItemId).eq('company_id', _companyId).is('variant_id', null);
     if (rows.length > 0) del = del.not('stock_item_id', 'in', `(${rows.map(r => `"${r.stock_item_id}"`).join(',')})`);
     const { error: delError } = await del;
     if (delError) { console.error('[saveRecipe prune]', delError); return delError.message; }

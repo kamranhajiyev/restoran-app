@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Plus, Pencil, Trash2, Warehouse, Boxes, Truck, ShoppingCart, X, BookOpen, Eraser, ChevronDown, Wallet, ArrowLeftRight } from 'lucide-react';
+import { Plus, Pencil, Trash2, Warehouse, Boxes, Truck, ShoppingCart, X, Eraser, ChevronDown, Wallet, ArrowLeftRight } from 'lucide-react';
 import {
   fetchWarehouses, createWarehouse, updateWarehouse, deleteWarehouse,
   fetchSuppliers, createSupplier, updateSupplier, deleteSupplier, fetchSupplierLedger, fetchSupplierPayments, addSupplierPayment, fetchSupplierPaymentLog,
@@ -10,14 +10,14 @@ import {
   fetchBalances, fetchReceipts, recordReceipt, updateReceipt, voidReceipt, recordWriteoff,
   fetchReceiptLines, fetchWriteoffs,
   fetchTransfers, fetchTransferLines, recordTransfer, voidTransfer,
-  fetchMenu, fetchRecipeLines, saveRecipe, fetchSalesWarehouse, setSalesWarehouse,
+  fetchSalesWarehouse, setSalesWarehouse,
   fetchStockFailures, retryOrderStock, StockFailure,
 } from '@/lib/store';
-import { Warehouse as Wh, Supplier, StockItem, StockBalance, StockReceipt, ReceiptLine, ReceiptLineDetail, StockTransfer, TransferLine, TransferLineDetail, WriteoffEntry, SupplierLedger, SupplierPayment, MenuItem, RecipeLineRow, RecipeIngredient } from '@/types';
+import { Warehouse as Wh, Supplier, StockItem, StockBalance, StockReceipt, ReceiptLine, ReceiptLineDetail, StockTransfer, TransferLine, TransferLineDetail, WriteoffEntry, SupplierLedger, SupplierPayment } from '@/types';
 import { DialogState } from '@/components/AppDialog';
 import { inputCls, btnPrimary, btnGhost, Modal, Empty } from '@/components/panel-ui';
 
-type Sub = 'warehouses' | 'balances' | 'suppliers' | 'payments' | 'receipts' | 'transfers' | 'writeoffs' | 'recipes';
+type Sub = 'warehouses' | 'balances' | 'suppliers' | 'payments' | 'receipts' | 'transfers' | 'writeoffs';
 
 const SUBS: { id: Sub; label: string; icon: React.ElementType }[] = [
   { id: 'warehouses', label: 'Anbarlar', icon: Warehouse },
@@ -27,7 +27,6 @@ const SUBS: { id: Sub; label: string; icon: React.ElementType }[] = [
   { id: 'receipts', label: 'Bazarlıqlar', icon: ShoppingCart },
   { id: 'transfers', label: 'Transferlər', icon: ArrowLeftRight },
   { id: 'writeoffs', label: 'Silinmələr', icon: Eraser },
-  { id: 'recipes', label: 'Reseptlər', icon: BookOpen },
 ];
 
 const UNITS = ['ədəd', 'kq', 'q', 'litr', 'ml', 'paket'];
@@ -111,9 +110,6 @@ export default function AnbarPanel({ setDialog }: { setDialog: (d: DialogState |
           )}
           {sub === 'writeoffs' && (
             <WriteoffsTab />
-          )}
-          {sub === 'recipes' && (
-            <RecipesTab items={items} flash={flash} fail={fail} />
           )}
         </>
       )}
@@ -1178,109 +1174,6 @@ function PaymentsTab({ suppliers }: { suppliers: Supplier[] }) {
         ))}
       </div>
     </div>
-  );
-}
-
-// ─── Reseptlər ──────────────────────────────────────────────────────────────────
-
-function RecipesTab({ items, flash, fail }: {
-  items: StockItem[]; flash: (m: string) => void; fail: (m: string | null) => void;
-}) {
-  const [menu, setMenu] = useState<MenuItem[]>([]);
-  const [lines, setLines] = useState<RecipeLineRow[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [editing, setEditing] = useState<MenuItem | null>(null);
-
-  async function reload() {
-    const [m, l] = await Promise.all([fetchMenu(), fetchRecipeLines()]);
-    setMenu(m.filter(mi => (mi.kind ?? 'product') === 'meal')); setLines(l); setLoaded(true);
-  }
-  useEffect(() => { reload(); }, []);
-
-  const linesFor = (menuItemId: string) => lines.filter(l => l.menuItemId === menuItemId);
-  const itemName = (id: string) => items.find(it => it.id === id)?.name ?? '—';
-  const itemUnit = (id: string) => items.find(it => it.id === id)?.unit ?? '';
-
-  if (items.length === 0) return <Empty msg="Əvvəlcə «Qalıqlar» bölməsində məhsul yaradın." />;
-  if (!loaded) return <div className="text-sm text-stone-400 py-10 text-center">Yüklənir…</div>;
-  if (menu.length === 0) return <Empty msg="Menyuda yemək yoxdur — əvvəlcə menyuya yemək əlavə edin." />;
-
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-stone-400">Yalnız resepti olan menyu məhsulları satışda anbardan çıxılır.</p>
-      <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
-        {menu.map(mi => {
-          const ls = linesFor(mi.id);
-          return (
-            <div key={mi.id} className="flex items-center justify-between px-4 py-3 gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-medium text-stone-800 truncate">{mi.name}</div>
-                <div className="text-xs text-stone-400 truncate">
-                  {ls.length === 0 ? 'resept yoxdur' : ls.map(l => `${itemName(l.stockItemId)} ${l.qty}${itemUnit(l.stockItemId)}`).join(', ')}
-                </div>
-              </div>
-              <button className={btnGhost} onClick={() => setEditing(mi)}>
-                <Pencil className="w-3.5 h-3.5" /> Resept
-              </button>
-            </div>
-          );
-        })}
-      </div>
-
-      {editing && (
-        <RecipeModal menuItem={editing} items={items} initial={linesFor(editing.id)}
-          onClose={() => setEditing(null)}
-          onSaved={async () => { setEditing(null); await reload(); flash('Resept yadda saxlanıldı'); }} fail={fail} />
-      )}
-    </div>
-  );
-}
-
-function RecipeModal({ menuItem, items, initial, onClose, onSaved, fail }: {
-  menuItem: MenuItem; items: StockItem[]; initial: RecipeLineRow[]; onClose: () => void; onSaved: () => void; fail: (m: string | null) => void;
-}) {
-  const [rows, setRows] = useState<{ stockItemId: string; qty: string }[]>(
-    initial.length ? initial.map(l => ({ stockItemId: l.stockItemId, qty: String(l.qty) })) : [{ stockItemId: items[0]?.id ?? '', qty: '' }]
-  );
-  const [busy, setBusy] = useState(false);
-  const unitOf = (id: string) => items.find(it => it.id === id)?.unit ?? '';
-  function setRow(i: number, patch: Partial<{ stockItemId: string; qty: string }>) {
-    setRows(prev => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r));
-  }
-  async function save() {
-    const lines: RecipeIngredient[] = rows
-      .filter(r => r.stockItemId && parseFloat(r.qty) > 0)
-      .map(r => ({ stockItemId: r.stockItemId, qty: parseFloat(r.qty) }));
-    setBusy(true);
-    const err = await saveRecipe(menuItem.id, lines);
-    setBusy(false);
-    if (err) { fail(err); return; }
-    onSaved();
-  }
-  return (
-    <Modal title={`Resept — ${menuItem.name}`} onClose={onClose} wide>
-      <p className="text-xs text-stone-500 mb-3">1 ədəd satılanda anbardan çıxılacaq məhsullar. Boş saxlasanız, bu məhsul anbara təsir etməyəcək.</p>
-      <div className="space-y-2">
-        {rows.map((r, i) => (
-          <div key={i} className="flex items-center gap-2">
-            {/* The name is the long text, so it takes the room; a quantity is
-                never more than a few digits. Sized by flex-basis, not width —
-                inputCls carries w-full, which beats any w-* put next to it. */}
-            <select className={`${inputCls} flex-1 min-w-0`} value={r.stockItemId} onChange={e => setRow(i, { stockItemId: e.target.value })}>
-              {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
-            </select>
-            <input className={`${inputCls} basis-24 grow-0 shrink-0 min-w-0`} type="number" placeholder="miqdar" value={r.qty} onChange={e => setRow(i, { qty: e.target.value })} />
-            <span className="text-xs text-stone-400 w-8 shrink-0">{unitOf(r.stockItemId)}</span>
-            <button className="text-stone-400 hover:text-red-500 shrink-0" onClick={() => setRows(rows.filter((_, idx) => idx !== i))}><X className="w-4 h-4" /></button>
-          </div>
-        ))}
-        <button className={btnGhost} onClick={() => setRows([...rows, { stockItemId: items[0]?.id ?? '', qty: '' }])}><Plus className="w-3.5 h-3.5" /> Sətir</button>
-      </div>
-      <div className="flex justify-end gap-2 mt-4">
-        <button className={btnGhost} onClick={onClose}>Ləğv et</button>
-        <button className={btnPrimary} onClick={save} disabled={busy}>Yadda saxla</button>
-      </div>
-    </Modal>
   );
 }
 

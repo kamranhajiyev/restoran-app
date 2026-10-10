@@ -3,6 +3,7 @@ import { orderTotal } from '@/components/seller/order-format';
 import { Category, MenuItem, MenuItemVariant, Order } from '@/types';
 import { orderClosedAt } from '@/lib/order-items';
 import { orderLabel } from './order-label';
+import { itemKind, KIND_LABEL, withSets, type ItemKind } from './set-items';
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ export function exportMenuExcel(menu: MenuItem[], categories: Category[]): void 
     [COL.price]: m.price,
     [COL.cost]: m.costPrice ?? '',
     [COL.available]: m.available ? 'Bəli' : 'Xeyr',
-    [COL.kind]: m.kind === 'meal' ? 'Yemək' : 'Məhsul',
+    [COL.kind]: KIND_LABEL[itemKind(m)],
     [COL.variants]: serializeVariants(m.variants),
   }));
   const catRows = categories.map(c => ({ 'Ad': c.name, 'Aktiv': c.available ? 'Bəli' : 'Xeyr' }));
@@ -99,6 +100,7 @@ export interface AnalizRow {
   name: string;
   category: string;
   qty: number;
+  inSets: number; // how many more went out inside sets; Cəmi = withSets(row)
   rev: number;
   cost: number;
   profit: number;
@@ -114,10 +116,16 @@ export function exportAnalizExcel(rows: AnalizRow[], from: string, to: string): 
   const r2 = (n: number) => Math.round(n * 100) / 100;
   // A product with sizes is replaced by its sizes: a total row followed by its parts
   // would be counted twice by anyone summing the column.
-  const sheet = rows.flatMap(r => (r.sizes?.length ? r.sizes : [r])).map(r => ({
+  // What went out inside sets has no size, so it gets a row of its own: the
+  // Cəmi column then adds up to what the screen shows for the product.
+  const inSetsRow = (r: AnalizRow): AnalizRow => ({
+    ...r, name: `${r.name} · setlərdə`, qty: 0, rev: 0, cost: 0, profit: 0, margin: null, share: 0, noCost: false, sizes: undefined,
+  });
+  const sheet = rows.flatMap(r => (r.sizes?.length ? (r.inSets > 0 ? [...r.sizes, inSetsRow(r)] : r.sizes) : [r])).map(r => ({
     'Məhsul': r.name,
     'Kateqoriya': r.category,
     'Satış (ədəd)': r.qty,
+    'Cəmi (ədəd)': withSets(r),
     'Gəlir (₼)': r2(r.rev),
     'Pay (%)': r2(r.share * 100),
     'Maya (₼)': r.noCost ? '' : r2(r.cost),
@@ -126,10 +134,10 @@ export function exportAnalizExcel(rows: AnalizRow[], from: string, to: string): 
     'Qeyd': [r.hidden && 'Gizli', r.noCost && 'Maya qeyd edilməyib', r.orphan && 'Menyuda yoxdur'].filter(Boolean).join(', '),
   }));
   const ws = XLSX.utils.json_to_sheet(sheet.length ? sheet : [{
-    'Məhsul': '', 'Kateqoriya': '', 'Satış (ədəd)': '', 'Gəlir (₼)': '', 'Pay (%)': '',
+    'Məhsul': '', 'Kateqoriya': '', 'Satış (ədəd)': '', 'Cəmi (ədəd)': '', 'Gəlir (₼)': '', 'Pay (%)': '',
     'Maya (₼)': '', 'Mənfəət (₼)': '', 'Marja (%)': '', 'Qeyd': '',
   }]);
-  ws['!cols'] = [{ wch: 28 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 26 }];
+  ws['!cols'] = [{ wch: 28 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 26 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Analiz');
   XLSX.writeFile(wb, `analiz-${from}_${to}.xlsx`);
@@ -165,9 +173,10 @@ function parseBool(raw: unknown): boolean {
   return true; // default: available
 }
 
-function parseKind(raw: unknown): 'product' | 'meal' | undefined {
+function parseKind(raw: unknown): ItemKind | undefined {
   const s = String(raw ?? '').trim().toLowerCase();
   if (!s) return undefined;
+  if (s === 'set') return 'set';
   if (s.startsWith('yem') || s === 'meal') return 'meal';
   if (s.startsWith('məh') || s.startsWith('meh') || s === 'product') return 'product';
   return undefined;

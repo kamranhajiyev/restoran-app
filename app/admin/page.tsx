@@ -37,7 +37,7 @@ import {
   fetchCompanySettings, updateCompanyHours,
   fetchLoginEvents, LoginEvent,
   fetchStaff, createStaff, updateStaff, setStaffPin, deleteStaff,
-  fetchSellerToken, linkProductStock,
+  fetchSellerToken, linkProductStock, fetchRecipeForm, saveRecipe,
   fetchBranding, setLogoUrl as saveLogoUrl, setBrandColor as saveBrandColor,
   fetchStations, fetchModifierGroupsOrNull,
   fetchAllUsers, createEmployee, updateEmployee, deleteUser, toggleUserActive,
@@ -53,7 +53,7 @@ import {
   addDays, dayDiff, dayOfWeek, dayToDate, tzHour, tzTime, cutoffMinutes,
 } from '@/lib/business-day';
 import { supabase } from '@/lib/supabase';
-import { CashShift, Category, Hall, MenuItem, MenuItemVariant, ModifierGroup, Order, OrderStatus, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, TrashItem, isOrderOpen } from '@/types';
+import { CashShift, Category, Hall, MenuItem, MenuItemVariant, ModifierGroup, Order, OrderStatus, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockItem, TrashItem, isOrderOpen } from '@/types';
 import AppDialog, { DialogState } from '@/components/AppDialog';
 import AnbarPanel from '@/components/AnbarPanel';
 import CourierPanel from '@/components/CourierPanel';
@@ -63,6 +63,10 @@ import OrderItemHistory from '@/components/OrderItemHistory';
 import PasswordField from '@/components/PasswordField';
 import { validatePassword } from '@/lib/password';
 import { exportMenuExcel, exportOrdersExcel, exportAnalizExcel, parseMenuFile, ImportPreview, AnalizRow } from '@/lib/excel';
+import { cleanSetItems, itemKind, KIND_LABEL, setChoices, setLine, setSplit, soldInSets, withSets, type ItemKind } from '@/lib/set-items';
+import { cleanRecipe } from '@/lib/recipes';
+import { azNormalize } from '@/lib/az-text';
+import SearchAdd from '@/components/SearchAdd';
 import QRCode from 'react-qr-code';
 import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt } from '@/lib/printer';
@@ -122,7 +126,7 @@ type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
 
 function emptyForm(cat: string) {
-  return { name: '', price: '', costPrice: '', category: cat, image: '', stationId: '', kind: 'meal' as 'product' | 'meal', hasVariants: false, variants: [] as FormVariant[], modifierGroupIds: [] as string[], modifiersKnown: true };
+  return { name: '', price: '', costPrice: '', category: cat, image: '', stationId: '', kind: 'meal' as ItemKind, hasVariants: false, variants: [] as FormVariant[], modifierGroupIds: [] as string[], modifiersKnown: true, setItems: [] as { id: string; qty: string }[], setKnown: true };
 }
 
 const AZ_MON_SHORT = ['Yan','Fev','Mar','Apr','May','İyn','İyl','Avq','Sen','Okt','Noy','Dek'];
@@ -283,20 +287,15 @@ function LineChartSvg({ data }: { data: { label: string; fullLabel: string; rev:
   );
 }
 
-// Diacritic-insensitive normalization so "cay" matches "Çay" and "e" matches "ə"
-const AZ_CHARS: Record<string, string> = { 'ç': 'c', 'ə': 'e', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u' };
-function azNormalize(s: string): string {
-  return s.toLocaleLowerCase('az').replace(/[çəğıöşü]/g, ch => AZ_CHARS[ch]);
-}
-
 // ── Statistika → Analiz ──────────────────────────────────────────────────────
 
 const LOW_MARGIN = 0.20;
 
 type AnalizChip = 'hamısı' | 'satılmayan' | 'aşağı marja' | 'mayasız';
-type AnalizSortKey = 'name' | 'category' | 'qty' | 'rev' | 'share' | 'cost' | 'profit' | 'margin';
+type AnalizSortKey = 'name' | 'category' | 'qty' | 'total' | 'rev' | 'share' | 'cost' | 'profit' | 'margin';
 
-const isUnsold    = (r: AnalizRow) => r.qty === 0 && !r.hidden;
+// Sold only inside a set is still sold.
+const isUnsold    = (r: AnalizRow) => withSets(r) === 0 && !r.hidden;
 const isLowMargin = (r: AnalizRow) => r.qty > 0 && !r.noCost && r.margin !== null && r.margin < LOW_MARGIN;
 const isNoCost    = (r: AnalizRow) => r.noCost && r.qty > 0;
 
@@ -305,15 +304,15 @@ const money = (n: number) => `${n.toFixed(2)} ₼`;
 // The product column stays pinned while the numbers scroll sideways on narrow screens.
 const ANALIZ_STICKY = 'sticky left-0 z-10 bg-white';
 
-function AnalizTh({ k, label, right, sortKey, sortDir, onSort }: {
-  k: AnalizSortKey; label: string; right?: boolean;
+function AnalizTh({ k, label, right, title, sortKey, sortDir, onSort }: {
+  k: AnalizSortKey; label: string; right?: boolean; title?: string;
   sortKey: AnalizSortKey; sortDir: 'asc' | 'desc'; onSort: (k: AnalizSortKey) => void;
 }) {
   const on = sortKey === k;
   return (
     <th className={`px-3 py-2.5 font-medium whitespace-nowrap ${right ? 'text-right' : 'text-left'} ${k === 'name' ? ANALIZ_STICKY : ''}`}>
-      <button onClick={() => onSort(k)}
-        className={`inline-flex items-center gap-1 transition-colors hover:text-stone-700 ${on ? 'text-stone-800 font-semibold' : ''}`}>
+      <button onClick={() => onSort(k)} title={title}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-stone-700 ${on ? 'text-stone-800 font-semibold' : ''} ${title ? 'underline decoration-dotted decoration-stone-300 underline-offset-4' : ''}`}>
         {label}
         {on && (sortDir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)}
       </button>
@@ -331,6 +330,8 @@ function AnalizPanel({ rows, from, to }: { rows: AnalizRow[]; from: string; to: 
   const [chip, setChip] = useState<AnalizChip>('hamısı');
   const [sortKey, setSortKey] = useState<AnalizSortKey>('rev');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  // Which row's Cəmi shows its "tək + setdə" note: a tap, for screens with no cursor.
+  const [splitOpen, setSplitOpen] = useState<string | null>(null);
 
   const chips: [AnalizChip, string, number][] = [
     ['hamısı', 'Hamısı', rows.length],
@@ -355,6 +356,7 @@ function AnalizPanel({ rows, from, to }: { rows: AnalizRow[]; from: string; to: 
     if (sortKey === 'category') return a.category.localeCompare(b.category, 'az') * dir;
     // Unsold items have no margin — park them at the bottom rather than treating them as 0%.
     if (sortKey === 'margin') return ((a.margin ?? -Infinity) - (b.margin ?? -Infinity)) * dir;
+    if (sortKey === 'total') return (withSets(a) - withSets(b)) * dir;
     return (a[sortKey] - b[sortKey]) * dir;
   };
   // Filters, sorting and the footer work on product rows only; sizes ride along under
@@ -373,8 +375,8 @@ function AnalizPanel({ rows, from, to }: { rows: AnalizRow[]; from: string; to: 
     setSortDir(k === 'name' || k === 'category' ? 'asc' : 'desc');
   }
 
-  const th = (k: AnalizSortKey, label: string, right?: boolean) => (
-    <AnalizTh k={k} label={label} right={right} sortKey={sortKey} sortDir={sortDir} onSort={sortBy} />
+  const th = (k: AnalizSortKey, label: string, right?: boolean, title?: string) => (
+    <AnalizTh k={k} label={label} right={right} title={title} sortKey={sortKey} sortDir={sortDir} onSort={sortBy} />
   );
 
   return (
@@ -431,6 +433,7 @@ function AnalizPanel({ rows, from, to }: { rows: AnalizRow[]; from: string; to: 
                 {th('name', 'Məhsul')}
                 {th('category', 'Kateqoriya')}
                 {th('qty', 'Satış', true)}
+                {th('total', 'Cəmi', true, 'Təklikdə və setlərin içində satılanların cəmi')}
                 {th('rev', 'Gəlir', true)}
                 {th('share', 'Pay', true)}
                 {th('cost', 'Maya', true)}
@@ -441,19 +444,33 @@ function AnalizPanel({ rows, from, to }: { rows: AnalizRow[]; from: string; to: 
             <tbody>
               {visible.flatMap(p => [p, ...[...(p.sizes ?? [])].sort(compare)]).map((r, i, all) => {
                 const dead = r.qty === 0;
+                // Nothing went out at all, not even inside a set.
+                const gone = withSets(r) === 0;
+                const rowKey = `${r.name}-${i}`;
                 const low = isLowMargin(r);
                 const isSize = !rows.includes(r);
                 const parent = isSize ? all.slice(0, i).reverse().find(x => rows.includes(x)) : undefined;
                 const label = parent && r.name.startsWith(`${parent.name} · `) ? r.name.slice(parent.name.length + 3) : r.name;
                 return (
-                  <tr key={`${r.name}-${i}`} className={`border-b border-stone-50 last:border-0 ${dead ? 'text-stone-400' : 'text-stone-600'} ${isSize ? 'text-xs' : ''}`}>
+                  <tr key={rowKey} className={`border-b border-stone-50 last:border-0 ${gone ? 'text-stone-400' : 'text-stone-600'} ${isSize ? 'text-xs' : ''}`}>
                     <td className={`py-2.5 min-w-[140px] max-w-[260px] ${ANALIZ_STICKY} ${isSize ? 'pl-8 pr-3' : 'px-3'}`}>
-                      <span className={dead || isSize ? '' : 'font-medium text-stone-800'}>{label}</span>
+                      <span className={gone || isSize ? '' : 'font-medium text-stone-800'}>{label}</span>
                       {r.hidden && !isSize && <span className="ml-1.5 text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded">Gizli</span>}
                       {r.orphan && <span className="ml-1.5 text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded">Menyuda yoxdur</span>}
                     </td>
                     <td className="px-3 py-2.5 min-w-[100px]">{isSize ? '' : r.category}</td>
                     <td className="px-3 py-2.5 text-right whitespace-nowrap">{dead ? '—' : r.qty}</td>
+                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                      {gone ? '—' : r.inSets > 0 ? (
+                        <>
+                          <button type="button" title={setSplit(r)} onClick={() => setSplitOpen(k => (k === rowKey ? null : rowKey))}
+                            className="font-semibold text-stone-800 underline decoration-dotted decoration-stone-300 underline-offset-4">
+                            {withSets(r)}
+                          </button>
+                          {splitOpen === rowKey && <span className="block text-[10px] text-stone-500">{setSplit(r)}</span>}
+                        </>
+                      ) : r.qty}
+                    </td>
                     <td className="px-3 py-2.5 text-right whitespace-nowrap">{dead ? '—' : money(r.rev)}</td>
                     <td className="px-3 py-2.5 text-right whitespace-nowrap">
                       {dead ? '—' : (
@@ -484,7 +501,7 @@ function AnalizPanel({ rows, from, to }: { rows: AnalizRow[]; from: string; to: 
                 );
               })}
               {visible.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-stone-400">Nəticə yoxdur</td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-stone-400">Nəticə yoxdur</td></tr>
               )}
             </tbody>
             {visible.length > 0 && (
@@ -493,6 +510,8 @@ function AnalizPanel({ rows, from, to }: { rows: AnalizRow[]; from: string; to: 
                   <td className="px-3 py-2.5 whitespace-nowrap sticky left-0 z-10 bg-stone-50">Cəmi</td>
                   <td className="px-3 py-2.5 whitespace-nowrap text-stone-500 font-normal">{visible.length} məhsul</td>
                   <td className="px-3 py-2.5 text-right whitespace-nowrap">{tQty}</td>
+                  {/* No Cəmi total: a set and the products inside it would both be counted. */}
+                  <td className="px-3 py-2.5" />
                   <td className="px-3 py-2.5 text-right whitespace-nowrap">{money(tRev)}</td>
                   <td className="px-3 py-2.5" />
                   <td className="px-3 py-2.5 text-right whitespace-nowrap">{money(tCost)}</td>
@@ -571,6 +590,10 @@ function AdminPageContent() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm(''));
+  // The recipe of the dish in the form, and the warehouse items to pick from.
+  // 'failed': it did not load, so the form says so and saves nothing over it.
+  const [recipe, setRecipe] = useState<{ state: 'loading' | 'ready' | 'failed'; rows: { stockItemId: string; qty: string }[]; items: StockItem[] }>({ state: 'loading', rows: [], items: [] });
+  const recipeFor = useRef<string | null>(null);
   const imgRef = useRef<HTMLInputElement>(null);
 
   const formRef = useRef<HTMLFormElement>(null);
@@ -622,7 +645,7 @@ function AdminPageContent() {
     });
   }
   const [menuSearch, setMenuSearch] = useState('');
-  const [kindFilter, setKindFilter] = useState<'all' | 'product' | 'meal'>('all');
+  const [kindFilter, setKindFilter] = useState<'all' | ItemKind>('all');
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
   const [importing, setImporting] = useState(false);
   const importFileRef = useRef<HTMLInputElement>(null);
@@ -1514,8 +1537,20 @@ function AdminPageContent() {
   }
 
   // ── menu form ──────────────────────────────────────────────────────────────
+  async function loadRecipe(id: string) {
+    recipeFor.current = id;
+    setRecipe({ state: 'loading', rows: [], items: [] });
+    const r = await fetchRecipeForm(id);
+    // Another dish was opened while this one was loading.
+    if (recipeFor.current !== id) return;
+    setRecipe(r
+      ? { state: 'ready', rows: r.lines.map(l => ({ stockItemId: l.stockItemId, qty: String(l.qty) })), items: r.items }
+      : { state: 'failed', rows: [], items: [] });
+  }
+
   function openEdit(item: MenuItem) {
     setEditingId(item.id);
+    loadRecipe(item.id);
     setForm({
       name: item.name,
       price: item.variants?.length ? '' : String(item.price),
@@ -1523,12 +1558,15 @@ function AdminPageContent() {
       category: item.category,
       image: item.image ?? '',
       stationId: item.stationId ?? '',
-      kind: item.kind ?? 'product',
+      kind: itemKind(item),
       hasVariants: !!item.variants?.length,
       variants: item.variants?.map(v => ({ id: v.id, name: v.name, price: String(v.price), costPrice: v.costPrice ? String(v.costPrice) : '' })) ?? [],
       modifierGroupIds: item.modifierGroupIds ?? [],
       // Undefined: this dish's links did not load, so the form must not save them.
       modifiersKnown: item.modifierGroupIds !== undefined,
+      setItems: (item.setItems ?? []).map(p => ({ id: p.id, qty: String(p.qty) })),
+      // Undefined: this dish's set contents did not load, so the form must not save them.
+      setKnown: item.setItems !== undefined,
     });
     setShowForm(false);
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
@@ -1536,14 +1574,22 @@ function AdminPageContent() {
 
   function cancelForm() { setShowForm(false); setEditingId(null); }
 
+  // False on a database that has no set contents yet (the migration is not on
+  // it) or a menu that did not come from the server: the form then neither
+  // shows nor saves them.
+  const setsLoaded = menu.some(m => m.setItems !== undefined);
+  // What can go inside the set being edited: not itself, not another set, not twice.
+  const setOptions = setChoices(menu, editingId, form.setItems);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const variants: MenuItemVariant[] = form.hasVariants
       ? form.variants.map(v => ({ id: v.id || Date.now().toString(), name: v.name, price: parseFloat(v.price) || 0, costPrice: v.costPrice ? parseFloat(v.costPrice) : undefined }))
       : [];
     const basePrice = form.hasVariants ? (variants[0]?.price ?? 0) : (parseFloat(form.price) || 0);
+    const id = editingId ?? crypto.randomUUID();
     const item: MenuItem = {
-      id: editingId ?? crypto.randomUUID(),
+      id,
       name: form.name,
       price: basePrice,
       category: form.category,
@@ -1558,11 +1604,20 @@ function AdminPageContent() {
       // only an answer when both the sets and this dish's links loaded. Sets
       // deleted since the form opened are dropped by saveMenu.
       modifierGroupIds: modifiersLoaded && form.modifiersKnown ? form.modifierGroupIds : undefined,
+      // Undefined leaves the set's contents alone (saveMenu), the same way.
+      // Only a set has parts: switching Növ away from Set empties them.
+      setItems: setsLoaded && form.setKnown ? cleanSetItems(id, form.kind === 'set' ? form.setItems.map(p => ({ id: p.id, qty: parseFloat(p.qty) })) : []) : undefined,
     };
     const updated = editingId ? menu.map(m => m.id === editingId ? item : m) : [...menu, item];
     setMenu(updated);
     setSaving(true);
-    await persistMenu(updated);
+    const saved = await persistMenu(updated);
+    // The recipe goes after the dish it belongs to, and only one this form
+    // really loaded. A failed save keeps the form open, with what was typed.
+    if (saved && item.kind === 'meal' && recipe.state === 'ready') {
+      const err = await saveRecipe(item.id, cleanRecipe(recipe.rows));
+      if (err) { setDialog({ title: 'Xəta', message: 'Resept yadda saxlanmadı: ' + err }); setSaving(false); return; }
+    }
     // A product is stock-tracked: back it with its own stock item(s) + 0 balance so it
     // shows in Qalıqlar. Idempotent — already-linked products/variants are left untouched.
     // A product with variants links one stock item per variant.
@@ -1577,9 +1632,10 @@ function AdminPageContent() {
   // All menu/category saves go through these — a failed save (RLS, constraint,
   // network) must be shown, never swallowed: the delete+insert flow means a
   // silent failure looks like saved data but is actually a wipe.
-  async function persistMenu(updated: MenuItem[]): Promise<void> {
+  async function persistMenu(updated: MenuItem[]): Promise<boolean> {
     const err = await saveMenu(updated);
     if (err) setDialog({ title: 'Xəta', message: 'Menyu yadda saxlanmadı: ' + err });
+    return !err;
   }
   async function persistCategories(updated: Category[]): Promise<void> {
     const err = await saveCategories(updated);
@@ -1595,8 +1651,9 @@ function AdminPageContent() {
     const name = quickAdd.name.trim();
     const price = parseFloat(quickAdd.price);
     if (!name || isNaN(price) || price < 0) return;
-    // Follow the active filter tab: creating under "Məhsullar" makes a product, otherwise a meal.
-    const item: MenuItem = { id: crypto.randomUUID(), name, price: Math.round(price * 100) / 100, category: cat, available: true, kind: kindFilter === 'product' ? 'product' : 'meal' };
+    // Follow the active filter tab: creating under "Məhsullar" makes a product,
+    // under "Setlər" a set (filled in with Düzəlt), otherwise a meal.
+    const item: MenuItem = { id: crypto.randomUUID(), name, price: Math.round(price * 100) / 100, category: cat, available: true, kind: kindFilter === 'all' ? 'meal' : kindFilter };
     const updated = [...menu, item];
     setMenu(updated);
     setQuickAdd({ cat, name: '', price: '' });
@@ -2058,14 +2115,16 @@ function AdminPageContent() {
         <div>
           <label className="text-xs font-medium text-stone-600 mb-1.5 block">Növ</label>
           <div className="inline-flex rounded-lg border border-stone-200 overflow-hidden">
-            {([['product', 'Məhsul'], ['meal', 'Yemək']] as const).map(([val, label]) => (
+            {/* Set needs the set contents column: without it (a database the
+                migration has not reached) the button is not offered. */}
+            {(['product', 'meal', 'set'] as const).filter(val => val !== 'set' || (setsLoaded && form.setKnown)).map(val => (
               <button
                 key={val}
                 type="button"
                 onClick={() => setForm(f => ({ ...f, kind: val }))}
                 className={`px-4 py-2 text-sm font-medium transition-colors ${form.kind === val ? 'bg-primary-700 text-white' : 'bg-white text-stone-600 hover:bg-stone-50'}`}
               >
-                {label}
+                {KIND_LABEL[val]}
               </button>
             ))}
           </div>
@@ -2138,6 +2197,80 @@ function AdminPageContent() {
               </div>
             ))}
             <button type="button" onClick={addVariant} className="text-sm text-primary-800 hover:text-primary-950 font-medium">+ Variant əlavə et</button>
+          </div>
+        )}
+
+        {form.kind === 'set' && setsLoaded && form.setKnown && (
+          <div>
+            <label className="text-xs font-medium text-stone-600 mb-1.5 block">
+              Setin tərkibi
+              <span className="text-stone-400 font-normal ml-1">— set satılanda içindəkilər anbardan çıxılır və Analizdə “Cəmi”yə əlavə olunur</span>
+            </label>
+            <div className="space-y-2">
+              {form.setItems.map((p, i) => {
+                const part = menu.find(m => m.id === p.id);
+                return (
+                  <div key={p.id} className="flex items-center gap-2">
+                    <span className="flex-1 min-w-0 text-sm text-stone-700 break-words">
+                      {part?.name ?? 'Silinmiş məhsul'}
+                      {part && <span className="text-xs text-stone-400 ml-1.5">{KIND_LABEL[itemKind(part)]}</span>}
+                      {/* A set names the product, not which size of it. */}
+                      {part?.variants?.length ? <span className="block text-xs text-amber-600">Variantlı məhsul — anbardan çıxılmır</span> : null}
+                    </span>
+                    <input type="number" min="1" step="1" required
+                      className="w-20 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
+                      value={p.qty} onChange={e => setForm(f => ({ ...f, setItems: f.setItems.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)) }))} />
+                    <span className="text-xs text-stone-400 w-8 shrink-0">ədəd</span>
+                    <button type="button" onClick={() => setForm(f => ({ ...f, setItems: f.setItems.filter((_, j) => j !== i) }))} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
+                  </div>
+                );
+              })}
+              <SearchAdd
+                options={setOptions.map(m => ({ id: m.id, name: m.name, tag: KIND_LABEL[itemKind(m)] }))}
+                placeholder="Yemək və ya məhsul axtar…" none="Tapılmadı"
+                onPick={id => setForm(f => ({ ...f, setItems: [...f.setItems, { id, qty: '1' }] }))} />
+            </div>
+          </div>
+        )}
+
+        {form.kind === 'meal' && (
+          <div>
+            <label className="text-xs font-medium text-stone-600 mb-1.5 block">
+              Resept
+              <span className="text-stone-400 font-normal ml-1">— 1 ədəd satılanda anbardan çıxılır. Boş saxlasanız, anbara təsir etmir</span>
+            </label>
+            {recipe.state === 'loading' && <p className="text-xs text-stone-400">Yüklənir…</p>}
+            {recipe.state === 'failed' && (
+              <p className="text-xs text-stone-500">
+                Resept yüklənmədi — dəyişməyəcək.{' '}
+                {editingId && <button type="button" onClick={() => loadRecipe(editingId)} className="text-primary-800 font-medium hover:underline">Yenidən yüklə</button>}
+              </p>
+            )}
+            {recipe.state === 'ready' && (
+              <div className="space-y-2">
+                {recipe.rows.map((r, i) => {
+                  const it = recipe.items.find(x => x.id === r.stockItemId);
+                  return (
+                    <div key={r.stockItemId} className="flex items-center gap-2">
+                      <span className="flex-1 min-w-0 text-sm text-stone-700 break-words">{it?.name ?? 'Silinmiş xammal'}</span>
+                      <input type="number" min="0" step="any" required placeholder="miqdar"
+                        className="w-20 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
+                        value={r.qty} onChange={e => setRecipe(x => ({ ...x, rows: x.rows.map((y, j) => (j === i ? { ...y, qty: e.target.value } : y)) }))} />
+                      <span className="text-xs text-stone-400 w-8 shrink-0">{it?.unit ?? ''}</span>
+                      <button type="button" onClick={() => setRecipe(x => ({ ...x, rows: x.rows.filter((_, j) => j !== i) }))} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
+                    </div>
+                  );
+                })}
+                {recipe.items.length === 0 ? (
+                  <p className="text-xs text-stone-400">Əvvəlcə Anbar → Qalıqlar bölməsində xammal yaradın.</p>
+                ) : (
+                  <SearchAdd
+                    options={recipe.items.filter(it => !recipe.rows.some(r => r.stockItemId === it.id)).map(it => ({ id: it.id, name: it.name, tag: it.unit }))}
+                    placeholder="Xammal axtar…" none="Tapılmadı"
+                    onPick={id => setRecipe(x => ({ ...x, rows: [...x.rows, { stockItemId: id, qty: '' }] }))} />
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -2412,12 +2545,13 @@ function AdminPageContent() {
     });
   });
   const analizRow = (name: string, category: string, s: { qty: number; rev: number; cost: number } | undefined,
-    hidden: boolean, noCost: boolean, orphan: boolean): AnalizRow => {
+    hidden: boolean, noCost: boolean, orphan: boolean, inSets = 0): AnalizRow => {
     const rev = s?.rev ?? 0;
     const cost = s?.cost ?? 0;
     return {
       name, category,
       qty: s?.qty ?? 0,
+      inSets,
       rev, cost,
       profit: rev - cost,
       margin: rev > 0 ? (rev - cost) / rev : null,
@@ -2440,6 +2574,7 @@ function AdminPageContent() {
     return rows;
   };
 
+  const inSets = soldInSets(menu, Object.fromEntries(Object.entries(itemMap).map(([id, s]) => [id, s.qty])));
   const analizRows: AnalizRow[] = [];
   const pushAnaliz = (id: string, name: string, category: string, variants: MenuItemVariant[], hidden: boolean, orphan: boolean) => {
     const s = itemMap[id];
@@ -2450,7 +2585,7 @@ function AdminPageContent() {
     const noCost = sizes.length > 1 || variants.length > 0
       ? (s ? sizes.some(z => z.noCost && z.qty > 0) : sizes.every(z => z.noCost))
       : menuCostMap[id] === undefined;
-    const row = analizRow(name, category, s, hidden, noCost, orphan);
+    const row = analizRow(name, category, s, hidden, noCost, orphan, inSets[id] ?? 0);
     if (variants.length > 0 || sizes.length > 1) row.sizes = sizes;
     analizRows.push(row);
   };
@@ -3928,7 +4063,7 @@ function AdminPageContent() {
               </div>
 
               <div className="flex items-center gap-2 mb-3">
-                {([['all', 'Hamısı'], ['meal', 'Yeməklər'], ['product', 'Məhsullar']] as const).map(([val, label]) => (
+                {([['all', 'Hamısı'], ['meal', 'Yeməklər'], ['product', 'Məhsullar'], ['set', 'Setlər']] as const).filter(([val]) => val !== 'set' || setsLoaded).map(([val, label]) => (
                   <button
                     key={val}
                     onClick={() => setKindFilter(val)}
@@ -3959,7 +4094,7 @@ function AdminPageContent() {
               {categories.map(({ name: cat, available: catAvailable, qrVisible: catQrVisible }) => {
                 const allItems = menu.filter(m => m.category === cat);
                 const items = allItems.filter(m =>
-                  (kindFilter === 'all' || (m.kind ?? 'product') === kindFilter) &&
+                  (kindFilter === 'all' || itemKind(m) === kindFilter) &&
                   (!menuQuery || azNormalize(m.name).includes(menuQuery)));
                 if ((menuQuery || kindFilter !== 'all') && items.length === 0) return null;
                 const isCollapsed = !menuQuery && kindFilter === 'all' && collapsedCats.has(cat);
@@ -4029,6 +4164,9 @@ function AdminPageContent() {
                                 {item.costPrice ? ` · Maya: ${item.costPrice.toFixed(2)}₼ · Marja: ${Math.round((1 - item.costPrice / item.price) * 100)}%` : ''}
                               </p>
                             )}
+                            {itemKind(item) === 'set' && (
+                              <p className="text-xs text-primary-800 mt-0.5 break-words">{setLine(item.setItems, menu) || 'Tərkibi yoxdur — “Düzəlt” ilə əlavə edin'}</p>
+                            )}
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <button onClick={() => openEdit(item)} title="Məhsulu düzəlt — qiymət, şəkil, variantlar, maya dəyəri" className="text-xs text-blue-500 hover:text-blue-700 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors font-medium">Düzəlt</button>
@@ -4052,7 +4190,7 @@ function AdminPageContent() {
                       {!menuQuery && (
                       <div className="flex items-center gap-2 px-4 py-2.5 border-t border-stone-100 bg-stone-50/60">
                         <input
-                          type="text" placeholder={kindFilter === 'product' ? 'Yeni məhsul adı…' : 'Yeni yemək adı…'}
+                          type="text" placeholder={kindFilter === 'product' ? 'Yeni məhsul adı…' : kindFilter === 'set' ? 'Yeni set adı…' : 'Yeni yemək adı…'}
                           data-quickadd={cat}
                           value={quickAdd.cat === cat ? quickAdd.name : ''}
                           onChange={e => setQuickAdd({ cat, name: e.target.value, price: quickAdd.cat === cat ? quickAdd.price : '' })}

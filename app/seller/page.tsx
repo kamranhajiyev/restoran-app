@@ -59,6 +59,7 @@ import OrderNote from '@/components/OrderNote';
 import { moneyDiff } from '@/lib/shift-check';
 import { REFRESH_GATHER_MS } from '@/lib/coalesce';
 import { changedOrderId, gatherOrderIds, patchOrders, patchReady } from '@/lib/order-patch';
+import { azNormalize } from '@/lib/az-text';
 
 // How many writes the server has not seen. Two stores answer that question — the
 // browser till's IndexedDB queue and the desktop till's SQLite outbox — but only
@@ -123,11 +124,6 @@ async function readTerminalTables(companyId: string): Promise<{ tables: Restaura
 }
 
 const CANCEL_REASONS =['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
-
-const AZ_CHARS: Record<string, string> = { 'ç': 'c', 'ə': 'e', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u' };
-function azNormalize(s: string): string {
-  return s.toLocaleLowerCase('az').replace(/[çəğıöşü]/g, ch => AZ_CHARS[ch]);
-}
 
 // What couriers handed over inside a window, split nağd/kart — the amount the
 // history tiles add to the day's takings. A terminal linked by token asks the
