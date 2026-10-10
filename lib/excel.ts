@@ -6,7 +6,8 @@ import { orderLabel } from './order-label';
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
-const COL = {
+// The menu file's column headers. lib/menu-text.ts writes the same ones.
+export const COL = {
   category: 'Kateqoriya',
   name: 'Məhsul',
   price: 'Qiymət (₼)',

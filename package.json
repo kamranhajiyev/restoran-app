@@ -13,6 +13,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "agent": "tsx --env-file=agent/.env agent/index.ts",
+    "menu": "tsx scripts/make-menu.ts",
     "desktop:compile": "tsc -p electron/tsconfig.json",
     "desktop:till": "node scripts/build-desktop.mjs",
     "desktop": "npm run desktop:compile && node scripts/run-electron.mjs",
