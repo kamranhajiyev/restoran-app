@@ -5,11 +5,11 @@
 // table: it is read from the shift each time, so correcting a shift in Kassa
 // corrects the account too. Every number on the Maliyyə screen comes from here.
 
-import type { CashShift } from '@/types';
+import type { CashShift, ShiftMovement } from '@/types';
 import { businessDayStartUtc, tzDateStr, type CompanySettings } from './business-day';
 
 export type AccountKind = 'cash' | 'card' | 'bank';
-export type SourceKind = 'cash' | 'card';
+export type SourceKind = 'cash' | 'card' | 'inkassasiya';
 export type EntryKind = 'income' | 'expense' | 'transfer';
 
 export const ACCOUNT_KIND_LABEL: Record<AccountKind, string> = { cash: 'Nağd', card: 'Kart', bank: 'Bank' };
@@ -53,7 +53,7 @@ export interface FinanceTransaction {
   deletedBy?: string;
 }
 
-/** From `fromAt` on, shift cash (or card) money goes to this account; none when the owner turned it off. */
+/** From `fromAt` on, shift cash (or card) money, or what the till takes out as inkassasiya, goes to this account; none when the owner turned it off. */
 export interface FinanceSource {
   kind: SourceKind;
   accountId?: string;
@@ -133,12 +133,27 @@ export function sourceAccount(sources: FinanceSource[], kind: SourceKind, at: st
   return best?.accountId;
 }
 
+// The same word however it was typed: İnkassasiya, inkassasiya, INKASSASIYA.
+const plain = (text: string) => text.trim().replace(/[İIı]/g, 'i').toLowerCase();
+
+/**
+ * Cash the till took out of the drawer as inkassasiya. The till writes the
+ * reason itself; a cashier who typed the word as a məxaric meant the same.
+ */
+export function isInkassasiya(m: Pick<ShiftMovement, 'amount' | 'reason'>): boolean {
+  return m.amount < 0 && plain(m.reason ?? '') === plain(INKASSASIYA);
+}
+
 /**
  * The money one closed shift brought. The cash lines add up to what the drawer
  * really gained (counted − opening), so the account follows the drawer:
  * what came in over the counter, each cash in or out, and any shortfall.
  * Card: what the app recorded, corrected to the terminal's own total when the
  * cashier entered it.
+ *
+ * Inkassasiya at the till leaves the drawer like any cash out, but it is not
+ * spent: it moves to the account the owner keeps for it, as a transfer. With
+ * no such account it is a cash out like the rest.
  *
  * "Came in" is money, not sales: it holds what riders paid back for older
  * shifts too, which is why it is not called satış.
@@ -158,10 +173,17 @@ export function shiftEntries(shift: CashShift, sources: FinanceSource[]): Financ
   if (cash) {
     const moved = shift.movements.reduce((t, m) => t + m.amount, 0);
     line('cash', cash, shift.expectedCash - shift.openingCash - moved, 'Növbə bağlandı · nağd daxilolma', CAT_CASH_IN);
-    shift.movements.forEach((m, i) =>
+    const taken = sourceAccount(sources, 'inkassasiya', at);
+    shift.movements.forEach((m, i) => {
+      if (taken && taken !== cash && isInkassasiya(m)) {
+        out.push({ id: `shift:${shift.id}:mov:${m.id ?? i}`, at, kind: 'transfer', accountId: cash, toAccountId: taken,
+          amount: round2(-m.amount), title: INKASSASIYA, category: INKASSASIYA, by: m.by, shiftId: shift.id });
+        return;
+      }
       line(`mov:${m.id ?? i}`, cash, m.amount, m.reason || (m.amount > 0 ? CAT_MOVE_IN : CAT_MOVE_OUT),
         // A rider's payback is delivery money, not just "cash put in the drawer".
-        m.amount > 0 ? (m.reason === CAT_COURIER ? CAT_COURIER : CAT_MOVE_IN) : CAT_MOVE_OUT, m.by));
+        m.amount > 0 ? (m.reason === CAT_COURIER ? CAT_COURIER : CAT_MOVE_IN) : CAT_MOVE_OUT, m.by);
+    });
     if (shift.countedCash !== undefined) {
       line('cashdiff', cash, shift.countedCash - shift.expectedCash, 'Kassa fərqi', CAT_CASH_DIFF);
     }
@@ -304,7 +326,19 @@ export function monthRange(month: string, s: CompanySettings): { from: string; t
 export function accountOffBlock(accountId: string, sources: FinanceSource[], now: string): string | null {
   if (sourceAccount(sources, 'cash', now) === accountId) return 'Növbənin nağd pulu bu hesaba düşür. Əvvəlcə başqa hesab seçin.';
   if (sourceAccount(sources, 'card', now) === accountId) return 'Növbənin kart pulu bu hesaba düşür. Əvvəlcə başqa hesab seçin.';
+  if (sourceAccount(sources, 'inkassasiya', now) === accountId) return 'Kassadan inkassasiya bu hesaba düşür. Əvvəlcə başqa hesab seçin.';
   return null;
+}
+
+/**
+ * Whether the accounts every restaurant starts with still have to be made:
+ * Nağd, Bank and İnkassasiya on a first visit, or only İnkassasiya for an owner
+ * who made their own accounts before the till could write one. The database
+ * makes them (finance_defaults), once: a source row is the mark, so an owner
+ * who turned inkassasiya off is not given the account again.
+ */
+export function missingDefaults(accounts: FinanceAccount[], sources: FinanceSource[]): boolean {
+  return accounts.length === 0 || !sources.some(s => s.kind === 'inkassasiya');
 }
 
 /** All the money there is: every account's balance, switched-off ones too. */

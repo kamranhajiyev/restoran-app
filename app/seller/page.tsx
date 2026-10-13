@@ -583,7 +583,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const [terminalInput, setTerminalInput] = useState('');
   const [movAmount, setMovAmount]       = useState('');
   const [movReason, setMovReason]       = useState('');
-  const [movOut, setMovOut]             = useState(true);
+  // 'ink': inkassasiya, cash taken out of the drawer and handed over, not spent.
+  const [movKind, setMovKind]           = useState<'out' | 'in' | 'ink'>('out');
   const [showMovForm, setShowMovForm]   = useState(false);
   const [justClosed, setJustClosed]     = useState(false);
 
@@ -2524,13 +2525,16 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   async function handleAddMovement() {
     if (!shift) return;
     const raw = parseFloat(movAmount) || 0;
-    if (raw <= 0 || !movReason.trim()) return;
+    // Maliyyə reads this reason as a transfer to the owner's inkassasiya
+    // account, not as money spent (isInkassasiya).
+    const reason = movKind === 'ink' ? 'İnkassasiya' : movReason.trim();
+    if (raw <= 0 || !reason) return;
     // The id is what lets an admin correct this entry later — generate it here so
     // the optimistic row and the stored one are the same movement.
-    const mv: ShiftMovement = { id: crypto.randomUUID(), at: new Date().toISOString(), amount: movOut ? -raw : raw, reason: movReason.trim(), by: effectiveSeller };
+    const mv: ShiftMovement = { id: crypto.randomUUID(), at: new Date().toISOString(), amount: movKind === 'in' ? raw : -raw, reason, by: effectiveSeller };
     const prevShift = shift;
     setShift({ ...shift, movements: [...shift.movements, mv] });
-    setShowMovForm(false); setMovAmount(''); setMovReason('');
+    setShowMovForm(false); setMovAmount(''); setMovReason(''); setMovKind('out');
     try {
       if (overrideCompanyId) {
         // The movement already carries the id an admin uses to correct it later,
@@ -3564,27 +3568,35 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                     <div className="mb-3 p-3 bg-stone-50 rounded-xl space-y-2">
                       <div className="flex rounded-lg overflow-hidden border border-stone-200">
                         <button
-                          onClick={() => setMovOut(true)}
-                          className={`flex-1 py-2 text-xs font-semibold transition-colors ${movOut ? 'bg-red-500 text-white' : 'bg-white text-stone-600'}`}
+                          onClick={() => setMovKind('out')}
+                          className={`flex-1 py-2 text-xs font-semibold transition-colors ${movKind === 'out' ? 'bg-red-500 text-white' : 'bg-white text-stone-600'}`}
                         >− Məxaric</button>
                         <button
-                          onClick={() => setMovOut(false)}
-                          className={`flex-1 py-2 text-xs font-semibold transition-colors ${!movOut ? 'bg-green-500 text-white' : 'bg-white text-stone-600'}`}
+                          onClick={() => setMovKind('in')}
+                          className={`flex-1 py-2 text-xs font-semibold transition-colors ${movKind === 'in' ? 'bg-green-500 text-white' : 'bg-white text-stone-600'}`}
                         >+ Mədaxil</button>
+                        <button
+                          onClick={() => setMovKind('ink')}
+                          className={`flex-1 py-2 text-xs font-semibold transition-colors ${movKind === 'ink' ? 'bg-primary-800 text-white' : 'bg-white text-stone-600'}`}
+                        >İnkassasiya</button>
                       </div>
                       <input
                         type="number" min="0" step="0.01" placeholder="Məbləğ (₼)"
                         value={movAmount} onChange={e => setMovAmount(e.target.value)}
                         className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
                       />
-                      <input
-                        type="text" placeholder="Səbəb (məs. su kuryeri)"
-                        value={movReason} onChange={e => setMovReason(e.target.value)}
-                        className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700"
-                      />
+                      {movKind === 'ink' ? (
+                        <p className="text-xs text-stone-500">Kassadan götürülüb təhvil verilən pul. Xərc sayılmır.</p>
+                      ) : (
+                        <input
+                          type="text" placeholder="Səbəb (məs. su kuryeri)"
+                          value={movReason} onChange={e => setMovReason(e.target.value)}
+                          className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700"
+                        />
+                      )}
                       <button
                         onClick={handleAddMovement}
-                        disabled={!(parseFloat(movAmount) > 0) || !movReason.trim()}
+                        disabled={!(parseFloat(movAmount) > 0) || (movKind !== 'ink' && !movReason.trim())}
                         className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-40 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
                       >Yadda saxla</button>
                     </div>

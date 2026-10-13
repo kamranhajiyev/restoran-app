@@ -3,23 +3,23 @@
 // Maliyyə — the owner's money accounts.
 //
 // Accounts with their balances, the lines that moved them, and a month's income
-// and expense. Closed shifts bring their cash and card money by themselves; the
-// owner types the rest (expense, income, transfer, inkassasiya). Nothing is
-// counted here: every number comes from lib/finance.
+// and expense. Closed shifts bring their cash and card money by themselves, and
+// the inkassasiya the cashier wrote in them; the owner types the rest (expense,
+// income, transfer). Nothing is counted here: every number comes from lib/finance.
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Plus, Minus, ArrowLeftRight, ArrowDownLeft, ArrowUpRight, Banknote, CreditCard, Landmark, Wallet, Pencil, Trash2, Settings, X, AlertTriangle,
+  Plus, Minus, ArrowLeftRight, ArrowDownLeft, ArrowUpRight, CreditCard, Landmark, Wallet, Pencil, Trash2, Settings, X, AlertTriangle,
   ChevronLeft, ChevronRight, ChevronDown,
 } from 'lucide-react';
 import {
-  fetchFinance, fetchFinanceClosing, saveFinanceClosings, createFinanceAccount, updateFinanceAccount, deleteFinanceAccount,
+  fetchFinance, fetchFinanceClosing, saveFinanceClosings, ensureFinanceDefaults, createFinanceAccount, updateFinanceAccount, deleteFinanceAccount,
   setFinanceSource, addFinanceTransaction, deleteFinanceTransaction, type FinanceData,
 } from '@/lib/store';
 import {
   ACCOUNT_KIND_LABEL, EXPENSE_CATEGORIES, INCOME_CATEGORIES, INKASSASIYA,
   accountBalances, accountEditText, accountOffBlock, addMonths, cashStartHint, dayLabel, deletedAccounts, deletedEntries, dueClosings, entriesBetween, entriesByDay, entriesOfAccount, financeEntries, financeReport,
-  inClosedMonth, isClosedMonth, liveAccounts, monthLabel, monthRange, netOf, openGaps, parseAmount, sourceAccount, totalBalance,
+  inClosedMonth, isClosedMonth, liveAccounts, missingDefaults, monthLabel, monthRange, netOf, openGaps, parseAmount, sourceAccount, totalBalance,
   type AccountKind, type EntryKind, type FinanceAccount, type FinanceClosing, type FinanceEntry, type SourceKind,
 } from '@/lib/finance';
 import { getSession } from '@/lib/auth';
@@ -27,8 +27,12 @@ import { DialogState } from '@/components/AppDialog';
 import { inputCls, btnPrimary, btnGhost, Modal } from '@/components/panel-ui';
 import { CompanySettings, businessToday, tzDateStr, tzTime } from '@/lib/business-day';
 
-type FormKind = 'income' | 'expense' | 'transfer' | 'ink';
-const FORM_TITLE: Record<FormKind, string> = { income: 'Gəlir', expense: 'Xərc', transfer: 'Köçürmə', ink: INKASSASIYA };
+type FormKind = 'income' | 'expense' | 'transfer';
+const FORM_TITLE: Record<FormKind, string> = { income: 'Gəlir', expense: 'Xərc', transfer: 'Köçürmə' };
+// What each account can be set to take by itself.
+const SOURCE_KINDS: SourceKind[] = ['cash', 'card', 'inkassasiya'];
+const SOURCE_LABEL: Record<SourceKind, string> = { cash: 'Nağd pul', card: 'Kart pulu', inkassasiya: 'Kassadan inkassasiya' };
+const SOURCE_TAG: Record<SourceKind, string> = { cash: 'Növbənin nağd pulu', card: 'Növbənin kart pulu', inkassasiya: 'Kassadan inkassasiya' };
 
 const money = (n: number) => `${n.toFixed(2)} ₼`;
 const card = 'bg-white rounded-xl border border-stone-100';
@@ -71,6 +75,14 @@ export default function FinancePanel({ setDialog, bizSettings }: {
   // "no money" (LESSONS: failed is not empty).
   async function reload() {
     let next = await fetchFinance();
+    // The accounts every restaurant starts with, made once by the database.
+    let made: Awaited<ReturnType<typeof ensureFinanceDefaults>> = null;
+    // Read before they were made: the open shift is in it even if the next read fails.
+    const startShifts = next?.shifts ?? [];
+    if (next && missingDefaults(next.accounts, next.sources)) {
+      made = await ensureFinanceDefaults(me);
+      if (made && made !== 'none') next = await fetchFinance();
+    }
     if (next) {
       // Months that have ended are closed here, once: saved, then read back.
       // If the save fails the page still counts them itself, as before.
@@ -80,6 +92,19 @@ export default function FinancePanel({ setDialog, bizSettings }: {
     }
     if (next) setData(next);
     setFailed(!next);
+    // Said once, and only now: the accounts exist even when the read after them failed.
+    if (made === 'all') {
+      setDialog({
+        title: 'Hesablar yaradıldı',
+        message: <>
+          «Nağd», «Bank» və «İnkassasiya» hesabları yaradıldı. Növbə bağlananda nağd pul «Nağd»a, kart pulu «Bank»a düşür;
+          kassirin növbədə yazdığı inkassasiya «İnkassasiya» hesabına keçir. Adları dəyişə, yeni hesab əlavə edə bilərsiniz.
+          <span className="block mt-2 text-amber-700">«Nağd» hesabının başlanğıc qalığını yazın. {cashStartHint(startShifts)}</span>
+        </>,
+      });
+    } else if (made === 'inkassasiya') {
+      flash('«İnkassasiya» hesabı yaradıldı: kassirin növbədə yazdığı inkassasiya bura düşəcək');
+    }
   }
   useEffect(() => { reload(); }, []);
 
@@ -122,15 +147,16 @@ export default function FinancePanel({ setDialog, bizSettings }: {
   const source: Record<SourceKind, string | undefined> = {
     cash: sourceAccount(data.sources, 'cash', now),
     card: sourceAccount(data.sources, 'card', now),
+    inkassasiya: sourceAccount(data.sources, 'inkassasiya', now),
   };
 
   async function changeSource(kind: SourceKind, accountId: string) {
     const err = await setFinanceSource(kind, accountId || null, me);
     if (err) return fail(err);
     await reload();
-    flash(accountId
-      ? `Bundan sonra bağlanan növbələrin ${kind === 'cash' ? 'nağd' : 'kart'} pulu «${nameOf(accountId)}» hesabına düşəcək`
-      : 'Söndürüldü');
+    flash(!accountId ? 'Söndürüldü'
+      : kind === 'inkassasiya' ? `Bundan sonra bağlanan növbələrin inkassasiyası «${nameOf(accountId)}» hesabına düşəcək`
+      : `Bundan sonra bağlanan növbələrin ${kind === 'cash' ? 'nağd' : 'kart'} pulu «${nameOf(accountId)}» hesabına düşəcək`);
   }
 
   function askDelete(e: FinanceEntry) {
@@ -236,9 +262,9 @@ export default function FinancePanel({ setDialog, bizSettings }: {
                   <p className={`text-xl font-bold tabular-nums mt-3 break-words ${balance[a.id] < 0 ? 'text-red-600' : 'text-stone-900'}`}>
                     {money(balance[a.id] ?? 0)}
                   </p>
-                  {(source.cash === a.id || source.card === a.id) && (
+                  {SOURCE_KINDS.some(k => source[k] === a.id) && (
                     <p className="text-[11px] font-medium text-primary-700 mt-0.5">
-                      {[source.cash === a.id && 'Növbənin nağd pulu', source.card === a.id && 'Növbənin kart pulu'].filter(Boolean).join(' və ')} bura düşür
+                      {SOURCE_KINDS.filter(k => source[k] === a.id).map(k => SOURCE_TAG[k]).join(' və ')} bura düşür
                     </p>
                   )}
                 </div>
@@ -250,7 +276,6 @@ export default function FinancePanel({ setDialog, bizSettings }: {
             <button className={`${btnColor} bg-green-600 hover:bg-green-700`} onClick={() => setTxForm('income')}><Plus className="w-4 h-4" />Gəlir</button>
             <button className={`${btnColor} bg-red-600 hover:bg-red-700`} onClick={() => setTxForm('expense')}><Minus className="w-4 h-4" />Xərc</button>
             <button className={`${btnGhost} bg-white disabled:opacity-50`} onClick={() => setTxForm('transfer')} disabled={active.length < 2}><ArrowLeftRight className="w-4 h-4" />Köçürmə</button>
-            <button className={btnPrimary} onClick={() => setTxForm('ink')} disabled={active.length < 2}><Banknote className="w-4 h-4" />{INKASSASIYA}</button>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-4 items-start">
@@ -351,13 +376,21 @@ export default function FinancePanel({ setDialog, bizSettings }: {
               Növbə bağlananda pulu seçdiyiniz hesaba özü düşür. Açıq növbənin pulu bağlanana qədər görünmür.
               Seçim yalnız bundan sonra bağlanan növbələrə aiddir.
             </p>
-            {(['cash', 'card'] as SourceKind[]).map(kind => (
-              <Field key={kind} label={kind === 'cash' ? 'Nağd pul' : 'Kart pulu'}>
+            {SOURCE_KINDS.map(kind => (
+              <Field key={kind} label={SOURCE_LABEL[kind]}>
                 <select className={inputCls} value={source[kind] ?? ''} onChange={e => changeSource(kind, e.target.value)}>
                   <option value="">— heç bir hesaba —</option>
-                  {accounts.filter(a => a.active || a.id === source[kind]).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  {/* Inkassasiya into the account the cash is already in would move nothing. */}
+                  {accounts.filter(a => (a.active || a.id === source[kind])
+                    && !(kind === 'inkassasiya' && a.id === source.cash) && !(kind === 'cash' && a.id === source.inkassasiya))
+                    .map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
                 {kind === 'cash' && <p className="text-xs text-amber-700 mt-1.5">{startHint}</p>}
+                {kind === 'inkassasiya' && (
+                  <p className="text-xs text-stone-500 mt-1.5">
+                    Kassir açıq növbədə «İnkassasiya» yazanda pul nağd hesabından bu hesaba keçir. Hesab seçilməsə, kassa məxarici (xərc) kimi yazılır.
+                  </p>
+                )}
               </Field>
             ))}
             <button className={btnGhost} onClick={() => setSettingsOpen(false)}>Bağla</button>
@@ -425,7 +458,7 @@ export default function FinancePanel({ setDialog, bizSettings }: {
       )}
       {txForm && (
         <TransactionForm
-          kind={txForm} accounts={active} balance={balance} cashAccount={source.cash} me={me} closing={closing}
+          kind={txForm} accounts={active} balance={balance} me={me} closing={closing}
           usedCategories={data.transactions.filter(t => t.kind === txForm && t.category).map(t => t.category!)}
           onClose={() => setTxForm(null)}
           onDone={async () => { setTxForm(null); await reload(); flash('Yazıldı'); }}
@@ -601,13 +634,12 @@ function localInputNow(): string {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
-function TransactionForm({ kind, accounts, balance, cashAccount, usedCategories, me, closing, onClose, onDone }: {
-  kind: FormKind; accounts: FinanceAccount[]; balance: Record<string, number>; cashAccount?: string; closing?: FinanceClosing;
+function TransactionForm({ kind, accounts, balance, usedCategories, me, closing, onClose, onDone }: {
+  kind: FormKind; accounts: FinanceAccount[]; balance: Record<string, number>; closing?: FinanceClosing;
   usedCategories: string[]; me: string; onClose: () => void; onDone: () => void;
 }) {
-  const two = kind === 'transfer' || kind === 'ink';
-  const firstFrom = (kind === 'ink' && accounts.find(a => a.id === cashAccount)?.id)
-    || (kind === 'ink' && accounts.find(a => a.kind === 'cash')?.id) || accounts[0]?.id || '';
+  const two = kind === 'transfer';
+  const firstFrom = accounts[0]?.id ?? '';
   // One id for the life of the form: pressing save again after a lost reply
   // writes the same row, not a second one.
   const [id] = useState(() => crypto.randomUUID());
@@ -634,7 +666,7 @@ function TransactionForm({ kind, accounts, balance, cashAccount, usedCategories,
     setBusy(true); setError(null);
     const err = await addFinanceTransaction({
       id, kind: two ? 'transfer' : kind, accountId: from, toAccountId: two ? to : undefined, amount: n,
-      category: kind === 'ink' ? INKASSASIYA : kind === 'transfer' ? undefined : category.trim() || undefined,
+      category: two ? undefined : category.trim() || undefined,
       note: note.trim() || undefined, happenedAt: when.toISOString(), createdBy: me,
     });
     setBusy(false);

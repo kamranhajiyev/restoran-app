@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   accountBalances, accountEditText, accountOffBlock, addMonths, cashStartHint, dueClosings, inClosedMonth, isClosedMonth, monthOf, deletedAccounts, deletedEntries, liveAccounts, dayLabel, entriesBetween, entriesByDay, entriesOfAccount, monthLabel, totalBalance, financeEntries, financeReport, monthRange, parseAmount,
-  gapEntries, netOf, openGaps, shiftEntries, sourceAccount, INKASSASIYA,
+  gapEntries, isInkassasiya, missingDefaults, netOf, openGaps, shiftEntries, sourceAccount, INKASSASIYA,
   type FinanceAccount, type FinanceClosing, type FinanceSource, type FinanceTransaction,
 } from '@/lib/finance';
 import type { CashShift } from '@/types';
@@ -166,6 +166,98 @@ describe('balances', () => {
   it('the account shift money goes to cannot be switched off', () => {
     expect(accountOffBlock('kassa', sources, '2026-10-13T00:00:00Z')).toMatch(/nağd/);
     expect(accountOffBlock('seyf', sources, '2026-10-13T00:00:00Z')).toBeNull();
+  });
+});
+
+// 2026-10-13: inkassasiya was a button in Maliyyə, but the cash it takes is in
+// the open shift's drawer, which Maliyyə does not see until the shift closes.
+// Written there it came off the account twice: once as inkassasiya, once as the
+// drawer's shortfall at close. The cashier now writes it in the open shift.
+describe('inkassasiya written at the till', () => {
+  const withInk: FinanceSource[] = [...sources, { kind: 'inkassasiya', accountId: 'ink', fromAt: '2026-10-10T00:00:00Z' }];
+  // The same shift, with 60 taken out as inkassasiya: the drawer should hold 95, and does.
+  const taken: CashShift = { ...shift, expectedCash: 95, countedCash: 95,
+    movements: [...shift.movements, { id: 'm3', at: '2026-10-12T15:00:00Z', amount: -60, reason: INKASSASIYA, by: 'Aysel' }] };
+  const accounts = [acc('kassa', 50), acc('ink'), acc('kart', 0, 'card')];
+
+  it('moves the money to the inkassasiya account: a transfer, not an expense', () => {
+    const line = shiftEntries(taken, withInk).find(l => l.id === 'shift:s1:mov:m3')!;
+    expect([line.kind, line.accountId, line.toAccountId, line.amount, line.category, line.by])
+      .toEqual(['transfer', 'kassa', 'ink', 60, INKASSASIYA, 'Aysel']);
+    // It came with the shift, so Maliyyə cannot delete it; it is corrected in Kassa.
+    expect(line.shiftId).toBe('s1');
+    const r = financeReport(financeEntries([], [taken], withInk));
+    expect([...r.income, ...r.expense].map(x => x.category)).not.toContain(INKASSASIYA);
+    expect(r.totalExpense).toBe(35 + 1);   // the ice and the terminal's 1 ₼, as before
+  });
+
+  it('the cash account still ends on what the drawer holds, and no money is lost on the way', () => {
+    const b = accountBalances(accounts, financeEntries([], [taken], withInk));
+    expect(b.kassa).toBe(taken.countedCash);
+    expect(b.ink).toBe(60);
+    const before = accountBalances(accounts, financeEntries([], [{ ...shift, expectedCash: 155, countedCash: 155 }], withInk));
+    expect(totalBalance(b)).toBe(totalBalance(before));
+  });
+
+  it('is seen only when the shift closes, with the rest of its money', () => {
+    expect(shiftEntries({ ...taken, closedAt: undefined, expectedCash: undefined }, withInk)).toEqual([]);
+  });
+
+  it('with no account for it, it is a cash out like before', () => {
+    const plain = (s: FinanceSource[]) => shiftEntries(taken, s).find(l => l.id === 'shift:s1:mov:m3')!;
+    for (const s of [
+      sources,                                                                        // never chosen
+      [...withInk, { kind: 'inkassasiya' as const, fromAt: '2026-10-11T00:00:00Z' }],   // turned off
+      [...sources, { kind: 'inkassasiya' as const, accountId: 'ink', fromAt: '2026-10-13T00:00:00Z' }],   // chosen after the shift closed
+      [...sources, { kind: 'inkassasiya' as const, accountId: 'kassa', fromAt: '2026-10-10T00:00:00Z' }], // the cash account itself
+    ]) {
+      expect([plain(s).kind, plain(s).accountId, plain(s).toAccountId, plain(s).category]).toEqual(['expense', 'kassa', undefined, 'Kassa məxarici']);
+    }
+  });
+
+  it('is told by its reason, however the word was typed, and only when cash went out', () => {
+    for (const reason of [INKASSASIYA, 'inkassasiya', ' INKASSASIYA ', 'İNKASSASİYA']) expect(isInkassasiya({ amount: -5, reason }), reason).toBe(true);
+    expect(isInkassasiya({ amount: 5, reason: INKASSASIYA })).toBe(false);
+    expect(isInkassasiya({ amount: -5, reason: 'buz' })).toBe(false);
+    expect(isInkassasiya({ amount: -5, reason: 'inkassasiya üçün çanta' })).toBe(false);
+  });
+
+  it('the till writes that reason, in the browser and the exe alike, and Maliyyə has no button of its own', () => {
+    const seller = readFileSync('app/seller/page.tsx', 'utf8');
+    expect(seller).toContain(`movKind === 'ink' ? '${INKASSASIYA}' : movReason.trim()`);
+    expect(seller).toMatch(/amount: movKind === 'in' \? raw : -raw, reason,/);
+    // The exe keeps the movement as the page sent it.
+    expect(readFileSync('electron/till-write.ts', 'utf8')).toMatch(/movements: \[\.\.\.shift\.movements, movement\]/);
+    const panel = readFileSync('components/FinancePanel.tsx', 'utf8');
+    expect(panel).not.toMatch(/setTxForm\('ink'\)/);
+    expect(panel).toMatch(/type FormKind = 'income' \| 'expense' \| 'transfer';/);
+  });
+
+  it('the account it goes to cannot be switched off', () => {
+    expect(accountOffBlock('ink', withInk, '2026-10-13T00:00:00Z')).toMatch(/inkassasiya/);
+    expect(accountOffBlock('ink', sources, '2026-10-13T00:00:00Z')).toBeNull();
+  });
+
+  it('the starting accounts are made once: all three on a first visit, only İnkassasiya for an owner with their own', () => {
+    expect(missingDefaults([], [])).toBe(true);
+    expect(missingDefaults([acc('kassa')], sources)).toBe(true);
+    expect(missingDefaults([acc('kassa'), acc('ink')], withInk)).toBe(false);
+    // Turned off by the owner: the row is still the mark, nothing is made again.
+    expect(missingDefaults([acc('kassa')], [...sources, { kind: 'inkassasiya', fromAt: '2026-10-11T00:00:00Z' }])).toBe(false);
+
+    const sql = readFileSync('supabase/migrations/20261020_finance_inkassasiya.sql', 'utf8');
+    expect(sql).toMatch(/check \(kind in \('cash', 'card', 'inkassasiya'\)\)/);
+    expect(sql).toMatch(/if not exists \(select 1 from finance_accounts where company_id = p_company_id\) then/);
+    expect(sql).toMatch(/if not exists \(select 1 from finance_sources where company_id = p_company_id and kind = 'inkassasiya'\) then/);
+    for (const name of ['Nağd', 'Bank', 'İnkassasiya']) expect(sql, name).toContain(`'${name}'`);
+    // Only the owner, never the public key or a cashier login.
+    // A cashier's "no owner company" compares as null, and null has to refuse as well.
+    expect(sql).toMatch(/if not coalesce\(\(p_company_id = get_my_owner_company_id\(\)\) or is_superadmin\(\), false\) then\s+raise exception 'owner_only'/);
+    expect(sql).toMatch(/revoke all on function public\.finance_defaults\(uuid, text\) from public, anon;/);
+    expect(sql).not.toMatch(/^grant [^;]* to [^;]*\b(anon|public)\b/m);
+    // The page asks the database, and only when something is missing.
+    const panel = readFileSync('components/FinancePanel.tsx', 'utf8');
+    expect(panel).toMatch(/if \(next && missingDefaults\(next\.accounts, next\.sources\)\) \{\s+made = await ensureFinanceDefaults\(me\);/);
   });
 });
 

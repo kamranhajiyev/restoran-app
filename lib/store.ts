@@ -3118,7 +3118,20 @@ export async function deleteFinanceAccount(id: string, by: string): Promise<stri
   return null;
 }
 
-/** From now on, closed shifts' cash (or card) money goes to this account; null turns it off. */
+/**
+ * Makes the accounts every restaurant starts with, once (finance_defaults in
+ * the database decides what is missing). Says what it made, or null when it
+ * could not: the page then shows what there is.
+ */
+export async function ensureFinanceDefaults(createdBy: string): Promise<'all' | 'inkassasiya' | 'none' | null> {
+  try {
+    const { data, error } = await supabase.rpc('finance_defaults', { p_company_id: _companyId, p_by: createdBy });
+    if (error) { console.error('[ensureFinanceDefaults]', error); return null; }
+    return data === 'all' || data === 'inkassasiya' ? data : 'none';
+  } catch { return null; }
+}
+
+/** From now on, closed shifts' cash (or card) money, or the till's inkassasiya, goes to this account; null turns it off. */
 export async function setFinanceSource(kind: SourceKind, accountId: string | null, createdBy: string): Promise<string | null> {
   const { error } = await supabase.from('finance_sources')
     .insert({ company_id: _companyId, kind, account_id: accountId, created_by: createdBy });
