@@ -2990,8 +2990,8 @@ export interface FinanceData {
   transactions: FinanceTransaction[];
   sources: FinanceSource[];
   /** Shifts closed since the first account was set to take shift money, and the open one:
-   *  its opening cash shows what left the drawer after the last count, and is
-   *  what a new cash account starts from. */
+   *  its inkassasiya counts already, and its opening cash is what a new cash
+   *  account starts from. */
   shifts: CashShift[];
   /** The newest closed month. Lines and shifts are read from its end on only. */
   closing?: FinanceClosing;
@@ -3016,7 +3016,7 @@ export async function fetchFinance(): Promise<FinanceData | null> {
   try {
     // The newest closing first: it says from when the rest has to be read.
     const { data: closed, error: closedError } = await supabase.from('finance_closings')
-      .select('month, until, moved, carry').order('month', { ascending: false }).limit(1).maybeSingle();
+      .select('month, until, moved').order('month', { ascending: false }).limit(1).maybeSingle();
     if (closedError) return null;
     const until = closed ? new Date(closed.until).toISOString() : undefined;
 
@@ -3025,7 +3025,7 @@ export async function fetchFinance(): Promise<FinanceData | null> {
         .select('id, name, kind, opening_balance, active, created_at, edits, deleted_at, deleted_by').order('created_at').order('id').range(a, b)),
       readAll(async (a, b) => {
         const q = supabase.from('finance_transactions')
-          .select('id, kind, account_id, to_account_id, amount, category, note, happened_at, created_by, gap_shift_id, deleted_at, deleted_by');
+          .select('id, kind, account_id, to_account_id, amount, category, note, happened_at, created_by, deleted_at, deleted_by');
         // Deleted lines of any age: Silinənlər lists them all.
         return (until ? q.or(`happened_at.gte.${until},deleted_at.not.is.null`) : q)
           .order('happened_at', { ascending: false }).order('id').range(a, b);
@@ -3054,14 +3054,13 @@ export async function fetchFinance(): Promise<FinanceData | null> {
         id: t.id, kind: t.kind as FinanceTransaction['kind'], accountId: t.account_id,
         toAccountId: t.to_account_id ?? undefined, amount: Number(t.amount),
         category: t.category ?? undefined, note: t.note ?? undefined,
-        happenedAt: t.happened_at, createdBy: t.created_by ?? undefined, gapShiftId: t.gap_shift_id ?? undefined,
+        happenedAt: t.happened_at, createdBy: t.created_by ?? undefined,
         deletedAt: t.deleted_at ?? undefined, deletedBy: t.deleted_by ?? undefined,
       })),
       sources: sources.map(s => ({ kind: s.kind as SourceKind, accountId: s.account_id ?? undefined, fromAt: s.from_at })),
       shifts: shifts.map(mapShift),
       closing: closed && until ? {
         month: closed.month, until, moved: (closed.moved ?? {}) as Record<string, number>,
-        carry: (closed.carry ?? undefined) as CashShift | undefined,
       } : undefined,
     };
   } catch { return null; }
@@ -3080,7 +3079,7 @@ export async function fetchFinanceClosing(month: string): Promise<FinanceEntry[]
 export async function saveFinanceClosings(closings: FinanceClosing[], closedBy: string): Promise<string | null> {
   for (const c of closings) {
     const { error } = await supabase.from('finance_closings').upsert({
-      company_id: _companyId, month: c.month, until: c.until, moved: c.moved, carry: c.carry ?? null,
+      company_id: _companyId, month: c.month, until: c.until, moved: c.moved,
       entries: c.entries ?? [], closed_by: closedBy,
     }, { onConflict: 'company_id,month', ignoreDuplicates: true });
     if (error) { console.error('[saveFinanceClosings]', error); return error.message; }
@@ -3131,7 +3130,7 @@ export async function ensureFinanceDefaults(createdBy: string): Promise<'all' | 
   } catch { return null; }
 }
 
-/** From now on, closed shifts' cash (or card) money, or the till's inkassasiya, goes to this account; null turns it off. */
+/** From now on, closed shifts' cash (or card) money, or inkassasiya as it is written, goes to this account; null turns it off. */
 export async function setFinanceSource(kind: SourceKind, accountId: string | null, createdBy: string): Promise<string | null> {
   const { error } = await supabase.from('finance_sources')
     .insert({ company_id: _companyId, kind, account_id: accountId, created_by: createdBy });
@@ -3144,7 +3143,7 @@ export async function addFinanceTransaction(t: FinanceTransaction): Promise<stri
   const { error } = await supabase.from('finance_transactions').upsert({
     id: t.id, company_id: _companyId, kind: t.kind, account_id: t.accountId, to_account_id: t.toAccountId ?? null,
     amount: t.amount, category: t.category || null, note: t.note || null,
-    happened_at: t.happenedAt, created_by: t.createdBy ?? null, gap_shift_id: t.gapShiftId ?? null,
+    happened_at: t.happenedAt, created_by: t.createdBy ?? null,
   }, { onConflict: 'id', ignoreDuplicates: true });
   if (error) { console.error('[addFinanceTransaction]', error); return error.code === 'FN001' ? financeError(error) : error.message; }
   return null;

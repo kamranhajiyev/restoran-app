@@ -3,23 +3,24 @@
 // Maliyyə — the owner's money accounts.
 //
 // Accounts with their balances, the lines that moved them, and a month's income
-// and expense. Closed shifts bring their cash and card money by themselves, and
-// the inkassasiya the cashier wrote in them; the owner types the rest (expense,
-// income, transfer). Nothing is counted here: every number comes from lib/finance.
+// and expense. A closed shift brings its cash and card money by itself, and
+// inkassasiya arrives as it is written in Kassa; the owner types the rest
+// (expense, income, transfer). Nothing is counted here: every number comes
+// from lib/finance.
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Plus, Minus, ArrowLeftRight, ArrowDownLeft, ArrowUpRight, CreditCard, Landmark, Wallet, Pencil, Trash2, Settings, X, AlertTriangle,
-  ChevronLeft, ChevronRight, ChevronDown,
+  Plus, Minus, ArrowLeftRight, ArrowDownLeft, ArrowUpRight, CreditCard, Landmark, Wallet, Pencil, Trash2, Settings, X,
+  ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import {
   fetchFinance, fetchFinanceClosing, saveFinanceClosings, ensureFinanceDefaults, createFinanceAccount, updateFinanceAccount, deleteFinanceAccount,
   setFinanceSource, addFinanceTransaction, deleteFinanceTransaction, type FinanceData,
 } from '@/lib/store';
 import {
-  ACCOUNT_KIND_LABEL, EXPENSE_CATEGORIES, INCOME_CATEGORIES, INKASSASIYA,
+  ACCOUNT_KIND_LABEL, EXPENSE_CATEGORIES, INCOME_CATEGORIES,
   accountBalances, accountEditText, accountOffBlock, addMonths, cashStartHint, dayLabel, deletedAccounts, deletedEntries, dueClosings, entriesBetween, entriesByDay, entriesOfAccount, financeEntries, financeReport,
-  inClosedMonth, isClosedMonth, liveAccounts, missingDefaults, monthLabel, monthRange, netOf, openGaps, parseAmount, sourceAccount, totalBalance,
+  inClosedMonth, isClosedMonth, liveAccounts, missingDefaults, monthLabel, monthRange, parseAmount, sourceAccount, totalBalance,
   type AccountKind, type EntryKind, type FinanceAccount, type FinanceClosing, type FinanceEntry, type SourceKind,
 } from '@/lib/finance';
 import { getSession } from '@/lib/auth';
@@ -61,8 +62,6 @@ export default function FinancePanel({ setDialog, bizSettings }: {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Tap an account to see only its lines.
   const [filter, setFilter] = useState<string | undefined>();
-  const [gapForm, setGapForm] = useState<FinanceEntry | null>(null);
-  const [allGaps, setAllGaps] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
   // A closed month's lines, read when the owner turns to it. null: could not be read.
   const [past, setPast] = useState<{ month: string; entries: FinanceEntry[] | null } | null>(null);
@@ -86,7 +85,7 @@ export default function FinancePanel({ setDialog, bizSettings }: {
     if (next) {
       // Months that have ended are closed here, once: saved, then read back.
       // If the save fails the page still counts them itself, as before.
-      const due = dueClosings(financeEntries(next.transactions, next.shifts, next.sources, next.closing), next.shifts,
+      const due = dueClosings(financeEntries(next.transactions, next.shifts, next.sources, next.closing),
         next.closing, businessToday(bizSettings).slice(0, 7), bizSettings);
       if (due.length > 0 && !(await saveFinanceClosings(due, me))) next = await fetchFinance();
     }
@@ -98,12 +97,12 @@ export default function FinancePanel({ setDialog, bizSettings }: {
         title: 'Hesablar yaradıldı',
         message: <>
           «Nağd», «Bank» və «İnkassasiya» hesabları yaradıldı. Növbə bağlananda nağd pul «Nağd»a, kart pulu «Bank»a düşür;
-          kassirin növbədə yazdığı inkassasiya «İnkassasiya» hesabına keçir. Adları dəyişə, yeni hesab əlavə edə bilərsiniz.
+          kassada yazılan inkassasiya dərhal «İnkassasiya» hesabına düşür. Adları dəyişə, yeni hesab əlavə edə bilərsiniz.
           <span className="block mt-2 text-amber-700">«Nağd» hesabının başlanğıc qalığını yazın. {cashStartHint(startShifts)}</span>
         </>,
       });
     } else if (made === 'inkassasiya') {
-      flash('«İnkassasiya» hesabı yaradıldı: kassirin növbədə yazdığı inkassasiya bura düşəcək');
+      flash('«İnkassasiya» hesabı yaradıldı: kassada yazılan inkassasiya bura düşəcək');
     }
   }
   useEffect(() => { reload(); }, []);
@@ -120,9 +119,7 @@ export default function FinancePanel({ setDialog, bizSettings }: {
   const entries = useMemo(() => data ? financeEntries(data.transactions, data.shifts, data.sources, data.closing) : [], [data]);
   const balance = useMemo(() => data ? accountBalances(liveAccounts(data.accounts), entries, data.closing) : {}, [data, entries]);
   const total = useMemo(() => totalBalance(balance), [balance]);
-  const gaps = useMemo(() => openGaps(entries), [entries]);
   const deleted = useMemo(() => data ? deletedEntries(data.transactions) : [], [data]);
-  const gapNet = useMemo(() => netOf(gaps), [gaps]);
   const range = useMemo(() => monthRange(month, bizSettings), [month, bizSettings]);
   const pastEntries = past?.month === month ? past.entries : undefined;
   const shown = useMemo(() => closedMonth ? pastEntries ?? [] : entriesBetween(entries, range.from, range.to),
@@ -155,7 +152,7 @@ export default function FinancePanel({ setDialog, bizSettings }: {
     if (err) return fail(err);
     await reload();
     flash(!accountId ? 'Söndürüldü'
-      : kind === 'inkassasiya' ? `Bundan sonra bağlanan növbələrin inkassasiyası «${nameOf(accountId)}» hesabına düşəcək`
+      : kind === 'inkassasiya' ? `Bundan sonra kassada yazılan inkassasiya «${nameOf(accountId)}» hesabına düşəcək`
       : `Bundan sonra bağlanan növbələrin ${kind === 'cash' ? 'nağd' : 'kart'} pulu «${nameOf(accountId)}» hesabına düşəcək`);
   }
 
@@ -193,39 +190,6 @@ export default function FinancePanel({ setDialog, bizSettings }: {
         </div>
       ) : (
         <>
-          {/* Cash that moved between shifts with nothing written: one line, opened to answer */}
-          {gaps.length > 0 && (
-            <div className={`${card} overflow-hidden`}>
-              <button className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-stone-50 transition-colors"
-                onClick={() => setAllGaps(!allGaps)} aria-expanded={allGaps}>
-                <span className="w-9 h-9 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0"><AlertTriangle className="w-4 h-4" /></span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold text-stone-800">Kassadan yazılmamış pul: {gaps.length} dəfə</span>
-                  <span className="block text-xs text-stone-500">Növbə bağlananda sayılan pul növbəti növbədə kassada olmayıb. Hara getdiyini seçin.</span>
-                </span>
-                <span className={`text-base font-bold tabular-nums shrink-0 ${gapNet < 0 ? 'text-red-600' : 'text-green-700'}`}>{gapNet > 0 ? '+' : ''}{money(gapNet)}</span>
-                <ChevronDown className={`w-4 h-4 text-stone-400 shrink-0 transition-transform ${allGaps ? 'rotate-180' : ''}`} />
-              </button>
-              {allGaps && (
-                <div className="border-t border-stone-100 max-h-72 overflow-y-auto">
-                  {gaps.map(g => (
-                    <div key={g.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-stone-100 last:border-b-0">
-                      <p className="text-sm text-stone-600 min-w-0 flex-1 break-words">
-                        {dayLabel(tzDateStr(new Date(g.at), bizSettings.timezone))}, {tzTime(g.at, bizSettings.timezone)}
-                        {g.gap && <span className="text-stone-400"> · {money(g.gap.counted)} sayıldı, {money(g.gap.opened)} ilə açıldı</span>}
-                      </p>
-                      <span className={`text-sm font-semibold tabular-nums shrink-0 ${g.kind === 'expense' ? 'text-red-600' : 'text-green-700'}`}>
-                        {g.kind === 'expense' ? '−' : '+'}{money(g.amount)}
-                      </span>
-                      <button className="shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 transition-colors"
-                        onClick={() => setGapForm(g)}>{g.kind === 'expense' ? 'Hara getdi?' : 'Haradan gəldi?'}</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
           {/* All the money, then where it is */}
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div className="min-w-0">
@@ -323,9 +287,7 @@ export default function FinancePanel({ setDialog, bizSettings }: {
                         </div>
                         <div className="text-right shrink-0">
                           <p className={`text-sm font-semibold tabular-nums ${look.text}`}>{look.sign}{money(e.amount)}</p>
-                          {e.closed ? null : e.gapShiftId
-                            ? <button className="text-[11px] font-semibold text-amber-700 underline" onClick={() => setGapForm(e)}>{e.kind === 'expense' ? 'Hara getdi?' : 'Haradan gəldi?'}</button>
-                            : e.shiftId
+                          {e.closed ? null : e.shiftId
                             ? <span className="text-[11px] font-medium text-primary-700">Növbədən</span>
                             : <button className="text-stone-300 hover:text-red-500" onClick={() => askDelete(e)} aria-label="Sil"><Trash2 className="w-3.5 h-3.5" /></button>}
                         </div>
@@ -363,7 +325,7 @@ export default function FinancePanel({ setDialog, bizSettings }: {
                   ))}
                 </div>
               ))}
-              <p className="text-xs text-stone-400">Köçürmə və inkassasiya nə gəlirdir, nə xərc: pul yalnız hesabdan hesaba keçir.</p>
+              <p className="text-xs text-stone-400">Köçürmə nə gəlirdir, nə xərc: pul yalnız hesabdan hesaba keçir. Kassadakı mədaxil və məxaric burada göstərilmir, onlar Kassada qalır.</p>
             </div>
           </div>
         </>
@@ -373,22 +335,19 @@ export default function FinancePanel({ setDialog, bizSettings }: {
         <Modal title="Növbənin pulu" onClose={() => setSettingsOpen(false)}>
           <div className="space-y-3">
             <p className="text-xs text-stone-500">
-              Növbə bağlananda pulu seçdiyiniz hesaba özü düşür. Açıq növbənin pulu bağlanana qədər görünmür.
-              Seçim yalnız bundan sonra bağlanan növbələrə aiddir.
+              Növbə bağlananda nağd və kart pulu seçdiyiniz hesaba özü düşür; açıq növbənin pulu bağlanana qədər görünmür.
+              İnkassasiya kassada yazılan kimi düşür. Seçim yalnız bundan sonrakılara aiddir.
             </p>
             {SOURCE_KINDS.map(kind => (
               <Field key={kind} label={SOURCE_LABEL[kind]}>
                 <select className={inputCls} value={source[kind] ?? ''} onChange={e => changeSource(kind, e.target.value)}>
                   <option value="">— heç bir hesaba —</option>
-                  {/* Inkassasiya into the account the cash is already in would move nothing. */}
-                  {accounts.filter(a => (a.active || a.id === source[kind])
-                    && !(kind === 'inkassasiya' && a.id === source.cash) && !(kind === 'cash' && a.id === source.inkassasiya))
-                    .map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  {accounts.filter(a => a.active || a.id === source[kind]).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
                 {kind === 'cash' && <p className="text-xs text-amber-700 mt-1.5">{startHint}</p>}
                 {kind === 'inkassasiya' && (
                   <p className="text-xs text-stone-500 mt-1.5">
-                    Kassir açıq növbədə «İnkassasiya» yazanda pul nağd hesabından bu hesaba keçir. Hesab seçilməsə, kassa məxarici (xərc) kimi yazılır.
+                    Kassada «İnkassasiya» yazılanda pul dərhal bu hesaba düşür. Hesab seçilməsə, heç bir hesaba yazılmır.
                   </p>
                 )}
               </Field>
@@ -448,13 +407,6 @@ export default function FinancePanel({ setDialog, bizSettings }: {
             <button className={btnGhost} onClick={() => setTrashOpen(false)}>Bağla</button>
           </div>
         </Modal>
-      )}
-      {gapForm && (
-        <GapForm
-          gap={gapForm} accounts={active.filter(a => a.id !== gapForm.accountId)} me={me}
-          onClose={() => setGapForm(null)}
-          onDone={async () => { setGapForm(null); await reload(); flash('Yazıldı'); }}
-        />
       )}
       {txForm && (
         <TransactionForm
@@ -560,69 +512,6 @@ function AccountForm({ account, offBlock, me, tz, startHint, onClose, onDone }: 
             )}
           </div>
         )}
-      </div>
-    </Modal>
-  );
-}
-
-// Where unwritten cash went (or came from). The answer is a transaction for the
-// whole gap, dated at the opening that showed it and naming that shift.
-function GapForm({ gap, accounts, me, onClose, onDone }: {
-  gap: FinanceEntry; accounts: FinanceAccount[]; me: string; onClose: () => void; onDone: () => void;
-}) {
-  const out = gap.kind === 'expense';
-  const [id] = useState(() => crypto.randomUUID());
-  const [way, setWay] = useState<'account' | 'category'>(accounts.length > 0 ? 'account' : 'category');
-  const [other, setOther] = useState(accounts[0]?.id ?? '');
-  const [category, setCategory] = useState('');
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function save() {
-    if (way === 'account' && !other) return setError('Hesab seçin.');
-    if (way === 'category' && !category.trim()) return setError('Kateqoriyanı yazın.');
-    setBusy(true); setError(null);
-    const base = { id, amount: gap.amount, note: note.trim() || undefined, happenedAt: gap.at, createdBy: me, gapShiftId: gap.gapShiftId };
-    const err = await addFinanceTransaction(way === 'account'
-      ? { ...base, kind: 'transfer', accountId: out ? gap.accountId : other, toAccountId: out ? other : gap.accountId, category: out ? INKASSASIYA : undefined }
-      : { ...base, kind: out ? 'expense' : 'income', accountId: gap.accountId, category: category.trim() });
-    setBusy(false);
-    if (err) setError(err); else onDone();
-  }
-
-  const pick = (value: 'account' | 'category', label: string, disabled = false) => (
-    <label className={`flex items-center gap-2 text-sm ${disabled ? 'text-stone-300' : 'text-stone-700'}`}>
-      <input type="radio" name="gap-way" checked={way === value} disabled={disabled} onChange={() => setWay(value)} />{label}
-    </label>
-  );
-
-  return (
-    <Modal title={out ? 'Pul hara getdi?' : 'Pul haradan gəldi?'} onClose={onClose}>
-      <div className="space-y-3">
-        <div className="rounded-lg bg-stone-50 px-3 py-2.5 text-sm text-stone-700">
-          <p className="text-xl font-bold tabular-nums text-stone-900">{money(gap.amount)}</p>
-          {gap.gap && <p className="text-xs text-stone-500 mt-0.5">Növbə {money(gap.gap.counted)} ilə bağlandı, növbəti {money(gap.gap.opened)} ilə açıldı.</p>}
-        </div>
-        {pick('account', out ? 'Başqa hesaba keçdi (seyf, bank…)' : 'Başqa hesabdan gəldi', accounts.length === 0)}
-        {way === 'account' && (
-          <select className={inputCls} value={other} onChange={e => setOther(e.target.value)}>
-            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
-        )}
-        {pick('category', out ? 'Xərcləndi' : 'Gəlirdir')}
-        {way === 'category' && (
-          <>
-            <input className={inputCls} list="finance-gap-categories" maxLength={60} value={category} onChange={e => setCategory(e.target.value)} placeholder="kateqoriya seçin və ya yazın" />
-            <datalist id="finance-gap-categories">{(out ? EXPENSE_CATEGORIES : INCOME_CATEGORIES).map(c => <option key={c} value={c} />)}</datalist>
-          </>
-        )}
-        <Field label="Qeyd"><input className={inputCls} maxLength={300} value={note} onChange={e => setNote(e.target.value)} placeholder="istəyə görə" /></Field>
-        {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
-        <div className="flex gap-2 pt-1">
-          <button className={btnPrimary} disabled={busy} onClick={save}>Yaz</button>
-          <button className={btnGhost} onClick={onClose}>Bağla</button>
-        </div>
       </div>
     </Modal>
   );

@@ -21,7 +21,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { getSession, logout, validateSession, clearLocalSession, updateSession, lockAdmin, unlockAdmin, isAdminLocked, rememberTill, forgetTill } from '@/lib/auth';
 import {
   fetchMenu, fetchMenuOrNull, fetchCategoriesOrNull, saveMenu, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, editOrderPayment, editCourierOrderSplit, deleteOrder, restoreOrder,
-  fetchShifts, fetchShiftSales, closeShift, fetchOpenShift,
+  fetchShifts, fetchShiftSales, closeShift, fetchOpenShift, addShiftMovement,
   updateShiftMovement, deleteShiftMovement, correctShiftTotals,
   fetchCategories, saveCategories,
   fetchTrash, moveToTrash, restoreFromTrash, permanentlyDeleteFromTrash, emptyTrash,
@@ -665,6 +665,11 @@ function AdminPageContent() {
   const [adminCountedInput, setAdminCountedInput] = useState('');
   const [adminTerminalInput, setAdminTerminalInput] = useState('');
   const [closingShift, setClosingShift] = useState(false);
+  // Inkassasiya from the open shift. One id for one entry: pressed again after a
+  // lost reply, it is looked for in the shift before it is sent a second time.
+  const [inkInput, setInkInput] = useState('');
+  const [inkBusy, setInkBusy] = useState(false);
+  const inkId = useRef<string | null>(null);
   // Kassa corrections. The unlock is deliberately component state, not localStorage:
   // it lapses on reload, so a terminal left open doesn't stay editable.
   const [kassaEditUnlocked, setKassaEditUnlocked] = useState(false);
@@ -1166,6 +1171,31 @@ function AdminPageContent() {
       setAdminCountedInput(''); setAdminTerminalInput('');
       setShifts(await fetchShifts());
     } finally { setClosingShift(false); }
+  }
+
+  // The same entry the till writes (cash out, reason "İnkassasiya"), so Kassa
+  // and Maliyyə read it the same way wherever it was written.
+  async function handleAdminInkassasiya(open: CashShift) {
+    const amount = Math.round((parseFloat(inkInput.replace(',', '.')) || 0) * 100) / 100;
+    if (amount <= 0 || inkBusy) return;
+    setInkBusy(true); setKassaEditError(null);
+    try {
+      const id = inkId.current ?? (inkId.current = crypto.randomUUID());
+      // A failed read is not "not written": without the shift in hand nothing is sent.
+      const before = await fetchOpenShift();
+      if (!before || before.id !== open.id) {
+        setKassaEditError('Açıq növbə oxunmadı. İnterneti yoxlayıb yenidən cəhd edin.');
+        return;
+      }
+      if (!before.movements.some(m => m.id === id)) {
+        await addShiftMovement(open.id, { id, at: new Date().toISOString(), amount: -amount, reason: 'İnkassasiya', by: adminName });
+      }
+      // Said only once it is read back from the shift.
+      const after = await fetchOpenShift();
+      if (after?.movements.some(m => m.id === id)) { inkId.current = null; setInkInput(''); }
+      else setKassaEditError('İnkassasiya yazılmadı. İnterneti yoxlayıb yenidən cəhd edin.');
+      await refreshKassa();
+    } finally { setInkBusy(false); }
   }
 
   // ── Kassa corrections ──────────────────────────────────────────────────────
@@ -3834,6 +3864,22 @@ function AdminPageContent() {
                         <p className="text-xs text-stone-500 -mt-1.5">Kassaya daxil deyil — bank terminalından keçir</p>
                         {renderSales(shiftSalesOf(open))}
                         {renderMovements(open)}
+                        <div className="border-t pt-3 flex gap-2">
+                          <input
+                            type="number" min="0" step="0.01" placeholder="İnkassasiya məbləği (₼)"
+                            value={inkInput}
+                            onChange={e => setInkInput(e.target.value)}
+                            className="flex-1 min-w-0 border border-stone-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
+                          />
+                          <button
+                            onClick={() => handleAdminInkassasiya(open)}
+                            disabled={inkBusy || !(parseFloat(inkInput) > 0)}
+                            className="bg-primary-800 hover:bg-primary-900 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors flex items-center gap-2"
+                          >
+                            {inkBusy && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
+                            İnkassasiya
+                          </button>
+                        </div>
                         {renderEditTrail(open)}
                         {kassaEditError && (
                           <p className="text-xs font-semibold text-red-500">{kassaEditError}</p>

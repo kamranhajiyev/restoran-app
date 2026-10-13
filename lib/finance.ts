@@ -1,7 +1,9 @@
 // Maliyyə — the owner's money accounts (admin only).
 //
 // An account's balance is what it started with, plus what the owner entered by
-// hand, plus the money closed shifts brought. Shift money is not copied into a
+// hand, plus what shifts brought. Kassa keeps its own books; a shift reaches
+// Maliyyə in three ways only: its cash and its card money when it closes, and
+// inkassasiya the moment it is written. Shift money is not copied into a
 // table: it is read from the shift each time, so correcting a shift in Kassa
 // corrects the account too. Every number on the Maliyyə screen comes from here.
 
@@ -46,8 +48,6 @@ export interface FinanceTransaction {
   note?: string;
   happenedAt: string;
   createdBy?: string;
-  /** The owner's answer to a gap: the shift whose opening showed it. */
-  gapShiftId?: string;
   /** Deleted: it counts nowhere, and stays in Silinənlər with who and when. */
   deletedAt?: string;
   deletedBy?: string;
@@ -60,7 +60,7 @@ export interface FinanceSource {
   fromAt: string;
 }
 
-/** One line of the Maliyyə list: typed by the owner, or brought by a closed shift. */
+/** One line of the Maliyyə list: typed by the owner, or brought by a shift. */
 export interface FinanceEntry {
   id: string;
   at: string;
@@ -73,10 +73,6 @@ export interface FinanceEntry {
   by?: string;
   /** Set on a line a shift brought: it cannot be deleted here, only corrected in Kassa. */
   shiftId?: string;
-  /** Set on cash that moved between two shifts with nothing written: the owner still has to say where. */
-  gapShiftId?: string;
-  /** What the shift before counted and what this one opened with. */
-  gap?: { counted: number; opened: number };
   deletedAt?: string;
   deletedBy?: string;
   /** Read from a closed month: it can no longer be deleted or answered. */
@@ -95,8 +91,6 @@ export interface FinanceClosing {
   until: string;
   /** What each account gained or lost before `until`; its starting balance is not in it. */
   moved: Record<string, number>;
-  /** The last shift counted before `until`: the next opening is compared with it. */
-  carry?: CashShift;
   /** The month's own lines, newest first. */
   entries?: FinanceEntry[];
 }
@@ -104,14 +98,7 @@ export interface FinanceClosing {
 export const INKASSASIYA = 'İnkassasiya';
 export const CAT_CASH_IN = 'Növbə · nağd';
 export const CAT_CARD_IN = 'Növbə · kart';
-export const CAT_MOVE_IN = 'Kassa mədaxili';
-export const CAT_MOVE_OUT = 'Kassa məxarici';
-// The reason the till and the database write on the cash-in a rider's payback makes.
-export const CAT_COURIER = 'Kuryer ödənişi';
-export const CAT_CASH_DIFF = 'Kassa fərqi';
-export const CAT_CARD_DIFF = 'Terminal fərqi';
-export const CAT_GAP_OUT = 'Naməlum çıxarış';
-export const CAT_GAP_IN = 'Naməlum mədaxil';
+export const CAT_INK_IN = 'Növbə · inkassasiya';
 export const EXPENSE_CATEGORIES = ['İcarə', 'Maaş', 'Kommunal', 'Təchizat', 'Təmir', 'Vergi', 'Digər xərc'];
 export const INCOME_CATEGORIES = ['Digər gəlir', 'İnvestisiya'];
 
@@ -145,102 +132,44 @@ export function isInkassasiya(m: Pick<ShiftMovement, 'amount' | 'reason'>): bool
 }
 
 /**
- * The money one closed shift brought. The cash lines add up to what the drawer
- * really gained (counted − opening), so the account follows the drawer:
- * what came in over the counter, each cash in or out, and any shortfall.
- * Card: what the app recorded, corrected to the terminal's own total when the
- * cashier entered it.
+ * What one shift brings to the owner's accounts. Kassa keeps its own books
+ * (cash in and out, riders, shortfalls) and none of that is listed here.
+ * Maliyyə takes three things only:
  *
- * Inkassasiya at the till leaves the drawer like any cash out, but it is not
- * spent: it moves to the account the owner keeps for it, as a transfer. With
- * no such account it is a cash out like the rest.
- *
- * "Came in" is money, not sales: it holds what riders paid back for older
- * shifts too, which is why it is not called satış.
+ * - when the shift closes, the cash it left: counted minus what it opened
+ *   with. The opening cash is not new money: it reached the account when the
+ *   shift before closed, and a shift may open with any amount.
+ * - when the shift closes, the card money: the terminal's own total when the
+ *   cashier entered it, otherwise what the app recorded.
+ * - inkassasiya, the moment it is written, in an open shift too: that cash has
+ *   already left the drawer for the owner. It is why the counted cash is lower,
+ *   so the two lines together are what the shift made in cash.
  */
 export function shiftEntries(shift: CashShift, sources: FinanceSource[]): FinanceEntry[] {
-  if (!shift.closedAt || shift.expectedCash === undefined) return [];
-  const at = shift.closedAt;
   const out: FinanceEntry[] = [];
-  const line = (key: string, accountId: string, signed: number, title: string, category: string, by?: string) => {
+  const line = (key: string, at: string, accountId: string, signed: number, title: string, category: string, by?: string) => {
     const amount = round2(Math.abs(signed));
     if (amount === 0) return;
     out.push({ id: `shift:${shift.id}:${key}`, at, kind: signed > 0 ? 'income' : 'expense', accountId, amount, title, category,
       by: by ?? shift.closedBy, shiftId: shift.id });
   };
 
+  shift.movements.forEach((m, i) => {
+    if (!isInkassasiya(m)) return;
+    const taken = sourceAccount(sources, 'inkassasiya', m.at);
+    if (taken) line(`ink:${m.id ?? i}`, m.at, taken, -m.amount, INKASSASIYA, CAT_INK_IN, m.by);
+  });
+  if (!shift.closedAt) return out;
+
+  const at = shift.closedAt;
   const cash = sourceAccount(sources, 'cash', at);
-  if (cash) {
-    const moved = shift.movements.reduce((t, m) => t + m.amount, 0);
-    line('cash', cash, shift.expectedCash - shift.openingCash - moved, 'Növbə bağlandı · nağd daxilolma', CAT_CASH_IN);
-    const taken = sourceAccount(sources, 'inkassasiya', at);
-    shift.movements.forEach((m, i) => {
-      if (taken && taken !== cash && isInkassasiya(m)) {
-        out.push({ id: `shift:${shift.id}:mov:${m.id ?? i}`, at, kind: 'transfer', accountId: cash, toAccountId: taken,
-          amount: round2(-m.amount), title: INKASSASIYA, category: INKASSASIYA, by: m.by, shiftId: shift.id });
-        return;
-      }
-      line(`mov:${m.id ?? i}`, cash, m.amount, m.reason || (m.amount > 0 ? CAT_MOVE_IN : CAT_MOVE_OUT),
-        // A rider's payback is delivery money, not just "cash put in the drawer".
-        m.amount > 0 ? (m.reason === CAT_COURIER ? CAT_COURIER : CAT_MOVE_IN) : CAT_MOVE_OUT, m.by);
-    });
-    if (shift.countedCash !== undefined) {
-      line('cashdiff', cash, shift.countedCash - shift.expectedCash, 'Kassa fərqi', CAT_CASH_DIFF);
-    }
-  }
+  const left = shift.countedCash ?? shift.expectedCash;
+  if (cash && left !== undefined) line('cash', at, cash, left - shift.openingCash, 'Növbə bağlandı · nağd pul', CAT_CASH_IN);
 
   const card = sourceAccount(sources, 'card', at);
-  if (card && shift.cardSales !== undefined) {
-    line('card', card, shift.cardSales, 'Növbə bağlandı · kart məbləği', CAT_CARD_IN);
-    if (shift.countedCard !== undefined) {
-      line('carddiff', card, shift.countedCard - shift.cardSales, 'Terminal fərqi', CAT_CARD_DIFF);
-    }
-  }
+  const terminal = shift.countedCard ?? shift.cardSales;
+  if (card && terminal !== undefined) line('card', at, card, terminal, 'Növbə bağlandı · kart məbləği', CAT_CARD_IN);
   return out;
-}
-
-/**
- * Cash that moved between two shifts with nothing written.
- *
- * Test Restoran, 2026-10-13: every shift opened with 0 ₼ though the one before
- * had counted money (133, 84.50…). The account only added what shifts brought,
- * so it went on showing cash that had left the drawer. The next opening is the
- * only sign: what it is short of the last count went out, what it is over came
- * in. Each gap is a line on the cash account until the owner says where the
- * money went — a transaction naming the shift (`gapShiftId`) answers that much
- * of it, and only what is left stays as "naməlum".
- */
-export function gapEntries(shifts: CashShift[], sources: FinanceSource[], transactions: FinanceTransaction[]): FinanceEntry[] {
-  const sorted = [...shifts].sort((a, b) => a.openedAt.localeCompare(b.openedAt));
-  const out: FinanceEntry[] = [];
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = sorted[i - 1], next = sorted[i];
-    if (!prev.closedAt || prev.countedCash === undefined) continue;
-    // Only when the count before went to the same account this opening belongs to.
-    const account = sourceAccount(sources, 'cash', next.openedAt);
-    if (!account || sourceAccount(sources, 'cash', prev.closedAt) !== account) continue;
-
-    const answered = transactions.reduce((t, x) => {
-      if (x.gapShiftId !== next.id || x.deletedAt) return t;
-      const q = Math.round(x.amount * 100);
-      if (x.kind === 'transfer') return t + (x.toAccountId === account ? q : x.accountId === account ? -q : 0);
-      return x.accountId === account ? t + (x.kind === 'income' ? q : -q) : t;
-    }, 0);
-    const rest = Math.round(next.openingCash * 100) - Math.round(prev.countedCash * 100) - answered;
-    if (rest === 0) continue;
-    out.push({
-      id: `gap:${next.id}`, at: next.openedAt, kind: rest > 0 ? 'income' : 'expense', accountId: account, amount: Math.abs(rest) / 100,
-      title: rest < 0 ? 'Kassadan götürülüb, yazılmayıb' : 'Kassaya qoyulub, yazılmayıb',
-      category: rest < 0 ? CAT_GAP_OUT : CAT_GAP_IN, by: next.openedBy,
-      gapShiftId: next.id, gap: { counted: prev.countedCash, opened: next.openingCash },
-    });
-  }
-  return out;
-}
-
-/** The gaps the owner has not explained yet, newest first. */
-export function openGaps(entries: FinanceEntry[]): FinanceEntry[] {
-  return entries.filter(e => e.gapShiftId !== undefined);
 }
 
 export function transactionEntry(t: FinanceTransaction): FinanceEntry {
@@ -259,8 +188,7 @@ const ms = (at: string) => Date.parse(at);
  * a second time.
  */
 export function financeEntries(transactions: FinanceTransaction[], shifts: CashShift[], sources: FinanceSource[], closing?: FinanceClosing): FinanceEntry[] {
-  const all = [...transactions.filter(t => !t.deletedAt).map(transactionEntry), ...shifts.flatMap(s => shiftEntries(s, sources)),
-    ...gapEntries(closing?.carry ? [closing.carry, ...shifts] : shifts, sources, transactions)];
+  const all = [...transactions.filter(t => !t.deletedAt).map(transactionEntry), ...shifts.flatMap(s => shiftEntries(s, sources))];
   const from = closing ? ms(closing.until) : undefined;
   return (from === undefined ? all : all.filter(e => ms(e.at) >= from)).sort((a, b) => ms(b.at) - ms(a.at));
 }
@@ -384,11 +312,6 @@ export function dayLabel(day: string): string {
   return `${d} ${AZ_MONTHS[m - 1] ?? ''}`;
 }
 
-/** What these lines add up to: money in minus money out (a transfer is neither). */
-export function netOf(entries: FinanceEntry[]): number {
-  return entries.reduce((t, e) => t + (e.kind === 'income' ? 1 : e.kind === 'expense' ? -1 : 0) * Math.round(e.amount * 100), 0) / 100;
-}
-
 /** The deleted lines, last deleted first. They count in no balance and no report. */
 export function deletedEntries(transactions: FinanceTransaction[]): FinanceEntry[] {
   return transactions.filter(t => t.deletedAt).map(transactionEntry)
@@ -419,11 +342,11 @@ export function deletedAccounts(accounts: FinanceAccount[]): FinanceAccount[] {
 /**
  * What to type as the starting balance of the account that takes shift cash.
  *
- * The account adds what each shift's drawer gained (counted − opening), so it
- * only follows the drawer when it starts from what the first shift opened
- * with. With a shift open that is its opening cash, not the cash in the drawer
- * now: what the shift has taken since is added when it closes, and typing it
- * here would count it twice.
+ * The account adds what each shift left (counted − opening), so it has to
+ * start from the cash there was before the first shift it counts. With a shift
+ * open that is its opening cash, not the cash in the drawer now: what the
+ * shift has taken since is added when it closes, and typing it here would
+ * count it twice.
  */
 export function cashStartHint(shifts: CashShift[]): string {
   const open = shifts.find(s => !s.closedAt);
@@ -439,38 +362,30 @@ export function monthOf(at: string, s: CompanySettings): string {
   return ms(at) < ms(from) ? addMonths(month, -1) : ms(at) >= ms(to) ? addMonths(month, 1) : month;
 }
 
-/** This month and the one before stay open, so the owner has time to explain what is unwritten. */
+/** This month and the one before stay open, so there is time to correct a shift or add a late line. */
 export const OPEN_MONTHS = 2;
 
 /**
  * The months that are due to be closed, oldest first, each ready to save.
  *
- * `entries` and `shifts` are everything still open (after `last`, the newest
- * closing). A month takes the lines dated in it; a gap nobody explained goes in
- * as "naməlum" and stays so. Each closing carries the totals of the ones before
- * it, so the newest one alone is enough to count from.
+ * `entries` is everything still open (after `last`, the newest closing). A
+ * month takes the lines dated in it. Each closing carries the totals of the
+ * ones before it, so the newest one alone is enough to count from.
  */
-export function dueClosings(entries: FinanceEntry[], shifts: CashShift[], last: FinanceClosing | undefined, currentMonth: string, s: CompanySettings): FinanceClosing[] {
+export function dueClosings(entries: FinanceEntry[], last: FinanceClosing | undefined, currentMonth: string, s: CompanySettings): FinanceClosing[] {
   const oldest = entries[entries.length - 1];
   let month = last ? addMonths(last.month, 1) : oldest ? monthOf(oldest.at, s) : undefined;
   if (!month) return [];
   const final = addMonths(currentMonth, -OPEN_MONTHS);
   const out: FinanceClosing[] = [];
   let from = last ? ms(last.until) : -Infinity;
-  let carry = last?.carry;
   const q: Record<string, number> = {};
   for (const [id, n] of Object.entries(last?.moved ?? {})) q[id] = Math.round(n * 100);
   for (; month <= final; month = addMonths(month, 1)) {
     const until = monthRange(month, s).to;
     const lines = entries.filter(e => ms(e.at) >= from && ms(e.at) < ms(until));
     movedBy(lines, q, false);
-    for (const x of shifts) {
-      if (!x.closedAt || ms(x.closedAt) >= ms(until) || (carry && ms(x.openedAt) <= ms(carry.openedAt))) continue;
-      // Only what the next opening is compared with.
-      carry = { id: x.id, openedAt: x.openedAt, openedBy: x.openedBy, openingCash: x.openingCash,
-        closedAt: x.closedAt, closedBy: x.closedBy, countedCash: x.countedCash, movements: [], edits: [] };
-    }
-    out.push({ month, until, moved: Object.fromEntries(Object.entries(q).map(([id, n]) => [id, n / 100])), carry, entries: lines });
+    out.push({ month, until, moved: Object.fromEntries(Object.entries(q).map(([id, n]) => [id, n / 100])), entries: lines });
     from = ms(until);
   }
   return out;

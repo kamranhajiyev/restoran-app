@@ -2525,8 +2525,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   async function handleAddMovement() {
     if (!shift) return;
     const raw = parseFloat(movAmount) || 0;
-    // Maliyyə reads this reason as a transfer to the owner's inkassasiya
-    // account, not as money spent (isInkassasiya).
+    // Maliyyə reads this reason and puts the money in the owner's inkassasiya
+    // account straight away (isInkassasiya).
     const reason = movKind === 'ink' ? 'İnkassasiya' : movReason.trim();
     if (raw <= 0 || !reason) return;
     // The id is what lets an admin correct this entry later — generate it here so
@@ -3557,12 +3557,21 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                 <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5">
                   <div className="flex items-center justify-between mb-3">
                     <h2 className="font-semibold text-stone-800 text-sm">Mədaxil / məxaric</h2>
-                    <button
-                      onClick={() => setShowMovForm(v => !v)}
-                      className="text-xs font-semibold text-primary-800 hover:text-primary-950 px-2.5 py-1 rounded-lg hover:bg-primary-50 transition-colors"
-                    >
-                      {showMovForm ? 'Bağla' : '+ Əlavə et'}
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      {/* Its own button: nobody looks for inkassasiya behind "+ Əlavə et". */}
+                      {!showMovForm && (
+                        <button
+                          onClick={() => { setMovKind('ink'); setShowMovForm(true); }}
+                          className="text-xs font-semibold text-white bg-primary-800 hover:bg-primary-900 px-2.5 py-1 rounded-lg transition-colors"
+                        >İnkassasiya</button>
+                      )}
+                      <button
+                        onClick={() => { if (!showMovForm) setMovKind('out'); setShowMovForm(v => !v); }}
+                        className="text-xs font-semibold text-primary-800 hover:text-primary-950 px-2.5 py-1 rounded-lg hover:bg-primary-50 transition-colors"
+                      >
+                        {showMovForm ? 'Bağla' : '+ Əlavə et'}
+                      </button>
+                    </div>
                   </div>
                   {showMovForm && (
                     <div className="mb-3 p-3 bg-stone-50 rounded-xl space-y-2">
@@ -3586,7 +3595,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                         className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
                       />
                       {movKind === 'ink' ? (
-                        <p className="text-xs text-stone-500">Kassadan götürülüb təhvil verilən pul. Xərc sayılmır.</p>
+                        <p className="text-xs text-stone-500">Kassadan götürülüb sahibə təhvil verilən pul.</p>
                       ) : (
                         <input
                           type="text" placeholder="Səbəb (məs. su kuryeri)"
