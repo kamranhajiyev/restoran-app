@@ -10,7 +10,7 @@ import {
   Coffee, BarChart2, Package, Bike, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
   GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link, Printer, Check, ArrowUp, ArrowDown, ChefHat,
-  Building2, AtSign,
+  Building2, AtSign, Landmark,
 } from 'lucide-react';
 import {
   DndContext, DragEndEvent, PointerSensor, useSensor, useSensors,
@@ -57,6 +57,7 @@ import { CashShift, Category, Hall, MenuItem, MenuItemVariant, ModifierGroup, Or
 import AppDialog, { DialogState } from '@/components/AppDialog';
 import AnbarPanel from '@/components/AnbarPanel';
 import CourierPanel from '@/components/CourierPanel';
+import FinancePanel from '@/components/FinancePanel';
 import StationsPanel from '@/components/StationsPanel';
 import ModifiersPanel from '@/components/ModifiersPanel';
 import OrderItemHistory from '@/components/OrderItemHistory';
@@ -120,7 +121,7 @@ const STATUS_LABELS: Record<OrderStatus, string> = {
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
 
-type Tab = 'stats' | 'orders' | 'kassa' | 'menu' | 'users' | 'tables' | 'anbar' | 'couriers' | 'logins';
+type Tab = 'stats' | 'orders' | 'kassa' | 'maliyye' | 'menu' | 'users' | 'tables' | 'anbar' | 'couriers' | 'logins';
 
 type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
@@ -197,6 +198,7 @@ const NAV_ITEMS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'stats',      label: 'Statistika',    icon: BarChart2 },
   { id: 'orders',     label: 'Sifarişlər',    icon: Receipt },
   { id: 'kassa',      label: 'Kassa',         icon: Wallet },
+  { id: 'maliyye',    label: 'Maliyyə',       icon: Landmark },
   { id: 'menu',       label: 'Menyu',         icon: Coffee },
   { id: 'users',      label: 'Əməkdaşlar', icon: Users },
   { id: 'tables',     label: 'Masalar',     icon: LayoutDashboard },
@@ -209,6 +211,7 @@ const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
   stats:      { title: 'Statistika & Hesabatlar', subtitle: 'Satış analitikası' },
   orders:     { title: 'Sifarişlər',              subtitle: 'Aktiv sifarişlər' },
   kassa:      { title: 'Kassa',                   subtitle: 'Növbələr və nağd pul nəzarəti' },
+  maliyye:    { title: 'Maliyyə',                 subtitle: 'Hesablar, gəlir, xərc və inkassasiya' },
   menu:       { title: 'Menyu',                    subtitle: 'Kateqoriyalar və məhsullar' },
   users:      { title: 'Əməkdaşlar',              subtitle: 'Satıcıları idarə et' },
   tables:     { title: 'Masalar',                 subtitle: 'Restoran masalarını idarə et' },
@@ -4476,6 +4479,13 @@ function AdminPageContent() {
           )}
 
           {/* ── ANBAR ──────────────────────────────────────────────────── */}
+          {/* ── MALİYYƏ ────────────────────────────────────────────────── */}
+          {tab === 'maliyye' && (
+            <div className="max-w-6xl">
+              <FinancePanel setDialog={setDialog} bizSettings={bizSettings} />
+            </div>
+          )}
+
           {tab === 'anbar' && (
             <div className="max-w-3xl">
               <AnbarPanel setDialog={setDialog} />

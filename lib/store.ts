@@ -11,6 +11,7 @@ import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
 import type { TillSettings } from './desktopPrint';
 import type { HealthProblem, HealthReport } from './health-report';
+import type { AccountEdit, AccountKind, FinanceAccount, FinanceClosing, FinanceEntry, FinanceSource, FinanceTransaction, SourceKind } from './finance';
 
 async function authHeaders(): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -2979,4 +2980,167 @@ export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promis
       courier: courierStillOut(data),
     };
   } catch { return null; }
+}
+
+// ─── Maliyyə (owner's money accounts, admin only) ─────────────────────────────
+
+export interface FinanceData {
+  /** Deleted accounts too: lib/finance tells them apart. */
+  accounts: FinanceAccount[];
+  transactions: FinanceTransaction[];
+  sources: FinanceSource[];
+  /** Shifts closed since the first account was set to take shift money, and the open one:
+   *  its opening cash shows what left the drawer after the last count, and is
+   *  what a new cash account starts from. */
+  shifts: CashShift[];
+  /** The newest closed month. Lines and shifts are read from its end on only. */
+  closing?: FinanceClosing;
+}
+
+// A balance is a sum over every row, and one read returns at most 1000: a
+// short list would be a wrong balance with nothing to say so.
+async function readAll<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[] | null> {
+  const size = 1000;
+  const out: T[] = [];
+  for (let from = 0; ; from += size) {
+    const { data, error } = await page(from, from + size - 1);
+    if (error || !data) return null;
+    out.push(...data);
+    if (data.length < size) return out;
+  }
+}
+
+/** Everything Maliyyə counts with, or null when any part could not be read — a
+ *  balance from half the rows must not reach the screen. */
+export async function fetchFinance(): Promise<FinanceData | null> {
+  try {
+    // The newest closing first: it says from when the rest has to be read.
+    const { data: closed, error: closedError } = await supabase.from('finance_closings')
+      .select('month, until, moved, carry').order('month', { ascending: false }).limit(1).maybeSingle();
+    if (closedError) return null;
+    const until = closed ? new Date(closed.until).toISOString() : undefined;
+
+    const [accounts, transactions, sources] = await Promise.all([
+      readAll(async (a, b) => supabase.from('finance_accounts')
+        .select('id, name, kind, opening_balance, active, created_at, edits, deleted_at, deleted_by').order('created_at').order('id').range(a, b)),
+      readAll(async (a, b) => {
+        const q = supabase.from('finance_transactions')
+          .select('id, kind, account_id, to_account_id, amount, category, note, happened_at, created_by, gap_shift_id, deleted_at, deleted_by');
+        // Deleted lines of any age: Silinənlər lists them all.
+        return (until ? q.or(`happened_at.gte.${until},deleted_at.not.is.null`) : q)
+          .order('happened_at', { ascending: false }).order('id').range(a, b);
+      }),
+      readAll(async (a, b) => supabase.from('finance_sources')
+        .select('kind, account_id, from_at').order('from_at').order('id').range(a, b)),
+    ]);
+    if (!accounts || !transactions || !sources) return null;
+
+    const first = sources.filter(s => s.account_id).map(s => new Date(s.from_at as string).toISOString()).sort()[0];
+    const since = first && until && until > first ? until : first;
+    const shifts = await readAll(async (a, b) => {
+      const q = supabase.from('cash_shifts').select('*');
+      return (since ? q.or(`closed_at.gte.${since},closed_at.is.null`) : q.is('closed_at', null))
+        .order('opened_at', { ascending: false }).order('id').range(a, b);
+    });
+    if (!shifts) return null;
+
+    return {
+      accounts: accounts.map(a => ({
+        id: a.id, name: a.name, kind: a.kind as AccountKind, openingBalance: Number(a.opening_balance),
+        active: a.active, createdAt: a.created_at, edits: Array.isArray(a.edits) ? (a.edits as AccountEdit[]) : [],
+        deletedAt: a.deleted_at ?? undefined, deletedBy: a.deleted_by ?? undefined,
+      })),
+      transactions: transactions.map(t => ({
+        id: t.id, kind: t.kind as FinanceTransaction['kind'], accountId: t.account_id,
+        toAccountId: t.to_account_id ?? undefined, amount: Number(t.amount),
+        category: t.category ?? undefined, note: t.note ?? undefined,
+        happenedAt: t.happened_at, createdBy: t.created_by ?? undefined, gapShiftId: t.gap_shift_id ?? undefined,
+        deletedAt: t.deleted_at ?? undefined, deletedBy: t.deleted_by ?? undefined,
+      })),
+      sources: sources.map(s => ({ kind: s.kind as SourceKind, accountId: s.account_id ?? undefined, fromAt: s.from_at })),
+      shifts: shifts.map(mapShift),
+      closing: closed && until ? {
+        month: closed.month, until, moved: (closed.moved ?? {}) as Record<string, number>,
+        carry: (closed.carry ?? undefined) as CashShift | undefined,
+      } : undefined,
+    };
+  } catch { return null; }
+}
+
+/** A closed month's lines as they were saved, or null when they could not be read. */
+export async function fetchFinanceClosing(month: string): Promise<FinanceEntry[] | null> {
+  try {
+    const { data, error } = await supabase.from('finance_closings').select('entries').eq('month', month).maybeSingle();
+    if (error) return null;
+    return (Array.isArray(data?.entries) ? data.entries as FinanceEntry[] : []).map(e => ({ ...e, closed: true }));
+  } catch { return null; }
+}
+
+/** Saves the months that are due, oldest first. A month already saved (a second tab) is kept as it is. */
+export async function saveFinanceClosings(closings: FinanceClosing[], closedBy: string): Promise<string | null> {
+  for (const c of closings) {
+    const { error } = await supabase.from('finance_closings').upsert({
+      company_id: _companyId, month: c.month, until: c.until, moved: c.moved, carry: c.carry ?? null,
+      entries: c.entries ?? [], closed_by: closedBy,
+    }, { onConflict: 'company_id,month', ignoreDuplicates: true });
+    if (error) { console.error('[saveFinanceClosings]', error); return error.message; }
+  }
+  return null;
+}
+
+function financeError(error: { code?: string; message: string }): string {
+  if (error.code === 'FN001') return 'Bu tarix bağlanmış aya düşür. Bağlanmış aya yazı əlavə etmək və ya oradan silmək olmur.';
+  if (error.code === '23505') return 'Bu adda hesab artıq var.';
+  if (error.code === '23503') return 'Bu hesabda əməliyyat var — silmək olmur. Hesabı söndürün.';
+  return error.message;
+}
+
+export async function createFinanceAccount(name: string, kind: AccountKind, openingBalance: number, createdBy: string): Promise<string | null> {
+  const { error } = await supabase.from('finance_accounts')
+    .insert({ company_id: _companyId, name: name.trim(), kind, opening_balance: openingBalance, created_by: createdBy });
+  if (error) { console.error('[createFinanceAccount]', error); return financeError(error); }
+  return null;
+}
+
+export async function updateFinanceAccount(id: string, patch: { name: string; kind: AccountKind; openingBalance: number; active: boolean }): Promise<string | null> {
+  const { error } = await supabase.from('finance_accounts')
+    .update({ name: patch.name.trim(), kind: patch.kind, opening_balance: patch.openingBalance, active: patch.active })
+    .eq('id', id);
+  if (error) { console.error('[updateFinanceAccount]', error); return financeError(error); }
+  return null;
+}
+
+/** Marks an account deleted. Only one nothing ever touched; one with history is refused (switch it off instead). */
+export async function deleteFinanceAccount(id: string, by: string): Promise<string | null> {
+  const { error } = await supabase.from('finance_accounts')
+    .update({ deleted_at: new Date().toISOString(), deleted_by: by }).eq('id', id).is('deleted_at', null);
+  if (error) { console.error('[deleteFinanceAccount]', error); return financeError(error); }
+  return null;
+}
+
+/** From now on, closed shifts' cash (or card) money goes to this account; null turns it off. */
+export async function setFinanceSource(kind: SourceKind, accountId: string | null, createdBy: string): Promise<string | null> {
+  const { error } = await supabase.from('finance_sources')
+    .insert({ company_id: _companyId, kind, account_id: accountId, created_by: createdBy });
+  if (error) { console.error('[setFinanceSource]', error); return error.message; }
+  return null;
+}
+
+/** `t.id` comes from the form, so pressing save again after a lost reply keeps one row. */
+export async function addFinanceTransaction(t: FinanceTransaction): Promise<string | null> {
+  const { error } = await supabase.from('finance_transactions').upsert({
+    id: t.id, company_id: _companyId, kind: t.kind, account_id: t.accountId, to_account_id: t.toAccountId ?? null,
+    amount: t.amount, category: t.category || null, note: t.note || null,
+    happened_at: t.happenedAt, created_by: t.createdBy ?? null, gap_shift_id: t.gapShiftId ?? null,
+  }, { onConflict: 'id', ignoreDuplicates: true });
+  if (error) { console.error('[addFinanceTransaction]', error); return error.code === 'FN001' ? financeError(error) : error.message; }
+  return null;
+}
+
+/** Marks the line deleted. It is never erased: the database keeps it, with who and when, for Silinənlər. */
+export async function deleteFinanceTransaction(id: string, by: string): Promise<string | null> {
+  const { error } = await supabase.from('finance_transactions')
+    .update({ deleted_at: new Date().toISOString(), deleted_by: by }).eq('id', id).is('deleted_at', null);
+  if (error) { console.error('[deleteFinanceTransaction]', error); return error.code === 'FN001' ? financeError(error) : error.message; }
+  return null;
 }
