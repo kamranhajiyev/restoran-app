@@ -177,6 +177,11 @@ A re-read that says the same thing must not count as a change. Exe, 2026-10-08:
 every 5-minute pull re-read the company settings into a new object, and Tarixçə
 reloaded on it — "Yüklənir...", back to the top (`keepSettings`).
 
+**Does something made on this screen look the same as it will after a reload?**
+Where "not loaded" and "empty" mean different things, a new item is empty.
+Test Restoran, 2026-10-14: a set made from the quick-add row opened in Düzəlt
+with no Set button and no contents until the page was refreshed (`submitQuickAdd`).
+
 ## 3. Money
 
 **Can the screen calculate a total from data that has not loaded yet?**

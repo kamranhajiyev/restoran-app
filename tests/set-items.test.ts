@@ -81,6 +81,14 @@ describe('Cəmi is counted in one place', () => {
     expect(admin).toMatch(/setKnown: item\.setItems !== undefined,/);
   });
 
+  // Owner report, 2026-10-14: a set made from the quick-add row opened in
+  // Düzəlt with no Set button and no contents until the page was refreshed.
+  it('a quick-added item opens in Düzəlt as known-empty, not unloaded', () => {
+    const quick = admin.slice(admin.indexOf('function submitQuickAdd'), admin.indexOf('function addVariant'));
+    expect(quick).toMatch(/setItems: setsLoaded \? \[\] : undefined,/);
+    expect(quick).toMatch(/modifierGroupIds: modifiersLoaded \? \[\] : undefined,/);
+  });
+
   it('the public menu does not send a set\'s contents', () => {
     expect(readFileSync('app/api/public-menu/route.ts', 'utf8')).not.toMatch(/set_items/);
   });

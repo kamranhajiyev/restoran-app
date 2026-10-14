@@ -1686,7 +1686,13 @@ function AdminPageContent() {
     if (!name || isNaN(price) || price < 0) return;
     // Follow the active filter tab: creating under "Məhsullar" makes a product,
     // under "Setlər" a set (filled in with Düzəlt), otherwise a meal.
-    const item: MenuItem = { id: crypto.randomUUID(), name, price: Math.round(price * 100) / 100, category: cat, available: true, kind: kindFilter === 'all' ? 'meal' : kindFilter };
+    // A new item has no parts and no modifier sets. Saying so ([], not undefined)
+    // lets Düzəlt show Növ and the set contents without a page refresh.
+    const item: MenuItem = {
+      id: crypto.randomUUID(), name, price: Math.round(price * 100) / 100, category: cat, available: true, kind: kindFilter === 'all' ? 'meal' : kindFilter,
+      setItems: setsLoaded ? [] : undefined,
+      modifierGroupIds: modifiersLoaded ? [] : undefined,
+    };
     const updated = [...menu, item];
     setMenu(updated);
     setQuickAdd({ cat, name: '', price: '' });
