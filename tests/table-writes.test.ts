@@ -30,9 +30,11 @@ describe('table writes', () => {
     expect(await updateTable(1, 'A', 4)).toBeNull();
   });
 
-  it('explain why a used table cannot be deleted', async () => {
-    answer = { error: { code: '23503', message: 'update or delete on table "restaurant_tables" violates foreign key constraint' } };
-    expect(await deleteTable(1)).toBe('Bu masada köhnə sifarişlər var — silmək olmaz.');
+  // Since 2026-10-14 old orders keep the table's name, so only an open order
+  // holds a table (20261024_order_table_name.sql).
+  it('explain why a table with an open order cannot be deleted', async () => {
+    answer = { error: { code: 'P0001', message: 'table_has_open_order: Aktiv sifarişi olan masanı silmək olmaz' } };
+    expect(await deleteTable(1)).toBe('Aktiv sifarişi olan masanı silmək olmaz.');
   });
 });
 

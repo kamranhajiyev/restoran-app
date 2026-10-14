@@ -7,6 +7,7 @@ import { courierDeleteBlock } from './couriers';
 import { printedStationColumn } from './stations';
 import { menuRowBatches } from './set-items';
 import { cleanRecipe } from './recipes';
+import { loginEventFromRow, type LoginEvent } from './login-events';
 import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
 import type { TillSettings } from './desktopPrint';
@@ -778,6 +779,7 @@ async function readOrders(opts?: OrderQuery): Promise<Order[]> {
       orderNumber: o.order_number ?? 0,
       tillNumber: o.till_number ?? undefined,
       tableNumber: o.table_id ?? 0,
+      tableName: o.table_name ?? undefined,
       sellerName: o.waiter_name,
       staffId: o.staff_id ?? undefined,
       courierId: o.courier_id ?? undefined,
@@ -2393,8 +2395,9 @@ export async function deleteTable(id: number): Promise<string | null> {
   const { error } = await supabase.from('restaurant_tables').delete().eq('id', id);
   if (error) {
     console.error('[deleteTable]', error);
-    // 23503: orders.table_id still points here. Old orders keep their table.
-    return error.code === '23503' ? 'Bu masada köhnə sifarişlər var — silmək olmaz.' : error.message;
+    // Old orders keep the table's name (orders.table_name); an open one still
+    // holds the table (table_delete_guard).
+    return /table_has_open_order/.test(error.message) ? 'Aktiv sifarişi olan masanı silmək olmaz.' : error.message;
   }
   return null;
 }
@@ -2634,15 +2637,7 @@ export async function verifyPassword(id: string, password: string): Promise<bool
 
 // ─── Login events ─────────────────────────────────────────────────────────────
 
-export interface LoginEvent {
-  id: string;
-  ip: string | null;
-  userAgent: string | null;
-  createdAt: string;
-  name: string;
-  username: string;
-  role: string;
-}
+export type { LoginEvent };
 
 // Null when the read failed, so the screen keeps what it shows.
 export async function fetchLoginEvents(): Promise<LoginEvent[] | null> {
@@ -2650,18 +2645,7 @@ export async function fetchLoginEvents(): Promise<LoginEvent[] | null> {
     const res = await fetch('/api/login-events', { headers: await authHeaders() });
     if (!res.ok) return null;
     const data = await res.json();
-    return data.map((e: Record<string, unknown>) => {
-      const p = (e.profiles ?? {}) as Record<string, unknown>;
-      return {
-        id: e.id,
-        ip: e.ip ?? null,
-        userAgent: e.user_agent ?? null,
-        createdAt: e.created_at,
-        name: p.name ?? '—',
-        username: p.username ?? '',
-        role: p.role ?? '',
-      };
-    });
+    return data.map(loginEventFromRow);
   } catch { return null; }
 }
 

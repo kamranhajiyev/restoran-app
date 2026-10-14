@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
   const db = createServerClient();
   let q = db
     .from('login_events')
-    .select('id, ip, user_agent, created_at, profiles(name, username, role)')
+    .select('id, ip, user_agent, created_at, name, username, role, profiles(name, username, role)')
     .order('created_at', { ascending: false })
     .limit(200);
 

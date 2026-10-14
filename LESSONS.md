@@ -35,7 +35,9 @@ there where history needs it?**
 Pickers, tabs, filters, reports, old orders. One shared rule decides each list
 (`lib/couriers`). Test Restoran, 2026-10-06: a deactivated courier was gone from
 the new-order picker but still in the seller's Kuryerlər tab, and a courier with
-orders could not be deleted at all.
+orders could not be deleted at all. Test Restoran, 2026-10-14: the same for a
+table with past orders, and for Rasim, whose two July logins in Girişlər were
+linked to him; a login now keeps the name it was made under.
 
 **When an account or a restaurant is switched off, is it off everywhere, or only
 on the screen?**
@@ -297,6 +299,13 @@ sale; now the server renumbers it (`app/api/add-order`, tested 2026-10-08).
 A renumbered order no longer matches its paper, so the exes also tell each
 other their highest number over the Wi-Fi (`electron/till-peers`). Does a
 number the till picks on its own have a way to hear what the other tills used?
+
+**When a screen hides a field for one kind of item, does the database still
+refuse it?**
+Hiding the field only stops new mistakes; data saved before, or saved while the
+item was another kind, stays. Test Restoran, 2026-10-14: the recipe box shows
+only for Yemək, but Ayran 200ml (Məhsul) had kept 10 × Cappy since July, so it
+never appeared in Anbar (`20261022_product_takes_itself.sql`).
 
 ## 5. Before shipping, try it like a restaurant would
 

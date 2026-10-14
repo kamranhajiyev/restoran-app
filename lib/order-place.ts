@@ -9,7 +9,7 @@
 //
 // So it lives here, like orderLabel does, and both screens call it.
 
-import type { Order, RestaurantTable } from '@/types';
+import type { Order, RestaurantTable } from '../types';
 
 /** The words for an order with no table — on the screen and on every ticket,
  *  so the kitchen reads what the till shows. */
@@ -30,7 +30,7 @@ export interface PlaceConfig {
   deliveryOn: boolean;
 }
 
-type PlaceOrder = Pick<Order, 'tableNumber' | 'courierId' | 'online'>;
+type PlaceOrder = Pick<Order, 'tableNumber' | 'courierId' | 'online'> & Partial<Pick<Order, 'tableName'>>;
 
 export function orderPlaceKind(order: PlaceOrder, cfg: Pick<PlaceConfig, 'deliveryOn'>): PlaceKind {
   if (order.tableNumber) return 'masa';
@@ -52,11 +52,20 @@ export function orderPlaceKind(order: PlaceOrder, cfg: Pick<PlaceConfig, 'delive
  * the cook to a table that does not exist. A bare number for a name ("1") gets
  * the word in front of it; a name that already says what it is ("Masa 1",
  * "Terras 3") is left alone. The id is the fallback only when the table is gone.
+ *
+ * `saved` is the name the order kept (Order.tableName). It wins over the
+ * table's current name, so a rename or a deleted table leaves history alone.
  */
-export function tableTitle(tables: Pick<RestaurantTable, 'id' | 'name'>[], id: number): string {
-  const name = tables.find(t => t.id === id)?.name?.trim();
+export function tableTitle(tables: Pick<RestaurantTable, 'id' | 'name'>[], id: number, saved?: string): string {
+  const name = (saved?.trim() || tables.find(t => t.id === id)?.name)?.trim();
   if (!name) return `Masa ${id}`;
   return /^\d+$/.test(name) ? `Masa ${name}` : name;
+}
+
+/** An order moved to another table. The name it kept was the old table's: it
+ *  goes, and the screens read the new table until the server names it. */
+export function movedToTable<T extends { tableNumber: number; tableName?: string }>(order: T, tableId: number): T {
+  return { ...order, tableNumber: tableId, tableName: undefined };
 }
 
 /**
@@ -71,7 +80,7 @@ export function tableTitle(tables: Pick<RestaurantTable, 'id' | 'name'>[], id: n
 export function orderPlace(order: PlaceOrder, cfg: PlaceConfig): string {
   const kind = orderPlaceKind(order, cfg);
   if (kind === 'masa') {
-    return cfg.tables.find(t => t.id === order.tableNumber)?.name ?? `Masa ${order.tableNumber}`;
+    return order.tableName?.trim() || (cfg.tables.find(t => t.id === order.tableNumber)?.name ?? `Masa ${order.tableNumber}`);
   }
   if (kind === 'online') return PLACE_WORDS.online;
   if (kind === 'delivery') return PLACE_WORDS.delivery;

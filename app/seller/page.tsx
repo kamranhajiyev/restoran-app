@@ -50,7 +50,7 @@ import { otherPart } from '@/lib/pay-split';
 import { canLink, checkLink, clearLink, readLink, saveLink, type Terminal } from '@/lib/terminal-link';
 import { tillImage } from '@/lib/till-image';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
-import { orderPlace as placeOf, tableTitle } from '@/lib/order-place';
+import { movedToTable, orderPlace as placeOf, tableTitle } from '@/lib/order-place';
 import { flushQueue, pendingOrderIds, ADD_ORDER } from '@/lib/sync';
 import { verifyPinOffline, rememberPin, forgetPins } from '@/lib/offline-pin';
 import { queueSize, enqueue, onEnqueue } from '@/lib/offline-queue';
@@ -1526,7 +1526,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   // What the open-orders list writes beside the order number: where this order
   // is going. The rule itself lives in lib/order-place.ts, because the admin
   // history shows the same thing about the same rows.
-  function orderPlace(order: Pick<Order, 'tableNumber' | 'courierId' | 'online'>): string {
+  function orderPlace(order: Pick<Order, 'tableNumber' | 'tableName' | 'courierId' | 'online'>): string {
     return placeOf(order, { tables, tablesOn, deliveryOn });
   }
 
@@ -2003,7 +2003,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         // the waiter closed it on purpose and doesn't need an alert about it.
         if (!ready) return;
       }
-      const ok = await printBill(order, overrideCompanyName || getSession()?.companyName || '', logoUrl, tableTitle(tables, order.tableNumber));
+      const ok = await printBill(order, overrideCompanyName || getSession()?.companyName || '', logoUrl, tableTitle(tables, order.tableNumber, order.tableName));
       if (!ok) {
         setPrinterConnected(false);
         alert('Hesab çap olunmadı — yazıcı bağlantısını yoxlayın.');
@@ -2027,7 +2027,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         setPrinterConnected(ready);
         if (!ready) return;
       }
-      const ok = await printReceipt(order, overrideCompanyName || getSession()?.companyName || '', logoUrl, tableTitle(tables, order.tableNumber));
+      const ok = await printReceipt(order, overrideCompanyName || getSession()?.companyName || '', logoUrl, tableTitle(tables, order.tableNumber, order.tableName));
       if (!ok) {
         setPrinterConnected(false);
         alert('Qəbz çap olunmadı — yazıcı bağlantısını yoxlayın.');
@@ -2119,7 +2119,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         // The public terminal link has no session, so the name has to come off
         // the props there or the receipt prints with a blank header.
         const cName = overrideCompanyName || getSession()?.companyName || '';
-        if (shouldPrintReceipt) printReceipt(paidOrder, cName, logoUrl, tableTitle(tables, paidOrder.tableNumber));
+        if (shouldPrintReceipt) printReceipt(paidOrder, cName, logoUrl, tableTitle(tables, paidOrder.tableNumber, paidOrder.tableName));
         // Every closed bill, not just the ones that put notes in the till: a card
         // payment still needs the drawer for change owed from an earlier round,
         // and a cashier who has to open it by key stops trusting the button.
@@ -2335,7 +2335,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     setMoveBusy(false);
     setMovingOrder(null);
     if (ok) {
-      mutateOrders(prev => prev.map(o => o.id === moving.id ? { ...o, tableNumber: target } : o));
+      mutateOrders(prev => prev.map(o => o.id === moving.id ? movedToTable(o, target) : o));
     } else {
       refreshOrders();
     }

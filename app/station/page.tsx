@@ -392,7 +392,7 @@ export default function StationPage() {
 
   async function notifyWaiters(orderId: string) {
     const order = orders.find(o => o.id === orderId);
-    const where = order?.tableNumber ? tableTitle(tables, order.tableNumber) : 'Sifariş';
+    const where = order?.tableNumber ? tableTitle(tables, order.tableNumber, order.tableName) : 'Sifariş';
     const num = order ? ` #${orderLabel(order)}` : '';
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -495,7 +495,7 @@ export default function StationPage() {
               <StationCard
                 key={card.order.id}
                 order={card.order}
-                table={card.order.tableNumber ? tableTitle(tables, card.order.tableNumber) : null}
+                table={card.order.tableNumber ? tableTitle(tables, card.order.tableNumber, card.order.tableName) : null}
                 items={card.items}
                 removedItems={card.removedItems}
                 since={card.since}

@@ -394,6 +394,10 @@ export interface Order {
   // what tells them apart. See lib/order-label.ts for how it is shown.
   tillNumber?: number;
   tableNumber: number;
+  // The table's name when the order was taken, saved by the database. Shown
+  // instead of the table's current name, so a rename or a deleted table does
+  // not change history. Absent on an order the server has not seen yet.
+  tableName?: string;
   items: OrderItem[];
   // Items the waiter pulled off the order. Kept OUT of `items` on purpose: every
   // total, the Analiz report, the Excel export and the customer receipt all read

@@ -45,7 +45,7 @@ export function tableSales(
   const sums = new Map<string, { rev: number; count: number }>();
   for (const o of orders) {
     if (!o.tableNumber) continue;
-    const name = tableTitle(tables, o.tableNumber);
+    const name = tableTitle(tables, o.tableNumber, o.tableName);
     const s = sums.get(name) ?? { rev: 0, count: 0 };
     s.rev += total(o);
     s.count += 1;

@@ -27,6 +27,7 @@
 
 import type { CashShift, Order, OrderItem, ShiftMovement } from '../types';
 import { refusal, type OrderAction } from '../lib/order-rules';
+import { movedToTable } from '../lib/order-place';
 import { db, getMeta, setMeta, transact } from './db';
 import { announce, heardMax } from './till-peers';
 import {
@@ -412,7 +413,7 @@ function applyMove(id: string, body: Record<string, unknown>, companyId: string)
   const found = openOrder(orderId, companyId, 'move');
   if ('error' in found) return { ok: false, error: found.error };
 
-  putOrder(companyId, { ...found, tableNumber: tableId });
+  putOrder(companyId, movedToTable(found, tableId));
   enqueue(id, '/api/move-table', { ...body, companyId }, companyId);
   return { ok: true };
 }
