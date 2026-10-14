@@ -2,6 +2,7 @@
 import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { forgetTill } from '@/lib/auth';
+import { LINK_CHECK_MS } from '@/lib/link-check';
 // The till itself, not the /seller route's wrapper: this route has already
 // resolved the terminal from the address bar, and asking the machine which
 // terminal it is would be a second, contradictory answer.
@@ -89,7 +90,7 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
         }
       } catch { /* ignore transient network errors */ }
     };
-    const id = setInterval(revalidate, 40000);
+    const id = setInterval(revalidate, LINK_CHECK_MS);
     const onVisible = () => { if (document.visibilityState === 'visible') revalidate(); };
     window.addEventListener('focus', revalidate);
     document.addEventListener('visibilitychange', onVisible);

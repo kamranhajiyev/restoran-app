@@ -101,7 +101,7 @@ describe('every screen patches instead of re-downloading', () => {
   it('admin, the browser till and the kitchen screen gather order ids', () => {
     for (const f of ['app/admin/page.tsx', 'app/seller/page.tsx', 'app/station/page.tsx']) {
       const src = readFileSync(f, 'utf8');
-      expect(src, f).toMatch(/table: 'orders'[^)]*\}, p => refreshSoon\(changedOrderId\('orders', p\)\)/);
+      expect(src, f).toMatch(/'orders', companyId, p => refreshSoon\(changedOrderId\('orders', p\)\)/);
       expect(src, f).toMatch(/patchOrders\(/);
     }
   });

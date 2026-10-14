@@ -80,6 +80,8 @@ import { moneyDiff, shiftCheck } from '@/lib/shift-check';
 import { coalesce, REFRESH_GATHER_MS } from '@/lib/coalesce';
 import { KASSA_GATHER_MS, KASSA_TICK_MS, kassaTickDue } from '@/lib/kassa-refresh';
 import { changedOrderId, gatherOrderIds, patchOrders } from '@/lib/order-patch';
+import { onCompanyChange } from '@/lib/company-changes';
+import { DATA_TABLES, gatherParts, type Part } from '@/lib/data-refresh';
 import OrderNote from '@/components/OrderNote';
 
 // RPC raise messages are machine codes — translated here for display
@@ -740,6 +742,7 @@ function AdminPageContent() {
   const collectedCache = useRef<Map<string, { at: number; data: { nagd: number; kart: number } }>>(new Map());
   const refreshRef = useRef<() => void>(() => {});
   const refreshAllRef = useRef<() => void>(() => {});
+  const refreshPartsRef = useRef<(parts: Set<Part>) => void>(() => {});
   const refreshChangedRef = useRef<(ids: Set<string>) => Promise<void>>(async () => {});
   const [sessionReady, setSessionReady] = useState(false);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
@@ -1120,10 +1123,9 @@ function AdminPageContent() {
       if (open) { void loadShiftTotals(open); const s = await fetchShiftSales(open.openedAt); if (s) setOpenShiftSales(s); }
     };
     const reloadSoon = coalesce(() => { void reload(); }, KASSA_GATHER_MS);
-    const channel = supabase
-      .channel('admin-kassa-orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, reloadSoon)
-      .subscribe(status => { realtimeUp = status === 'SUBSCRIBED'; });
+    const companyId = getSession()?.companyId;
+    const channel = companyId ? onCompanyChange(supabase.channel('admin-kassa-orders'), 'orders', companyId, reloadSoon) : null;
+    channel?.subscribe(status => { realtimeUp = status === 'SUBSCRIBED'; });
     const interval = setInterval(() => {
       const visible = document.visibilityState !== 'hidden';
       if (kassaTickDue({ lastRun: last, now: Date.now(), realtimeUp, visible })) void reload();
@@ -1133,7 +1135,7 @@ function AdminPageContent() {
     return () => {
       clearInterval(interval);
       reloadSoon.cancel();
-      supabase.removeChannel(channel);
+      if (channel) supabase.removeChannel(channel);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [sessionReady, tab, loadShiftTotals]);
@@ -1456,6 +1458,23 @@ function AdminPageContent() {
     } catch { /* ignore */ } finally { setPullRefreshing(false); }
   }
 
+  // An edit re-reads only what it touched (lib/data-refresh), not the orders
+  // and everything else in refreshAll. A failed read keeps what is on screen.
+  async function refreshParts(parts: Set<Part>) {
+    try {
+      if (parts.has('menu')) {
+        const [m, c] = await Promise.all([fetchMenuOrNull(), fetchCategoriesOrNull()]);
+        if (m) setMenu(m);
+        if (c) setCategories(c);
+      }
+      if (parts.has('tables')) {
+        const [tb, hl] = await Promise.all([fetchTablesOrNull(), fetchHallsOrNull()]);
+        if (tb) setTables(tb);
+        if (hl) setHalls(hl);
+      }
+    } catch { /* ignore */ }
+  }
+
   // A realtime change names its order: download that one and patch the list
   // (lib/order-patch), instead of the last 200 on every change.
   async function refreshChanged(ids: Set<string>) {
@@ -1470,16 +1489,17 @@ function AdminPageContent() {
   refreshRef.current = refresh;
   refreshChangedRef.current = refreshChanged;
   refreshAllRef.current = refreshAll;
+  refreshPartsRef.current = refreshParts;
 
   useEffect(() => {
     const refreshSoon = gatherOrderIds(ids => {
       if (ids) void refreshChangedRef.current(ids);
       else void refreshRef.current();
     }, REFRESH_GATHER_MS);
-    const channel = supabase
-      .channel('admin-orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, p => refreshSoon(changedOrderId('orders', p)))
-      .subscribe();
+    const companyId = getSession()?.companyId;
+    if (!companyId) return () => refreshSoon.cancel();
+    const channel = onCompanyChange(supabase.channel('admin-orders'), 'orders', companyId, p => refreshSoon(changedOrderId('orders', p)));
+    channel.subscribe();
     return () => { refreshSoon.cancel(); supabase.removeChannel(channel); };
   }, []);
 
@@ -1492,15 +1512,16 @@ function AdminPageContent() {
   }, []);
 
   useEffect(() => {
-    const channel = supabase
-      .channel('admin-data')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => refreshAllRef.current())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => refreshAllRef.current())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_tables' }, () => refreshAllRef.current())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'halls' }, () => refreshAllRef.current())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'cash_shifts' }, () => refreshKassa())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    const companyId = getSession()?.companyId;
+    if (!companyId) return;
+    const editsSoon = gatherParts(parts => { void refreshPartsRef.current(parts); });
+    let channel = supabase.channel('admin-data');
+    for (const table of DATA_TABLES) {
+      channel = onCompanyChange(channel, table, companyId, () => editsSoon(table));
+    }
+    channel = onCompanyChange(channel, 'cash_shifts', companyId, () => refreshKassa());
+    channel.subscribe();
+    return () => { editsSoon.cancel(); supabase.removeChannel(channel); };
   }, []);
 
   function onTouchStart(e: React.TouchEvent) {

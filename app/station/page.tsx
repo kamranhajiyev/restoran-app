@@ -25,6 +25,8 @@ import { tableTitle } from '@/lib/order-place';
 import OrderNote from '@/components/OrderNote';
 import { REFRESH_GATHER_MS } from '@/lib/coalesce';
 import { changedOrderId, gatherOrderIds, patchOrders, patchReady } from '@/lib/order-patch';
+import { onCompanyChange } from '@/lib/company-changes';
+import { gatherParts } from '@/lib/data-refresh';
 
 // A card older than this is late. Newest-first puts the oldest at the BOTTOM, so
 // the colour is what stops it being forgotten — the sort can't be relied on to
@@ -228,9 +230,8 @@ export default function StationPage() {
   }, [router]);
 
   // ── Realtime ────────────────────────────────────────────────────────────────
-  // Filtered by company_id, unlike the older seller/admin channels: a screen in
-  // every sex of every venue makes unfiltered replication expensive, and the filter
-  // costs nothing to add now.
+  // Filtered by company_id (lib/company-changes): a screen in every sex of every
+  // venue makes unfiltered replication expensive.
   const [realtimeUp, setRealtimeUp] = useState(false);
   const [rtAttempt, setRtAttempt] = useState(0);
   const companyId = getSession()?.companyId ?? null;
@@ -241,16 +242,14 @@ export default function StationPage() {
       if (ids) void refreshChanged(ids);
       else void refreshOrders();
     }, REFRESH_GATHER_MS);
-    const channel = supabase
-      .channel(`station-${companyId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `company_id=eq.${companyId}` }, p => refreshSoon(changedOrderId('orders', p)))
-      // order_items has no company_id of its own — it hangs off the order — so this
-      // one cannot be filtered. RLS still scopes what actually arrives.
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, p => refreshSoon(changedOrderId('order_items', p)))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_station_ready', filter: `company_id=eq.${companyId}` }, p => refreshSoon(changedOrderId('order_station_ready', p)))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items', filter: `company_id=eq.${companyId}` }, () => { fetchMenuOrNull().then(m => { if (m) setMenu(m); }); })
-      .subscribe(status => setRealtimeUp(status === 'SUBSCRIBED'));
-    return () => { refreshSoon.cancel(); setRealtimeUp(false); supabase.removeChannel(channel); };
+    let channel = supabase.channel(`station-${companyId}`);
+    channel = onCompanyChange(channel, 'orders', companyId, p => refreshSoon(changedOrderId('orders', p)));
+    channel = onCompanyChange(channel, 'order_items', companyId, p => refreshSoon(changedOrderId('order_items', p)));
+    channel = onCompanyChange(channel, 'order_station_ready', companyId, p => refreshSoon(changedOrderId('order_station_ready', p)));
+    const editsSoon = gatherParts(() => { fetchMenuOrNull().then(m => { if (m) setMenu(m); }); });
+    channel = onCompanyChange(channel, 'menu_items', companyId, () => editsSoon('menu_items'));
+    channel.subscribe(status => setRealtimeUp(status === 'SUBSCRIBED'));
+    return () => { refreshSoon.cancel(); editsSoon.cancel(); setRealtimeUp(false); supabase.removeChannel(channel); };
   }, [companyId, refreshOrders, refreshChanged, rtAttempt]);
 
   useEffect(() => {

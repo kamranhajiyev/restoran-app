@@ -278,12 +278,18 @@ menu functions. Is what you open on the list, with a reason? Run
 
 **Is every query and every queued write scoped to one company?**
 A till moved to another restaurant must not send the first one's orders.
+Live listeners too: usage review, 2026-10-14: the till and admin heard every
+restaurant's changes, so one sale anywhere was work for every open screen. Use
+`lib/company-changes`; it also keeps deletes, which a filter would drop.
 
 **If ten changes arrive at once, does the screen download ten times?**
 One sale is several realtime changes (order, dishes, payment). Gather them
 (`lib/coalesce`) and refresh once. Production logs, 2026-10-07: admin, the
 browser till and the kitchen screen re-downloaded 200 orders on every change;
 it was most of the egress, and the reads, with no company filter, timed out.
+Usage review, 2026-10-14: the same for menu and table edits, which downloaded
+everything per edit. Does the refresh read only the part that changed
+(`lib/data-refresh`)?
 
 **Can the public key read or change this table? And does anything that needs
 it run as the caller?**

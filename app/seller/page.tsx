@@ -59,6 +59,8 @@ import OrderNote from '@/components/OrderNote';
 import { moneyDiff } from '@/lib/shift-check';
 import { REFRESH_GATHER_MS } from '@/lib/coalesce';
 import { changedOrderId, gatherOrderIds, patchOrders, patchReady } from '@/lib/order-patch';
+import { onCompanyChange } from '@/lib/company-changes';
+import { DATA_TABLES, gatherParts, type Part } from '@/lib/data-refresh';
 import { azNormalize } from '@/lib/az-text';
 
 // How many writes the server has not seen. Two stores answer that question — the
@@ -674,6 +676,33 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       if (!silent) setPullRefreshing(false);
     }
   }, [overrideCompanyId, beginOrdersRead, applyOrders]);
+
+  // An edit in admin re-reads only what it touched (lib/data-refresh), not the
+  // whole of refreshAll. A failed read keeps what the screen has.
+  const refreshParts = useCallback(async (parts: Set<Part>) => {
+    try {
+      if (parts.has('menu')) {
+        const [m, c] = overrideCompanyId
+          ? await Promise.all([
+              listOrNull<MenuItem>(tillFetch(`/api/public-menu?companyId=${overrideCompanyId}`), 'items'),
+              listOrNull<Category>(tillFetch(`/api/public-categories?companyId=${overrideCompanyId}`), 'categories'),
+            ])
+          : await Promise.all([fetchMenuOrNull(), fetchCategoriesOrNull()]);
+        if (m) setMenu(m);
+        if (c) setAvailableCategories(c.filter(cat => cat.available));
+      }
+      if (parts.has('tables')) {
+        if (overrideCompanyId) {
+          const tb = await readTerminalTables(overrideCompanyId);
+          if (tb) { setTables(tb.tables); setHalls(tb.halls); }
+        } else {
+          const [tb, hl] = await Promise.all([fetchTablesOrNull(), fetchHallsOrNull()]);
+          if (tb) setTables(tb);
+          if (hl) setHalls(hl);
+        }
+      }
+    } catch { /* ignore */ }
+  }, [overrideCompanyId]);
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshOrders = useCallback(async (opts?: { silent?: boolean }) => {
@@ -1339,17 +1368,18 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       if (ids && patching) void refreshChanged(ids);
       else void refreshOrders();
     }, REFRESH_GATHER_MS);
-    const channel = supabase
-      .channel('seller-orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, p => refreshSoon(changedOrderId('orders', p)))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, p => refreshSoon(changedOrderId('order_items', p)))
-      // A sex finishing its part is the one change the seller doesn't make himself,
-      // so it's the one he'd never learn about without this.
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_station_ready' }, p => {
-        if (patching) refreshSoon(changedOrderId('order_station_ready', p));
-        else void refreshReady();
-      })
-      .subscribe(status => setRealtimeUp(status === 'SUBSCRIBED'));
+    const companyId = overrideCompanyId ?? getSession()?.companyId ?? null;
+    if (!companyId) return;
+    let channel = supabase.channel('seller-orders');
+    channel = onCompanyChange(channel, 'orders', companyId, p => refreshSoon(changedOrderId('orders', p)));
+    channel = onCompanyChange(channel, 'order_items', companyId, p => refreshSoon(changedOrderId('order_items', p)));
+    // A sex finishing its part is the one change the seller doesn't make himself,
+    // so it's the one he'd never learn about without this.
+    channel = onCompanyChange(channel, 'order_station_ready', companyId, p => {
+      if (patching) refreshSoon(changedOrderId('order_station_ready', p));
+      else void refreshReady();
+    });
+    channel.subscribe(status => setRealtimeUp(status === 'SUBSCRIBED'));
     return () => { refreshSoon.cancel(); setRealtimeUp(false); supabase.removeChannel(channel); };
   }, [refreshOrders, refreshReady, refreshChanged, overrideCompanyId, rtAttempt]);
 
@@ -1377,26 +1407,27 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   }, [overrideCompanyId, realtimeUp, refreshOrders]);
 
   useEffect(() => {
-    const channel = supabase
-      .channel('seller-data')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_items' }, () => refreshAll())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => refreshAll())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_tables' }, () => refreshAll())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'halls' }, () => refreshAll())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'companies' }, async () => {
-        const [te, ke, de] = await Promise.all([fetchTablesEnabled(), fetchKassaEnabled(), fetchDeliveryEnabled()]);
-        setTablesOn(te); setKassaOn(ke); setDeliveryOn(de);
-        // The owner just switched çatdırılma off and a seller may be standing on
-        // one of its screens — the nav item they arrived through is gone, so
-        // leaving them there is a dead end.
-        if (!de) {
-          setView(v => (v === 'couriers' ? 'orders' : v));
-          setOrderType(t => (t === 'kuryer' ? null : t));
-        }
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [refreshAll]);
+    const companyId = overrideCompanyId ?? getSession()?.companyId ?? null;
+    if (!companyId) return;
+    const editsSoon = gatherParts(parts => { void refreshParts(parts); });
+    let channel = supabase.channel('seller-data');
+    for (const table of DATA_TABLES) {
+      channel = onCompanyChange(channel, table, companyId, () => editsSoon(table));
+    }
+    channel = onCompanyChange(channel, 'companies', companyId, async () => {
+      const [te, ke, de] = await Promise.all([fetchTablesEnabled(), fetchKassaEnabled(), fetchDeliveryEnabled()]);
+      setTablesOn(te); setKassaOn(ke); setDeliveryOn(de);
+      // The owner just switched çatdırılma off and a seller may be standing on
+      // one of its screens — the nav item they arrived through is gone, so
+      // leaving them there is a dead end.
+      if (!de) {
+        setView(v => (v === 'couriers' ? 'orders' : v));
+        setOrderType(t => (t === 'kuryer' ? null : t));
+      }
+    });
+    channel.subscribe();
+    return () => { editsSoon.cancel(); supabase.removeChannel(channel); };
+  }, [refreshParts, overrideCompanyId]);
 
   // ── cart helpers ──────────────────────────────────────────────────────────
 
