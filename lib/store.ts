@@ -7,6 +7,7 @@ import { courierDeleteBlock } from './couriers';
 import { printedStationColumn } from './stations';
 import { menuRowBatches } from './set-items';
 import { cleanRecipe } from './recipes';
+import type { LeftStock } from './kind-change';
 import { loginEventFromRow, type LoginEvent } from './login-events';
 import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
@@ -2093,6 +2094,22 @@ export async function saveRecipe(menuItemId: string, lines: RecipeIngredient[]):
     console.error('[saveRecipe]', e);
     return 'Şəbəkə xətası — resept yadda saxlanmadı';
   }
+}
+
+/** A Məhsul's own rows that have stock or history: what turning it into a
+ *  Yemək would leave in Anbar. Null when the read failed. */
+export async function fetchProductStockLeft(menuItemId: string): Promise<LeftStock[] | null> {
+  const { data, error } = await supabase.rpc('product_stock_left', { p_menu_item_id: menuItemId });
+  if (error || !data) { console.error('[fetchProductStockLeft]', error); return null; }
+  return (data as { stock_item_id: string; name: string; unit: string; qty: number | string }[])
+    .map(r => ({ stockItemId: r.stock_item_id, name: r.name, unit: r.unit, qty: Number(r.qty) }));
+}
+
+/** The owner's answer for those rows: keep them as ingredients, or trash them. */
+export async function settleProductStock(stockItemIds: string[], keep: boolean): Promise<string | null> {
+  const { error } = await supabase.rpc('settle_product_stock', { p_stock_item_ids: stockItemIds, p_keep: keep });
+  if (error) { console.error('[settleProductStock]', error); return error.message; }
+  return null;
 }
 
 // Back a menu product with its own stock item + qty-1 self recipe + a 0 balance

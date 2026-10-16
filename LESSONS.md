@@ -313,6 +313,15 @@ item was another kind, stays. Test Restoran, 2026-10-14: the recipe box shows
 only for Yemək, but Ayran 200ml (Məhsul) had kept 10 × Cappy since July, so it
 never appeared in Anbar (`20261022_product_takes_itself.sql`).
 
+**When a change sets something up by itself, does changing it back take that
+down?**
+Code that only runs "when it is X" never runs when it stops being X. Natiq,
+Test Restoran, 2026-10-16: Dolma made a Məhsul got its own row in Anbar; turned
+back into a Yemək, the row stayed in Qalıqlar. Now the row goes when it is
+empty, the owner is asked when it has stock, and a Məhsul again takes back its
+own row (`20261026_product_stops_being_product.sql`). Does the way back leave
+anything behind, and is anything with stock in it removed without asking?
+
 ## 5. Before shipping, try it like a restaurant would
 
 - Turn the internet off in the middle of the action, then back on.

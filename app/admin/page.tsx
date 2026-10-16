@@ -37,7 +37,7 @@ import {
   fetchCompanySettings, updateCompanyHours,
   fetchLoginEvents, LoginEvent,
   fetchStaff, createStaff, updateStaff, setStaffPin, deleteStaff,
-  fetchSellerToken, linkProductStock, fetchRecipeForm, saveRecipe,
+  fetchSellerToken, linkProductStock, fetchRecipeForm, saveRecipe, fetchProductStockLeft, settleProductStock,
   fetchBranding, setLogoUrl as saveLogoUrl, setBrandColor as saveBrandColor,
   fetchStations, fetchModifierGroupsOrNull,
   fetchAllUsers, createEmployee, updateEmployee, deleteUser, toggleUserActive,
@@ -65,6 +65,7 @@ import PasswordField from '@/components/PasswordField';
 import { validatePassword } from '@/lib/password';
 import { exportMenuExcel, exportOrdersExcel, exportAnalizExcel, parseMenuFile, ImportPreview, AnalizRow } from '@/lib/excel';
 import { cleanSetItems, itemKind, KIND_LABEL, setChoices, setLine, setSplit, soldInSets, withSets, type ItemKind } from '@/lib/set-items';
+import { formRecipeLines, kindChangeStock, leftStockMessage, recipeLostMessage } from '@/lib/kind-change';
 import { cleanRecipe } from '@/lib/recipes';
 import { azNormalize } from '@/lib/az-text';
 import SearchAdd from '@/components/SearchAdd';
@@ -1591,20 +1592,20 @@ function AdminPageContent() {
   }
 
   // ── menu form ──────────────────────────────────────────────────────────────
-  async function loadRecipe(id: string) {
+  async function loadRecipe(id: string, kind: ItemKind) {
     recipeFor.current = id;
     setRecipe({ state: 'loading', rows: [], items: [] });
     const r = await fetchRecipeForm(id);
     // Another dish was opened while this one was loading.
     if (recipeFor.current !== id) return;
     setRecipe(r
-      ? { state: 'ready', rows: r.lines.map(l => ({ stockItemId: l.stockItemId, qty: String(l.qty) })), items: r.items }
+      ? { state: 'ready', rows: formRecipeLines(kind, r.lines).map(l => ({ stockItemId: l.stockItemId, qty: String(l.qty) })), items: r.items }
       : { state: 'failed', rows: [], items: [] });
   }
 
   function openEdit(item: MenuItem) {
     setEditingId(item.id);
-    loadRecipe(item.id);
+    loadRecipe(item.id, itemKind(item));
     setForm({
       name: item.name,
       price: item.variants?.length ? '' : String(item.price),
@@ -1635,8 +1636,43 @@ function AdminPageContent() {
   // What can go inside the set being edited: not itself, not another set, not twice.
   const setOptions = setChoices(menu, editingId, form.setItems);
 
+  // A Növ change moves stock, so the owner answers before the save
+  // (lib/kind-change): a Yemək becoming a Məhsul loses its recipe, and a Məhsul
+  // with stock left in Anbar needs to say what happens to it.
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const before = editingId ? menu.find(m => m.id === editingId) : undefined;
+    const change = kindChangeStock(before ? itemKind(before) : null, form.kind);
+    if (change === 'drop-recipe') {
+      const rows = recipe.state === 'ready' ? recipe.rows.length : null;
+      if (rows !== 0) {
+        setDialog({ title: 'Resept silinəcək', message: recipeLostMessage(rows), confirmLabel: 'Davam et', onConfirm: () => { void saveForm(null); } });
+        return;
+      }
+    }
+    if (change === 'release' && editingId) {
+      setSaving(true);
+      const left = await fetchProductStockLeft(editingId);
+      setSaving(false);
+      if (!left) { setDialog({ title: 'Xəta', message: 'Anbar qalığı oxunmadı — yenidən cəhd edin.' }); return; }
+      if (left.length > 0) {
+        const ids = left.map(l => l.stockItemId);
+        setDialog({
+          title: 'Anbarda qalıq var',
+          message: leftStockMessage(left),
+          confirmLabel: 'Sil',
+          onConfirm: () => { void saveForm({ ids, keep: false }); },
+          altLabel: 'Xammal kimi saxla',
+          onAlt: () => { void saveForm({ ids, keep: true }); },
+        });
+        return;
+      }
+    }
+    await saveForm(null);
+  }
+
+  /** `settle`: the owner's answer for the stock a Məhsul leaves behind. */
+  async function saveForm(settle: { ids: string[]; keep: boolean } | null) {
     const variants: MenuItemVariant[] = form.hasVariants
       ? form.variants.map(v => ({ id: v.id || Date.now().toString(), name: v.name, price: parseFloat(v.price) || 0, costPrice: v.costPrice ? parseFloat(v.costPrice) : undefined }))
       : [];
@@ -1666,6 +1702,12 @@ function AdminPageContent() {
     setMenu(updated);
     setSaving(true);
     const saved = await persistMenu(updated);
+    // The save let go of the rows (the database does that on the Növ change);
+    // now they get the answer.
+    if (saved && settle) {
+      const err = await settleProductStock(settle.ids, settle.keep);
+      if (err) setDialog({ title: 'Diqqət', message: 'Anbar sətri dəyişmədi: ' + err });
+    }
     // The recipe goes after the dish it belongs to, and only one this form
     // really loaded. A failed save keeps the form open, with what was typed.
     if (saved && item.kind === 'meal' && recipe.state === 'ready') {
@@ -2303,7 +2345,7 @@ function AdminPageContent() {
             {recipe.state === 'failed' && (
               <p className="text-xs text-stone-500">
                 Resept yüklənmədi — dəyişməyəcək.{' '}
-                {editingId && <button type="button" onClick={() => loadRecipe(editingId)} className="text-primary-800 font-medium hover:underline">Yenidən yüklə</button>}
+                {editingId && <button type="button" onClick={() => { const saved = menu.find(m => m.id === editingId); loadRecipe(editingId, saved ? itemKind(saved) : form.kind); }} className="text-primary-800 font-medium hover:underline">Yenidən yüklə</button>}
               </p>
             )}
             {recipe.state === 'ready' && (
