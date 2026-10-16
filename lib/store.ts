@@ -8,6 +8,7 @@ import { printedStationColumn } from './stations';
 import { menuRowBatches } from './set-items';
 import { cleanRecipe } from './recipes';
 import type { LeftStock } from './kind-change';
+import type { StockTrashResult } from './stock-trash';
 import { loginEventFromRow, type LoginEvent } from './login-events';
 import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
@@ -631,9 +632,12 @@ export async function restoreRecipe(menuItemId: string, recipe: TrashedRecipeLin
   if (!_companyId) return { error: 'Şirkət konteksti yoxdur', skipped: 0 };
   try {
     const { data: alive, error: readErr } = await supabase.from('stock_items')
-      .select('id').in('id', recipe.map(l => l.stock_item_id));
+      .select('id, type, trashed_at').in('id', recipe.map(l => l.stock_item_id));
     if (readErr || !alive) return { error: readErr?.message ?? 'Anbar oxunmadı', skipped: 0 };
-    const ids = new Set(alive.map(s => s.id));
+    // An inqrediyent in the Zibil qutusu is gone from Anbar, so it is skipped
+    // like a deleted one. A Məhsul's own row is trashed with its dish and comes
+    // back with it.
+    const ids = new Set(alive.filter(s => !(s.trashed_at && s.type !== 'product')).map(s => s.id));
     const rows = recipe.filter(l => ids.has(l.stock_item_id)).map(l => ({
       company_id: _companyId, menu_item_id: menuItemId, stock_item_id: l.stock_item_id, qty: l.qty, variant_id: l.variant_id,
     }));
@@ -1423,9 +1427,19 @@ export async function updateStockItem(id: string, name: string, unit: string, ty
   return null;
 }
 
-export async function deleteStockItem(id: string): Promise<string | null> {
-  const { error } = await supabase.from('stock_items').delete().eq('id', id);
-  if (error) { console.error('[deleteStockItem]', error); return error.message; }
+/** Anbar's delete. The database decides (20261027_stock_item_trash.sql): a
+ *  never-used row is deleted, a used one goes to the Zibil qutusu with its
+ *  history, one in a recipe is refused, and one with stock waits for `confirm`. */
+export async function trashStockItem(id: string, confirm = false): Promise<StockTrashResult> {
+  const { data, error } = await supabase.rpc('trash_stock_item', { p_stock_item_id: id, p_confirm: confirm });
+  if (error || !data) { console.error('[trashStockItem]', error); return { result: 'error', message: error?.message ?? 'Cavab gəlmədi' }; }
+  return data as StockTrashResult;
+}
+
+/** Back from the Zibil qutusu into Anbar, with the balance it had. */
+export async function restoreStockItem(id: string): Promise<string | null> {
+  const { error } = await supabase.rpc('restore_stock_item', { p_stock_item_id: id });
+  if (error) { console.error('[restoreStockItem]', error); return error.message; }
   return null;
 }
 

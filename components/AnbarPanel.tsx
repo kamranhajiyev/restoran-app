@@ -6,7 +6,7 @@ import { Plus, Pencil, Trash2, Warehouse, Boxes, Truck, ShoppingCart, X, Eraser,
 import {
   fetchWarehouses, createWarehouse, updateWarehouse, deleteWarehouse,
   fetchSuppliers, createSupplier, updateSupplier, deleteSupplier, fetchSupplierLedger, fetchSupplierPayments, addSupplierPayment, fetchSupplierPaymentLog,
-  fetchStockItems, createStockItem, updateStockItem, deleteStockItem,
+  fetchStockItems, createStockItem, updateStockItem, trashStockItem,
   fetchBalances, fetchReceipts, recordReceipt, updateReceipt, voidReceipt, recordWriteoff,
   fetchReceiptLines, fetchWriteoffs,
   fetchTransfers, fetchTransferLines, recordTransfer, voidTransfer,
@@ -15,6 +15,7 @@ import {
 } from '@/lib/store';
 import { Warehouse as Wh, Supplier, StockItem, StockBalance, StockReceipt, ReceiptLine, ReceiptLineDetail, StockTransfer, TransferLine, TransferLineDetail, WriteoffEntry, SupplierLedger, SupplierPayment } from '@/types';
 import { DialogState } from '@/components/AppDialog';
+import { goneItems, stockLeftQuestion, stockTrashDone, stockTrashMessage } from '@/lib/stock-trash';
 import { inputCls, btnPrimary, btnGhost, Modal, Empty } from '@/components/panel-ui';
 
 type Sub = 'warehouses' | 'balances' | 'suppliers' | 'payments' | 'receipts' | 'transfers' | 'writeoffs';
@@ -461,6 +462,19 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
   }
   useEffect(() => { reloadBalances(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [whId]);
 
+  // A used row goes to the Zibil qutusu with its history (lib/stock-trash).
+  // Stock left: asked once more, then sent with `confirm`.
+  async function removeItem(it: StockItem, confirm: boolean) {
+    const r = await trashStockItem(it.id, confirm);
+    if (r.result === 'has_stock') {
+      setDialog({ title: 'Anbarda qalıq var', message: stockLeftQuestion(r.qty, r.unit, it.name), onConfirm: () => removeItem(it, true) });
+      return;
+    }
+    const msg = stockTrashMessage(r, it.name);
+    if (msg) { setDialog({ title: 'Silinmədi', message: msg }); return; }
+    await reloadItems(); await reloadBalances(); flash(stockTrashDone(r));
+  }
+
   if (warehouses.length === 0) return <Empty msg="Əvvəlcə «Anbarlar» bölməsində bir anbar yaradın." />;
 
   return (
@@ -515,11 +529,7 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
               <div className="flex gap-1">
                 <button className={btnGhost} onClick={() => setItemModal(it)}><Pencil className="w-3.5 h-3.5" /></button>
                 <button className={btnGhost} onClick={() => setDialog({
-                  title: 'Məhsulu sil?', message: `«${it.name}» silinəcək.`, onConfirm: async () => {
-                    const err = await deleteStockItem(it.id);
-                    if (err) fail(err.includes('foreign') || err.includes('violates') ? 'Bu məhsulun hərəkəti var — silinə bilməz.' : err);
-                    else { await reloadItems(); await reloadBalances(); flash('Silindi'); }
-                  },
+                  title: 'Sil?', message: `«${it.name}» silinəcək.`, onConfirm: () => removeItem(it, false),
                 })}><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>
               </div>
             </div>
@@ -778,6 +788,8 @@ function NewReceipt({ activeWh, suppliers, items, initial, initialLines, onClose
   const [lines, setLines] = useState<{ stockItemId: string; qty: string; unitCost: string }[]>(
     initialLines && initialLines.length ? seedLines(initialLines) : [{ stockItemId: items[0]?.id ?? '', qty: '', unitCost: '' }]
   );
+  // Items of this purchase that are in the Zibil qutusu now (lib/stock-trash).
+  const [gone, setGone] = useState(() => goneItems(initialLines ?? [], items));
   const [busy, setBusy] = useState(false);
   // One id per opened screen, so Save pressed again after a lost reply is recorded once.
   const [saveId] = useState(() => crypto.randomUUID());
@@ -789,7 +801,7 @@ function NewReceipt({ activeWh, suppliers, items, initial, initialLines, onClose
     let alive = true;
     fetchReceiptLines(initial.id).then(ls => {
       if (!alive) return;
-      if (ls.length) setLines(seedLines(ls));
+      if (ls.length) { setLines(seedLines(ls)); setGone(goneItems(ls, items)); }
       setLinesReady(true);
     });
     return () => { alive = false; };
@@ -802,7 +814,7 @@ function NewReceipt({ activeWh, suppliers, items, initial, initialLines, onClose
   function setLine(i: number, patch: Partial<{ stockItemId: string; qty: string; unitCost: string }>) {
     setLines(prev => prev.map((l, idx) => idx === i ? { ...l, ...patch } : l));
   }
-  const unitOf = (id: string) => items.find(it => it.id === id)?.unit ?? '';
+  const unitOf = (id: string) => items.find(it => it.id === id)?.unit ?? gone.get(id)?.unit ?? '';
 
   async function save() {
     const valid: ReceiptLine[] = lines
@@ -845,6 +857,7 @@ function NewReceipt({ activeWh, suppliers, items, initial, initialLines, onClose
             {/* Product name on its own full-width row so long names are always fully visible. */}
             <div className="flex items-center gap-2">
               <select className={`${inputCls} flex-1 min-w-0`} value={l.stockItemId} onChange={e => setLine(i, { stockItemId: e.target.value })}>
+                {gone.has(l.stockItemId) && <option value={l.stockItemId}>{gone.get(l.stockItemId)!.name}</option>}
                 {items.map(it => <option key={it.id} value={it.id}>{it.name}</option>)}
               </select>
               {lines.length > 1 && <button className="shrink-0 text-stone-400 hover:text-red-500" onClick={() => setLines(lines.filter((_, idx) => idx !== i))}><X className="w-4 h-4" /></button>}

@@ -37,7 +37,10 @@ Pickers, tabs, filters, reports, old orders. One shared rule decides each list
 the new-order picker but still in the seller's Kuryerlər tab, and a courier with
 orders could not be deleted at all. Test Restoran, 2026-10-14: the same for a
 table with past orders, and for Rasim, whose two July logins in Girişlər were
-linked to him; a login now keeps the name it was made under.
+linked to him; a login now keeps the name it was made under. Natiq, Test
+Restoran, 2026-10-16: Anbar's delete was a real delete, refused for anything
+ever used, and it would have left receipts not adding up; an inqrediyent now
+goes to the Zibil qutusu (`20261027_stock_item_trash.sql`).
 
 **When an account or a restaurant is switched off, is it off everywhere, or only
 on the screen?**

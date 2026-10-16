@@ -37,7 +37,7 @@ import {
   fetchCompanySettings, updateCompanyHours,
   fetchLoginEvents, LoginEvent,
   fetchStaff, createStaff, updateStaff, setStaffPin, deleteStaff,
-  fetchSellerToken, linkProductStock, fetchRecipeForm, saveRecipe, fetchProductStockLeft, settleProductStock,
+  fetchSellerToken, linkProductStock, fetchRecipeForm, saveRecipe, fetchProductStockLeft, settleProductStock, restoreStockItem,
   fetchBranding, setLogoUrl as saveLogoUrl, setBrandColor as saveBrandColor,
   fetchStations, fetchModifierGroupsOrNull,
   fetchAllUsers, createEmployee, updateEmployee, deleteUser, toggleUserActive,
@@ -1662,7 +1662,7 @@ function AdminPageContent() {
           message: leftStockMessage(left),
           confirmLabel: 'Sil',
           onConfirm: () => { void saveForm({ ids, keep: false }); },
-          altLabel: 'Xammal kimi saxla',
+          altLabel: 'İnqrediyent kimi saxla',
           onAlt: () => { void saveForm({ ids, keep: true }); },
         });
         return;
@@ -1851,7 +1851,13 @@ function AdminPageContent() {
       }
       const { error, skipped } = await restoreRecipe(restored.id, recipe);
       if (error) { setDialog({ title: 'Xəta', message: 'Məhsul qayıtdı, resepti yox: ' + error + '. Yenidən "Bərpa et" basın.' }); return; }
-      if (skipped > 0) setDialog({ title: 'Diqqət', message: `"${restored.name}" qayıtdı, amma reseptindən ${skipped} xammal artıq anbarda yoxdur. Resepti yoxlayın.` });
+      if (skipped > 0) setDialog({ title: 'Diqqət', message: `"${restored.name}" qayıtdı, amma reseptindən ${skipped} inqrediyent artıq anbarda yoxdur. Resepti yoxlayın.` });
+    } else if (item.type === 'stock_item') {
+      // The database brings it back into Anbar and drops this trash row.
+      const err = await restoreStockItem(String(item.data.id ?? ''));
+      if (err) { setDialog({ title: 'Xəta', message: 'Bərpa olunmadı: ' + err }); return; }
+      setTrash(t => t.filter(x => x.id !== item.id));
+      return;
     } else if (item.type === 'category') {
       const restored = item.data as unknown as Category;
       if (!categories.some(c => c.name === restored.name)) {
@@ -2354,7 +2360,7 @@ function AdminPageContent() {
                   const it = recipe.items.find(x => x.id === r.stockItemId);
                   return (
                     <div key={r.stockItemId} className="flex items-center gap-2">
-                      <span className="flex-1 min-w-0 text-sm text-stone-700 break-words">{it?.name ?? 'Silinmiş xammal'}</span>
+                      <span className="flex-1 min-w-0 text-sm text-stone-700 break-words">{it?.name ?? 'Silinmiş inqrediyent'}</span>
                       <input type="number" min="0" step="any" required placeholder="miqdar"
                         className="w-20 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
                         value={r.qty} onChange={e => setRecipe(x => ({ ...x, rows: x.rows.map((y, j) => (j === i ? { ...y, qty: e.target.value } : y)) }))} />
@@ -2364,11 +2370,11 @@ function AdminPageContent() {
                   );
                 })}
                 {recipe.items.length === 0 ? (
-                  <p className="text-xs text-stone-400">Əvvəlcə Anbar → Qalıqlar bölməsində xammal yaradın.</p>
+                  <p className="text-xs text-stone-400">Əvvəlcə Anbar → Qalıqlar bölməsində inqrediyent yaradın.</p>
                 ) : (
                   <SearchAdd
                     options={recipe.items.filter(it => !recipe.rows.some(r => r.stockItemId === it.id)).map(it => ({ id: it.id, name: it.name, tag: it.unit }))}
-                    placeholder="Xammal axtar…" none="Tapılmadı"
+                    placeholder="İnqrediyent axtar…" none="Tapılmadı"
                     onPick={id => setRecipe(x => ({ ...x, rows: [...x.rows, { stockItemId: id, qty: '' }] }))} />
                 )}
               </div>
@@ -4170,7 +4176,7 @@ function AdminPageContent() {
                   <button onClick={() => exportMenuExcel(menu, categories)} title="Excel-ə ixrac et" className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
                     <Upload className="w-4 h-4" /> <span className="hidden sm:inline">İxrac</span>
                   </button>
-                  <button onClick={() => setShowTrash(true)} className="relative flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
+                  <button onClick={() => { setShowTrash(true); fetchTrash().then(setTrash); }} className="relative flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
                     <Trash2 className="w-4 h-4" />
                     {trash.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-400 text-white text-[10px] rounded-full flex items-center justify-center font-bold">{trash.length}</span>}
                   </button>
@@ -5695,7 +5701,7 @@ function AdminPageContent() {
               {trash.map(item => {
                 const d = item.data as Record<string, unknown>;
                 const label = item.type === 'menu' ? String(d.name ?? '') : String(d.name ?? '');
-                const sub = item.type === 'menu' ? String(d.category ?? '') : 'Kateqoriya';
+                const sub = item.type === 'menu' ? String(d.category ?? '') : item.type === 'stock_item' ? 'İnqrediyent' : 'Kateqoriya';
                 const daysLeft = Math.max(0, 30 - Math.floor((Date.now() - new Date(item.deletedAt).getTime()) / 86400000));
                 return (
                   <div key={item.id} className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-stone-100 hover:bg-stone-50">

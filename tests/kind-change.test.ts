@@ -33,8 +33,8 @@ describe('what a Növ change does to stock', () => {
 
   it('asks in numbers', () => {
     expect(leftStockMessage([{ stockItemId: 'd', name: 'Dolma', unit: 'ədəd', qty: 12 }]))
-      .toBe('Anbarda 12 ədəd Dolma qalıb. Silinsin, yoxsa xammal kimi qalsın?');
-    expect(recipeLostMessage(2)).toContain('2 xammal silinəcək');
+      .toBe('Anbarda 12 ədəd Dolma qalıb. Silinsin, yoxsa inqrediyent kimi qalsın?');
+    expect(recipeLostMessage(2)).toContain('2 inqrediyent silinəcək');
     expect(recipeLostMessage(null)).toContain('varsa, silinəcək');
   });
 });
@@ -79,5 +79,24 @@ describe('the admin form', () => {
     expect(admin).toMatch(/formRecipeLines\(kind, r\.lines\)/);
     expect(admin).toMatch(/fetchProductStockLeft\(editingId\)/);
     expect(admin).toMatch(/settleProductStock\(settle\.ids, settle\.keep\)/);
+  });
+});
+
+// Natiq, 2026-10-16: the dialog said "xammal" while Anbar says "İnqrediyent"
+// for the same row. One word on every screen.
+describe('the word', () => {
+  it('is İnqrediyent everywhere, never xammal', async () => {
+    const { readdirSync, statSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const found: string[] = [];
+    const walk = (dir: string) => {
+      for (const f of readdirSync(dir)) {
+        const p = join(dir, f);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.(ts|tsx)$/.test(f) && /xammal/i.test(readFileSync(p, 'utf8'))) found.push(p);
+      }
+    };
+    ['app', 'components', 'lib', 'electron'].forEach(walk);
+    expect(found).toEqual([]);
   });
 });

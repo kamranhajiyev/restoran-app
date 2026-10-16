@@ -32,14 +32,14 @@ export function leftStockMessage(left: LeftStock[]): string {
   const lines = left.map(l => l.qty !== 0
     ? `Anbarda ${fmtQty(l.qty)} ${l.unit} ${l.name} qalıb.`
     : `${l.name} anbarda keçmiş hərəkətləri olan sətirdir.`);
-  return `${lines.join(' ')} Silinsin, yoxsa xammal kimi qalsın?`;
+  return `${lines.join(' ')} Silinsin, yoxsa inqrediyent kimi qalsın?`;
 }
 
 /** The warning before a Yemək becomes a Məhsul. Null rows: the recipe did not
  *  load, so the count is unknown and the warning says so. */
 export function recipeLostMessage(rows: number | null): string {
   if (rows === null) return 'Məhsulun resepti olmur: bu yeməyin resepti varsa, silinəcək. Davam edilsin?';
-  return `Məhsulun resepti olmur: bu yeməyin reseptindəki ${rows} xammal silinəcək. Davam edilsin?`;
+  return `Məhsulun resepti olmur: bu yeməyin reseptindəki ${rows} inqrediyent silinəcək. Davam edilsin?`;
 }
 
 function fmtQty(n: number): string {

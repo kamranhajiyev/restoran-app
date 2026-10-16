@@ -9,7 +9,7 @@ export type DialogState = {
   confirmLabel?: string;
   /** When present the dialog shows Ləğv et / confirm buttons; otherwise a single Bağla button. */
   onConfirm?: () => void;
-  /** A second answer beside the confirm button ("Xammal kimi saxla"). */
+  /** A second answer beside the confirm button ("İnqrediyent kimi saxla"). */
   altLabel?: string;
   onAlt?: () => void;
 };
