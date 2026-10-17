@@ -1,4 +1,14 @@
 <!-- BEGIN:nextjs-agent-rules -->
+# Never touch main or production
+
+Real restaurants run on the `main` branch and the production Supabase project,
+and production has no backups. Never commit, merge or push to `main`, and never
+run SQL, migrations or any other write against production. Work on the
+development branch and the "restoran testing" project only.
+
+The only exception is an explicit command from the user for that one action.
+An earlier go-ahead does not carry over to the next one: ask every time.
+
 # This is NOT the Next.js you know
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
