@@ -65,7 +65,7 @@ describe('what goes inside a set', () => {
 
   it('is emptied when Növ is switched away from Set', () => {
     expect(admin).toContain("cleanSetItems(id, form.kind === 'set' ? form.setItems.map(");
-    expect(admin).toMatch(/parseFloat\(p\.qty\) \}\)\) : \[\]\) : undefined,/);
+    expect(admin).toMatch(/parseFloat\(p\.qty\), variantId: p\.variantId \}\)\) : \[\]\) : undefined,/);
   });
 });
 

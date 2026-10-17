@@ -325,6 +325,14 @@ empty, the owner is asked when it has stock, and a Məhsul again takes back its
 own row (`20261026_product_stops_being_product.sql`). Does the way back leave
 anything behind, and is anything with stock in it removed without asking?
 
+**Does every shape of a sale reach the stock: alone and inside a set, with
+sizes and without, Məhsul and Yemək?**
+Each shape is its own path through `order_stock_lines`; one that matches no
+line takes nothing and says nothing. Owner question, 2026-10-17: a set could
+only name "Fanta", not "Fanta 0.5L", so a product with sizes inside a set took
+no stock; and a Yemək with sizes (Plov qulyaj) took nothing even sold alone,
+because its one recipe is saved with no size (`20261028_set_variants.sql`).
+
 ## 5. Before shipping, try it like a restaurant would
 
 - Turn the internet off in the middle of the action, then back on.

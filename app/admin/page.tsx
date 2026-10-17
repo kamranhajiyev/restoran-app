@@ -64,7 +64,7 @@ import OrderItemHistory from '@/components/OrderItemHistory';
 import PasswordField from '@/components/PasswordField';
 import { validatePassword } from '@/lib/password';
 import { exportMenuExcel, exportOrdersExcel, exportAnalizExcel, parseMenuFile, ImportPreview, AnalizRow } from '@/lib/excel';
-import { cleanSetItems, itemKind, KIND_LABEL, setChoices, setLine, setSplit, soldInSets, withSets, type ItemKind } from '@/lib/set-items';
+import { cleanSetItems, itemKind, KIND_LABEL, partVariant, setChoices, setLine, setSplit, soldInSets, soldInSetSizes, withSets, type ItemKind } from '@/lib/set-items';
 import { formRecipeLines, kindChangeStock, leftStockMessage, recipeLostMessage } from '@/lib/kind-change';
 import { cleanRecipe } from '@/lib/recipes';
 import { azNormalize } from '@/lib/az-text';
@@ -130,7 +130,7 @@ type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
 
 function emptyForm(cat: string) {
-  return { name: '', price: '', costPrice: '', category: cat, image: '', stationId: '', kind: 'meal' as ItemKind, hasVariants: false, variants: [] as FormVariant[], modifierGroupIds: [] as string[], modifiersKnown: true, setItems: [] as { id: string; qty: string }[], setKnown: true };
+  return { name: '', price: '', costPrice: '', category: cat, image: '', stationId: '', kind: 'meal' as ItemKind, hasVariants: false, variants: [] as FormVariant[], modifierGroupIds: [] as string[], modifiersKnown: true, setItems: [] as { id: string; qty: string; variantId: string }[], setKnown: true };
 }
 
 const AZ_MON_SHORT = ['Yan','Fev','Mar','Apr','May','İyn','İyl','Avq','Sen','Okt','Noy','Dek'];
@@ -1619,7 +1619,8 @@ function AdminPageContent() {
       modifierGroupIds: item.modifierGroupIds ?? [],
       // Undefined: this dish's links did not load, so the form must not save them.
       modifiersKnown: item.modifierGroupIds !== undefined,
-      setItems: (item.setItems ?? []).map(p => ({ id: p.id, qty: String(p.qty) })),
+      // A size deleted since reads as none, so the form asks for it again.
+      setItems: (item.setItems ?? []).map(p => ({ id: p.id, qty: String(p.qty), variantId: partVariant(p, menu.find(m => m.id === p.id))?.id ?? '' })),
       // Undefined: this dish's set contents did not load, so the form must not save them.
       setKnown: item.setItems !== undefined,
     });
@@ -1696,7 +1697,7 @@ function AdminPageContent() {
       modifierGroupIds: modifiersLoaded && form.modifiersKnown ? form.modifierGroupIds : undefined,
       // Undefined leaves the set's contents alone (saveMenu), the same way.
       // Only a set has parts: switching Növ away from Set empties them.
-      setItems: setsLoaded && form.setKnown ? cleanSetItems(id, form.kind === 'set' ? form.setItems.map(p => ({ id: p.id, qty: parseFloat(p.qty) })) : []) : undefined,
+      setItems: setsLoaded && form.setKnown ? cleanSetItems(id, form.kind === 'set' ? form.setItems.map(p => ({ id: p.id, qty: parseFloat(p.qty), variantId: p.variantId })) : []) : undefined,
     };
     const updated = editingId ? menu.map(m => m.id === editingId ? item : m) : [...menu, item];
     setMenu(updated);
@@ -2317,14 +2318,24 @@ function AdminPageContent() {
             <div className="space-y-2">
               {form.setItems.map((p, i) => {
                 const part = menu.find(m => m.id === p.id);
+                // A product with sizes needs one picked: its stock is kept per size.
+                // Sizes already used by another row of the same product are left out.
+                const sizes = (part?.variants ?? []).filter(v => v.id === p.variantId
+                  || !form.setItems.some((x, j) => j !== i && x.id === p.id && x.variantId === v.id));
                 return (
-                  <div key={p.id} className="flex items-center gap-2">
+                  <div key={`${p.id}-${i}`} className="flex items-center gap-2">
                     <span className="flex-1 min-w-0 text-sm text-stone-700 break-words">
                       {part?.name ?? 'Silinmiş məhsul'}
                       {part && <span className="text-xs text-stone-400 ml-1.5">{KIND_LABEL[itemKind(part)]}</span>}
-                      {/* A set names the product, not which size of it. */}
-                      {part?.variants?.length ? <span className="block text-xs text-amber-600">Variantlı məhsul — anbardan çıxılmır</span> : null}
                     </span>
+                    {part?.variants?.length ? (
+                      <select required
+                        className={`w-28 border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white ${p.variantId ? 'border-stone-200' : 'border-amber-400'}`}
+                        value={p.variantId} onChange={e => setForm(f => ({ ...f, setItems: f.setItems.map((x, j) => (j === i ? { ...x, variantId: e.target.value } : x)) }))}>
+                        <option value="">Variant seçin</option>
+                        {sizes.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                      </select>
+                    ) : null}
                     <input type="number" min="1" step="1" required
                       className="w-20 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
                       value={p.qty} onChange={e => setForm(f => ({ ...f, setItems: f.setItems.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)) }))} />
@@ -2336,7 +2347,7 @@ function AdminPageContent() {
               <SearchAdd
                 options={setOptions.map(m => ({ id: m.id, name: m.name, tag: KIND_LABEL[itemKind(m)] }))}
                 placeholder="Yemək və ya məhsul axtar…" none="Tapılmadı"
-                onPick={id => setForm(f => ({ ...f, setItems: [...f.setItems, { id, qty: '1' }] }))} />
+                onPick={id => setForm(f => ({ ...f, setItems: [...f.setItems, { id, qty: '1', variantId: '' }] }))} />
             </div>
           </div>
         )}
@@ -2667,13 +2678,19 @@ function AdminPageContent() {
       hidden, noCost, orphan,
     };
   };
+  const soldAlone = Object.fromEntries(Object.entries(itemMap).map(([id, s]) => [id, s.qty]));
+  const inSets = soldInSets(menu, soldAlone);
+  const inSetSizes = soldInSetSizes(menu, soldAlone);
   // Every size the menu lists (sold or not), plus any sold under a variant since deleted
   // or with no variant at all — those are still real revenue.
+  // A set part with a size counts under that size too; one with no size only in
+  // the product's own total.
   const sizeRows = (itemId: string, itemName: string, category: string, variants: MenuItemVariant[], hidden: boolean) => {
     const sold = sizeMap[itemId] ?? {};
+    const setSizes = inSetSizes[itemId] ?? {};
     const itemNoCost = menuCostMap[itemId] === undefined;
     const rows = variants.map(v =>
-      analizRow(`${itemName} · ${v.name}`, category, sold[v.id], hidden, menuCostMap[v.id] === undefined && itemNoCost, false));
+      analizRow(`${itemName} · ${v.name}`, category, sold[v.id], hidden, menuCostMap[v.id] === undefined && itemNoCost, false, setSizes[v.id] ?? 0));
     Object.entries(sold).forEach(([vid, s]) => {
       if (variants.some(v => v.id === vid)) return;
       rows.push(analizRow(`${itemName} · ${vid ? 'silinmiş ölçü' : 'ölçüsüz'}`, category, s, false,
@@ -2682,7 +2699,6 @@ function AdminPageContent() {
     return rows;
   };
 
-  const inSets = soldInSets(menu, Object.fromEntries(Object.entries(itemMap).map(([id, s]) => [id, s.qty])));
   const analizRows: AnalizRow[] = [];
   const pushAnaliz = (id: string, name: string, category: string, variants: MenuItemVariant[], hidden: boolean, orphan: boolean) => {
     const s = itemMap[id];

@@ -116,12 +116,13 @@ export function exportAnalizExcel(rows: AnalizRow[], from: string, to: string): 
   const r2 = (n: number) => Math.round(n * 100) / 100;
   // A product with sizes is replaced by its sizes: a total row followed by its parts
   // would be counted twice by anyone summing the column.
-  // What went out inside sets has no size, so it gets a row of its own: the
-  // Cəmi column then adds up to what the screen shows for the product.
+  // A set part with a size is counted on that size's row. One with no size gets
+  // a row of its own: the Cəmi column then adds up to what the screen shows.
+  const unsized = (r: AnalizRow) => r.inSets - (r.sizes ?? []).reduce((s, z) => s + z.inSets, 0);
   const inSetsRow = (r: AnalizRow): AnalizRow => ({
-    ...r, name: `${r.name} · setlərdə`, qty: 0, rev: 0, cost: 0, profit: 0, margin: null, share: 0, noCost: false, sizes: undefined,
+    ...r, name: `${r.name} · setlərdə`, qty: 0, inSets: unsized(r), rev: 0, cost: 0, profit: 0, margin: null, share: 0, noCost: false, sizes: undefined,
   });
-  const sheet = rows.flatMap(r => (r.sizes?.length ? (r.inSets > 0 ? [...r.sizes, inSetsRow(r)] : r.sizes) : [r])).map(r => ({
+  const sheet = rows.flatMap(r => (r.sizes?.length ? (unsized(r) > 0 ? [...r.sizes, inSetsRow(r)] : r.sizes) : [r])).map(r => ({
     'Məhsul': r.name,
     'Kateqoriya': r.category,
     'Satış (ədəd)': r.qty,

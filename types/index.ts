@@ -83,6 +83,7 @@ export interface SelectedModifier {
 export interface SetPart {
   id: string;   // the menu item inside
   qty: number;
+  variantId?: string;   // which size of it, when it has sizes ("Fanta · 0.5L")
 }
 
 export interface MenuItem {

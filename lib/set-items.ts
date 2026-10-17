@@ -17,18 +17,30 @@ export function itemKind(m: Pick<MenuItem, 'kind' | 'setItems'>): ItemKind {
 }
 
 /** What can be added to the set being edited: not itself, not another set, not
- *  something already inside. */
-export function setChoices<T extends Pick<MenuItem, 'id' | 'kind' | 'setItems'>>(
+ *  something already inside. A product with sizes stays on the list until each
+ *  size is inside (Fanta 0.5L and Fanta 1L in one set). */
+export function setChoices<T extends Pick<MenuItem, 'id' | 'kind' | 'setItems' | 'variants'>>(
   menu: T[], selfId: string | null, picked: { id: string }[],
 ): T[] {
-  return menu.filter(m => m.id !== selfId && itemKind(m) !== 'set' && !picked.some(p => p.id === m.id));
+  return menu.filter(m => m.id !== selfId && itemKind(m) !== 'set'
+    && picked.filter(p => p.id === m.id).length < Math.max(1, m.variants?.length ?? 0));
 }
 
-/** "Ayran × 1 · Dolma × 2", for the menu list. A part deleted since is left out. */
-export function setLine(parts: SetPart[] | undefined, menu: { id: string; name: string }[]): string {
+/** The size a part names, if the product still has it. A part with no size, or
+ *  a size deleted since, has none: the form then asks for one again. */
+export function partVariant(part: { variantId?: string }, item: Pick<MenuItem, 'variants'> | undefined) {
+  return part.variantId ? item?.variants?.find(v => v.id === part.variantId) : undefined;
+}
+
+/** "Ayran × 1 · Fanta · 0.5L × 2", for the menu list. A part deleted since is
+ *  left out; a product with sizes and none picked says so, for the owner to fix. */
+export function setLine(parts: SetPart[] | undefined, menu: Pick<MenuItem, 'id' | 'name' | 'variants'>[]): string {
   return (parts ?? []).flatMap(p => {
-    const name = menu.find(m => m.id === p.id)?.name;
-    return name ? [`${name} × ${p.qty}`] : [];
+    const item = menu.find(m => m.id === p.id);
+    if (!item) return [];
+    const size = partVariant(p, item);
+    const label = size ? ` · ${size.name}` : item.variants?.length ? ' · variant seçilməyib' : '';
+    return [`${item.name}${label} × ${p.qty}`];
   }).join(' · ');
 }
 
@@ -44,21 +56,38 @@ export function soldInSets(menu: { id: string; setItems?: SetPart[] }[], sold: R
   return out;
 }
 
+/** The same, per size: product id → size id → how many. A part with no size is
+ *  under '', and counts only in the product's own total (soldInSets). */
+export function soldInSetSizes(menu: { id: string; setItems?: SetPart[] }[], sold: Record<string, number>): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  for (const m of menu) {
+    const n = sold[m.id] ?? 0;
+    if (n === 0) continue;
+    for (const p of m.setItems ?? []) {
+      const sizes = (out[p.id] ??= {});
+      const v = p.variantId ?? '';
+      sizes[v] = (sizes[v] ?? 0) + n * p.qty;
+    }
+  }
+  return out;
+}
+
 /** Cəmi: sold alone plus sold inside sets. */
 export const withSets = (r: { qty: number; inSets: number }) => r.qty + r.inSets;
 
 /** What Cəmi is made of, for the hover note. */
 export const setSplit = (r: { qty: number; inSets: number }) => `${r.qty} tək + ${r.inSets} setdə`;
 
-/** Cleans what the form or an old row holds: no part twice, none pointing at
- *  the set itself, whole numbers from 1. */
-export function cleanSetItems(selfId: string, parts: { id: string; qty: number }[]): SetPart[] {
+/** Cleans what the form or an old row holds: no part twice (the same size of
+ *  the same product), none pointing at the set itself, whole numbers from 1. */
+export function cleanSetItems(selfId: string, parts: { id: string; qty: number; variantId?: string }[]): SetPart[] {
   const out: SetPart[] = [];
   for (const p of parts) {
     if (!p.id || p.id === selfId) continue;
     const qty = Math.max(1, Math.round(Number(p.qty) || 1));
-    const same = out.find(x => x.id === p.id);
-    if (same) same.qty += qty; else out.push({ id: p.id, qty });
+    const variantId = p.variantId || undefined;
+    const same = out.find(x => x.id === p.id && x.variantId === variantId);
+    if (same) same.qty += qty; else out.push(variantId ? { id: p.id, qty, variantId } : { id: p.id, qty });
   }
   return out;
 }
