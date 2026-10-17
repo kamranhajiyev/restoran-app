@@ -51,7 +51,7 @@ import { canLink, checkLink, clearLink, readLink, saveLink, type Terminal } from
 import { tillImage } from '@/lib/till-image';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
 import { movedToTable, orderPlace as placeOf, tableTitle } from '@/lib/order-place';
-import { flushQueue, pendingOrderIds, ADD_ORDER } from '@/lib/sync';
+import { flushQueue, pendingOrderIds, ADD_ORDER, sendOrderByLink } from '@/lib/sync';
 import { verifyPinOffline, rememberPin, forgetPins } from '@/lib/offline-pin';
 import { queueSize, enqueue, onEnqueue } from '@/lib/offline-queue';
 import { onLocalWrite, pendingWrites, tillPost } from '@/lib/till-write';
@@ -1988,8 +1988,16 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     // so isOnline() is asked only where there is nowhere else for the order to
     // go. Asking it anyway would send a perfectly-saveable order to IndexedDB
     // whenever the probe happened to be mid-flight.
-    const saveError = hasLocalDb() || isOnline()
+    //
+    // A browser tab opened by a terminal link has no account, so it goes through
+    // the server with the link's token, like every other write it makes.
+    const saveError = hasLocalDb()
       ? await addOrder(order)
+      : isOnline()
+      ? (overrideCompanyId && overrideToken
+          ? await sendOrderByLink(order, overrideCompanyId, overrideToken, `order:${order.id}`)
+              .then(r => r?.reason ?? null, (e: unknown) => String(e))
+          : await addOrder(order))
       : (await enqueue(`order:${order.id}`, ADD_ORDER, order, overrideCompanyId ?? null), null);
     setSubmitting(false);
     if (saveError) {

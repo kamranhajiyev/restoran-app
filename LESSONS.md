@@ -279,6 +279,15 @@ Finding these one at a time kept missing some, so they were closed all at once
 menu functions. Is what you open on the list, with a reason? Run
 `supabase/checks/anon_reach.sql`; empty is the only good answer.
 
+**When a door closes to anon, who was still walking through it?**
+Closing access breaks every caller that had none of its own, not only the
+attackers. Before closing, search the code for each table or function being
+closed and try each screen without an account: browser link till, exe, QR menu.
+Parviz, 2026-10-17: the website till opened by a terminal link still inserted
+new orders with the public key; the morning `close_anon_doors` reached
+production every new order failed with "İcazə xətası". The exe and a signed-in
+browser worked, so testing never saw it.
+
 **Is every query and every queued write scoped to one company?**
 A till moved to another restaurant must not send the first one's orders.
 Live listeners too: usage review, 2026-10-14: the till and admin heard every

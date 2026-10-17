@@ -114,6 +114,31 @@ export function otherCompany(written: string | null, current: string | null): bo
 /** Why an entry was not applied, and the HTTP status that said so, if any. */
 type Refusal = { reason: string; status?: number };
 
+/**
+ * A new order from a browser tab opened by a terminal link, through the server.
+ *
+ * Such a tab has no account, so a straight insert goes in under the anon key —
+ * and anon may no longer write orders (20261009_close_anon_doors.sql). Every
+ * new order on the website till was refused with "İcazə xətası" the morning
+ * those doors closed on production — Parviz, 2026-10-17.
+ */
+export async function sendOrderByLink(
+  order: unknown, companyId: string, token: string, idempotencyKey: string, base = "",
+): Promise<Refusal | null> {
+  const r = await fetch(`${base}/api/add-order`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ order, companyId, token }),
+  });
+  const text = await r.text();
+  const data = ((): { ok?: boolean; error?: unknown } => {
+    try { return JSON.parse(text) as { ok?: boolean; error?: unknown }; }
+    catch { return { ok: r.ok }; }
+  })();
+  if (r.ok && data.ok !== false) return null;
+  return { reason: data.error ? String(data.error) : `http ${r.status}`, status: r.status };
+}
+
 /** The fields the replay needs. Both queues supply them under these names. */
 export interface Pending {
   id: string;
@@ -184,7 +209,12 @@ async function replay(item: Pending, base: string, local: boolean, token: string
       return { reason: data.error ? String(data.error) : `http ${res.status}`, status: res.status };
     }
 
-    // A browser tab still has the waiter's own session, so it inserts as itself.
+    // A browser tab opened by a terminal link has no session: through the server.
+    if (token && item.companyId) {
+      return sendOrderByLink(item.body, item.companyId, token, item.id, base);
+    }
+
+    // A browser tab signed in has the waiter's own session, so it inserts as itself.
     // Re-inserting an order the server already has trips the primary key on the
     // till-generated id, which is the same answer as success.
     const error = await addOrder(item.body as Order, { server: true, keepOrderNumber: local });
