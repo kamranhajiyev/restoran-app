@@ -20,7 +20,7 @@ Every new feature or bug fix comes with a test in `tests/` that fails without th
 
 Before finishing any change, read `LESSONS.md` and go through the questions that touch the change. They are questions from past bugs, not fixed rules: skip what does not apply, and stop and ask if one would break something else.
 
-Every customer bug fix also adds its question to `LESSONS.md` (date and customer) in the same commit, unless one already covers it. Fixed bugs that never reached the file were made again.
+Every customer bug fix also adds its question to `LESSONS.md` (date and customer) in the same commit, unless one already covers it. Fixed bugs that never reached the file were made again. A lesson is three lines: the question, one example line, and `Guard:` the test that stops it. The full story goes in `LESSONS-HISTORY.md`.
 
 # The public key gets nothing
 
