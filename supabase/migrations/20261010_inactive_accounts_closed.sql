@@ -43,6 +43,7 @@ begin
     select p.oid
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
+      and p.prokind in ('f', 'p')  -- aggregates have no definition to rewrite
       and p.proname not in ('get_my_company_id', 'is_superadmin')
       and pg_get_functiondef(p.oid) ~* pattern
   loop
@@ -54,6 +55,7 @@ begin
   if exists (
     select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
+      and p.prokind in ('f', 'p')
       and p.proname not in ('get_my_company_id', 'is_superadmin')
       and pg_get_functiondef(p.oid) ~* pattern
   ) then
