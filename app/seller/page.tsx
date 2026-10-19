@@ -43,6 +43,7 @@ import SyncStatus from '@/components/SyncStatus';
 import OrderSyncDot from '@/components/OrderSyncDot';
 import TillLink from '@/components/TillLink';
 import { CartItems } from '@/components/seller/CartItems';
+import { addAgainLine, takeBackOne } from '@/lib/add-again';
 import { OrderRow } from '@/components/seller/OrderRow';
 import { PrintKitchenToggle } from '@/components/seller/PrintKitchenToggle';
 import { STATUS_COLORS, STATUS_LABELS, orderTotal, round2 } from '@/components/seller/order-format';
@@ -1451,6 +1452,12 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     });
   }
 
+  // The "+" beside a line already on the order: one more of it, into the new batch.
+  function addAgainFor(oi: OrderItem): (() => void) | null {
+    const line = addAgainLine(oi, menu);
+    return line ? () => addToCart(line.item, line.mods, line.variantId, line.detail) : null;
+  }
+
   function removeFromCart(itemId: string, mods?: string, price?: number) {
     setCart(prev => {
       const ex = prev.find(ci => sameCartLine(ci, itemId, mods, price));
@@ -1828,6 +1835,12 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     // (removed_by, removed_at) when the batch lands.
     if (staged === 0 && isItemReady(order, oi) && !confirm(`"${oi.menuItem.name}" hazırdır. Yenə də silinsin?`)) return;
     updatePendingRemovals(p => ({ ...p, [oi.id!]: staged + 1 }));
+  }
+
+  function takeBackOneRemoval(oi: OrderItem) {
+    const id = oi.id;
+    if (!id) return;
+    updatePendingRemovals(prev => takeBackOne(prev, id));
   }
 
   function unstageRemovals(oi: OrderItem) {
@@ -3236,7 +3249,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
               </div>
 
               {/* Desktop table header */}
-              <div className="hidden md:grid grid-cols-[120px_1fr_140px_200px_110px] gap-4 px-6 py-2 text-xs font-medium text-stone-500 uppercase tracking-wide border-b border-t bg-white">
+              <div className="hidden md:grid grid-cols-[120px_1fr_140px_420px_110px] gap-4 px-6 py-2 text-xs font-medium text-stone-500 uppercase tracking-wide border-b border-t bg-white">
                 <span>Vaxt</span><span>Sifariş</span><span>Durum</span><span></span><span className="text-right">Ümumi</span>
               </div>
 
@@ -4063,7 +4076,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                     last line; once the list reaches the bottom it scrolls and the footer stays put. */}
                 <div className="min-h-0 overflow-y-auto px-4 py-3">
                   {appendOrder
-                    ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} pendingRemovals={pendingRemovals} onUnstageRemoval={unstageRemovals} onCommitRemovals={() => commitRemovals(appendOrder)} removing={removing} />
+                    ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} onUnstageRemoval={unstageRemovals} onCommitRemovals={() => commitRemovals(appendOrder)} removing={removing} />
                     : cart.length === 0
                     ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
                     : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
@@ -4189,7 +4202,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-3">
               {appendOrder
-                ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} pendingRemovals={pendingRemovals} onUnstageRemoval={unstageRemovals} onCommitRemovals={() => commitRemovals(appendOrder)} removing={removing} />
+                ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} onUnstageRemoval={unstageRemovals} onCommitRemovals={() => commitRemovals(appendOrder)} removing={removing} />
                 : cart.length === 0
                 ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
                 : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />

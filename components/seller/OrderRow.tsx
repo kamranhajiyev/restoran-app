@@ -3,8 +3,10 @@ import { useState } from 'react';
 import { AlertTriangle, Bike, ChevronDown, Printer, Undo2 } from 'lucide-react';
 import { isOrderOpen, type Order, type OrderItem, type OrderStatus } from '@/types';
 import OrderItemHistory from '@/components/OrderItemHistory';
+import OrderItemsMerged from '@/components/OrderItemsMerged';
 import OrderSyncDot from '@/components/OrderSyncDot';
 import { orderLabel } from '@/lib/order-label';
+import { mergeLines } from '@/lib/add-again';
 import { STATUS_COLORS, STATUS_LABELS, elapsed, orderTotal } from './order-format';
 import OrderNote from '@/components/OrderNote';
 
@@ -51,9 +53,30 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
   onStatusChange: (id: string, s: OrderStatus) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // One line per dish by default — what's on the table now. The rounds with their
+  // times are one tap away, for when the seller needs to know what came later.
+  const [byTime, setByTime] = useState(false);
+  const items = (
+    <>
+      {order.items.length > 0 && (
+        <div className="flex justify-end -mt-1 mb-1">
+          <button
+            onClick={e => { e.stopPropagation(); setByTime(t => !t); }}
+            className="text-xs font-medium text-stone-500 hover:text-stone-800 underline underline-offset-2"
+          >
+            {byTime ? 'Birlikdə göstər' : 'Vaxtla göstər'}
+          </button>
+        </div>
+      )}
+      {byTime
+        ? <OrderItemHistory order={order} tz={tz} isItemReady={isItemReady} />
+        : <OrderItemsMerged order={order} isItemReady={isItemReady} />}
+    </>
+  );
   const total = orderTotal(order);
-  const itemsPreview = order.items.map(oi =>
-    oi.modifiers ? `${oi.menuItem.name} (${oi.modifiers})` : oi.menuItem.name
+  // "Çoban salatı ×4", not the same name four times over.
+  const itemsPreview = mergeLines(order.items, [], {}).lines.map(({ item: oi, quantity }) =>
+    (oi.modifiers ? `${oi.menuItem.name} (${oi.modifiers})` : oi.menuItem.name) + (quantity > 1 ? ` ×${quantity}` : '')
   ).join(', ');
 
   // Green is the only colour on this list, and it means one thing: food is waiting
@@ -123,7 +146,7 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
         {expanded && (
           <div className={`px-4 pb-4 border-t border-stone-100 ${anyReady ? 'bg-green-50/70' : 'bg-stone-50'}`}>
             <div className="pt-3 mb-3">
-              <OrderItemHistory order={order} tz={tz} isItemReady={isItemReady} />
+              {items}
             </div>
             {order.note && <OrderNote note={order.note} className="text-xs text-stone-500 italic mb-3" />}
             {(order.discountAmount ?? 0) > 0 && (
@@ -152,7 +175,7 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
                   onClick={e => { e.stopPropagation(); onAppend(); }}
                   className="w-full px-4 py-2.5 rounded-xl border border-primary-300 text-primary-800 hover:bg-primary-50 active:scale-95 text-sm font-semibold transition-all"
                 >
-                  Düzəliş et
+                  Düzəliş
                 </button>
                 {order.tableNumber !== 0 && (
                   <button
@@ -186,7 +209,7 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
           react under the cursor looks disabled. */}
       <div className={`hidden md:block border-b ${anyReady ? 'bg-green-50 hover:bg-green-100 border-l-4 border-l-green-500' : 'bg-white hover:bg-stone-50'}`}>
         <div
-          className="w-full grid grid-cols-[120px_1fr_140px_200px_110px] gap-4 px-6 py-4 items-center cursor-pointer"
+          className="w-full grid grid-cols-[120px_1fr_140px_420px_110px] gap-4 px-6 py-4 items-center cursor-pointer"
           onClick={() => setExpanded(e => !e)}
         >
           <div>
@@ -216,18 +239,33 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center gap-2 flex-wrap" onClick={e => e.stopPropagation()}>
             {printFailed && (
               <button onClick={onReprint} className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
                 Yenidən çap
               </button>
             )}
+            {/* The two things a seller does most to an open table — print the bill,
+                add to it — sit on the row itself. "Ödənişsiz bağla" is kept apart at
+                the end so a rushed click on "Düzəliş" can't close the order. */}
             {isOrderOpen(order) && (
               <>
+                <button
+                  onClick={onPrintBill}
+                  disabled={billBusy}
+                  title="Çap et"
+                  aria-label="Çap et"
+                  className="border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 p-1.5 rounded transition-colors"
+                >
+                  <Printer className="w-4 h-4" />
+                </button>
+                <button onClick={onAppend} className="border border-primary-300 text-primary-800 hover:bg-primary-50 text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
+                  Düzəliş
+                </button>
                 <button onClick={onPay} className="bg-primary-800 hover:bg-primary-900 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
                   Ödəniş
                 </button>
-                <button onClick={onCancel} className="border border-red-200 text-red-500 hover:bg-red-50 text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
+                <button onClick={onCancel} className="ml-4 border border-red-200 text-red-500 hover:bg-red-50 text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
                   Ödənişsiz bağla
                 </button>
               </>
@@ -254,24 +292,11 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
         {expanded && (
           <div className={`px-6 pb-4 border-t border-stone-100 ${anyReady ? 'bg-green-50/70' : 'bg-stone-50'}`}>
             <div className="pt-3 mb-3">
-              <OrderItemHistory order={order} tz={tz} isItemReady={isItemReady} />
+              {items}
             </div>
             {order.note && <OrderNote note={order.note} className="text-xs text-stone-500 italic" />}
-            {isOrderOpen(order) && (
+            {isOrderOpen(order) && (order.tableNumber !== 0 || canPickCourier) && (
               <div className="flex gap-2 pt-3 mt-1 border-t border-stone-200">
-                <button
-                  onClick={e => { e.stopPropagation(); onPrintBill(); }}
-                  disabled={billBusy}
-                  className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 border border-emerald-300 hover:bg-emerald-50 disabled:opacity-50 rounded-lg px-3 py-1.5 transition-colors"
-                >
-                  <Printer className="w-3.5 h-3.5" />{billBusy ? 'Çap olunur…' : 'Çap et'}
-                </button>
-                <button
-                  onClick={e => { e.stopPropagation(); onAppend(); }}
-                  className="text-xs font-semibold text-primary-800 border border-primary-300 hover:bg-primary-50 rounded-lg px-3 py-1.5 transition-colors"
-                >
-                  Düzəliş et
-                </button>
                 {order.tableNumber !== 0 && (
                   <button
                     onClick={e => { e.stopPropagation(); onMove(); }}

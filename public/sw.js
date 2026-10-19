@@ -76,8 +76,11 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  // Hashed filenames never change contents — cache first, forever.
-  if (url.pathname.startsWith('/_next/static/')) {
+  // Hashed filenames never change contents — cache first, forever. Not under
+  // `next dev`: its chunks keep one name across edits, so a cached copy served
+  // yesterday's code with today's styles and the order list fell apart.
+  const devHost = self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1';
+  if (url.pathname.startsWith('/_next/static/') && !devHost) {
     e.respondWith(
       caches.open(CACHE).then(async cache => {
         const hit = await cache.match(req);
