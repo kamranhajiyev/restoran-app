@@ -1,0 +1,10 @@
+{
+  "name": "Çinar Lounge",
+
+  "setCategories": ["Qelyan setleri", "Pive setleri"],
+  "productCategories": ["Alkoqollu içkiler", "Piveler"],
+  "productNames": [
+    "Suxarik", "Tum", "Noxud", "Cips Lays", "Araxis", "Alpen Gold",
+    "Cola", "Red Bull", "Hell", "Sirab", "Natura", "Bizon", "Sarıkız", "Fuse Tea"
+  ]
+}
