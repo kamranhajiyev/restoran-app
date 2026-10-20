@@ -54,6 +54,12 @@ android {
         }
     }
 
+    // The release lint check crashes under the Java 25 that Android Studio
+    // ships ("25.0.3"), and two Java files are not worth a lint run per build.
+    lint {
+        checkReleaseBuilds false
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
