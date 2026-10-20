@@ -98,3 +98,22 @@ export function rowToGiveBack(line: MergedLine, staged: Record<string, number>):
   }
   return null;
 }
+
+// The one button under the panel. It sends everything at once — removals, new
+// lines and a changed note — so the seller never has a second, red button to
+// press first (Test Restoran, 2026-10-20). Its name says what this press does.
+export function submitButton(s: {
+  appending: boolean;
+  cartCount: number;
+  removals: number;
+  noteChanged: boolean;
+  busy: boolean;
+}): { label: string; disabled: boolean } {
+  if (!s.appending) return { label: s.busy ? 'Göndərilir...' : 'Sifariş ver', disabled: s.cartCount === 0 || s.busy };
+  const label = s.busy ? 'Göndərilir...'
+    : s.cartCount > 0 ? 'Əlavə et'
+    : s.removals > 0 ? 'Yadda saxla'
+    : s.noteChanged ? 'Qeydi göndər'
+    : 'Əlavə et';
+  return { label, disabled: s.busy || (s.cartCount === 0 && s.removals === 0 && !s.noteChanged) };
+}

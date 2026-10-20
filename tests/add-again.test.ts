@@ -6,9 +6,10 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { addAgainLine, mergeLines, rowToGiveBack, rowToTakeFrom, takeBackOne } from '@/lib/add-again';
+import { addAgainLine, mergeLines, rowToGiveBack, rowToTakeFrom, submitButton, takeBackOne } from '@/lib/add-again';
 import { CartItems } from '@/components/seller/CartItems';
-import type { MenuItem, OrderItem } from '@/types';
+import type { MenuItem, Order, OrderItem } from '@/types';
+import { itemLines } from '@/lib/printer';
 
 const fanta: MenuItem = {
   id: 'f', name: 'Fanta', price: 1, category: 'İçki', available: true,
@@ -65,7 +66,7 @@ describe('"+" on a line with a removal waiting', () => {
     const el = CartItems({
       cart: [], existingItems: [oi], pendingRemovals: { r1: 1 },
       addToCart: () => {}, removeFromCart: () => {}, onDecrementExisting: () => {},
-      onUnstageRemoval: () => {}, onTakeBackOne: o => taken.push(o.id!),
+      onTakeBackOne: o => taken.push(o.id!),
       addAgain: o => () => added.push(o.id!),
     });
     const plus = findByTitle(el, 'Bir ədəd əlavə et');
@@ -73,6 +74,81 @@ describe('"+" on a line with a removal waiting', () => {
     plus!.props.onClick();
     expect(taken).toEqual(['r1']);
     expect(added).toEqual([]);
+  });
+
+  // A separate undo button beside − and + did what "+" already does, and left
+  // the seller guessing which of three to press (Test Restoran, 2026-10-20).
+  it('is the only undo: the row has just − and +', () => {
+    // Every handler the seller page has, including the old undo one.
+    const handlers = { onTakeBackOne: () => {}, addAgain: () => () => {}, onUnstageRemoval: () => {} };
+    const html = renderToStaticMarkup(createElement(CartItems, {
+      cart: [], existingItems: [{ id: 'r1', menuItem: ayran, quantity: 3 }], pendingRemovals: { r1: 2 },
+      addToCart: () => {}, removeFromCart: () => {}, onDecrementExisting: () => {},
+      ...(handlers as object),
+    }));
+    const row = html.slice(html.indexOf('Ayran'), html.indexOf('</li>'));
+    expect(row.match(/<button/g)).toHaveLength(2);
+    expect(html).not.toContain('Silinməni ləğv et');
+  });
+});
+
+// Limonad 5 on the order with 3 more read "+3 … 5 əd", while Ayran with 2 taken
+// off read "−2 … 3 əd": one count left the change out, the other took it in
+// (Test Restoran, 2026-10-20). The count is what the order will hold.
+describe('the count on a line in Mövcud', () => {
+  const limonad: MenuItem = { id: 'l', name: 'Limonad', price: 2, category: 'İçki', available: true };
+  const render = (props: Partial<Parameters<typeof CartItems>[0]>) => renderToStaticMarkup(createElement(CartItems, {
+    cart: [], addToCart: () => {}, removeFromCart: () => {}, ...props,
+  }));
+
+  it('includes units being added', () => {
+    const html = render({ existingItems: [{ id: 'r1', menuItem: limonad, quantity: 5 }], cart: [{ menuItem: limonad, quantity: 3 }] });
+    expect(html).toContain('8 əd');
+  });
+
+  it('leaves out units being taken off', () => {
+    const html = render({ existingItems: [{ id: 'r1', menuItem: limonad, quantity: 5 }], pendingRemovals: { r1: 2 } });
+    expect(html).toContain('3 əd');
+  });
+});
+
+// A red "Silinməni əlavə et" sat above the green "Əlavə et": two "add" buttons,
+// and the red one took things off (Test Restoran, 2026-10-20). The green one
+// already sent removals too, so it is now the only button.
+describe('one button sends the whole edit', () => {
+  const base = { appending: true, cartCount: 0, removals: 0, noteChanged: false, busy: false };
+
+  it('has no red button in the panel', () => {
+    const limonad: MenuItem = { id: 'l', name: 'Limonad', price: 2, category: 'İçki', available: true };
+    const html = renderToStaticMarkup(createElement(CartItems, {
+      cart: [], existingItems: [{ id: 'r1', menuItem: limonad, quantity: 5 }], pendingRemovals: { r1: 2 },
+      addToCart: () => {}, removeFromCart: () => {},
+      ...({ onCommitRemovals: () => {} } as object),
+    }));
+    expect(html).not.toContain('Silinməni əlavə et');
+    expect(html).not.toContain('bg-red-600');
+  });
+
+  it('can be pressed with only removals, and says "Yadda saxla"', () => {
+    expect(submitButton({ ...base, removals: 2 })).toEqual({ label: 'Yadda saxla', disabled: false });
+  });
+
+  it('says "Əlavə et" when something is added, removals or not', () => {
+    expect(submitButton({ ...base, cartCount: 1, removals: 2 }).label).toBe('Əlavə et');
+  });
+
+  it('still sends a changed note on its own', () => {
+    expect(submitButton({ ...base, noteChanged: true })).toEqual({ label: 'Qeydi göndər', disabled: false });
+  });
+
+  it('cannot be pressed with nothing to send, or while sending', () => {
+    expect(submitButton(base).disabled).toBe(true);
+    expect(submitButton({ ...base, cartCount: 1, busy: true })).toEqual({ label: 'Göndərilir...', disabled: true });
+  });
+
+  it('on a new order needs something in the cart', () => {
+    expect(submitButton({ ...base, appending: false })).toEqual({ label: 'Sifariş ver', disabled: true });
+    expect(submitButton({ ...base, appending: false, cartCount: 1 }).disabled).toBe(false);
   });
 });
 
@@ -209,5 +285,32 @@ describe('a new size of a product already on the order', () => {
     expect(html.indexOf('2 L')).toBeGreaterThan(html.indexOf('0.5 L'));
     expect(html.indexOf('2 L')).toBeLessThan(html.indexOf('YENİ'));
     expect(html.slice(html.indexOf('YENİ'))).toContain('Ayran');
+  });
+});
+
+// Limonad ordered 5, then 3 more, printed as "Limonad 5x" and "Limonad 3x" on
+// the guest's receipt (Test Restoran, 2026-10-20).
+describe('the guest receipt and bill', () => {
+  const limonad: MenuItem = { id: 'l', name: 'Limonad', price: 2, category: 'İçki', available: true };
+  const order = (items: OrderItem[]) => ({ items } as Order);
+
+  it('prints one line per dish, as the till shows it', () => {
+    const lines = itemLines(order([
+      { id: 'r1', menuItem: limonad, quantity: 5 },
+      { id: 'r2', menuItem: ayran, quantity: 3 },
+      { id: 'r3', menuItem: limonad, quantity: 3 },
+    ])).map(l => l.text);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^Limonad\s+8x\s+16\.00m$/);
+  });
+
+  it('keeps another price or size on its own line', () => {
+    const lines = itemLines(order([
+      { id: 'r1', menuItem: limonad, quantity: 5 },
+      { id: 'r2', menuItem: { ...limonad, price: 2.5 }, quantity: 1 },
+      { id: 'r3', menuItem: fanta, quantity: 1, modifiers: '0.33 L', variantId: 'v33' },
+      { id: 'r4', menuItem: fanta, quantity: 1, modifiers: '0.5 L', variantId: 'v5' },
+    ]));
+    expect(lines).toHaveLength(4);
   });
 });

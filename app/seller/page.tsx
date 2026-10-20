@@ -43,7 +43,7 @@ import SyncStatus from '@/components/SyncStatus';
 import OrderSyncDot from '@/components/OrderSyncDot';
 import TillLink from '@/components/TillLink';
 import { CartItems } from '@/components/seller/CartItems';
-import { addAgainLine, takeBackOne } from '@/lib/add-again';
+import { addAgainLine, submitButton, takeBackOne } from '@/lib/add-again';
 import { OrderRow } from '@/components/seller/OrderRow';
 import { PrintKitchenToggle } from '@/components/seller/PrintKitchenToggle';
 import { STATUS_COLORS, STATUS_LABELS, orderTotal, round2 } from '@/components/seller/order-format';
@@ -1843,16 +1843,6 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     updatePendingRemovals(prev => takeBackOne(prev, id));
   }
 
-  function unstageRemovals(oi: OrderItem) {
-    const id = oi.id;
-    if (!id) return;
-    updatePendingRemovals(prev => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-  }
-
   // Send everything staged as ONE batch. A SOFT delete: the row survives, struck through on the
   // card, and is what the kitchen's LEGV slip prints. One call rather than one per line, because
   // each call printed its own slip — Fanta, Cola and Su taken off together were three tickets at
@@ -2698,10 +2688,15 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const cartTotal   = cart.reduce((s, ci) => s + ci.menuItem.price * ci.quantity, 0);
   const cartCount   = cart.reduce((s, ci) => s + ci.quantity, 0);
   const appendOrder = appendOrderId ? orders.find(o => o.id === appendOrderId) ?? null : null;
-  // The edit screen's button also sends a changed note on its own (a QEYD slip),
-  // so an empty cart doesn't disable it then.
-  const appendNoteOnly = !!appendOrder && cart.length === 0 && note.trim() !== (appendOrder.note ?? '').trim()
-    && !Object.values(pendingRemovals).some(n => n > 0);
+  // The edit screen's button also sends removals and a changed note (a QEYD slip)
+  // on their own, so an empty cart doesn't disable it then.
+  const submit = submitButton({
+    appending: !!appendOrder,
+    cartCount: cart.length,
+    removals: Object.values(pendingRemovals).reduce((s, n) => s + n, 0),
+    noteChanged: !!appendOrder && note.trim() !== (appendOrder.note ?? '').trim(),
+    busy: submitting || removing,
+  });
   // Category tab order follows the admin's saved category order
   const categories  = [...new Set(availableCategories.filter(a => menu.some(i => i.category === a.name)).map(a => a.name))];
   const menuQuery   = azNormalize(menuSearch.trim());
@@ -4076,7 +4071,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                     last line; once the list reaches the bottom it scrolls and the footer stays put. */}
                 <div className="min-h-0 overflow-y-auto px-4 py-3">
                   {appendOrder
-                    ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} onUnstageRemoval={unstageRemovals} onCommitRemovals={() => commitRemovals(appendOrder)} removing={removing} />
+                    ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} removing={removing} />
                     : cart.length === 0
                     ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
                     : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
@@ -4097,11 +4092,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                   </div>
                   <button
                     onClick={submitOrder}
-                    disabled={(cart.length === 0 && !appendNoteOnly) || submitting}
+                    disabled={submit.disabled}
                     className="w-full bg-primary-800 hover:bg-primary-900 disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
                   >
-                    {submitting && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                    {submitting ? 'Göndərilir...' : appendNoteOnly ? 'Qeydi göndər' : appendOrder ? 'Əlavə et' : 'Sifariş ver'}
+                    {(submitting || removing) && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                    {submit.label}
                   </button>
                 </div>
               </div>
@@ -4202,7 +4197,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-3">
               {appendOrder
-                ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} onUnstageRemoval={unstageRemovals} onCommitRemovals={() => commitRemovals(appendOrder)} removing={removing} />
+                ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} removing={removing} />
                 : cart.length === 0
                 ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
                 : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
@@ -4223,11 +4218,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
               </div>
               <button
                 onClick={submitOrder}
-                disabled={(cart.length === 0 && !appendNoteOnly) || submitting}
+                disabled={submit.disabled}
                 className="w-full bg-primary-800 hover:bg-primary-900 disabled:bg-stone-300 text-white font-semibold py-4 rounded-2xl transition-colors text-base active:scale-95 flex items-center justify-center gap-2"
               >
-                {submitting && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                {submitting ? 'Göndərilir...' : appendNoteOnly ? 'Qeydi göndər' : appendOrder ? 'Əlavə et' : 'Sifariş ver'}
+                {(submitting || removing) && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                {submit.label}
               </button>
             </div>
           </div>

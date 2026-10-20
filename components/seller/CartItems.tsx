@@ -1,12 +1,12 @@
 'use client';
 import { Fragment } from 'react';
-import { Minus, Plus, Undo2 } from 'lucide-react';
+import { Minus, Plus } from 'lucide-react';
 import type { MenuItem, OrderItem } from '@/types';
 import { mergeLines, rowToGiveBack, rowToTakeFrom } from '@/lib/add-again';
 
 // ── CartItems — shared between desktop sidebar and mobile sheet ───────────
 
-export function CartItems({ cart, existingItems, removedItems, addToCart, removeFromCart, onDecrementExisting, addAgain, onTakeBackOne, pendingRemovals, onUnstageRemoval, onCommitRemovals, removing }: {
+export function CartItems({ cart, existingItems, removedItems, addToCart, removeFromCart, onDecrementExisting, addAgain, onTakeBackOne, pendingRemovals, removing }: {
   cart: OrderItem[];
   existingItems?: OrderItem[];
   removedItems?: OrderItem[];
@@ -18,17 +18,15 @@ export function CartItems({ cart, existingItems, removedItems, addToCart, remove
   // One more of a line already on the order, as a new line in the cart. Returns
   // null when it can't be added again (the product is off the menu).
   addAgain?: (oi: OrderItem) => (() => void) | null;
-  // "+" on a line with units waiting to come off takes one back instead.
+  // "+" on a line with units waiting to come off takes one back instead; that
+  // is the only undo, so the row has just − and +.
   onTakeBackOne?: (oi: OrderItem) => void;
   // Units staged for removal but not yet sent, keyed by order_items.id.
   pendingRemovals?: Record<string, number>;
-  onUnstageRemoval?: (oi: OrderItem) => void;
-  onCommitRemovals?: () => void;
   removing?: boolean;
 }) {
   const staged = pendingRemovals ?? {};
   const stagedFor = (oi: OrderItem) => (oi.id ? staged[oi.id] ?? 0 : 0);
-  const stagedTotal = (existingItems ?? []).reduce((s, oi) => s + stagedFor(oi), 0);
   // Active items only — removed lines cost the guest nothing. Staged units are already
   // discounted here so the total on screen is what the guest will actually pay.
   const existingTotal = (existingItems ?? [])
@@ -89,18 +87,9 @@ export function CartItems({ cart, existingItems, removedItems, addToCart, remove
                     <Minus className="w-4 h-4" />
                   </button>
                 )}
-                {/* Staged units are not on the server yet, so taking them back costs nothing. */}
-                {onUnstageRemoval && line.off > 0 && (
-                  <button
-                    onClick={() => line.rows.forEach(r => { if (stagedFor(r) > 0) onUnstageRemoval(r); })}
-                    disabled={removing}
-                    className="shrink-0 w-7 h-7 rounded-full bg-stone-100 hover:bg-stone-200 disabled:opacity-40 text-stone-600 flex items-center justify-center active:scale-90"
-                    title="Silinməni ləğv et"
-                  >
-                    <Undo2 className="w-4 h-4" />
-                  </button>
-                )}
-                <span className="shrink-0 text-sm w-10 text-center">{left} əd</span>
+                {/* What the order will hold once sent: removals off and additions on,
+                    so −2 and +3 both read the same way. */}
+                <span className="shrink-0 text-sm w-10 text-center">{left + more} əd</span>
                 {/* The extra goes into the new batch, not onto these rows: the kitchen
                     already has them, and only the extra should print. */}
                 {plus && (
@@ -161,18 +150,6 @@ export function CartItems({ cart, existingItems, removedItems, addToCart, remove
               </li>
             ))}
           </ul>
-          {/* One press sends the whole batch, so five units off one line become a single
-              struck-through row and a single cancel slip at the bar. */}
-          {onCommitRemovals && stagedTotal > 0 && (
-            <button
-              onClick={onCommitRemovals}
-              disabled={removing}
-              className="mt-3 w-full bg-red-600 hover:bg-red-700 disabled:bg-stone-300 text-white text-sm font-semibold py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"
-            >
-              {removing && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-              {removing ? 'Göndərilir...' : `Silinməni əlavə et (${stagedTotal})`}
-            </button>
-          )}
         </div>
       )}
       {existingItems && cart.length === 0 && (

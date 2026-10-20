@@ -4,6 +4,7 @@ import { rasterize, type Line, type Logo } from './raster';
 import { loadLogo } from './logo';
 import { orderLabel } from './order-label';
 import { PLACE_WORDS } from './order-place';
+import { mergeLines } from './add-again';
 
 // Any USB printer, not one model. The till first ran an XP-Q806K (1FC9:2016)
 // and the next one is an XP-S200M, whose ID nobody wrote down; a filter on one
@@ -167,12 +168,15 @@ function head(order: Order, companyName: string, heading?: string, table?: strin
 
 // name | qty | price, filling the line exactly. The modifier rides on the
 // same line as its dish — on a line of its own it read as another item.
-function itemLines(order: Order): Line[] {
-  return order.items.map(item => {
+// Batches of one dish print as one line, the way the till shows them: Limonad
+// ordered 5 then 3 more read "5x" and "3x" on the guest's paper (Test Restoran,
+// 2026-10-20). Another price stays its own line, so each line still adds up.
+export function itemLines(order: Order): Line[] {
+  return mergeLines(order.items, [], {}).lines.map(({ item, quantity }) => {
     const label = item.modifiers ? `${item.menuItem.name} (${item.modifiers})` : item.menuItem.name;
     const name = label.substring(0, WIDTH - 12).padEnd(WIDTH - 12);
-    const qty = `${item.quantity}x`.padStart(4);
-    const price = money(item.menuItem.price * item.quantity).padStart(8);
+    const qty = `${quantity}x`.padStart(4);
+    const price = money(item.menuItem.price * quantity).padStart(8);
     return { text: `${name}${qty}${price}` };
   });
 }
