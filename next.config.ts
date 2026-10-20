@@ -26,6 +26,10 @@ const nextConfig: NextConfig = desktop
       // this keeps the export from failing if something ever does.
       images: { unoptimized: true },
     }
-  : {};
+  : {
+      // The Android emulator reaches `npm run dev` on this Mac as 10.0.2.2 (the
+      // debug build of android/). Dev server only; no effect on a build.
+      allowedDevOrigins: ["10.0.2.2"],
+    };
 
 export default nextConfig;

@@ -7,7 +7,8 @@
 // only its own restaurant's tickets, and the machine-specific part — putting
 // bytes on a socket — is the one thing it asks the native side to do.
 //
-// Runs only inside the Electron shell. In a plain browser posNative is absent
+// Runs only inside the Electron shell or the Android app (lib/android-bridge.ts).
+// In a plain browser posNative is absent
 // and every entry point below is a no-op, so the same bundle is safe on the
 // tablets and phones that will never see a printer.
 
@@ -22,7 +23,11 @@ import { tableTitle } from './order-place';
 import { resolveStationId } from './stations';
 import { isUsbPrinter } from './station-printer';
 import { printRawToUsb } from './printer';
+import { installAndroidBridge } from './android-bridge';
 import type { MenuItem, OrderItem, Station } from '@/types';
+
+// The Android app's printers become posNative here, before anything below asks.
+installAndroidBridge();
 
 /**
  * The switches an owner flips in the admin panel, as the till sees them.

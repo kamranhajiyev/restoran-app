@@ -1,0 +1,61 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Which site the app opens. Same rule as posUrl in package.json: a build for a
+// restaurant opens production; a preview url is for testing only.
+def posUrl = project.findProperty('posUrl') ?: 'https://www.possiblle.com'
+def appVersion = new groovy.json.JsonSlurper().parse(file('../../package.json')).version
+
+// The signing key comes from the build's secrets (see .github/workflows/android.yml).
+// Without it the APK is signed with a throwaway debug key: fine to try, but the
+// next build cannot be installed over it.
+def keystore = System.getenv('ANDROID_KEYSTORE_FILE')
+
+android {
+    namespace 'com.possiblle.pos'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.possiblle.pos'
+        minSdk 26
+        targetSdk 35
+        // 0.4.4 → 404, so every release is a higher number than the one before.
+        versionCode appVersion.tokenize('.').collect { it as int }.inject(0) { n, p -> n * 100 + p }
+        versionName appVersion
+        buildConfigField 'String', 'POS_URL', "\"${posUrl}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    signingConfigs {
+        if (keystore) {
+            release {
+                storeFile file(keystore)
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        // What Android Studio's Run builds: the emulator opens `npm run dev` on
+        // this Mac (10.0.2.2 is the Mac, seen from the emulator), so a change
+        // can be tried without a push.
+        debug {
+            buildConfigField 'String', 'POS_URL', '"http://10.0.2.2:3000"'
+        }
+        release {
+            minifyEnabled false
+            signingConfig keystore ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

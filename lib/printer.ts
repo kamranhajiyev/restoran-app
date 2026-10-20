@@ -5,6 +5,10 @@ import { loadLogo } from './logo';
 import { orderLabel } from './order-label';
 import { PLACE_WORDS } from './order-place';
 import { mergeLines } from './add-again';
+import { isValidIp } from './station-printer';
+import { installAndroidBridge } from './android-bridge';
+
+installAndroidBridge();
 
 // Any USB printer, not one model. The till first ran an XP-Q806K (1FC9:2016)
 // and the next one is an XP-S200M, whose ID nobody wrote down; a filter on one
@@ -27,6 +31,37 @@ let endpoint = 1;
 
 function isWebUSBAvailable(): boolean {
   return typeof navigator !== 'undefined' && 'usb' in navigator;
+}
+
+// The Android app has no WebUSB — its WebView leaves it out — but it can reach
+// the Wi-Fi. So there the receipt printer is an IP, kept on the device, and the
+// bytes go through the app's socket like a sex's ticket. The exe has both, and
+// keeps its USB printer.
+const RECEIPT_IP_KEY = 'restoran_receipt_printer_ip';
+const RECEIPT_PORT = 9100;
+
+function wifiTill(): boolean {
+  return typeof window !== 'undefined' && !!window.posNative && !isWebUSBAvailable();
+}
+
+function receiptIp(): string | null {
+  try {
+    const ip = localStorage.getItem(RECEIPT_IP_KEY);
+    return ip && isValidIp(ip) ? ip : null;
+  } catch { return null; }
+}
+
+/** Ask for the Wi-Fi receipt printer's IP. The current one is filled in to correct. */
+function askReceiptIp(): boolean {
+  const typed = window.prompt('Çek printerinin IP ünvanı (məs: 192.168.1.50)', receiptIp() ?? '');
+  if (typed === null) return false;
+  const ip = typed.trim();
+  if (!isValidIp(ip)) {
+    alert('IP düzgün deyil (məs: 192.168.1.50)');
+    return false;
+  }
+  try { localStorage.setItem(RECEIPT_IP_KEY, ip); } catch { return false; }
+  return true;
 }
 
 async function openDevice(d: USBDevice): Promise<void> {
@@ -53,6 +88,17 @@ let queue: Promise<unknown> = Promise.resolve();
 
 function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
   const next = queue.then(async () => {
+    if (wifiTill()) {
+      const ip = receiptIp();
+      if (!ip) return false;
+      try {
+        await window.posNative!.print(ip, RECEIPT_PORT, bytes);
+        return true;
+      } catch (err) {
+        console.error('[Printer] Göndərmə xətası:', err);
+        return false;
+      }
+    }
     if (!device) {
       console.error('[Printer] Yazıcı qoşulu deyil');
       return false;
@@ -75,11 +121,12 @@ function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
  * so the ticket stays in the queue exactly as one for a LAN printer that is off.
  */
 export async function printRawToUsb(bytes: Uint8Array): Promise<void> {
-  if (!device && !(await connectPrinter())) throw new Error('USB printer not connected');
+  if (!wifiTill() && !device && !(await connectPrinter())) throw new Error('USB printer not connected');
   if (!(await sendBytes(new Uint8Array(bytes)))) throw new Error('USB printer did not take the ticket');
 }
 
 export async function connectPrinter(): Promise<boolean> {
+  if (wifiTill()) return receiptIp() !== null;
   if (!isWebUSBAvailable()) return false;
   try {
     // getDevices() returns only what this site was already granted, which in
@@ -99,6 +146,7 @@ export async function connectPrinter(): Promise<boolean> {
 }
 
 export async function selectPrinter(): Promise<boolean> {
+  if (wifiTill()) return askReceiptIp();
   if (!isWebUSBAvailable()) return false;
   try {
     const d = await navigator.usb.requestDevice({ filters: USB_FILTERS });
@@ -123,11 +171,13 @@ export async function disconnectPrinter(): Promise<void> {
 const printerName = (d: USBDevice) => d.productName || 'USB yazıcı';
 
 export async function getPrinterList(): Promise<string[]> {
+  if (wifiTill()) return receiptIp() ? [receiptIp()!] : [];
   if (!isWebUSBAvailable()) return [];
   return (await navigator.usb.getDevices()).map(printerName);
 }
 
 export function getSavedPrinter(): string | null {
+  if (wifiTill()) return receiptIp();
   return device ? printerName(device) : null;
 }
 

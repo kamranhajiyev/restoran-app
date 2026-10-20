@@ -21,7 +21,9 @@ export function tillImage(url: string): string;
 export function tillImage(url: string | undefined | null): string | undefined;
 export function tillImage(url: string | undefined | null): string | undefined {
   if (!url) return url ?? undefined;
-  if (!isDesktop() || !/^https?:\/\//i.test(url)) return url;
+  // Only a till with the local database has the /_img cache behind it; the
+  // Android app is "desktop" for printing but loads pictures like a browser.
+  if (!isDesktop() || !window.posNative?.till || !/^https?:\/\//i.test(url)) return url;
   return `/_img?src=${encodeURIComponent(url)}`;
 }
 
