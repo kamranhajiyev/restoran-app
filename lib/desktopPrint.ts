@@ -12,6 +12,7 @@
 // and every entry point below is a no-op, so the same bundle is safe on the
 // tablets and phones that will never see a printer.
 
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { markPrinted, wasPrinted } from './printed-jobs';
 import { SAFETY_NET_MS, listenTill, tillSignalUp, timerDue } from './till-signal';
@@ -191,7 +192,11 @@ interface JobSource {
 
 const sessionSource: JobSource = {
   async claim() {
-    const { data, error } = await supabase.rpc('claim_print_jobs', { p_limit: CLAIM_LIMIT });
+    const { data, error, status } = await supabase.rpc('claim_print_jobs', { p_limit: CLAIM_LIMIT });
+    // The server no longer takes this till's login. Asking again every 15 s
+    // changes nothing — the phone till did that for an hour, printing nothing
+    // and saying nothing (Test Restoran, 2026-10-21).
+    if (status === 401) { await loginRejected(); return null; }
     if (error) { console.error('[print] claim', error.message); return null; }
     return (data ?? []) as ClaimedJob[];
   },
@@ -284,6 +289,24 @@ export async function saveStationPrinter(
 }
 
 let source: JobSource = sessionSource;
+
+// What the seller page does when the login is gone for good: back to the login
+// screen, where staff can see it and sign in again.
+let onLoginLost: (() => void) | null = null;
+
+// A login that only went stale — a phone asleep past its refresh — comes back
+// with one refresh. One that was ended elsewhere does not, and only then is
+// anyone sent to log in. No internet is not a lost login.
+async function loginRejected(): Promise<void> {
+  try {
+    const { data, error } = await supabase.auth.refreshSession();
+    if (data.session) return;
+    if (error && isAuthRetryableFetchError(error)) return;
+  } catch {
+    return;
+  }
+  onLoginLost?.();
+}
 
 // Station rows change rarely, but an IP corrected mid-service must take effect
 // without restarting the app — hence a short-lived cache rather than a load
@@ -554,10 +577,11 @@ export async function drainPrintQueue(): Promise<void> {
 }
 
 // Call once from the seller screen. Returns the teardown.
-export function startKitchenPrinting(auth: PrintAuth): () => void {
+export function startKitchenPrinting(auth: PrintAuth, loginLost?: () => void): () => void {
   if (!isDesktop()) return () => {};
 
   source = auth.kind === 'session' ? sessionSource : linkSource(auth.companyId, auth.token);
+  onLoginLost = loginLost ?? null;
   stationCache = null;
   tableCache = null;
   printingActive = true;
@@ -590,6 +614,7 @@ export function startKitchenPrinting(auth: PrintAuth): () => void {
 
   return () => {
     printingActive = false;
+    onLoginLost = null;
     clearInterval(timer);
     if (channel) void supabase.removeChannel(channel);
     unlisten?.();

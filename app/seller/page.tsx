@@ -1278,12 +1278,12 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     const companyId = getSession()?.companyId;
     if (companyId) {
       if (overrideCompanyId && overrideCompanyId !== companyId) return;
-      return startKitchenPrinting({ kind: 'session', companyId });
+      return startKitchenPrinting({ kind: 'session', companyId }, () => { clearLocalSession(); router.replace('/login'); });
     }
     if (overrideCompanyId && overrideToken) {
       return startKitchenPrinting({ kind: 'link', companyId: overrideCompanyId, token: overrideToken });
     }
-  }, [overrideCompanyId, overrideToken]);
+  }, [overrideCompanyId, overrideToken, router]);
 
   useEffect(() => {
     if (overrideCompanyId) return;

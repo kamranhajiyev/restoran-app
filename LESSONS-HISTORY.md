@@ -173,6 +173,16 @@ Where "not loaded" and "empty" mean different things, a new item is empty.
 Test Restoran, 2026-10-14: a set made from the quick-add row opened in Düzəlt
 with no Set button and no contents until the page was refreshed (`submitQuickAdd`).
 
+**Does an action on one device reach the others on the same login? When the
+server stops taking a login, does the screen say so?**
+Natiq, Test Restoran, 2026-10-21: the laptop exe and the Android phone till were
+both signed in as "owner". Çıxış on the laptop called `signOut()`, whose default
+ends the account's login everywhere. The phone kept its last pass for about two
+hours, then the server answered every ticket claim with 401; the queue logged it
+and asked again every 15 s, so kitchen tickets piled up while the screen looked
+fine and the printer took the blame. Logout is now this device only, and a 401
+the till cannot refresh away sends it to the login screen.
+
 ## 3. Money
 
 **Can the screen calculate a total from data that has not loaded yet?**

@@ -155,7 +155,10 @@ export function updateSession(patch: Partial<Session>) {
 }
 
 export function logout() {
-  supabase.auth.signOut();
+  // This device only. The default ends the account's login on every device: the
+  // laptop's Çıxış silently logged out the phone till sharing "owner", and its
+  // kitchen tickets stopped two hours later (Test Restoran, 2026-10-21).
+  supabase.auth.signOut({ scope: 'local' });
   localStorage.removeItem(AUTH_KEY);
   // Signing in again is proof enough — don't make the next owner face the lock.
   unlockAdmin();
