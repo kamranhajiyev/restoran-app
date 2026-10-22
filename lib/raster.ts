@@ -6,6 +6,8 @@
 // character table from the problem entirely — and it is the only way to print
 // ə at all, since no ESC/POS codepage contains U+0259.
 
+import { TICKET_FONT } from './ticket-font';
+
 const DOTS = 576;          // 72mm at 203dpi, the printer's full carriage
 const BYTES_PER_ROW = DOTS / 8;
 const NORMAL_H = 28;       // ~20px glyphs need the leading to stay readable
@@ -38,8 +40,9 @@ const lineHeight = (l: Line) =>
 // grey and breaks up. Bold is the single biggest legibility win available here,
 // and in a monospace face it costs nothing: the advance width is identical, so
 // the columns don't shift. DejaVu leads the stack for its heavy, open shapes and
-// its full Azerbaijani coverage; the rest are per-platform fallbacks.
-const STACK = '"DejaVu Sans Mono", "Liberation Mono", Consolas, Menlo, ui-monospace, monospace';
+// its full Azerbaijani coverage; the rest are per-platform fallbacks. Our own
+// copy comes last before the generic names, for a phone that has none of them.
+export const STACK = `"DejaVu Sans Mono", "Liberation Mono", Consolas, Menlo, "${TICKET_FONT}", ui-monospace, monospace`;
 const WEIGHT = 'bold';
 
 // The layout is monospace column arithmetic (WIDTH characters to a line), so the

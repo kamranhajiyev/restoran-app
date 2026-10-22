@@ -13,6 +13,7 @@
 
 import { ESC, placeLines, WIDTH, itemRows, sizedNoteRows, stringToBytes, wrap, type TicketPayload } from './escpos';
 import { rasterize, type Line } from './raster';
+import { ticketFontReady } from './ticket-font';
 
 // Dish names a step up from `big`, wider as well as taller, so the cook can read
 // them at arm's length. Wrapped to fewer columns to make room.
@@ -41,7 +42,7 @@ const HEADING: Record<TicketPayload['kind'], string> = {
  * it. The id is only a row number — a restaurant that remade its tables has
  * "Masa 1" at id 51, and a ticket that said 51 sent the cook nowhere.
  */
-export function buildStationTicketRaster(p: TicketPayload, tableName?: (id: number) => string): Uint8Array {
+export async function buildStationTicketRaster(p: TicketPayload, tableName?: (id: number) => string): Promise<Uint8Array> {
   const place = (t: number) => (tableName ? tableName(t) : `Masa ${t}`);
 
   const when = new Date(p.at).toLocaleString('az-AZ', {
@@ -91,6 +92,7 @@ export function buildStationTicketRaster(p: TicketPayload, tableName?: (id: numb
     }
   }
 
+  await ticketFontReady();
   const head = new Uint8Array(stringToBytes(ESC.INIT + ESC.LEFT));
   const image = rasterize(lines, WIDTH);
   const tail = new Uint8Array(stringToBytes('\n\n\n' + ESC.CUT));

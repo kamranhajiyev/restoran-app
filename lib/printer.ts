@@ -1,6 +1,7 @@
 import type { Order } from '@/types';
 import { stringToBytes, ESC, WIDTH } from './escpos';
 import { rasterize, type Line, type Logo } from './raster';
+import { ticketFontReady } from './ticket-font';
 import { loadLogo } from './logo';
 import { orderLabel } from './order-label';
 import { PLACE_WORDS } from './order-place';
@@ -232,6 +233,7 @@ export function itemLines(order: Order): Line[] {
 }
 
 async function send(lines: Line[], logo?: Logo | null): Promise<boolean> {
+  await ticketFontReady();
   const prefix = new Uint8Array(stringToBytes(ESC.INIT + ESC.LEFT));
   const image = rasterize(lines, WIDTH, logo);
   const tail = new Uint8Array(stringToBytes('\n\n\n' + ESC.CUT));

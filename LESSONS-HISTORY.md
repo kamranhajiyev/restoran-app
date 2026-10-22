@@ -183,6 +183,16 @@ and asked again every 15 s, so kitchen tickets piled up while the screen looked
 fine and the printer took the blame. Logout is now this device only, and a 401
 the till cannot refresh away sends it to the login screen.
 
+**Does this lean on something only some devices have — a font, a driver, a
+codepage? Does the page bring its own?**
+Natiq, Test Restoran, 2026-10-21: tickets are drawn as a picture with the
+device's monospace font (`lib/raster.ts`), because no printer codepage has ə.
+Windows has Consolas, so the exe printed fine. The Android phone has none of the
+named faces, and its fallback has no ə: "Pivə" came out "Piv□", "ÖDƏNİLƏCƏK"
+lost every Ə, on the HESAB and the Bar ticket alike. The page now carries DejaVu
+Sans Mono Bold (`public/fonts`), placed after the system faces so the exe's
+tickets do not change, and every ticket waits for it before drawing.
+
 ## 3. Money
 
 **Can the screen calculate a total from data that has not loaded yet?**

@@ -10,7 +10,7 @@ vi.mock('@/lib/raster', () => ({ rasterize: (lines: Line[]) => { drawn.push(line
 describe('Qeyd size on the exe ticket', () => {
   it('prints Qeyd at 1.3x height, phone and address normal', async () => {
     const { buildStationTicketRaster } = await import('@/lib/station-ticket');
-    buildStationTicketRaster({
+    await buildStationTicketRaster({
       kind: 'new', station: 'Bar', orderNumber: 1, table: null, waiter: null, online: true,
       at: '2026-10-05T10:00:00Z', items: [{ name: 'Ayran', qty: 3 }],
       note: 'Tel: 050 · Ünvan: Gəncə · az buzlu',

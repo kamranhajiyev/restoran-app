@@ -351,7 +351,7 @@ async function runJob(job: ClaimedJob): Promise<void> {
   try {
     const known = await tables();
     await printTo(native, station.ip, station.port,
-      buildStationTicketRaster(job.payload, id => tableTitle(known, id)));
+      await buildStationTicketRaster(job.payload, id => tableTitle(known, id)));
   } catch (err) {
     const attempts = job.attempts + 1;
     const message = err instanceof Error ? err.message : String(err);
@@ -466,7 +466,7 @@ export async function printKitchenNow(t: KitchenTicket): Promise<OrderItem[]> {
     };
     try {
       await printTo(native, station.printerIp, station.printerPort ?? 9100,
-        buildStationTicketRaster(payload, t.tableName), LOCAL_PRINT_MS);
+        await buildStationTicketRaster(payload, t.tableName), LOCAL_PRINT_MS);
       for (const i of idx) printed.set(i, stationId);
     } catch (err) {
       console.error(`[print] till → ${station.name}: ${err instanceof Error ? err.message : String(err)}`);
@@ -530,7 +530,7 @@ export async function printNoteNow(t: NoteTicket): Promise<string[]> {
     };
     try {
       await printTo(native, station.printerIp, station.printerPort ?? 9100,
-        buildStationTicketRaster(payload, t.tableName), LOCAL_PRINT_MS);
+        await buildStationTicketRaster(payload, t.tableName), LOCAL_PRINT_MS);
       printed.push(stationId);
     } catch (err) {
       console.error(`[print] till → ${station.name}: ${err instanceof Error ? err.message : String(err)}`);

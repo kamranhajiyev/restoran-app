@@ -146,6 +146,11 @@ server stops taking a login, does the screen say so?**
 Natiq, Test Restoran, 2026-10-21: Çıxış on the laptop logged out the phone till too; its kitchen tickets stopped with no message.
 Guard: `tests/login-lost.test.ts`
 
+**Does this lean on something only some devices have — a font, a driver, a
+codepage? Does the page bring its own?**
+Natiq, Test Restoran, 2026-10-21: the Android phone printed "Pivə" as "Piv□"; its font has no ə.
+Guard: `lib/ticket-font`, `tests/ticket-font.test.ts`
+
 ## 3. Money
 
 **Can the screen calculate a total from data that has not loaded yet?**
