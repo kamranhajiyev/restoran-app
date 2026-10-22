@@ -3158,7 +3158,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       <div className="flex min-h-[calc(100vh-3.5rem)] bg-white">
 
         {/* Desktop sidebar */}
-        <aside className={`hidden md:block flex-shrink-0 sticky top-14 self-start h-[calc(100vh-3.5rem)] transition-all duration-200 border-r border-stone-100/60 ${collapsed ? 'w-14' : 'w-56'}`}>
+        {/* z-40: sticky makes the sidebar its own layer, and without it the
+            product cards painted over its popups (the unsent list, on a tablet). */}
+        <aside className={`hidden md:block flex-shrink-0 sticky top-14 z-40 self-start h-[calc(100vh-3.5rem)] transition-all duration-200 border-r border-stone-100/60 ${collapsed ? 'w-14' : 'w-56'}`}>
           <SidebarContent />
         </aside>
 

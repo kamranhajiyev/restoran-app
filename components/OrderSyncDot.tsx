@@ -17,7 +17,7 @@ export default function OrderSyncDot({ unsent }: { unsent: boolean }) {
   if (!unsent) return null;
   return (
     <span
-      title="Bu kompüterdə saxlanılır — internet qayıdanda göndəriləcək"
+      title="Bu cihazda saxlanılır — internet qayıdanda göndəriləcək"
       className="inline-flex items-center text-amber-600 shrink-0"
       aria-label="göndərilməyib"
     >

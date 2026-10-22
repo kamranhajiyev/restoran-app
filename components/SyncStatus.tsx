@@ -151,7 +151,7 @@ export default function SyncStatus({
 
           {list?.length === 0 && (
             <p className="text-xs text-stone-500">
-              Hər şey serverdədir. Bu kompüterdə gözləyən əməliyyat yoxdur.
+              Hər şey serverdədir. Bu cihazda gözləyən əməliyyat yoxdur.
             </p>
           )}
 
@@ -177,7 +177,7 @@ export default function SyncStatus({
           )}
 
           <p className="mt-2 text-[10px] text-stone-400 leading-relaxed">
-            Sifarişlər bu kompüterdə saxlanılır və internet qayıdanda öz-özünə göndərilir.
+            Sifarişlər bu cihazda saxlanılır və internet qayıdanda öz-özünə göndərilir.
           </p>
         </div>
       )}
