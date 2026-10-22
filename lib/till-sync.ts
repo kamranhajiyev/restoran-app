@@ -153,8 +153,11 @@ const STEPS: Step[] = [
       const { tables, halls } = await serverRead<{ tables: unknown[]; halls: unknown[] }>(
         db, "public-tables", companyId,
       );
+      // A place with no tables at all (takeaway, a kiosk) is ordinary, so an
+      // empty room is refused only when it would wipe the room this till has.
+      const local = (await db.tables(companyId)) as { tables?: unknown[] };
       await replace(db, "halls", companyId, halls ?? []);
-      return replace(db, "tables", companyId, tables ?? [], true);
+      return replace(db, "tables", companyId, tables ?? [], (local.tables?.length ?? 0) > 0);
     },
   },
   {
