@@ -11,7 +11,7 @@
 import type {
   CashShift, Category, Courier, CourierPendingOrder, Hall, MenuItem, ModifierGroup, Order,
   RestaurantTable, Staff, Station,
-} from '../types';
+} from '../../types';
 import { db, docs, transact } from './db';
 
 export interface StationReady {

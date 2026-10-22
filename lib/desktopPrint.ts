@@ -137,6 +137,8 @@ export interface PosNative {
 export interface DesktopUpdate {
   version: string;
   required: boolean;
+  /** False on Android: after the install the waiter opens the app again. */
+  reopens?: boolean;
 }
 
 declare global {

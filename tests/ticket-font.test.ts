@@ -37,7 +37,7 @@ describe('ticket font', () => {
 
   it('every ticket drawing waits for the font first', () => {
     const draws = (src: string) => src.search(/=\s*rasterize\(/);
-    const callers = readdirSync('lib').filter(f => draws(readFileSync(join('lib', f), 'utf8')) > -1);
+    const callers = readdirSync('lib').filter(f => f.endsWith('.ts') && draws(readFileSync(join('lib', f), 'utf8')) > -1);
     expect(callers.sort()).toEqual(['printer.ts', 'station-ticket.ts']);
     for (const f of callers) {
       const src = readFileSync(join('lib', f), 'utf8');

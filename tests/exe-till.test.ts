@@ -12,16 +12,16 @@ const C = "company-1";
 const PAY = "/api/update-order-status";
 
 let dir: string;
-let till: typeof import("@/electron/till-write");
-let repo: typeof import("@/electron/till-repo");
+let till: typeof import("@/lib/till-store/write");
+let repo: typeof import("@/lib/till-store/repo");
 
 // Fresh modules each time: electron/db.ts keeps its open handle in a module
 // variable, so reloading the modules is what "restarting the exe" looks like.
 async function start(folder: string) {
   vi.resetModules();
   (await import("@/electron/db")).openDb(folder);
-  till = await import("@/electron/till-write");
-  repo = await import("@/electron/till-repo");
+  till = await import("@/lib/till-store/write");
+  repo = await import("@/lib/till-store/repo");
 }
 
 function order(id: string): Order {

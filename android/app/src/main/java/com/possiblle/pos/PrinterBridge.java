@@ -9,6 +9,10 @@ package com.possiblle.pos;
 //
 // Only private addresses: the page decides what to print, but this must not be
 // a way for any script to open sockets to the internet.
+//
+// On the copy of the page inside the APK it also carries the till's database
+// (TillDb), its requests to the site, and its menu pictures (TillFiles) — what
+// lib/android-till.ts turns into posNative.till.
 
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
@@ -17,14 +21,19 @@ import android.webkit.WebView;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
 import java.net.Socket;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -43,19 +52,156 @@ public class PrinterBridge {
     // out as one unreadable slip.
     private final ExecutorService printing = Executors.newSingleThreadExecutor();
     private final ExecutorService knocking = Executors.newFixedThreadPool(64);
+    // Requests to the site and picture downloads: a few at once, never on the
+    // thread the page's calls arrive on.
+    private final ExecutorService network = Executors.newFixedThreadPool(4);
     private volatile boolean trusted = false;
+    // The database only for the page the APK carries, never for a page from
+    // anywhere else (the debug build's dev server reads through the site).
+    private final TillDb till;
+    private final TillFiles files;
+    private volatile boolean tillPage = false;
+    // Null in the debug build, which has nothing to update.
+    private volatile Updater updater;
 
-    PrinterBridge(WebView web) {
+    PrinterBridge(WebView web, TillDb till, TillFiles files) {
         this.web = web;
+        this.till = till;
+        this.files = files;
     }
 
-    void setTrusted(boolean trusted) {
+    void setUpdater(Updater updater) {
+        this.updater = updater;
+    }
+
+    // ── A new version (Updater) ────────────────────────────────────────────
+    // The page's posNative.update, as the exe's (components/DesktopUpdate.tsx).
+
+    @JavascriptInterface
+    public boolean hasUpdater() {
+        return trusted && updater != null;
+    }
+
+    @JavascriptInterface
+    public String updateStatus() {
+        Updater u = updater;
+        return trusted && u != null ? u.status() : "null";
+    }
+
+    @JavascriptInterface
+    public void updateInstall() {
+        Updater u = updater;
+        if (trusted && u != null) u.install();
+    }
+
+    void setTrusted(boolean trusted, boolean tillPage) {
         this.trusted = trusted;
+        this.tillPage = trusted && tillPage && till != null;
     }
 
     void shutdown() {
         printing.shutdownNow();
         knocking.shutdownNow();
+        network.shutdownNow();
+    }
+
+    // ── The till's database ────────────────────────────────────────────────
+    // Answered at once (lib/android-till.ts): the till's reads and writes are
+    // synchronous in the exe too, and a transaction relies on it.
+
+    @JavascriptInterface
+    public boolean hasTill() {
+        return tillPage;
+    }
+
+    @JavascriptInterface
+    public String appUrl() {
+        return BuildConfig.POS_URL;
+    }
+
+    @JavascriptInterface
+    public String sqlExec(String sql) {
+        if (!tillPage) return "{\"error\":\"not allowed on this page\"}";
+        return till.exec(sql);
+    }
+
+    @JavascriptInterface
+    public String sqlQuery(String sql, String params) {
+        if (!tillPage) return "{\"error\":\"not allowed on this page\"}";
+        return till.query(sql, params);
+    }
+
+    @JavascriptInterface
+    public String sqlRun(String sql, String params) {
+        if (!tillPage) return "{\"error\":\"not allowed on this page\"}";
+        return till.run(sql, params);
+    }
+
+    // ── The site ───────────────────────────────────────────────────────────
+    // The page is on the phone's own host and the site is another, so its
+    // fetch would be refused for CORS; the exe's main process makes these
+    // requests for the same reason (lib/till-store/handlers.ts). Only the
+    // site's /api routes — never an address the page makes up.
+    @JavascriptInterface
+    public void http(final String id, final String url, final String method, final String headers, final String body) {
+        String site = BuildConfig.POS_URL.replaceAll("/+$", "");
+        if (!tillPage) { answer(id, "not allowed on this page", null); return; }
+        if (url == null || !url.startsWith(site + "/api/")) { answer(id, "bad path", null); return; }
+        network.execute(() -> {
+            HttpURLConnection c = null;
+            try {
+                c = (HttpURLConnection) new URL(url).openConnection();
+                c.setConnectTimeout(15_000);
+                c.setReadTimeout(30_000);
+                c.setRequestMethod(method == null || method.isEmpty() ? "GET" : method);
+                JSONObject h = new JSONObject(headers == null || headers.isEmpty() ? "{}" : headers);
+                for (Iterator<String> keys = h.keys(); keys.hasNext(); ) {
+                    String k = keys.next();
+                    c.setRequestProperty(k, h.getString(k));
+                }
+                if (body != null) {
+                    c.setDoOutput(true);
+                    byte[] bytes = body.getBytes("UTF-8");
+                    c.setFixedLengthStreamingMode(bytes.length);
+                    try (OutputStream out = c.getOutputStream()) { out.write(bytes); }
+                }
+                int status = c.getResponseCode();
+                InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream();
+                ByteArrayOutputStream text = new ByteArrayOutputStream();
+                if (in != null) {
+                    try (InputStream stream = in) {
+                        byte[] buf = new byte[16 * 1024];
+                        for (int n; (n = stream.read(buf)) > 0; ) text.write(buf, 0, n);
+                    }
+                }
+                // The status comes back, not an error: "the server refused" and
+                // "there was no server" are different answers to the outbox.
+                JSONObject res = new JSONObject()
+                    .put("ok", status >= 200 && status < 300)
+                    .put("status", status)
+                    .put("body", text.toString("UTF-8"));
+                answer(id, null, res.toString());
+            } catch (Exception e) {
+                answer(id, "network: " + e.getMessage(), null);
+            } finally {
+                if (c != null) c.disconnect();
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public void cacheImages(final String id, final String urls) {
+        if (!tillPage) { answer(id, "not allowed on this page", null); return; }
+        network.execute(() -> {
+            try {
+                JSONArray list = new JSONArray(urls);
+                List<String> todo = new ArrayList<>();
+                for (int i = 0; i < list.length() && i < 2000; i++) todo.add(list.getString(i));
+                answer(id, null, String.valueOf(files.cacheImages(todo)));
+            } catch (Exception e) {
+                answer(id, null, "0");
+            }
+        });
     }
 
     static boolean isPrivate(String ip) {

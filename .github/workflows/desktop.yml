@@ -116,3 +116,15 @@ jobs:
           # release (electron/updater.ts). A draft is invisible to them: try the
           # exe first, then press Publish on GitHub to send it to the restaurants.
           draft: true
+
+  # The Android till, for the same release: built after the exe so it joins the
+  # draft that job made rather than racing it to create one.
+  android:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    uses: ./.github/workflows/android.yml
+    with:
+      release: true
+    secrets: inherit

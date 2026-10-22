@@ -1,8 +1,13 @@
 # Builds the Android till APK (android/).
 #
-# The APK loads the seller page from the site, so a push to the site reaches it
-# without a new build. Only changes inside android/ need one. Run it from the
-# Actions tab and download the APK from the run's Artifacts.
+# The APK carries its own copy of the seller page, like the exe, so it opens and
+# sells with the internet down — and every change to the page needs a new APK.
+# The url only picks which site it syncs with. Run it from the Actions tab and
+# download the APK from the run's Artifacts.
+#
+# A release tag (desktop.yml) also runs this, after the exe: the APK is built
+# for production and attached to the same draft release, where the tills'
+# updater (android/…/Updater.java) finds it once the release is published.
 #
 # Signing: with the four ANDROID_* secrets set, the APK is signed with the
 # restaurant key and each build installs over the last. Without them it is
@@ -12,6 +17,12 @@
 name: Android (APK)
 
 on:
+  workflow_call:
+    inputs:
+      release:
+        description: 'Attach the APK to the release of this tag'
+        type: boolean
+        default: false
   workflow_dispatch:      # shown on the Actions tab once this file is on main
     inputs:
       url:
@@ -19,10 +30,10 @@ on:
         required: false
         default: ''
   # Until then: a push to the test branch that touches the app builds one that
-  # opens the branch's preview site, where the page's Android code already is.
+  # syncs with the branch's preview site.
   push:
     branches: [development-printer-cash-drawer]
-    paths: ['android/**', 'lib/android-bridge.ts', '.github/workflows/android.yml']
+    paths: ['android/**', 'lib/android-bridge.ts', 'lib/android-till.ts', 'lib/till-store/**', '.github/workflows/android.yml']
 
 env:
   PREVIEW_URL: https://restoran-app-git-development-p-f968e3-kamrans-projects-11d6b816.vercel.app
@@ -33,6 +44,22 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # The page the APK carries: the same static export as the exe's.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm install --no-audit --no-fund
+
+      - name: Export the till page
+        run: npm run desktop:till
+        env:
+          # Only the two public values, as in desktop.yml: the service-role key
+          # must never be near a build that goes onto a restaurant's phone.
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
 
       - uses: actions/setup-java@v4
         with:
@@ -51,6 +78,10 @@ jobs:
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
             echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          elif [ "${{ inputs.release }}" = "true" ]; then
+            # Every till would download it and fail to install it.
+            echo "::error::No ANDROID_KEYSTORE_BASE64 secret — a release APK must carry the restaurant key."
+            exit 1
           else
             echo "::warning::No ANDROID_KEYSTORE_BASE64 secret — this APK has a throwaway key and the next one will not install over it."
           fi
@@ -61,8 +92,12 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        # A release first: called from desktop.yml its event is the tag's push,
+        # and it must open production, not the preview.
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
+          if [ "${{ inputs.release }}" = "true" ]; then
+            ./gradlew assembleRelease
+          elif [ "${{ github.event_name }}" = "push" ]; then
             ./gradlew assembleRelease -PposUrl="$PREVIEW_URL"
           elif [ -n "${{ inputs.url }}" ]; then
             ./gradlew assembleRelease -PposUrl="${{ inputs.url }}"
@@ -76,3 +111,12 @@ jobs:
           name: PossibllePOS-apk
           path: android/app/build/outputs/apk/release/PossibllePOS.apk
           if-no-files-found: error
+
+      - name: Attach to release
+        if: inputs.release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android/app/build/outputs/apk/release/PossibllePOS.apk
+          # The exe's job made this draft; the APK joins it. Publishing it on
+          # GitHub sends both to the restaurants.
+          draft: true

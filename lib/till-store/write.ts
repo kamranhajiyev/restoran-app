@@ -9,7 +9,7 @@
 // That inversion is the whole point of the offline till. The old code asked "am
 // I online?" before every write and took a different path for each answer, which
 // meant the offline path was the one nobody tested and the one that lost an
-// order. Here there is one path. electron/sync.ts drains the outbox behind it,
+// order. Here there is one path. lib/sync.ts drains the outbox behind it,
 // on its own time, and if it never gets the chance the orders are still on the
 // disk in the morning.
 //
@@ -25,14 +25,14 @@
 // know what happened — is the thing this file exists to avoid. When a route
 // changes, change its twin here; the comment on each one says which.
 
-import type { CashShift, Order, OrderItem, ShiftMovement } from '../types';
-import { refusal, type OrderAction } from '../lib/order-rules';
-import { movedToTable } from '../lib/order-place';
+import type { CashShift, Order, OrderItem, ShiftMovement } from '../../types';
+import { refusal, type OrderAction } from '../order-rules';
+import { movedToTable } from '../order-place';
 import { db, getMeta, setMeta, transact } from './db';
-import { announce, heardMax } from './till-peers';
+import { announce, heardMax } from './peers';
 import {
   addCourierPayment, applyCourierSettlement, getOpenShift, getOrder, hasCourierPayment, putOrder, putShift,
-} from './till-repo';
+} from './repo';
 
 /** The two writes that never had an API route: they go straight to Supabase. */
 export const ADD_ORDER = 'supabase:addOrder';

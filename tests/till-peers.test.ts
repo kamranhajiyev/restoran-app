@@ -9,9 +9,9 @@ import type { Order } from "@/types";
 
 const C = "company-1";
 let dir: string;
-let till: typeof import("@/electron/till-write");
+let till: typeof import("@/lib/till-store/write");
 let peers: typeof import("@/electron/till-peers");
-let repo: typeof import("@/electron/till-repo");
+let repo: typeof import("@/lib/till-store/repo");
 
 const order = (id: string) => ({
   id,
@@ -24,9 +24,9 @@ beforeEach(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "peers-"));
   vi.resetModules();
   (await import("@/electron/db")).openDb(dir);
-  till = await import("@/electron/till-write");
+  till = await import("@/lib/till-store/write");
   peers = await import("@/electron/till-peers");
-  repo = await import("@/electron/till-repo");
+  repo = await import("@/lib/till-store/repo");
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 

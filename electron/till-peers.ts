@@ -1,7 +1,7 @@
 // Tills in one restaurant tell each other, over the restaurant's Wi-Fi, the
 // highest order number they have handed out.
 //
-// Each machine numbers its own orders from its own database (till-write.ts),
+// Each machine numbers its own orders from its own database (lib/till-store/write.ts),
 // and that database only hears about the other till's orders on the next pull
 // from the server — every five minutes, or never while the internet is down. So
 // two tills picked the same number, and the second one was renumbered by the
@@ -19,18 +19,13 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import dgram from 'node:dgram';
-import { db, getMeta, setMeta } from './db';
+import { db, getMeta } from './db';
+import { hear, heardMax, setAnnouncer, type PeerNews } from '../lib/till-store/peers';
+
+export { hear, heardMax, type PeerNews };
 
 export const PEER_PORT = 47845;
 const EVERY_MS = 10_000;
-const heardKey = (companyId: string) => `peer_order_max:${companyId}`;
-
-export interface PeerNews {
-  companyId: string;
-  /** The highest order number the sender has given out. */
-  max: number;
-  till: number;
-}
 
 function sign(token: string, news: PeerNews): string {
   return createHmac('sha256', token).update(`${news.companyId}|${news.max}|${news.till}`).digest('hex');
@@ -55,16 +50,6 @@ export function decodeNews(token: string, companyId: string, msg: Buffer): PeerN
   } catch {
     return null;
   }
-}
-
-/** The highest number another till has said it gave out. */
-export function heardMax(companyId: string): number {
-  return Number(getMeta(db(), heardKey(companyId)) ?? 0) || 0;
-}
-
-/** Remember a number heard from another till. Only ever moves up. */
-export function hear(news: PeerNews): void {
-  if (news.max > heardMax(news.companyId)) setMeta(db(), heardKey(news.companyId), String(news.max));
 }
 
 interface Link { token: string; companyId: string; tillNumber: number }
@@ -115,6 +100,8 @@ export function startTillPeers(highest: (companyId: string) => number): void {
     });
     setInterval(announce, EVERY_MS).unref();
     socket = s;
+    // A new order announces itself (lib/till-store/write.ts) through this.
+    setAnnouncer(announce);
   } catch (e) {
     console.warn('[peers] off:', e instanceof Error ? e.message : e);
   }

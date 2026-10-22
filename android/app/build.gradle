@@ -12,6 +12,24 @@ def appVersion = new groovy.json.JsonSlurper().parse(file('../../package.json'))
 // next build cannot be installed over it.
 def keystore = System.getenv('ANDROID_KEYSTORE_FILE')
 
+// The till's page, as the exe carries it: `npm run desktop:till` exports it to
+// out-desktop/, and it goes into the APK as assets/till/ (TillFiles.java).
+def tillExport = file('../../out-desktop')
+def tillAssets = layout.buildDirectory.dir('generated/till-assets').get().asFile
+
+def copyTill = tasks.register('copyTill', Sync) {
+    from(tillExport)
+    into(new File(tillAssets, 'till'))
+}
+
+// A release without the page would open nothing with the internet down — the
+// one thing it is for. Stop the build rather than ship that.
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.name == 'assembleRelease' } && !new File(tillExport, 'seller/index.html').exists()) {
+        throw new GradleException('out-desktop/ has no till: run `npm run desktop:till` first')
+    }
+}
+
 android {
     namespace 'com.possiblle.pos'
     compileSdk 35
@@ -24,6 +42,17 @@ android {
         versionCode appVersion.tokenize('.').collect { it as int }.inject(0) { n, p -> n * 100 + p }
         versionName appVersion
         buildConfigField 'String', 'POS_URL', "\"${posUrl}\""
+        buildConfigField 'boolean', 'BUNDLED', 'true'
+    }
+
+    sourceSets {
+        main.assets.srcDirs += tillAssets
+    }
+
+    androidResources {
+        // The default leaves out every folder starting with "_", and Next keeps
+        // all of the page's code in _next/.
+        ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
 
     buildFeatures {
@@ -47,6 +76,7 @@ android {
         // can be tried without a push.
         debug {
             buildConfigField 'String', 'POS_URL', '"http://10.0.2.2:3000"'
+            buildConfigField 'boolean', 'BUNDLED', 'false'
         }
         release {
             minifyEnabled false
@@ -65,3 +95,5 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 }
+
+preBuild.dependsOn copyTill

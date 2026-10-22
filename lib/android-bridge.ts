@@ -7,17 +7,27 @@
 // posNative the exe has, so the kitchen queue, the sexes' printer screen and
 // the receipt all run unchanged.
 //
-// What the Android till does not have is the exe's local database (`till`), so
-// it reads and writes through the site like the browser till, and stops when
-// the internet does.
+// The copy of the page inside the app also gets the exe's local database
+// (`till`, lib/android-till.ts), so it keeps selling with the internet down.
+// A page loaded from the site has none, and reads and writes through the site
+// like the browser till.
 //
 // Java answers later, not as a return value: every call carries an id, and the
 // app calls window.__posAndroid(id, error, result) when the socket is done.
 
-import type { PosNative } from './desktopPrint';
+import { androidTill, type AndroidTillBridge } from './android-till';
+import type { DesktopUpdate, PosNative } from './desktopPrint';
+
+/** A new version, as android/…/Updater.java reports it. */
+export interface AndroidUpdateBridge {
+  hasUpdater(): boolean;
+  /** JSON: a DesktopUpdate, or null. */
+  updateStatus(): string;
+  updateInstall(): void;
+}
 
 /** The object android/…/PrinterBridge.java puts on the page. */
-export interface AndroidPrinterBridge {
+export interface AndroidPrinterBridge extends Partial<AndroidTillBridge>, Partial<AndroidUpdateBridge> {
   print(id: string, ip: string, port: number, base64: string, timeoutMs: number): void;
   scan(id: string): void;
 }
@@ -28,7 +38,32 @@ interface AndroidWindow {
   PosAndroid?: AndroidPrinterBridge;
   posNative?: PosNative;
   __posAndroid?: Answer;
+  __posAndroidUpdate?: (status: DesktopUpdate | null) => void;
   btoa(data: string): string;
+}
+
+/**
+ * posNative.update for the Android app: the exe's "Yeni versiyanı yüklə", over
+ * Updater.java. It tells the page when a download is ready, and again when an
+ * install was cancelled so the button can be pressed again.
+ */
+export function androidUpdate(win: AndroidWindow, bridge: AndroidUpdateBridge): PosNative['update'] {
+  const listeners = new Set<(status: DesktopUpdate) => void>();
+  win.__posAndroidUpdate = status => {
+    if (status) for (const cb of listeners) cb(status);
+  };
+  return {
+    async status() {
+      return JSON.parse(bridge.updateStatus()) as DesktopUpdate | null;
+    },
+    onReady(cb) {
+      listeners.add(cb);
+      return () => { listeners.delete(cb); };
+    },
+    async install() {
+      bridge.updateInstall();
+    },
+  };
 }
 
 // Same as lib/tcp-print.ts: a printer that is off never answers at all.
@@ -73,9 +108,11 @@ export function androidNative(win: AndroidWindow): PosNative {
 
   return {
     // Desktop in every way the page asks about printing: it drains the kitchen
-    // queue and shows the sexes' printer screen. Without `till`, nothing else
-    // changes.
+    // queue and shows the sexes' printer screen.
     isDesktop: true,
+    // An APK before the offline till has no SQL calls at all.
+    till: bridge.hasTill ? androidTill(bridge as AndroidTillBridge, ask) : undefined,
+    update: bridge.hasUpdater?.() ? androidUpdate(win, bridge as AndroidUpdateBridge) : undefined,
     async print(ip, port, bytes, timeoutMs) {
       await ask(id => bridge.print(id, ip, port, toBase64(bytes, s => win.btoa(s)), timeoutMs ?? PRINT_MS));
     },

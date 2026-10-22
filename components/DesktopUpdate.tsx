@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { Download } from 'lucide-react';
+import { installAndroidBridge } from '@/lib/android-bridge';
 import type { DesktopUpdate as Update } from '@/lib/desktopPrint';
 
-// The desktop app's "new version" prompt. Renders nothing in a browser, and
-// nothing until electron/updater.ts has a verified installer on the disk.
+// The desktop app's "new version" prompt, in the exe and the Android app.
+// Renders nothing in a browser, and nothing until electron/updater.ts (or
+// android/…/Updater.java) has a verified installer on the disk.
 //
 // An update that was waiting as the app opened blocks the till until it is
 // installed. One that arrives mid-shift is only a banner: a waiter in the middle
@@ -16,10 +18,13 @@ export default function DesktopUpdate() {
   const [installing, setInstalling] = useState(false);
 
   useEffect(() => {
+    // The layout can run before the page that brings the Android bridge in.
+    installAndroidBridge();
     const bridge = window.posNative?.update;
     if (!bridge) return;
     void bridge.status().then(s => { if (s) setUpdate(s); });
-    return bridge.onReady(setUpdate);
+    // Heard again after an install was cancelled (Android): press it again.
+    return bridge.onReady(s => { setUpdate(s); setInstalling(false); });
   }, []);
 
   if (!update) return null;
@@ -46,8 +51,9 @@ export default function DesktopUpdate() {
         <div className="max-w-sm text-center">
           <h1 className="mb-2 text-xl font-semibold text-stone-800">Yeni versiya hazırdır</h1>
           <p className="mb-6 text-sm leading-relaxed text-stone-500">
-            Davam etmək üçün proqramı yeniləyin. Bu, təxminən yarım dəqiqə çəkir —
-            proqram özü yenidən açılacaq. Sifarişləriniz itməyəcək.
+            {update.reopens === false
+              ? 'Davam etmək üçün proqramı yeniləyin: düyməni basın, telefonda çıxan pəncərədə təsdiq edin və proqramı yenidən açın. Sifarişləriniz itməyəcək.'
+              : 'Davam etmək üçün proqramı yeniləyin. Bu, təxminən yarım dəqiqə çəkir — proqram özü yenidən açılacaq. Sifarişləriniz itməyəcək.'}
           </p>
           {button}
           <p className="mt-6 text-xs text-stone-400">v{update.version}</p>

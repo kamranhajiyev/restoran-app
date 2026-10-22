@@ -30,7 +30,7 @@ describe('an order on a table', () => {
     expect(moved).toEqual({ tableNumber: 7, tableName: undefined });
     expect(orderPlace(moved, cfg)).toBe('Masa 5 (yeni)');
     expect(readFileSync('app/seller/page.tsx', 'utf8')).toMatch(/o\.id === moving\.id \? movedToTable\(o, target\) : o/);
-    expect(readFileSync('electron/till-write.ts', 'utf8')).toMatch(/putOrder\(companyId, movedToTable\(found, tableId\)\)/);
+    expect(readFileSync('lib/till-store/write.ts', 'utf8')).toMatch(/putOrder\(companyId, movedToTable\(found, tableId\)\)/);
   });
 
   it('is still a table order when its table is gone', () => {

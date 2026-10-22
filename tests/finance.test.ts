@@ -231,7 +231,7 @@ describe('inkassasiya written in Kassa', () => {
     // Not behind "+ Əlavə et".
     expect(seller).toMatch(/onClick=\{\(\) => \{ setMovKind\('ink'\); setShowMovForm\(true\); \}\}/);
     // The exe keeps the movement as the page sent it.
-    expect(readFileSync('electron/till-write.ts', 'utf8')).toMatch(/movements: \[\.\.\.shift\.movements, movement\]/);
+    expect(readFileSync('lib/till-store/write.ts', 'utf8')).toMatch(/movements: \[\.\.\.shift\.movements, movement\]/);
 
     const admin = readFileSync('app/admin/page.tsx', 'utf8');
     expect(admin).toContain(`amount: -amount, reason: '${INKASSASIYA}', by: adminName`);

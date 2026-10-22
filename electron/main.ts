@@ -23,7 +23,7 @@ import {
 import { scanPrinters } from './printer-scan';
 import { registerTillHandlers } from './till-ipc';
 import { startTillPeers } from './till-peers';
-import { highestOrderNumber } from './till-write';
+import { highestOrderNumber } from '../lib/till-store/write';
 import { startUpdater } from './updater';
 
 // ── The till, served off the disk ────────────────────────────────────────────
