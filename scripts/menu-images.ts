@@ -2,7 +2,7 @@
  * Gives an imported menu the pictures from the restaurant's online menu.
  *
  * Usage:
- *   // 1. Look first: matches by name and downloads to ~/Desktop/<company>-pictures
+ *   // 1. Look first: matches by name and downloads to ~/Desktop/Possiblle/Menu pictures/<company>-pictures
  *   npm run menu-images -- --company meydan-test --url https://sherewoodlounge.clopos.menu/az/1/products
  *
  *   // 2. Then upload and link them to the products
@@ -69,7 +69,7 @@ async function main() {
   if (m.notOnPage.length) console.log(`  not on the page:    ${m.notOnPage.join(', ')}`);
   if (m.matched.length === 0) return;
 
-  const dir = path.join(os.homedir(), 'Desktop', `${slug}-pictures`);
+  const dir = path.join(os.homedir(), 'Desktop', 'Possiblle', 'Menu pictures', `${slug}-pictures`);
   fs.mkdirSync(dir, { recursive: true });
   let uploaded = 0;
   const failed: string[] = [];
