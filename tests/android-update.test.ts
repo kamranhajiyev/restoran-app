@@ -82,8 +82,9 @@ describe('the Android app update', () => {
   it('builds a key-signed production APK from an apk-* tag, without main', () => {
     const apk = readFileSync('.github/workflows/android.yml', 'utf8');
     expect(apk).toMatch(/push:[\s\S]*tags: \['apk-\*'\]/);
-    // ubuntu-latest (Ubuntu 26) broke setup-android on 2026-10-23.
+    // setup-android failed every build on GitHub (2026-10-23); the image's own SDK is used.
     expect(apk).toMatch(/runs-on: ubuntu-24\.04/);
+    expect(apk).not.toMatch(/setup-android/);
     // The tag takes the production branch of both the key check and the build.
     expect(apk).toMatch(/elif \[ "\$\{\{ inputs\.release \}\}" = "true" \] \|\| \[\[ "\$GITHUB_REF" == refs\/tags\/apk-\* \]\]; then\s+# Every till/);
     expect(apk).toMatch(/if \[ "\$\{\{ inputs\.release \}\}" = "true" \] \|\| \[\[ "\$GITHUB_REF" == refs\/tags\/apk-\* \]\]; then\s+\.\/gradlew assembleRelease\n/);

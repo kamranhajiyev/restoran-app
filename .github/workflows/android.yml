@@ -42,8 +42,9 @@ env:
 
 jobs:
   build:
-    # Not ubuntu-latest: from 2026-10-19 that became Ubuntu 26, where
-    # setup-android fails before the build starts.
+    # Its image carries the Android SDK (ANDROID_HOME, licences accepted), so
+    # Android's setup action is not used: it asks sdkmanager for the old 'tools'
+    # package, which no longer exists, and failed every build here.
     runs-on: ubuntu-24.04
 
     steps:
@@ -69,8 +70,6 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-
-      - uses: android-actions/setup-android@v3
 
       # The Gradle version is the one in android/gradle/wrapper, same as a Mac.
       - uses: gradle/actions/setup-gradle@v4
