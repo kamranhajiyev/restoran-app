@@ -42,7 +42,9 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: from 2026-10-19 that became Ubuntu 26, where
+    # setup-android fails before the build starts.
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
