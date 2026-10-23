@@ -59,6 +59,15 @@ android {
         buildConfig true
     }
 
+    // SQLite's .so files packed and unpacked on install, the classic way.
+    // Stored uncompressed (the newer default) installs on stock Android but
+    // gave "parse error" on a Huawei MatePad SE 11 (HarmonyOS 2), 2026-10-23.
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+
     signingConfigs {
         if (keystore) {
             release {
@@ -66,6 +75,10 @@ android {
                 storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
                 keyAlias System.getenv('ANDROID_KEY_ALIAS')
                 keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+                // Both signatures, not v2 alone: a Huawei MatePad SE 11
+                // (HarmonyOS 2) refused the v2-only APK with "parse error".
+                enableV1Signing true
+                enableV2Signing true
             }
         }
     }

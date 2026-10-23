@@ -79,6 +79,14 @@ describe('the Android app update', () => {
     expect(apk).toMatch(/if: inputs\.release[\s\S]*PossibllePOS\.apk/);
   });
 
+  it('packs the APK the classic way, which Huawei tablets can read', () => {
+    // 2026-10-23: a MatePad SE 11 (HarmonyOS 2) said "parse error" to an APK
+    // with stored .so files and only a v2 signature; stock Android took it.
+    const gradle = readFileSync('android/app/build.gradle', 'utf8');
+    expect(gradle).toMatch(/jniLibs \{\s+useLegacyPackaging true/);
+    expect(gradle).toMatch(/release \{[\s\S]*enableV1Signing true\s+enableV2Signing true/);
+  });
+
   it('builds a key-signed production APK from an apk-* tag, without main', () => {
     const apk = readFileSync('.github/workflows/android.yml', 'utf8');
     expect(apk).toMatch(/push:[\s\S]*tags: \['apk-\*'\]/);
