@@ -46,6 +46,9 @@ jobs:
     # Android's setup action is not used: it asks sdkmanager for the old 'tools'
     # package, which no longer exists, and failed every build here.
     runs-on: ubuntu-24.04
+    # An apk-* tag pushes a v-tag and drafts a release (below).
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -122,4 +125,32 @@ jobs:
           files: android/app/build/outputs/apk/release/PossibllePOS.apk
           # The exe's job made this draft; the APK joins it. Publishing it on
           # GitHub sends both to the restaurants.
+          draft: true
+
+      # An apk-* tag also drafts a release with the APK alone, for the phones.
+      # The tills read the newest release's tag (v<package.json version>), so
+      # the tag is a v-tag; the exe finds no exe in it and stays as it is.
+      # The tag is pushed here with this job's token, which starts no other
+      # workflow — publishing the draft in GitHub's page would create it as a
+      # new tag and run desktop.yml, which builds an exe for it.
+      - name: Tag the APK-only release
+        if: startsWith(github.ref, 'refs/tags/apk-')
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if git ls-remote --exit-code origin "refs/tags/v$version" >/dev/null; then
+            echo "::error::v$version is already released — raise the version in package.json first."
+            exit 1
+          fi
+          git tag "v$version" "$GITHUB_SHA"
+          git push origin "v$version"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Draft the APK-only release
+        if: startsWith(github.ref, 'refs/tags/apk-')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Android APK ${{ env.VERSION }}
+          body: Only the Android APK. Exe tills skip this release.
+          files: android/app/build/outputs/apk/release/PossibllePOS.apk
           draft: true

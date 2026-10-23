@@ -79,6 +79,18 @@ describe('the Android app update', () => {
     expect(apk).toMatch(/if: inputs\.release[\s\S]*PossibllePOS\.apk/);
   });
 
+  it('drafts an APK-only release from an apk-* tag, under a v-tag that starts no exe build', () => {
+    const apk = readFileSync('.github/workflows/android.yml', 'utf8');
+    // The tills compare the release tag with their version: it must be v<version>.
+    expect(apk).toMatch(/git tag "v\$version" "\$GITHUB_SHA"\s+git push origin "v\$version"/);
+    expect(apk).toMatch(/already released — raise the version/);
+    expect(apk).toMatch(/tag_name: v\$\{\{ env\.VERSION \}\}\s+name: Android APK/);
+    expect(apk).toMatch(/permissions:\s+contents: write/);
+    // The exe skips a release with no exe in it.
+    const exe = readFileSync('electron/updater.ts', 'utf8');
+    expect(exe).toMatch(/if \(!asset \|\| !expected\) return;/);
+  });
+
   it('packs the APK the classic way, which Huawei tablets can read', () => {
     // 2026-10-23: a MatePad SE 11 (HarmonyOS 2) said "parse error" to an APK
     // with stored .so files and only a v2 signature; stock Android took it.
