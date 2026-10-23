@@ -30,9 +30,11 @@ on:
         required: false
         default: ''
   # Until then: a push to the test branch that touches the app builds one that
-  # syncs with the branch's preview site.
+  # syncs with the branch's preview site. A tag apk-<n> pushed from any branch
+  # builds one for production without merging into main (tags skip `paths`).
   push:
     branches: [development-printer-cash-drawer]
+    tags: ['apk-*']
     paths: ['android/**', 'lib/android-bridge.ts', 'lib/android-till.ts', 'lib/till-store/**', 'lib/android-browsers.mjs', 'scripts/build-desktop.mjs', '.github/workflows/android.yml']
 
 env:
@@ -78,7 +80,7 @@ jobs:
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
             echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-          elif [ "${{ inputs.release }}" = "true" ]; then
+          elif [ "${{ inputs.release }}" = "true" ] || [[ "$GITHUB_REF" == refs/tags/apk-* ]]; then
             # Every till would download it and fail to install it.
             echo "::error::No ANDROID_KEYSTORE_BASE64 secret — a release APK must carry the restaurant key."
             exit 1
@@ -95,7 +97,7 @@ jobs:
         # A release first: called from desktop.yml its event is the tag's push,
         # and it must open production, not the preview.
         run: |
-          if [ "${{ inputs.release }}" = "true" ]; then
+          if [ "${{ inputs.release }}" = "true" ] || [[ "$GITHUB_REF" == refs/tags/apk-* ]]; then
             ./gradlew assembleRelease
           elif [ "${{ github.event_name }}" = "push" ]; then
             ./gradlew assembleRelease -PposUrl="$PREVIEW_URL"

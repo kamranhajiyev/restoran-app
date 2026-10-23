@@ -78,4 +78,12 @@ describe('the Android app update', () => {
     expect(apk).toMatch(/a release APK must carry the restaurant key/);
     expect(apk).toMatch(/if: inputs\.release[\s\S]*PossibllePOS\.apk/);
   });
+
+  it('builds a key-signed production APK from an apk-* tag, without main', () => {
+    const apk = readFileSync('.github/workflows/android.yml', 'utf8');
+    expect(apk).toMatch(/push:[\s\S]*tags: \['apk-\*'\]/);
+    // The tag takes the production branch of both the key check and the build.
+    expect(apk).toMatch(/elif \[ "\$\{\{ inputs\.release \}\}" = "true" \] \|\| \[\[ "\$GITHUB_REF" == refs\/tags\/apk-\* \]\]; then\s+# Every till/);
+    expect(apk).toMatch(/if \[ "\$\{\{ inputs\.release \}\}" = "true" \] \|\| \[\[ "\$GITHUB_REF" == refs\/tags\/apk-\* \]\]; then\s+\.\/gradlew assembleRelease\n/);
+  });
 });
