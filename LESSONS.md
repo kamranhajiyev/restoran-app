@@ -147,9 +147,9 @@ Natiq, Test Restoran, 2026-10-21: Çıxış on the laptop logged out the phone t
 Guard: `tests/login-lost.test.ts`
 
 **Does this lean on something only some devices have — a font, a driver, a
-codepage? Does the page bring its own?**
-Natiq, Test Restoran, 2026-10-21: the Android phone printed "Pivə" as "Piv□"; its font has no ə.
-Guard: `lib/ticket-font`, `tests/ticket-font.test.ts`
+codepage, a newer browser? Does the page bring its own?**
+Natiq, Test Restoran, 2026-10-21: the Android phone printed "Pivə" as "Piv□"; its font has no ə. (2026-10-22: a Chrome 101 phone could not load the APK at all.)
+Guard: `lib/ticket-font`, `tests/ticket-font.test.ts`, `lib/android-browsers.mjs`, `tests/android-old-phones.test.ts`
 
 ## 3. Money
 

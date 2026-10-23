@@ -9,13 +9,18 @@ package com.possiblle.pos;
 //
 // The tables are made by the page (lib/till-store/db.ts), so a change to them
 // is one change for both apps.
+//
+// SQLite is the one in the APK (io.requery), not the phone's. 2026-10-22: on
+// Android 9 (SQLite 3.22) the till stopped at its first save, "near "on":
+// syntax error" — upsert came in 3.24 and the exe's node:sqlite has it.
 
 import android.content.Context;
 import android.database.Cursor;
-import android.database.sqlite.SQLiteCursor;
-import android.database.sqlite.SQLiteDatabase;
-import android.database.sqlite.SQLiteProgram;
-import android.database.sqlite.SQLiteStatement;
+
+import io.requery.android.database.sqlite.SQLiteCursor;
+import io.requery.android.database.sqlite.SQLiteDatabase;
+import io.requery.android.database.sqlite.SQLiteProgram;
+import io.requery.android.database.sqlite.SQLiteStatement;
 
 import org.json.JSONArray;
 import org.json.JSONObject;

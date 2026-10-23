@@ -59,6 +59,7 @@ release/
 # Supabase project baked into it.
 .desktop-build/
 out-desktop/
+out-android/
 
 # The WinUSB installer (scripts/build-winusb.mjs): its staging copy and the
 # compiled addon the installer ships.

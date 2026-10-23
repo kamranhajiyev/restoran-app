@@ -46,4 +46,4 @@ A change can show up in three places: the seller page (browser till), the admin 
 
 The Windows exe always carries its own copy of the page. The `url` in the build (Actions → Desktop (Windows) → Run workflow) only picks which server it talks to; it does not load the page from that site. So every change, page or exe code, needs a new exe build before it can be tested in the exe. Only the browser terminal link picks up a push without a build.
 
-The Android APK does the same: it carries its own copy of the page and its own database (`lib/till-store/`, shared with the exe), so every change needs a new APK too (Actions → Android (APK)).
+The Android APK does the same: it carries its own copy of the page and its own database (`lib/till-store/`, shared with the exe), so every change needs a new APK too (Actions → Android (APK)). Unlike the exe it runs in the phone's own Chrome, so its copy is built for older Chrome (`npm run android:till`, `lib/android-browsers.mjs`, `lib/android-polyfills.ts`); a newer browser feature in the page needs a check on an old-Chrome emulator.

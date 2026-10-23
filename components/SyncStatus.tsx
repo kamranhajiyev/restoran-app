@@ -137,7 +137,9 @@ export default function SyncStatus({
         }`}
       >
         {icon}
-        {!compact && <span>{text}</span>}
+        {/* In the top bar of a phone the words pushed the page wider than the
+            screen; the colour and the icon still say it, and a tap opens the list. */}
+        {!compact && <span className={below ? 'hidden sm:inline' : undefined}>{text}</span>}
       </button>
 
       {open && (

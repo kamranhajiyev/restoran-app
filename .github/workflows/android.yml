@@ -33,7 +33,7 @@ on:
   # syncs with the branch's preview site.
   push:
     branches: [development-printer-cash-drawer]
-    paths: ['android/**', 'lib/android-bridge.ts', 'lib/android-till.ts', 'lib/till-store/**', '.github/workflows/android.yml']
+    paths: ['android/**', 'lib/android-bridge.ts', 'lib/android-till.ts', 'lib/till-store/**', 'lib/android-browsers.mjs', 'scripts/build-desktop.mjs', '.github/workflows/android.yml']
 
 env:
   PREVIEW_URL: https://restoran-app-git-development-p-f968e3-kamrans-projects-11d6b816.vercel.app
@@ -54,7 +54,7 @@ jobs:
       - run: npm install --no-audit --no-fund
 
       - name: Export the till page
-        run: npm run desktop:till
+        run: npm run android:till
         env:
           # Only the two public values, as in desktop.yml: the service-role key
           # must never be near a build that goes onto a restaurant's phone.

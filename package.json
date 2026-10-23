@@ -19,6 +19,7 @@
     "import-menu": "tsx --env-file-if-exists=.env.local scripts/import-menu.ts",
     "desktop:compile": "tsc -p electron/tsconfig.json",
     "desktop:till": "node scripts/build-desktop.mjs",
+    "android:till": "node scripts/build-desktop.mjs --android",
     "desktop": "npm run desktop:compile && node scripts/run-electron.mjs",
     "desktop:preview": "npm run desktop:compile && node scripts/run-electron.mjs --url=https://restoran-app-git-development-p-f968e3-kamrans-projects-11d6b816.vercel.app",
     "desktop:winusb": "node scripts/build-winusb.mjs",

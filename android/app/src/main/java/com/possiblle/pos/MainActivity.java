@@ -11,6 +11,7 @@ package com.possiblle.pos;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
@@ -108,7 +109,14 @@ public class MainActivity extends Activity {
         });
 
         setContentView(web);
-        if (state != null) web.restoreState(state);
+        // An engine too old for the page gets a screen that says so, not a
+        // crash. The updater above still runs: a new APK can still arrive.
+        PackageInfo engine = WebViewCheck.tooOld();
+        if (engine != null) {
+            Log.w("PossibllePOS", "WebView too old: " + engine.packageName + " " + engine.versionName);
+            web.loadDataWithBaseURL(null, WebViewCheck.page(engine), "text/html", "UTF-8", null);
+        }
+        else if (state != null) web.restoreState(state);
         // The bundled till opens at /seller, like the exe; the page decides
         // whether that means the PIN pad or the login screen. The site root
         // sends a till that was left on the seller screen back there (tillHome

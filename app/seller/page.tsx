@@ -3091,7 +3091,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
           <Printer className="w-4 h-4 text-emerald-600" />
           <span className="hidden sm:inline text-xs font-semibold text-emerald-700">Pul çəkməcəsi</span>
         </button>
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl">
+        {/* Not on a phone: with it the top bar was wider than the screen and
+            the bottom menu fell out of view. "Dəyiş" still switches the waiter. */}
+        <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl">
           <div className="w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold">
             {effectiveSeller[0]?.toUpperCase()}
           </div>

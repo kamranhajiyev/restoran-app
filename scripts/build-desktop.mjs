@@ -16,14 +16,25 @@
 // node_modules is symlinked rather than copied — it is the whole cost of the
 // build otherwise, and nothing here writes to it.
 
-import { cp, mkdir, rm, symlink, readdir, access, readFile } from 'node:fs/promises';
+import { cp, mkdir, rm, symlink, readdir, access, readFile, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { ANDROID_BROWSERS, oldTransforms, unlayer } from '../lib/android-browsers.mjs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STAGE = path.join(ROOT, '.desktop-build');
 const OUT = 'out-desktop';
+
+// `--android`: the copy for the APK, in out-android/. The exe brings its own
+// Chrome, but the APK runs in the phone's, and a till phone is often years
+// behind the Chrome 111 Next.js builds for (2026-10-22: one on Chrome 101
+// opened to "This page couldn't load"). So this copy is compiled down to
+// ANDROID_BROWSERS (lib/android-browsers.mjs). The browser and the exe never
+// get it.
+const ANDROID = process.argv.includes('--android');
+const BUILT = ANDROID ? 'out-android' : OUT;
 
 // Everything the till's module graph can reach. Erring wide is cheap; a missing
 // directory surfaces as a module-not-found in the middle of the export.
@@ -146,19 +157,71 @@ async function main() {
   console.log('[desktop] staging the till…');
   await stage();
 
-  console.log(`[desktop] exporting against ${env.NEXT_PUBLIC_SUPABASE_URL}`);
+  if (ANDROID) {
+    // Next.js compiles its JS and CSS for the browserslist in package.json.
+    const pkgPath = path.join(STAGE, 'package.json');
+    const pkg = JSON.parse(await readFile(pkgPath, 'utf8'));
+    pkg.browserslist = ANDROID_BROWSERS;
+    await writeFile(pkgPath, JSON.stringify(pkg, null, 2));
+    // The browserslist rewrites syntax, not missing functions: those come from
+    // lib/android-polyfills.ts, run before the page by Next.js.
+    await writeFile(
+      path.join(STAGE, 'instrumentation-client.ts'),
+      "import { installPolyfills } from './lib/android-polyfills';\ninstallPolyfills();\n",
+    );
+  }
+
+  console.log(`[desktop] exporting against ${env.NEXT_PUBLIC_SUPABASE_URL}${ANDROID ? ` for ${ANDROID_BROWSERS.join(', ')}` : ''}`);
   await run('npx', ['next', 'build'], STAGE, { ...env, POS_DESKTOP: '1' });
 
-  // Hand the result back to the repo root, where electron-builder and the dev
-  // shell both look for it.
+  // Hand the result back to the repo root, where electron-builder, the dev
+  // shell and android/ look for it.
   const built = path.join(STAGE, OUT);
   if (!(await exists(built))) {
     throw new Error(`export produced no ${OUT}/ — did next.config.ts see POS_DESKTOP?`);
   }
-  await rm(path.join(ROOT, OUT), { recursive: true, force: true });
-  await cp(built, path.join(ROOT, OUT), { recursive: true });
+  if (ANDROID) await lowerCss(built);
+  await rm(path.join(ROOT, BUILT), { recursive: true, force: true });
+  await cp(built, path.join(ROOT, BUILT), { recursive: true });
 
-  console.log(`[desktop] ${OUT}/ ready`);
+  console.log(`[desktop] ${BUILT}/ ready`);
+}
+
+// The browserslist reaches the JS but not Tailwind's CSS. Lightning CSS, the
+// one Tailwind itself uses, rewrites what it can for the older browser (media
+// ranges, nesting); unlayer and oldTransforms do the two it leaves, each of
+// which broke the page on Chrome 91 (lib/android-browsers.mjs).
+async function lowerCss(dir) {
+  const { transform, browserslistToTargets } = await import('lightningcss');
+  const { default: browserslist } = await import('browserslist');
+  const targets = browserslistToTargets(browserslist(ANDROID_BROWSERS));
+  const all = await readdir(dir, { recursive: true });
+  const files = all.filter(f => f.endsWith('.css'));
+  const renamed = new Map();
+  for (const file of files) {
+    const at = path.join(dir, file);
+    const { code } = transform({ filename: file, code: await readFile(at), minify: true, targets });
+    const css = oldTransforms(unlayer(code.toString()));
+    // A new name for the new content. The till's service worker keeps
+    // /_next/static/ files by name forever (public/sw.js), so a phone that
+    // had this name before would go on using the old file.
+    const hash = createHash('sha256').update(css).digest('hex').slice(0, 8);
+    const name = path.basename(file, '.css') + '-' + hash + '.css';
+    await writeFile(path.join(path.dirname(at), name), css);
+    await rm(at);
+    renamed.set(path.basename(file), name);
+  }
+  // Every page and RSC payload that names a stylesheet.
+  for (const file of all.filter(f => /\.(html|txt|js)$/.test(f))) {
+    const at = path.join(dir, file);
+    let text = await readFile(at, 'utf8');
+    let changed = false;
+    for (const [from, to] of renamed) {
+      if (text.includes(from)) { text = text.replaceAll(from, to); changed = true; }
+    }
+    if (changed) await writeFile(at, text);
+  }
+  console.log(`[desktop] ${files.length} stylesheet(s) lowered for ${ANDROID_BROWSERS.join(', ')}`);
 }
 
 main().catch(err => {

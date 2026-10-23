@@ -10,6 +10,11 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Only for the till's own SQLite (app/build.gradle).
+        maven {
+            url 'https://jitpack.io'
+            content { includeGroup 'com.github.requery' }
+        }
     }
 }
 rootProject.name = 'PossibllePOS'
