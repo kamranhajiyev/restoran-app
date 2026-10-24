@@ -2126,13 +2126,21 @@ function AdminPageContent() {
     setHallName('');
   }
 
+  // Its tables go with it, after the confirm says how many; one with an open
+  // order stops the lot.
   function removeHall() {
     if (!activeHall) return;
+    const busy = hallTables.find(t => orders.some(o => o.tableNumber === t.id && isOrderOpen(o)));
+    if (busy) { setDialog({ title: 'Silinmədi', message: <>&ldquo;{busy.name}&rdquo; masasında aktiv sifariş var.</> }); return; }
+    const ids = hallTables.map(t => t.id);
     setDialog({
       title: 'Zalı sil?',
-      message: <><span className="font-medium text-stone-700">&ldquo;{activeHall.name}&rdquo;</span> silinəcək.</>,
-      onConfirm: () => deleteHall(activeHall.id).then(err => {
+      message: ids.length > 0
+        ? <><span className="font-medium text-stone-700">&ldquo;{activeHall.name}&rdquo;</span> və içindəki {ids.length} masa silinəcək.</>
+        : <><span className="font-medium text-stone-700">&ldquo;{activeHall.name}&rdquo;</span> silinəcək.</>,
+      onConfirm: () => deleteHall(activeHall.id, ids).then(err => {
         if (err) { setDialog({ title: 'Silinmədi', message: err }); return; }
+        setTables(prev => prev.filter(t => !ids.includes(t.id)));
         setHalls(prev => prev.filter(h => h.id !== activeHall.id));
       }),
     });

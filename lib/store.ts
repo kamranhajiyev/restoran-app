@@ -2549,7 +2549,17 @@ export async function renameHall(id: string, name: string): Promise<string | nul
   return null;
 }
 
-export async function deleteHall(id: string): Promise<string | null> {
+/** Deletes the hall and the tables it shows (`tableIds`, asked for by the
+ *  screen's confirm). The tables go in one statement, so a single open order
+ *  (table_delete_guard) keeps them all and the hall. */
+export async function deleteHall(id: string, tableIds: number[] = []): Promise<string | null> {
+  if (tableIds.length > 0) {
+    const { error } = await supabase.from('restaurant_tables').delete().in('id', tableIds);
+    if (error) {
+      console.error('[deleteHall tables]', error);
+      return /table_has_open_order/.test(error.message) ? 'Bu zalda aktiv sifarişi olan masa var.' : error.message;
+    }
+  }
   const { error } = await supabase.from('halls').delete().eq('id', id);
   // 23503: restaurant_tables.hall_id still points here — the hall is not empty.
   if (error) {

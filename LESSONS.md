@@ -145,6 +145,10 @@ Guard: `tests/set-items.test.ts`
 Test Restoran, 2026-10-24: the Hesabat printed "Ləğv" and "Qaytarma" for orders the till calls "ödənişsiz bağlanan".
 Guard: `tests/history-report.test.ts`
 
+**When a safety rule blocks an action, does the screen offer to do the blocked part too (after saying what it will remove), instead of sending the user to do it by hand?**
+Test Restoran, 2026-10-24: a hall with tables could not be deleted; the owner had to remove every table one by one.
+Guard: `tests/hall-delete.test.ts`
+
 **Does an action on one device reach the others on the same login? When the
 server stops taking a login, does the screen say so?**
 Natiq, Test Restoran, 2026-10-21: Çıxış on the laptop logged out the phone till too; its kitchen tickets stopped with no message.
