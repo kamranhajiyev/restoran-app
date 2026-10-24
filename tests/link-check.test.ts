@@ -10,9 +10,10 @@ describe('the terminal link check', () => {
     expect(LINK_CHECK_MS).toBe(5 * 60_000);
   });
 
-  it('is the timer the link page uses, and focus still checks at once', () => {
+  it('is the timer the link page uses, and focus still checks (once per half minute)', () => {
     const src = readFileSync('app/s/[slug]/[token]/page.tsx', 'utf8');
     expect(src).toMatch(/setInterval\(revalidate, LINK_CHECK_MS\)/);
-    expect(src).toMatch(/addEventListener\('focus', revalidate\)/);
+    expect(src).toMatch(/addEventListener\('focus', onFocus\)/);
+    expect(src).toMatch(/focusRefreshDue\(last, Date\.now\(\)\)\) revalidate\(\)/);
   });
 });

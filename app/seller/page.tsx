@@ -37,6 +37,7 @@ import StationPrinters from '@/components/StationPrinters';
 import { postOrQueue, isOnline, startConnectivityWatch, onConnectivityChange } from '@/lib/offline-net';
 import { tillFetch, hasLocalDb, localCourierCollections, siteGet, setTillToken } from '@/lib/till-data';
 import { hasLocalData, pullAll, pullChanged, pullNewOrders, pullStationReady } from '@/lib/till-sync';
+import { focusRefreshDue } from '@/lib/focus-refresh';
 import { SAFETY_NET_MS, listenTill, onTillSignalStatus, tillSignalUp, timerDue, type TillSignal } from '@/lib/till-signal';
 import TillSetup from '@/components/TillSetup';
 import SyncStatus from '@/components/SyncStatus';
@@ -1288,8 +1289,12 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
 
   useEffect(() => {
     if (overrideCompanyId) return;
+    let last = 0;
     async function sync() {
       if (!getSession()) return;
+      // Focus and visibilitychange fire together (lib/focus-refresh.ts).
+      if (!focusRefreshDue(last, Date.now())) return;
+      last = Date.now();
       const ticket = beginOrdersRead();
       try {
         const [m, o, c, st, s, mg] = await Promise.all([
@@ -1333,12 +1338,15 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     const id = setInterval(() => {
       if (timerDue(last, Date.now(), tillSignalUp(), 3 * SAFETY_NET_MS)) sync();
     }, 40000);
-    const onVisible = () => { if (document.visibilityState === 'visible') refreshAll({ silent: true }); };
-    window.addEventListener('focus', sync);
+    // Focus and visibilitychange fire together, and a window switched to often
+    // re-read the lot every time (lib/focus-refresh.ts).
+    const onFocus = () => { if (focusRefreshDue(last, Date.now())) sync(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') onFocus(); };
+    window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       clearInterval(id);
-      window.removeEventListener('focus', sync);
+      window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [overrideCompanyId, refreshAll]);

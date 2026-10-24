@@ -3,6 +3,7 @@ import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { forgetTill } from '@/lib/auth';
 import { LINK_CHECK_MS } from '@/lib/link-check';
+import { focusRefreshDue } from '@/lib/focus-refresh';
 // The till itself, not the /seller route's wrapper: this route has already
 // resolved the terminal from the address bar, and asking the machine which
 // terminal it is would be a second, contradictory answer.
@@ -74,8 +75,10 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
   // blips are ignored so a transient error doesn't lock a valid terminal.
   useEffect(() => {
     let cancelled = false;
+    let last = Date.now();
     const revalidate = async () => {
       if (document.visibilityState === 'hidden') return;
+      last = Date.now();
       try {
         const r = await fetch(`/api/seller-token?slug=${encodeURIComponent(slug)}&token=${encodeURIComponent(token)}`);
         if (cancelled) return;
@@ -91,13 +94,15 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
       } catch { /* ignore transient network errors */ }
     };
     const id = setInterval(revalidate, LINK_CHECK_MS);
-    const onVisible = () => { if (document.visibilityState === 'visible') revalidate(); };
-    window.addEventListener('focus', revalidate);
+    // At most once per half minute on focus (lib/focus-refresh.ts).
+    const onFocus = () => { if (focusRefreshDue(last, Date.now())) revalidate(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') onFocus(); };
+    window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       cancelled = true;
       clearInterval(id);
-      window.removeEventListener('focus', revalidate);
+      window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [slug, token]);
