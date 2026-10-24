@@ -2425,9 +2425,17 @@ export async function setKassaEnabled(enabled: boolean): Promise<{ error?: strin
   return {};
 }
 
+type LocalTableRow = RestaurantTable & { hall_id?: string | null };
+
+/** The till's own copy keeps the rows as /api/public-tables sent them, with
+ *  hall_id. Read as they were, every table sat in the first hall. */
+export function localTables(rows: LocalTableRow[]): RestaurantTable[] {
+  return rows.map(({ hall_id, ...t }) => ({ ...t, hallId: t.hallId ?? hall_id ?? undefined }));
+}
+
 export async function fetchTablesOrNull(opts?: ReadOpts): Promise<RestaurantTable[] | null> {
   const local = await fromLocal(opts, async (till, companyId) =>
-    ((await till.tables(companyId)) as { tables: RestaurantTable[] }).tables);
+    localTables(((await till.tables(companyId)) as { tables: LocalTableRow[] }).tables));
   if (local) return local;
 
   try {

@@ -168,7 +168,16 @@ interface ClaimedJob {
 }
 
 type StationPrinter = { ip: string | null; port: number; name: string };
-type TableName = { id: number; name: string };
+// Tables and halls, for what the room calls a table: "Terras · Masa 5".
+type Places = {
+  tables: { id: number; name: string; hallId?: string }[];
+  halls: { id: string; name: string }[];
+};
+type TableRow = { id: number; name: string; hall_id?: string | null };
+
+function toPlaces(tables: TableRow[], halls: Places['halls']): Places {
+  return { tables: tables.map(t => ({ id: t.id, name: t.name, hallId: t.hall_id ?? undefined })), halls };
+}
 
 type Outcome =
   | { result: 'printed' }
@@ -189,8 +198,8 @@ export type PrintAuth =
 interface JobSource {
   claim(): Promise<ClaimedJob[] | null>;
   stations(): Promise<Map<string, StationPrinter>>;
-  /** Table names, for putting on the ticket in place of the bare id. */
-  tables(): Promise<TableName[]>;
+  /** Table and hall names, for putting on the ticket in place of the bare id. */
+  tables(): Promise<Places>;
   report(id: string, outcome: Outcome): Promise<void>;
 }
 
@@ -217,8 +226,11 @@ const sessionSource: JobSource = {
     return next;
   },
   async tables() {
-    const { data } = await supabase.from('restaurant_tables').select('id, name');
-    return (data ?? []) as TableName[];
+    const [t, h] = await Promise.all([
+      supabase.from('restaurant_tables').select('id, name, hall_id'),
+      supabase.from('halls').select('id, name').order('position').order('name'),
+    ]);
+    return toPlaces((t.data ?? []) as TableRow[], h.data ?? []);
   },
   async report(id, outcome) {
     await supabase.from('print_jobs').update(
@@ -256,9 +268,10 @@ function linkSource(companyId: string, token: string): JobSource {
       const path = `/api/public-tables?companyId=${encodeURIComponent(companyId)}`;
       try {
         const body = till ? JSON.parse((await till.api(path)).body) : await (await siteGet(path)).json();
-        return ((body as { tables?: TableName[] }).tables ?? []);
+        const b = body as { tables?: TableRow[]; halls?: Places['halls'] };
+        return toPlaces(b.tables ?? [], b.halls ?? []);
       } catch {
-        return [];
+        return { tables: [], halls: [] };
       }
     },
     async report(id, outcome) {
@@ -327,7 +340,7 @@ async function stations() {
 
 // Same short life as the stations: a table renamed mid-service shows up on the
 // next ticket without a restart.
-let tableCache: TableName[] | null = null;
+let tableCache: Places | null = null;
 let tableCacheAt = 0;
 
 async function tables() {
@@ -355,7 +368,7 @@ async function runJob(job: ClaimedJob): Promise<void> {
   try {
     const known = await tables();
     await printTo(native, station.ip, station.port,
-      await buildStationTicketRaster(job.payload, id => tableTitle(known, id)));
+      await buildStationTicketRaster(job.payload, id => tableTitle(known.tables, id, undefined, known.halls)));
   } catch (err) {
     const attempts = job.attempts + 1;
     const message = err instanceof Error ? err.message : String(err);

@@ -12,14 +12,14 @@ import { Bell, CircleCheck, Check, Settings } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
-  setCompanyContext, fetchMenuOrNull, fetchOrdersOrNull, fetchStationsOrNull, fetchTables,
+  setCompanyContext, fetchMenuOrNull, fetchOrdersOrNull, fetchStationsOrNull, fetchTables, fetchHalls,
   fetchStationReadyOrNull, markStationReady, unmarkStationReady, StationReady,
 } from '@/lib/store';
 import { menuIndex, sliceForStation, readyStationIds } from '@/lib/stations';
 import { itemBatches } from '@/lib/order-items';
 import { snapshotOrders, diffOrderAlerts, OrdersSnapshot } from '@/lib/orderAlerts';
 import { unlockSound, playNewOrder, playItemRemoved } from '@/lib/sound';
-import { MenuItem, Order, OrderItem, RestaurantTable, Station, isOrderOpen } from '@/types';
+import { Hall, MenuItem, Order, OrderItem, RestaurantTable, Station, isOrderOpen } from '@/types';
 import { orderLabel } from '@/lib/order-label';
 import { tableTitle } from '@/lib/order-place';
 import OrderNote from '@/components/OrderNote';
@@ -118,6 +118,7 @@ export default function StationPage() {
   // For the table's name. Orders carry only its id, which is a row number — a
   // restaurant that remade its tables had "Masa 1" showing here as "Masa 51".
   const [tables, setTables] = useState<RestaurantTable[]>([]);
+  const [halls, setHalls] = useState<Hall[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [readyRows, setReadyRows] = useState<StationReady[]>([]);
   const [online, setOnline] = useState(true);
@@ -225,6 +226,7 @@ export default function StationPage() {
     // Apart from the load above: a failure here must not blank the screen, only
     // fall back to the id.
     fetchTables().then(setTables).catch(() => {});
+    fetchHalls().then(setHalls).catch(() => {});
 
     return () => { stopped = true; clearTimeout(retry); authSub.subscription.unsubscribe(); };
   }, [router]);
@@ -391,7 +393,7 @@ export default function StationPage() {
 
   async function notifyWaiters(orderId: string) {
     const order = orders.find(o => o.id === orderId);
-    const where = order?.tableNumber ? tableTitle(tables, order.tableNumber, order.tableName) : 'Sifariş';
+    const where = order?.tableNumber ? tableTitle(tables, order.tableNumber, order.tableName, halls) : 'Sifariş';
     const num = order ? ` #${orderLabel(order)}` : '';
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -494,7 +496,7 @@ export default function StationPage() {
               <StationCard
                 key={card.order.id}
                 order={card.order}
-                table={card.order.tableNumber ? tableTitle(tables, card.order.tableNumber, card.order.tableName) : null}
+                table={card.order.tableNumber ? tableTitle(tables, card.order.tableNumber, card.order.tableName, halls) : null}
                 items={card.items}
                 removedItems={card.removedItems}
                 since={card.since}

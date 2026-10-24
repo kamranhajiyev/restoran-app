@@ -60,7 +60,7 @@ import DialogHost from '@/components/DialogHost';
 import { askConfirm, showAlert } from '@/lib/dialog-queue';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
 import { fitPlan, tableBox, tableRadius } from '@/lib/floor-plan';
-import { movedToTable, orderPlace as placeOf, tableTitle } from '@/lib/order-place';
+import { movedToTable, orderPlace as placeOf, tableTitle, withHall } from '@/lib/order-place';
 import { flushQueue, pendingOrderIds, ADD_ORDER, sendOrderByLink } from '@/lib/sync';
 import { verifyPinOffline, rememberPin, forgetPins } from '@/lib/offline-pin';
 import { queueSize, enqueue, onEnqueue } from '@/lib/offline-queue';
@@ -1691,14 +1691,14 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
 
   function tableName(id: number | null): string {
     if (!id) return tablesOn ? 'Takeaway' : '';
-    return tables.find(t => t.id === id)?.name ?? `Masa ${id}`;
+    return withHall(tables.find(t => t.id === id)?.name ?? `Masa ${id}`, tables, id, halls);
   }
 
   // What the open-orders list writes beside the order number: where this order
   // is going. The rule itself lives in lib/order-place.ts, because the admin
   // history shows the same thing about the same rows.
   function orderPlace(order: Pick<Order, 'tableNumber' | 'tableName' | 'courierId' | 'online'>): string {
-    return placeOf(order, { tables, tablesOn, deliveryOn });
+    return placeOf(order, { tables, tablesOn, deliveryOn, halls });
   }
 
   function hallName(id: string | undefined): string {
@@ -1914,7 +1914,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 note: editedNote,
                 items: [...target.items, ...(target.removedItems ?? [])],
                 menu,
-                tableName: id => tableTitle(tables, id),
+                tableName: id => tableTitle(tables, id, undefined, halls),
               })
             : [],
         };
@@ -1963,7 +1963,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         note: newNote || target.note || null,
         items: newItems,
         menu,
-        tableName: id => tableTitle(tables, id),
+        tableName: id => tableTitle(tables, id, undefined, halls),
       });
     }
     const saveError = overrideCompanyId
@@ -2160,7 +2160,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
           note: order.note ?? null,
           items: order.items,
           menu,
-          tableName: id => tableTitle(tables, id),
+          tableName: id => tableTitle(tables, id, undefined, halls),
         });
       }
     }
@@ -2227,7 +2227,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         // the waiter closed it on purpose and doesn't need an alert about it.
         if (!ready) return;
       }
-      const ok = await printBill(order, overrideCompanyName || getSession()?.companyName || '', logoUrl, tableTitle(tables, order.tableNumber, order.tableName));
+      const ok = await printBill(order, overrideCompanyName || getSession()?.companyName || '', logoUrl, tableTitle(tables, order.tableNumber, order.tableName, halls));
       if (!ok) {
         setPrinterConnected(false);
         showAlert('Hesab çap olunmadı — yazıcı bağlantısını yoxlayın.');
@@ -2261,7 +2261,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         setPrinterConnected(ready);
         if (!ready) return;
       }
-      const ok = await printReceipt(order, overrideCompanyName || getSession()?.companyName || '', logoUrl, tableTitle(tables, order.tableNumber, order.tableName));
+      const ok = await printReceipt(order, overrideCompanyName || getSession()?.companyName || '', logoUrl, tableTitle(tables, order.tableNumber, order.tableName, halls));
       if (!ok) {
         setPrinterConnected(false);
         showAlert('Qəbz çap olunmadı — yazıcı bağlantısını yoxlayın.');
@@ -2385,7 +2385,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         // The public terminal link has no session, so the name has to come off
         // the props there or the receipt prints with a blank header.
         const cName = overrideCompanyName || getSession()?.companyName || '';
-        if (shouldPrintReceipt) printReceipt(paidOrder, cName, logoUrl, tableTitle(tables, paidOrder.tableNumber, paidOrder.tableName));
+        if (shouldPrintReceipt) printReceipt(paidOrder, cName, logoUrl, tableTitle(tables, paidOrder.tableNumber, paidOrder.tableName, halls));
         // Every closed bill, not just the ones that put notes in the till: a card
         // payment still needs the drawer for change owed from an earlier round,
         // and a cashier who has to open it by key stops trusting the button.

@@ -2569,7 +2569,7 @@ function AdminPageContent() {
   // Place and courier sit after the audit filter and before the search box, so
   // they narrow whichever period is in charge and the Excel export — which takes
   // visibleOrders — carries them for free.
-  const placeCfg = { tables, tablesOn, deliveryOn };
+  const placeCfg = { tables, tablesOn, deliveryOn, halls };
   // Deactivated riders included: their old deliveries are still in the history,
   // and a name missing from the list would make them unfindable.
   const courierOptions = Object.entries(courierNames)
@@ -3383,7 +3383,7 @@ function AdminPageContent() {
                             </div>
                             {isMasa && tablesOpen && (
                               <div className="mt-2 ml-5 space-y-1">
-                                {tableSales(chartPaid, tables, orderTotal).map(t => (
+                                {tableSales(chartPaid, tables, orderTotal, halls).map(t => (
                                   <div key={t.name} className="flex justify-between text-xs text-stone-600">
                                     <span>{t.name} <span className="text-stone-400">({t.count})</span></span>
                                     <span className="font-semibold text-stone-700">{t.rev.toFixed(2)} ₼</span>
@@ -3865,7 +3865,7 @@ function AdminPageContent() {
                               {order.status === 'ödənilib' && printerConnected && (
                                 <button
                                   onClick={async () => {
-                                    const ok = await printReceipt(order, companyName, undefined, tableTitle(tables, order.tableNumber, order.tableName));
+                                    const ok = await printReceipt(order, companyName, undefined, tableTitle(tables, order.tableNumber, order.tableName, halls));
                                     if (!ok) setPrinterError('Çap alınmadı — yazıcı bağlantısını yoxlayın');
                                   }}
                                   className="text-xs font-semibold text-emerald-600 border border-emerald-200 hover:bg-emerald-50 rounded-lg px-2.5 py-1 transition-colors flex items-center gap-1"

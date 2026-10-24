@@ -9,7 +9,7 @@
 //
 // So it lives here, like orderLabel does, and both screens call it.
 
-import type { Order, RestaurantTable } from '../types';
+import type { Hall, Order, RestaurantTable } from '../types';
 
 /** The words for an order with no table — on the screen and on every ticket,
  *  so the kitchen reads what the till shows. */
@@ -25,10 +25,15 @@ export type PlaceKind = 'masa' | 'delivery' | 'online' | 'takeaway';
 /** What the company actually runs. Both toggles off is a valid setup — a shop
  *  that only ever hands food across the counter. */
 export interface PlaceConfig {
-  tables: Pick<RestaurantTable, 'id' | 'name'>[];
+  tables: TableRef[];
   tablesOn: boolean;
   deliveryOn: boolean;
+  /** For the hall in front of the table's name — see withHall. */
+  halls?: HallRef[];
 }
+
+type TableRef = Pick<RestaurantTable, 'id' | 'name'> & Partial<Pick<RestaurantTable, 'hallId'>>;
+type HallRef = Pick<Hall, 'id' | 'name'>;
 
 type PlaceOrder = Pick<Order, 'tableNumber' | 'courierId' | 'online'> & Partial<Pick<Order, 'tableName'>>;
 
@@ -56,10 +61,28 @@ export function orderPlaceKind(order: PlaceOrder, cfg: Pick<PlaceConfig, 'delive
  * `saved` is the name the order kept (Order.tableName). It wins over the
  * table's current name, so a rename or a deleted table leaves history alone.
  */
-export function tableTitle(tables: Pick<RestaurantTable, 'id' | 'name'>[], id: number, saved?: string): string {
+export function tableTitle(tables: TableRef[], id: number, saved?: string, halls?: HallRef[]): string {
   const name = (saved?.trim() || tables.find(t => t.id === id)?.name)?.trim();
   if (!name) return `Masa ${id}`;
-  return /^\d+$/.test(name) ? `Masa ${name}` : name;
+  return withHall(/^\d+$/.test(name) ? `Masa ${name}` : name, tables, id, halls);
+}
+
+/**
+ * The hall in front of a table's name: "Terras · Masa 5".
+ *
+ * Two halls can each have a "Masa 5", and a receipt that says only that sends
+ * the waiter to the wrong one. With a single hall it says nothing, so it is left
+ * off; so is a name that already starts with its hall ("Terras 3"). `halls` is
+ * in display order: a table with no hall predates halls and sits in the first,
+ * as on the floor plan. A table that is gone has no hall to name.
+ */
+export function withHall(title: string, tables: TableRef[], id: number, halls?: HallRef[]): string {
+  if (!halls || halls.length < 2) return title;
+  const table = tables.find(t => t.id === id);
+  if (!table) return title;
+  const hall = halls.find(h => h.id === (table.hallId ?? halls[0].id))?.name.trim();
+  if (!hall || title.toLowerCase().startsWith(hall.toLowerCase())) return title;
+  return `${hall} · ${title}`;
 }
 
 /** An order moved to another table. The name it kept was the old table's: it
@@ -80,7 +103,8 @@ export function movedToTable<T extends { tableNumber: number; tableName?: string
 export function orderPlace(order: PlaceOrder, cfg: PlaceConfig): string {
   const kind = orderPlaceKind(order, cfg);
   if (kind === 'masa') {
-    return order.tableName?.trim() || (cfg.tables.find(t => t.id === order.tableNumber)?.name ?? `Masa ${order.tableNumber}`);
+    const name = order.tableName?.trim() || (cfg.tables.find(t => t.id === order.tableNumber)?.name ?? `Masa ${order.tableNumber}`);
+    return withHall(name, cfg.tables, order.tableNumber, cfg.halls);
   }
   if (kind === 'online') return PLACE_WORDS.online;
   if (kind === 'delivery') return PLACE_WORDS.delivery;

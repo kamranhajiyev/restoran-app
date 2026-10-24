@@ -2,7 +2,7 @@
 // (Test Restoran asked, 2026-10-05). Uses orderPlaceKind, the rule behind the
 // admin's Sifarişlər filter, so a row here and that filter always agree.
 
-import type { Order, RestaurantTable } from '@/types';
+import type { Hall, Order, RestaurantTable } from '@/types';
 import { orderPlaceKind, PLACE_WORDS, tableTitle, type PlaceKind } from './order-place';
 
 const ROWS: { kind: PlaceKind; label: string }[] = [
@@ -36,16 +36,18 @@ export function placeSales(
 }
 
 /** The Masa row opened up: one row per table, by its name as the till shows it,
- *  highest sales first. Tables that share a name are one row. */
+ *  highest sales first. Tables that share a name are one row — unless they
+ *  are in different halls, which the name then says. */
 export function tableSales(
   orders: Order[],
-  tables: Pick<RestaurantTable, 'id' | 'name'>[],
+  tables: Pick<RestaurantTable, 'id' | 'name' | 'hallId'>[],
   total: (o: Order) => number,
+  halls?: Pick<Hall, 'id' | 'name'>[],
 ): { name: string; rev: number; count: number }[] {
   const sums = new Map<string, { rev: number; count: number }>();
   for (const o of orders) {
     if (!o.tableNumber) continue;
-    const name = tableTitle(tables, o.tableNumber, o.tableName);
+    const name = tableTitle(tables, o.tableNumber, o.tableName, halls);
     const s = sums.get(name) ?? { rev: 0, count: 0 };
     s.rev += total(o);
     s.count += 1;
