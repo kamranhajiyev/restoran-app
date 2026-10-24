@@ -141,6 +141,10 @@ Guard: `keepSettings`, `tests/keep-settings.test.ts`
 Test Restoran, 2026-10-14: a quick-added set opened in Düzəlt with no Set button until refresh.
 Guard: `tests/set-items.test.ts`
 
+**Does a new screen or printout use the same words the till already uses?**
+Test Restoran, 2026-10-24: the Hesabat printed "Ləğv" and "Qaytarma" for orders the till calls "ödənişsiz bağlanan".
+Guard: `tests/history-report.test.ts`
+
 **Does an action on one device reach the others on the same login? When the
 server stops taking a login, does the screen say so?**
 Natiq, Test Restoran, 2026-10-21: Çıxış on the laptop logged out the phone till too; its kitchen tickets stopped with no message.

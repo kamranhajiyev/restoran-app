@@ -90,8 +90,9 @@ export function historyReportLines(r: HistoryReport, head: {
   if (r.kuryer > 0.005) lines.push({ text: row('Kuryer', money(r.kuryer)) });
   lines.push(
     { text: '-'.repeat(WIDTH) },
-    { text: row(`Ləğv (${r.legv.count})`, money(r.legv.sum)) },
-    { text: row(`Qaytarma (${r.qaytarma.count})`, money(r.qaytarma.sum)) },
+    // The till's own words: there is no "ləğv" or "qaytarma" button anywhere.
+    { text: row(`Ödənişsiz bağlanan (${r.legv.count})`, money(r.legv.sum)) },
+    { text: row(`Kuryerdən geri alınan (${r.qaytarma.count})`, money(r.qaytarma.sum)) },
   );
   return lines;
 }

@@ -39,12 +39,15 @@ describe('Hesabat', () => {
   it('prints every line, with Kuryer only when some money is out', () => {
     const head = { companyName: 'Chinar', from: '2026-10-20T05:00:00Z', to: '2026-10-20T19:40:00Z', printedBy: 'Natiq', timezone: 'Asia/Baku' };
     const text = historyReportLines(historyReport(orders, total), head).map(l => l.text).join('\n');
-    for (const w of ['Hesabat 20.10.2026', 'Chinar', 'Natiq', 'Sifarişlərin sayı', 'Toplam', 'Endirimlər', 'CƏMİ', 'Nağd', 'Kart', 'Kuryer', 'Ləğv (1)', 'Qaytarma (1)']) {
+    for (const w of ['Hesabat 20.10.2026', 'Chinar', 'Natiq', 'Sifarişlərin sayı', 'Toplam', 'Endirimlər', 'CƏMİ', 'Nağd', 'Kart', 'Kuryer', 'Ödənişsiz bağlanan (1)', 'Kuryerdən geri alınan (1)']) {
       expect(text).toContain(w);
     }
+    // Names the till does not use confused the owner (Test Restoran, 2026-10-24).
+    expect(text).not.toContain('Ləğv');
+    expect(text).not.toContain('Qaytarma');
     expect(text).toContain('09:00');
     const noCourier = historyReportLines(historyReport(orders.filter(o => o.id !== 'c'), total), head).map(l => l.text).join('\n');
-    expect(noCourier).not.toContain('Kuryer');
+    expect(noCourier).not.toMatch(/^Kuryer /m);
   });
 
   it('the till prints it from Tarixçə with the shared function', () => {
