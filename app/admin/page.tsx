@@ -10,8 +10,9 @@ import {
   Coffee, BarChart2, Package, Bike, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
   GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link, Printer, Check, ArrowUp, ArrowDown, ChefHat,
-  Building2, AtSign, Landmark,
+  Building2, AtSign, Landmark, ChevronLeft, ChevronRight,
 } from 'lucide-react';
+import { hallsMoved, nextHallPosition } from '@/lib/hall-order';
 import {
   DndContext, DragEndEvent, PointerSensor, useSensor, useSensors,
   closestCenter, pointerWithin, useDroppable,
@@ -28,7 +29,7 @@ import {
   trashMenuItems, trashedMenuItem, restoreRecipe, trashPhotoPaths, imagePath,
   setCompanyContext, updateUser,
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, moveTableToHall, fetchCompanySlug,
-  fetchHalls, createHall, renameHall, deleteHall, adoptOrphanTables, fetchTablesOrNull, fetchHallsOrNull,
+  fetchHalls, createHall, renameHall, deleteHall, saveHallOrder, adoptOrphanTables, fetchTablesOrNull, fetchHallsOrNull,
   fetchTablesEnabled, setTablesEnabled,
   fetchDeliveryEnabled, setDeliveryEnabled,
   fetchQrEnabled, setQrEnabled, fetchMenuOnly, setMenuOnly,
@@ -2112,7 +2113,7 @@ function AdminPageContent() {
       if (err) { setDialog({ title: 'Saxlanmadı', message: err }); setHallSaving(false); return; }
       setHalls(prev => prev.map(h => h.id === activeHallId ? { ...h, name } : h));
     } else {
-      const { id, error } = await createHall(name);
+      const { id, error } = await createHall(name, nextHallPosition(halls));
       if (error || !id) { setDialog({ title: 'Yaradılmadı', message: error ?? 'Xəta' }); setHallSaving(false); return; }
       // First hall of the venue: pull in any table still sitting outside a hall.
       if (halls.length === 0) await adoptOrphanTables(id);
@@ -2124,6 +2125,17 @@ function AdminPageContent() {
     setHallSaving(false);
     setShowHallForm(null);
     setHallName('');
+  }
+
+  // Shown at once; a failed save puts the old order back.
+  async function moveHall(dir: -1 | 1) {
+    if (!activeHall) return;
+    const moved = hallsMoved(halls, activeHall.id, dir);
+    if (!moved) return;
+    const before = halls;
+    setHalls(moved);
+    const err = await saveHallOrder(moved);
+    if (err) { setHalls(before); setDialog({ title: 'Saxlanmadı', message: err }); }
   }
 
   // Its tables go with it, after the confirm says how many; one with an open
@@ -5071,6 +5083,22 @@ function AdminPageContent() {
                 </select>
                 {activeHall && (
                   <>
+                    <button
+                      onClick={() => moveHall(-1)}
+                      disabled={halls[0]?.id === activeHall.id}
+                      title="Sola köçür"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-primary-700 transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => moveHall(1)}
+                      disabled={halls[halls.length - 1]?.id === activeHall.id}
+                      title="Sağa köçür"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-primary-700 transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
                     <button
                       onClick={() => { setHallName(activeHall.name); setShowHallForm('rename'); }}
                       title="Zalın adını dəyiş"

@@ -2527,10 +2527,10 @@ export async function fetchHalls(opts?: ReadOpts): Promise<Hall[]> {
   return (await fetchHallsOrNull(opts)) ?? [];
 }
 
-export async function createHall(name: string): Promise<{ id?: string; error?: string }> {
+export async function createHall(name: string, position = 0): Promise<{ id?: string; error?: string }> {
   const { data, error } = await supabase
     .from('halls')
-    .insert({ name, company_id: _companyId })
+    .insert({ name, company_id: _companyId, position })
     .select('id')
     .single();
   if (error) {
@@ -2538,6 +2538,19 @@ export async function createHall(name: string): Promise<{ id?: string; error?: s
     return { error: error.code === '23505' ? 'Bu adda zal artıq var.' : error.message };
   }
   return { id: data.id };
+}
+
+/** Saves every hall's position (from hallsMoved); the first error, or null. */
+export async function saveHallOrder(halls: { id: string; position: number }[]): Promise<string | null> {
+  const results = await Promise.all(
+    halls.map(h => supabase.from('halls').update({ position: h.position }).eq('id', h.id)),
+  );
+  const failed = results.find(r => r.error)?.error;
+  if (failed) {
+    console.error('[saveHallOrder]', failed);
+    return failed.message;
+  }
+  return null;
 }
 
 export async function renameHall(id: string, name: string): Promise<string | null> {
