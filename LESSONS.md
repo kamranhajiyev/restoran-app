@@ -157,7 +157,7 @@ Guard: `tests/login-lost.test.ts`
 **Does this lean on something only some devices have — a font, a driver, a
 codepage, a newer browser? Does the page bring its own?**
 Natiq, Test Restoran, 2026-10-21: the Android phone printed "Pivə" as "Piv□"; its font has no ə. (2026-10-22: a Chrome 101 phone could not load the APK at all. 2026-10-23: a Huawei tablet would not even install it.)
-Guard: `lib/ticket-font`, `tests/ticket-font.test.ts`, `lib/android-browsers.mjs`, `tests/android-old-phones.test.ts`, `tests/android-update.test.ts`
+Guard: `lib/ticket-font`, `tests/ticket-font.test.ts`, `lib/dates.ts`, `tests/dates.test.ts`, `lib/android-browsers.mjs`, `tests/android-old-phones.test.ts`, `tests/android-update.test.ts`
 
 ## 3. Money
 

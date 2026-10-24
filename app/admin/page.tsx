@@ -90,6 +90,7 @@ import { changedOrderId, gatherOrderIds, patchOrders } from '@/lib/order-patch';
 import { onCompanyChange } from '@/lib/company-changes';
 import { DATA_TABLES, gatherParts, type Part } from '@/lib/data-refresh';
 import OrderNote from '@/components/OrderNote';
+import { formatDayMonth, formatDayMonthTime, formatTime } from '@/lib/dates';
 
 // RPC raise messages are machine codes — translated here for display
 const STAFF_ERRORS: Record<string, string> = {
@@ -1433,7 +1434,7 @@ function AdminPageContent() {
             {e.action !== 'movement_delete' && <> → <span className="text-stone-700 font-medium">{money(e.to)}</span></>}
             <span className="text-stone-400">
               {' · '}{e.by}{' · '}
-              {new Date(e.at).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
+              {formatDayMonthTime(e.at, bizSettings.timezone)}
             </span>
           </div>
         ))}
@@ -2690,7 +2691,7 @@ function AdminPageContent() {
       const mS = `${year}-${pad2(month + 1)}-01`;
       const mE = month === 11 ? `${year + 1}-01-01` : `${year}-${pad2(month + 2)}-01`;
       return {
-        label: new Date(year, month, 1).toLocaleDateString('az-AZ', { month: 'short' }),
+        label: AZ_MON_SHORT[month],
         fullLabel: monthFull(new Date(year, month, 1)),
         rev: paidOrders.filter(o => { const d = orderBizDay(o); return d >= mS && d < mE; }).reduce((s, o) => s + orderTotal(o), 0),
       };
@@ -3798,11 +3799,10 @@ function AdminPageContent() {
                           )}
                         </span>
                         <span className="text-xs text-stone-500 flex-shrink-0 hidden sm:block">
-                          {new Date(order.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
-                          {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
+                          {formatDayMonthTime(order.createdAt, bizSettings.timezone)}
                           {' → '}
                           {closedAt
-                            ? new Date(closedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })
+                            ? formatTime(closedAt, bizSettings.timezone)
                             : '—'}
                         </span>
                         <span className="text-sm font-semibold text-stone-800 flex-shrink-0 text-right">
@@ -3850,7 +3850,7 @@ function AdminPageContent() {
                           {order.status === 'ləğv edildi' && (
                             <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3">
                               Ödənişsiz bağlandı{order.cancelledBy ? ` — ${order.cancelledBy}` : ''}
-                              {order.cancelledAt ? `, ${new Date(order.cancelledAt).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}` : ''}
+                              {order.cancelledAt ? `, ${formatDayMonthTime(order.cancelledAt, bizSettings.timezone)}` : ''}
                               {order.cancelReason ? ` · Səbəb: ${order.cancelReason}` : ''}
                             </p>
                           )}
@@ -4056,7 +4056,7 @@ function AdminPageContent() {
                           </h3>
                           <div className="flex items-center gap-2">
                             <span className="text-xs text-stone-500">
-                              {new Date(open.openedAt).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })} · {open.openedBy}
+                              {formatDayMonthTime(open.openedAt, bizSettings.timezone)} · {open.openedBy}
                             </span>
                             <button
                               onClick={refreshKassa}
@@ -4173,10 +4173,10 @@ function AdminPageContent() {
                               >
                                 <ChevronDown className={`w-4 h-4 text-stone-400 shrink-0 transition-transform ${isExp ? 'rotate-180' : ''}`} />
                                 <span className="text-sm text-stone-700 flex-1 truncate">
-                                  {new Date(s.openedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })}
+                                  {formatDayMonth(s.openedAt, bizSettings.timezone)}
                                   <span className="text-xs text-stone-500 ml-2">
-                                    {new Date(s.openedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
-                                    –{s.closedAt ? new Date(s.closedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone }) : ''}
+                                    {formatTime(s.openedAt, bizSettings.timezone)}
+                                    –{s.closedAt ? formatTime(s.closedAt, bizSettings.timezone) : ''}
                                   </span>
                                 </span>
                                 {s.edits.length > 0 && (
@@ -4867,7 +4867,7 @@ function AdminPageContent() {
                                 </div>
                               </td>
                               <td className="px-4 py-3 text-stone-600 whitespace-nowrap">
-                                {d.getDate()} {AZ_MON_SHORT[d.getMonth()]} {String(d.getHours()).padStart(2, '0')}:{String(d.getMinutes()).padStart(2, '0')}
+                                {formatDayMonthTime(d)}
                               </td>
                               <td className="px-4 py-3 font-mono text-xs text-stone-600 whitespace-nowrap">{e.ip ?? '—'}</td>
                               <td className="px-4 py-3 text-stone-600 whitespace-nowrap">{deviceLabel(e.userAgent)}</td>

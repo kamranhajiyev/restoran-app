@@ -72,6 +72,7 @@ import { changedOrderId, gatherOrderIds, patchOrders, patchReady } from '@/lib/o
 import { onCompanyChange } from '@/lib/company-changes';
 import { DATA_TABLES, gatherParts, type Part } from '@/lib/data-refresh';
 import { azNormalize } from '@/lib/az-text';
+import { formatDayMonthTime, formatTime } from '@/lib/dates';
 
 // How many writes the server has not seen. Two stores answer that question — the
 // browser till's IndexedDB queue and the desktop till's SQLite outbox — but only
@@ -3540,7 +3541,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
               {historyShifts.length > 0 && (
                 <div className="px-4 md:px-6 pb-2 flex gap-2 overflow-x-auto">
                   {[null, ...historyShifts].map((s, i) => {
-                    const time = (iso: string) => new Date(iso).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone });
+                    const time = (iso: string) => formatTime(iso, bizSettings.timezone);
                     const on = (s?.id ?? null) === historyShiftId;
                     return (
                       <button
@@ -3645,11 +3646,10 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                               {[tLabel, order.sellerName].filter(Boolean).join(' · ')}
                             </span>
                             <span className="text-xs text-stone-500 flex-shrink-0 hidden sm:block">
-                              {new Date(order.createdAt).toLocaleDateString('az-AZ', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
-                              {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
+                              {formatDayMonthTime(order.createdAt, bizSettings.timezone)}
                               {' → '}
                               {closedAt
-                                ? new Date(closedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })
+                                ? formatTime(closedAt, bizSettings.timezone)
                                 : '—'}
                             </span>
                             <span className="text-sm font-semibold text-stone-800 flex-shrink-0 text-right">
@@ -3672,11 +3672,10 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                           {isExpanded && (
                             <div className="px-4 pb-4 bg-stone-50 border-t border-stone-100">
                               <p className="pt-3 text-xs text-stone-500 sm:hidden">
-                                Açıldı: {new Date(order.createdAt).toLocaleDateString('az-AZ', { day: 'numeric', month: 'short', timeZone: bizSettings.timezone })},{' '}
-                                {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
+                                Açıldı: {formatDayMonthTime(order.createdAt, bizSettings.timezone)}
                                 {' · '}
                                 {closedAt
-                                  ? `Bağlandı: ${new Date(closedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}`
+                                  ? `Bağlandı: ${formatTime(closedAt, bizSettings.timezone)}`
                                   : 'açıqdır'}
                               </p>
                               <div className="pt-3 space-y-1 mb-3">
@@ -3695,7 +3694,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                               {order.status === 'ləğv edildi' && (
                                 <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3">
                                   Ödənişsiz bağlandı{order.cancelledBy ? ` — ${order.cancelledBy}` : ''}
-                                  {order.cancelledAt ? `, ${new Date(order.cancelledAt).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}` : ''}
+                                  {order.cancelledAt ? `, ${formatDayMonthTime(order.cancelledAt, bizSettings.timezone)}` : ''}
                                   {order.cancelReason ? ` · Səbəb: ${order.cancelReason}` : ''}
                                 </p>
                               )}
@@ -3772,7 +3771,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 <div>
                   <h1 className="text-lg font-semibold text-stone-900">Kassa</h1>
                   <p className="text-sm text-stone-600 mt-0.5">
-                    Açılıb: {new Date(shift.openedAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })} · {shift.openedBy}
+                    Açılıb: {formatTime(shift.openedAt, bizSettings.timezone)} · {shift.openedBy}
                   </p>
                 </div>
 
@@ -4728,7 +4727,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                           <input type="checkbox" checked={on} onChange={() => toggle(p.id)} className="w-4 h-4 accent-[var(--color-primary-800,#115e59)]" />
                           <span className="text-sm font-bold text-primary-900 w-14">№{p.orderNumber}</span>
                           <span className="flex-1 text-xs text-stone-500">
-                            {new Date(p.createdAt).toLocaleString('az-AZ', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: bizSettings.timezone })}
+                            {formatDayMonthTime(p.createdAt, bizSettings.timezone)}
                           </span>
                           <span className="text-sm font-semibold tabular-nums text-stone-800">{p.owed.toFixed(2)} ₼</span>
                         </label>

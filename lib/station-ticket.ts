@@ -14,6 +14,7 @@
 import { ESC, placeLines, WIDTH, itemRows, sizedNoteRows, stringToBytes, wrap, type TicketPayload } from './escpos';
 import { rasterize, type Line } from './raster';
 import { ticketFontReady } from './ticket-font';
+import { formatDayMonthTime } from './dates';
 
 // Dish names a step up from `big`, wider as well as taller, so the cook can read
 // them at arm's length. Wrapped to fewer columns to make room.
@@ -45,9 +46,7 @@ const HEADING: Record<TicketPayload['kind'], string> = {
 export async function buildStationTicketRaster(p: TicketPayload, tableName?: (id: number) => string): Promise<Uint8Array> {
   const place = (t: number) => (tableName ? tableName(t) : `Masa ${t}`);
 
-  const when = new Date(p.at).toLocaleString('az-AZ', {
-    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
-  });
+  const when = formatDayMonthTime(p.at);
 
   const lines: Line[] = [{ text: p.station, big: true, center: true }];
 

@@ -4,6 +4,7 @@ import { Category, MenuItem, MenuItemVariant, Order } from '@/types';
 import { orderClosedAt } from '@/lib/order-items';
 import { orderLabel } from './order-label';
 import { itemKind, KIND_LABEL, withSets, type ItemKind } from './set-items';
+import { formatDate, formatDateTime } from './dates';
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ export function exportMenuExcel(menu: MenuItem[], categories: Category[]): void 
   menuSheet['!cols'] = [{ wch: 18 }, { wch: 30 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 30 }];
   XLSX.utils.book_append_sheet(wb, menuSheet, 'Menyu');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catRows), 'Kateqoriyalar');
-  XLSX.writeFile(wb, `menyu-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  XLSX.writeFile(wb, `menyu-${formatDate(new Date())}.xlsx`);
 }
 
 /** What one order puts in the money columns of the orders export. */
@@ -68,10 +69,10 @@ export function exportOrdersExcel(orders: Order[], timezone: string, courierName
       // The label, so two tills' 45s are two rows an owner can tell apart.
       'Sifariş №': orderLabel(o),
       'Satıcı': o.sellerName,
-      'Tarix': new Date(o.createdAt).toLocaleString('az-AZ', { timeZone: timezone, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      'Tarix': formatDateTime(o.createdAt, timezone),
       // Blank while the order is still open — an empty cell reads better in Excel
       // than a placeholder, and it keeps the column sortable as a date.
-      'Bağlanma': closed ? new Date(closed).toLocaleString('az-AZ', { timeZone: timezone, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
+      'Bağlanma': closed ? formatDateTime(closed, timezone) : '',
       'Status': o.status,
       'Məhsullar': o.items.map(i => `${i.menuItem.name} x${i.quantity}`).join(', '),
       'Endirim (₼)': o.discountAmount ?? 0,
@@ -93,7 +94,7 @@ export function exportOrdersExcel(orders: Order[], timezone: string, courierName
   ws['!cols'] = [{ wch: 10 }, { wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 14 }, { wch: 50 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 16 }, { wch: 16 }, { wch: 10 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Sifarişlər');
-  XLSX.writeFile(wb, `sifarisler-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  XLSX.writeFile(wb, `sifarisler-${formatDate(new Date())}.xlsx`);
 }
 
 export interface AnalizRow {

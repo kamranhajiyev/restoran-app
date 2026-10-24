@@ -6,11 +6,10 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { fetchHealthReportsOrNull, runHealthReport } from '@/lib/store';
 import { byCompany, type HealthReport } from '@/lib/health-report';
+import { formatDateTime } from '@/lib/dates';
 
 function bakuTime(iso: string): string {
-  return new Date(iso).toLocaleString('az-AZ', {
-    timeZone: 'Asia/Baku', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
+  return formatDateTime(iso, 'Asia/Baku');
 }
 
 export default function HealthReportPanel() {

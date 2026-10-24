@@ -2,6 +2,7 @@
 
 import { itemBatches } from '@/lib/order-items';
 import { Order, OrderItem } from '@/types';
+import { formatTime } from '@/lib/dates';
 
 // The order's item list read as a history rather than a snapshot: what was ordered
 // first, what was added later and when, and what was taken off — struck through and
@@ -21,7 +22,7 @@ export default function OrderItemHistory({ order, tz, isItemReady }: {
   const batches = itemBatches(order);
 
   const time = (iso: string) =>
-    new Date(iso).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: tz });
+    formatTime(iso, tz);
 
   return (
     <div className="space-y-1">

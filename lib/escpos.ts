@@ -8,6 +8,7 @@
 // our own newline — which is what pushed every price one row below its name.
 import { noteLines } from './order-note';
 import { PLACE_WORDS } from './order-place';
+import { formatDayMonthTime } from './dates';
 
 export const WIDTH = 47;
 
@@ -159,9 +160,7 @@ const HEADING: Record<TicketPayload['kind'], string> = {
 // A kitchen ticket carries no prices — the cook doesn't need them, and they
 // crowd out the thing that matters: what to make, and how many.
 export function buildStationTicket(p: TicketPayload): Uint8Array {
-  const when = new Date(p.at).toLocaleString('az-AZ', {
-    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
-  });
+  const when = formatDayMonthTime(p.at);
 
   const lines: string[] = [
     ESC.INIT,

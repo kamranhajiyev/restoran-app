@@ -17,6 +17,7 @@ import { Warehouse as Wh, Supplier, StockItem, StockBalance, StockReceipt, Recei
 import { DialogState } from '@/components/AppDialog';
 import { goneItems, stockLeftQuestion, stockTrashDone, stockTrashMessage } from '@/lib/stock-trash';
 import { inputCls, btnPrimary, btnGhost, Modal, Empty } from '@/components/panel-ui';
+import { formatDateTime, formatDayMonthTime } from '@/lib/dates';
 
 type Sub = 'warehouses' | 'balances' | 'suppliers' | 'payments' | 'receipts' | 'transfers' | 'writeoffs';
 
@@ -160,7 +161,7 @@ function StockFailures({ flash, fail }: { flash: (m: string) => void; fail: (m: 
             <li key={f.id} className="flex items-center justify-between gap-2 bg-white rounded-lg px-3 py-2 border border-red-100">
               <span className="min-w-0 break-words">
                 №{f.orderNumber}
-                {f.paidAt && <span className="text-stone-500"> · {new Date(f.paidAt).toLocaleString('az-AZ', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>}
+                {f.paidAt && <span className="text-stone-500"> · {formatDayMonthTime(f.paidAt)}</span>}
                 <span className="block text-xs text-red-500">{f.error}</span>
               </span>
               <button onClick={() => retry(f.id)} disabled={busy !== null}
@@ -701,7 +702,7 @@ function ReceiptsTab({ warehouses, suppliers, items, flash, fail, setDialog }: {
                     {supName(r.supplierId)} → {whName(r.warehouseId)}
                     {voided && <span className="text-[10px] font-semibold no-underline px-1.5 py-0.5 rounded bg-red-50 text-red-500">silinib</span>}
                   </div>
-                  <div className="text-xs text-stone-400">{new Date(r.createdAt).toLocaleString('az-AZ')}{r.note ? ` · ${r.note}` : ''}</div>
+                  <div className="text-xs text-stone-400">{formatDateTime(r.createdAt)}{r.note ? ` · ${r.note}` : ''}</div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <div className="text-right">
@@ -749,7 +750,7 @@ function ReceiptsTab({ warehouses, suppliers, items, flash, fail, setDialog }: {
                       <button className={btnGhost} onClick={() => askVoid(r)}><Trash2 className="w-3.5 h-3.5 text-red-500" /> Sil</button>
                     </div>
                   )}
-                  {voided && <p className="text-xs text-red-400 pt-2">{r.voidedBy ? `${r.voidedBy} tərəfindən ` : ''}silinib{r.voidedAt ? ` · ${new Date(r.voidedAt).toLocaleString('az-AZ')}` : ''}</p>}
+                  {voided && <p className="text-xs text-red-400 pt-2">{r.voidedBy ? `${r.voidedBy} tərəfindən ` : ''}silinib{r.voidedAt ? ` · ${formatDateTime(r.voidedAt)}` : ''}</p>}
                 </div>
               )}
             </div>
@@ -960,7 +961,7 @@ function TransfersTab({ warehouses, items, flash, fail, setDialog }: {
                     {voided && <span className="text-[10px] font-semibold no-underline px-1.5 py-0.5 rounded bg-red-50 text-red-500">geri qaytarılıb</span>}
                   </div>
                   <div className="text-xs text-stone-400">
-                    {new Date(t.createdAt).toLocaleString('az-AZ')}{t.createdBy ? ` · ${t.createdBy}` : ''}{t.note ? ` · ${t.note}` : ''}
+                    {formatDateTime(t.createdAt)}{t.createdBy ? ` · ${t.createdBy}` : ''}{t.note ? ` · ${t.note}` : ''}
                   </div>
                 </div>
                 <ChevronDown className={`w-4 h-4 shrink-0 text-stone-300 transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -984,7 +985,7 @@ function TransfersTab({ warehouses, items, flash, fail, setDialog }: {
                       <button className={btnGhost} onClick={() => askVoid(t)}><Trash2 className="w-3.5 h-3.5 text-red-500" /> Geri qaytar</button>
                     </div>
                   ) : (
-                    <p className="text-xs text-red-400 pt-2">{t.voidedBy ? `${t.voidedBy} tərəfindən ` : ''}geri qaytarılıb{t.voidedAt ? ` · ${new Date(t.voidedAt).toLocaleString('az-AZ')}` : ''}</p>
+                    <p className="text-xs text-red-400 pt-2">{t.voidedBy ? `${t.voidedBy} tərəfindən ` : ''}geri qaytarılıb{t.voidedAt ? ` · ${formatDateTime(t.voidedAt)}` : ''}</p>
                   )}
                 </div>
               )}
@@ -1128,7 +1129,7 @@ function WriteoffsTab() {
             <div className="min-w-0">
               <div className="text-sm font-medium text-stone-800">{w.name}</div>
               <div className="text-xs text-stone-400">
-                {new Date(w.createdAt).toLocaleString('az-AZ')} · {w.warehouseName}
+                {formatDateTime(w.createdAt)} · {w.warehouseName}
                 {w.reason ? <> · <span className="text-stone-500">{w.reason}</span></> : ''}
                 {w.createdBy ? ` · ${w.createdBy}` : ''}
               </div>
@@ -1177,7 +1178,7 @@ function PaymentsTab({ suppliers }: { suppliers: Supplier[] }) {
             <div className="min-w-0">
               <div className="text-sm font-medium text-stone-800">{p.supplierName}</div>
               <div className="text-xs text-stone-400">
-                {new Date(p.createdAt).toLocaleString('az-AZ')}
+                {formatDateTime(p.createdAt)}
                 {p.createdBy ? ` · ${p.createdBy}` : ''}
                 {p.note ? <> · <span className="text-stone-500">{p.note}</span></> : ''}
               </div>

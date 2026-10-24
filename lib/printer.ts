@@ -8,6 +8,7 @@ import { PLACE_WORDS } from './order-place';
 import { mergeLines } from './add-again';
 import { isValidIp } from './station-printer';
 import { installAndroidBridge } from './android-bridge';
+import { formatDateTime } from './dates';
 
 installAndroidBridge();
 
@@ -194,7 +195,7 @@ const money = (n: number) => `${n.toFixed(2)}m`;
 
 // The header both papers share: who, which order, which table, when, whose.
 function head(order: Order, companyName: string, heading?: string, table?: string): Line[] {
-  const date = new Date(order.createdAt).toLocaleString('az-AZ', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const date = formatDateTime(order.createdAt);
   const lines: Line[] = [
     { text: companyName, big: true, center: true },
     { text: '-'.repeat(WIDTH), center: true },

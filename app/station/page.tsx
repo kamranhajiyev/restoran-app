@@ -27,6 +27,7 @@ import { REFRESH_GATHER_MS } from '@/lib/coalesce';
 import { changedOrderId, gatherOrderIds, patchOrders, patchReady } from '@/lib/order-patch';
 import { onCompanyChange } from '@/lib/company-changes';
 import { gatherParts } from '@/lib/data-refresh';
+import { formatTime } from '@/lib/dates';
 
 // A card older than this is late. Newest-first puts the oldest at the BOTTOM, so
 // the colour is what stops it being forgotten — the sort can't be relied on to
@@ -101,10 +102,7 @@ function waitedLabel(fromISO: string, now: number): string {
 }
 
 function clockTime(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime())
-    ? ''
-    : d.toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' });
+  return formatTime(iso);
 }
 
 export default function StationPage() {

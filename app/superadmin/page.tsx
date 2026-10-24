@@ -16,6 +16,7 @@ import AppDialog, { DialogState } from '@/components/AppDialog';
 import PasswordField from '@/components/PasswordField';
 import HealthReportPanel from '@/components/HealthReportPanel';
 import { validatePassword } from '@/lib/password';
+import { formatDate } from '@/lib/dates';
 
 // Each company's clock for statistics — superadmin picks it per company
 const TIMEZONES: { value: string; label: string }[] = [
@@ -551,7 +552,7 @@ export default function SuperadminPage() {
                         className="text-xs text-gray-400 hover:text-[#2779a7] transition-colors"
                         title="Tarixi dəyişmək üçün profili açın"
                       >
-                        {c.expiresAt ? new Date(c.expiresAt).toLocaleDateString('az-AZ') : '+ tarix'}
+                        {c.expiresAt ? formatDate(c.expiresAt) : '+ tarix'}
                       </button>
                     </div>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${c.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
@@ -829,7 +830,7 @@ export default function SuperadminPage() {
                 )}
                 {profExpiry && (
                   <p className="text-xs text-gray-400">
-                    Bitmə tarixi: <span className="font-medium text-gray-600">{new Date(profExpiry.slice(0, 10) + 'T12:00:00').toLocaleDateString('az-AZ')}</span>
+                    Bitmə tarixi: <span className="font-medium text-gray-600">{formatDate(profExpiry.slice(0, 10) + 'T12:00:00')}</span>
                   </p>
                 )}
               </div>

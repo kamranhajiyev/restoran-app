@@ -7,6 +7,7 @@
 import type { Line } from './raster';
 import { WIDTH } from './escpos';
 import { historyTotals } from './history-shifts';
+import { formatDate, formatDateTime } from './dates';
 
 type ReportOrder = { id: string; status: string; discountAmount?: number; cashAmount?: number; cardAmount?: number;
   courierDebt?: number; courierCash?: number; courierCard?: number };
@@ -63,10 +64,8 @@ export function historyReportLines(r: HistoryReport, head: {
   timezone: string;
   shift?: string;      // "Növbə 2" when one shift is picked
 }): Line[] {
-  const at = (iso: string) => new Date(iso).toLocaleString('az-AZ', {
-    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: head.timezone,
-  });
-  const day = new Date(head.from).toLocaleDateString('az-AZ', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: head.timezone });
+  const at = (iso: string) => formatDateTime(iso, head.timezone);
+  const day = formatDate(head.from, head.timezone);
   const lines: Line[] = [
     { text: `Hesabat ${day}`, big: true, center: true },
     { text: row('Məkan', head.companyName) },

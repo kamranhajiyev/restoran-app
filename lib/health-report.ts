@@ -1,6 +1,8 @@
 // The nightly health report on the superadmin page (20261012_health_reports.sql).
 // The database finds the problems; this only turns a saved night into lines.
 
+import { formatDate } from './dates';
+
 export type HealthProblem = {
   company: string;
   problem: string;
@@ -12,7 +14,7 @@ export type HealthProblem = {
 export type HealthReport = { id: number; runAt: string; problems: HealthProblem[] };
 
 function bakuDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('az-AZ', { timeZone: 'Asia/Baku', day: '2-digit', month: '2-digit', year: 'numeric' });
+  return formatDate(iso, 'Asia/Baku');
 }
 
 /** One problem in words, in Azerbaijani (the order ones say what Telegram says). */

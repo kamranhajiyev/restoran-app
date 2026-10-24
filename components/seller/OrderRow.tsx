@@ -9,6 +9,7 @@ import { orderLabel } from '@/lib/order-label';
 import { mergeLines } from '@/lib/add-again';
 import { STATUS_COLORS, STATUS_LABELS, elapsed, orderTotal } from './order-format';
 import OrderNote from '@/components/OrderNote';
+import { formatTime } from '@/lib/dates';
 
 // ── OrderRow — mobile card + desktop table row ────────────────────────────
 
@@ -116,7 +117,7 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
                 )}
               </div>
               <p className="text-xs text-stone-500 pl-5">
-                {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: tz })} · {elapsed(order.createdAt)}
+                {formatTime(order.createdAt, tz)} · {elapsed(order.createdAt)}
               </p>
             </div>
             <div className="text-right">
@@ -214,7 +215,7 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
         >
           <div>
             <p className="font-semibold text-stone-800 text-sm">
-              {new Date(order.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit', timeZone: tz })}
+              {formatTime(order.createdAt, tz)}
             </p>
             <p className="text-xs text-stone-500">{elapsed(order.createdAt)}</p>
           </div>

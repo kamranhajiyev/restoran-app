@@ -22,6 +22,7 @@ import { Courier, CourierLedger, CourierPayMethod, CourierPayment } from '@/type
 import { DialogState } from '@/components/AppDialog';
 import { inputCls, btnPrimary, btnGhost, Modal } from '@/components/panel-ui';
 import { CompanySettings, businessToday, businessDayStartUtc, addDays } from '@/lib/business-day';
+import { formatDateTime } from '@/lib/dates';
 
 type Sub = 'couriers' | 'payments' | 'report';
 
@@ -293,7 +294,7 @@ function PaymentsTab({ couriers, flash, fail, setDialog }: {
             <div className="min-w-0">
               <div className="text-sm font-medium text-stone-800">{p.courierName}</div>
               <div className="text-xs text-stone-400">
-                {new Date(p.createdAt).toLocaleString('az-AZ')}
+                {formatDateTime(p.createdAt)}
                 {/* The whole point of the column: who was standing at the till. */}
                 {p.createdBy ? <> · Qəbul edən: <span className="text-stone-500">{p.createdBy}</span></> : ''}
               </div>

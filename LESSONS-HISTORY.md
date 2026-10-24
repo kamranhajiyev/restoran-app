@@ -193,6 +193,12 @@ lost every Ə, on the HESAB and the Bar ticket alike. The page now carries DejaV
 Sans Mono Bold (`public/fonts`), placed after the system faces so the exe's
 tickets do not change, and every ticket waits for it before drawing.
 
+Natiq, Test Restoran, 2026-10-24: the printed Hesabat read "2026-10-24 13:15"
+though the code asked for `toLocaleString('az-AZ')`. Chrome and the exe carry no
+Azerbaijani date data and fall back to year first; Node has it, so the tests
+passed. Every date now goes through `lib/dates.ts`, which puts day, month, year
+in order itself ("24.10.2026 13:15").
+
 ## 3. Money
 
 **Can the screen calculate a total from data that has not loaded yet?**
