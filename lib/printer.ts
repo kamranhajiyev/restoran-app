@@ -320,6 +320,16 @@ export async function printReceipt(order: Order, companyName: string, logoUrl?: 
   }
 }
 
+// Tarixçə's Hesabat — the lines come from lib/history-report.
+export async function printHistoryReport(lines: Line[]): Promise<boolean> {
+  try {
+    return await send(lines);
+  } catch (err) {
+    console.error('[Printer] Hesabat cap alinmadi:', err);
+    return false;
+  }
+}
+
 export async function openCashDrawer(): Promise<boolean> {
   try {
     return await sendBytes(new Uint8Array([0x1B, 0x70, 0x00, 0x19, 0xFF]));

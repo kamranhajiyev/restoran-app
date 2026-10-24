@@ -31,7 +31,8 @@ import { pickableCouriers, settleableCouriers } from '@/lib/couriers';
 import { historyTotals, ordersOfShift, shiftLoadWindow, shiftTotals, shiftsOfDay, shiftWindow, type HistoryShift } from '@/lib/history-shifts';
 import { CashShift, Category, Courier, CourierPayMethod, CourierPendingOrder, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
-import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, openCashDrawer } from '@/lib/printer';
+import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, printHistoryReport, openCashDrawer } from '@/lib/printer';
+import { historyReport, historyReportLines } from '@/lib/history-report';
 import { installExeFocusFix } from '@/lib/exe-focus';
 import { drainPrintQueue, isDesktop, nextLocalOrderNumber, printKitchenNow, printNoteNow, startKitchenPrinting } from '@/lib/desktopPrint';
 import StationPrinters from '@/components/StationPrinters';
@@ -654,6 +655,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // because it is not attached to them: a rider settles when they get back, which
   // may be days after the delivery closed.
   const [historyCollected, setHistoryCollected] = useState<Collections>({ nagd: 0, kart: 0 });
+  // The from–to the list was loaded for, printed on the Hesabat.
+  const [historyWindow, setHistoryWindow]   = useState<{ from: string; to: string } | null>(null);
+  const [reportBusy, setReportBusy]         = useState(false);
   const [loadingMore, setLoadingMore]       = useState(false);
 
   // cancel modal — preset reason required, free text only for "Digər"
@@ -2264,6 +2268,36 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     }
   }
 
+  // Tarixçə's Hesabat: the orders in view on paper, with the boxes' numbers.
+  // Writes nothing, so it can be printed as often as wanted.
+  async function handlePrintReport() {
+    if (reportBusy || !historyWindow) return;
+    setReportBusy(true);
+    try {
+      let ready = printerConnected;
+      if (!ready) {
+        ready = await selectPrinter();
+        setPrinterConnected(ready);
+        if (!ready) return;
+      }
+      const shiftNo = historyShifts.findIndex(s => s.id === historyShiftId);
+      const lines = historyReportLines(historyReport(historyOrders, orderTotal, historyPaidIds), {
+        companyName: overrideCompanyName || getSession()?.companyName || '',
+        from: historyWindow.from,
+        to: historyWindow.to,
+        printedBy: effectiveSeller,
+        timezone: bizSettings.timezone,
+        shift: shiftNo >= 0 ? `Növbə ${shiftNo + 1}` : undefined,
+      });
+      if (!(await printHistoryReport(lines))) {
+        setPrinterConnected(false);
+        showAlert('Hesabat çap olunmadı — yazıcı bağlantısını yoxlayın.');
+      }
+    } finally {
+      setReportBusy(false);
+    }
+  }
+
   // Pre-fill cash with the total — the common case is exact cash payment;
   // the field selects on focus so a different amount can be typed straight over it.
   function openPayment(order: Order) {
@@ -2698,7 +2732,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     // The boxes need both: which deliveries were paid back in view decides
     // their Nağd / Kart / Kuryer split, so neither is shown without the other.
     Promise.all([
-      load.then(list => { if (list) setHistoryOrders(picked ? ordersOfShift(list, picked, now) : list); }),
+      load.then(list => { if (list) { setHistoryOrders(picked ? ordersOfShift(list, picked, now) : list); setHistoryWindow({ from, to }); } }),
       courierCollections(from, to, overrideCompanyId).then(setHistoryCollected),
     ]).finally(() => setHistoryLoading(false));
     // siteGet, not tillFetch: the till keeps only the open shift, and closed
@@ -3476,6 +3510,15 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                     {historyLoading ? 'Yüklənir...' : `${historyOrders.length} sifariş`}
                   </p>
                 </div>
+                <div className="flex items-center gap-2">
+                <button
+                  onClick={handlePrintReport}
+                  disabled={historyLoading || reportBusy || !historyWindow}
+                  className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  {reportBusy ? 'Çap olunur...' : 'Hesabat çap et'}
+                </button>
                 <button
                   onClick={loadHistory}
                   disabled={historyLoading}
@@ -3486,6 +3529,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                     : <span>↻</span>}
                   Yenilə
                 </button>
+                </div>
               </div>
 
               {/* One kassa shift at a time — the owner checks a shift's money
