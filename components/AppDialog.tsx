@@ -12,6 +12,8 @@ export type DialogState = {
   /** A second answer beside the confirm button ("İnqrediyent kimi saxla"). */
   altLabel?: string;
   onAlt?: () => void;
+  /** Called when Ləğv et is pressed (onClose runs for every button). */
+  onCancel?: () => void;
 };
 
 export default function AppDialog({ dialog, onClose }: { dialog: DialogState | null; onClose: () => void }) {
@@ -20,11 +22,11 @@ export default function AppDialog({ dialog, onClose }: { dialog: DialogState | n
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
         <h3 className="text-base font-semibold text-stone-800">{dialog.title}</h3>
-        <p className="text-sm text-stone-600">{dialog.message}</p>
+        {dialog.message && <p className="text-sm text-stone-600 whitespace-pre-line">{dialog.message}</p>}
         <div className="flex flex-wrap gap-2 justify-end">
           {dialog.onConfirm ? (
             <>
-              <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors">Ləğv et</button>
+              <button onClick={() => { dialog.onCancel?.(); onClose(); }} className="px-4 py-2 text-sm rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors">Ləğv et</button>
               {dialog.onAlt && (
                 <button
                   onClick={() => { const fn = dialog.onAlt!; onClose(); fn(); }}

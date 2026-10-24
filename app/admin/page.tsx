@@ -61,6 +61,9 @@ import FinancePanel from '@/components/FinancePanel';
 import StationsPanel from '@/components/StationsPanel';
 import ModifiersPanel from '@/components/ModifiersPanel';
 import OrderItemHistory from '@/components/OrderItemHistory';
+import TillRulesPanel from '@/components/TillRulesPanel';
+import { ROLE_NAMES } from '@/lib/till-rules';
+import type { StaffRole } from '@/types';
 import PasswordField from '@/components/PasswordField';
 import { validatePassword } from '@/lib/password';
 import { exportMenuExcel, exportOrdersExcel, exportAnalizExcel, parseMenuFile, ImportPreview, AnalizRow } from '@/lib/excel';
@@ -91,6 +94,7 @@ const STAFF_ERRORS: Record<string, string> = {
   pin_taken: 'Bu PIN artıq başqa əməkdaşda istifadə olunur',
   bad_pin: 'PIN 4 rəqəmdən ibarət olmalıdır',
   bad_name: 'Ad boş ola bilməz',
+  bad_role: 'Vəzifə seçilməyib',
   not_owner: 'Bu əməliyyat üçün icazəniz yoxdur',
 };
 function staffErrorText(err: string): string {
@@ -578,6 +582,7 @@ function AdminPageContent() {
   const tab = (rawTab === 'categories' ? 'menu' : rawTab as Tab | null) ?? 'stats';
   // Statistika sub-view. Absent ?sub= means Ümumi, so existing /admin?tab=stats links are unchanged.
   const statsSub: 'ümumi' | 'analiz' = searchParams.get('sub') === 'analiz' ? 'analiz' : 'ümumi';
+  const usersSub = searchParams.get('sub');
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -832,6 +837,7 @@ function AdminPageContent() {
   const [editingStaff, setEditingStaff] = useState<Staff | null>(null);
   const [sName, setSName] = useState('');
   const [sPin, setSPin] = useState('');
+  const [sRole, setSRole] = useState<StaffRole>('seller');
   const [sSaving, setSSaving] = useState(false);
   const [sError, setSError] = useState('');
 
@@ -4493,6 +4499,19 @@ function AdminPageContent() {
 
           {/* ── USERS ──────────────────────────────────────────────────── */}
           {tab === 'users' && (
+            <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5 w-fit mb-4">
+              {(['siyahı', 'icazələr'] as const).map(s => (
+                <button key={s} onClick={() => router.replace(s === 'icazələr' ? '/admin?tab=users&sub=icazeler' : '/admin?tab=users')}
+                  className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${(usersSub === 'icazeler') === (s === 'icazələr') ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
+                  {s === 'siyahı' ? 'Əməkdaşlar' : 'İcazələr'}
+                </button>
+              ))}
+            </div>
+          )}
+          {tab === 'users' && usersSub === 'icazeler' && (
+            <div className="max-w-2xl"><TillRulesPanel staff={pinStaff} /></div>
+          )}
+          {tab === 'users' && usersSub !== 'icazeler' && (
             <div className="max-w-lg space-y-4">
 
               {/* Seller terminal URL */}
@@ -4556,7 +4575,7 @@ function AdminPageContent() {
                     <p className="text-xs text-stone-400 mt-0.5">Satıcılar yuxarıdakı linkdən daxil olur, özlərini 4 rəqəmli PIN ilə tanıdır</p>
                   </div>
                   <button
-                    onClick={() => { setEditingStaff(null); setSName(''); setSPin(''); setSError(''); setShowStaffForm(true); }}
+                    onClick={() => { setEditingStaff(null); setSName(''); setSPin(''); setSRole('seller'); setSError(''); setShowStaffForm(true); }}
                     className="flex items-center gap-2 bg-primary-800 hover:bg-primary-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors shrink-0"
                   >
                     <Plus className="w-4 h-4" /> PIN əməkdaşı
@@ -4578,14 +4597,18 @@ function AdminPageContent() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-stone-800">{s.name}</p>
-                      <p className="text-xs text-stone-500">PIN: ••••</p>
+                      <p className="text-xs text-stone-500">
+                        {ROLE_NAMES[s.role ?? 'seller']} · PIN: ••••
+                        {/* Staff made before roles: their PIN is unknown until they type it online once. */}
+                        {s.role === 'manager' && !s.approveHash && <span className="text-amber-600"> · oflayn təsdiq üçün bir dəfə onlayn daxil olsun</span>}
+                      </p>
                     </div>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${s.active ? 'bg-green-100 text-green-700' : 'bg-stone-100 text-stone-600'}`}>
                       {s.active ? 'Aktiv' : 'Deaktiv'}
                     </span>
                     <div className="flex items-center gap-1 shrink-0">
                       <button
-                        onClick={() => { setEditingStaff(s); setSName(s.name); setSPin(''); setSError(''); setShowStaffForm(true); }}
+                        onClick={() => { setEditingStaff(s); setSName(s.name); setSPin(''); setSRole(s.role ?? 'seller'); setSError(''); setShowStaffForm(true); }}
                         title="Düzəlt"
                         className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-primary-700 transition-colors"
                       >
@@ -5678,10 +5701,10 @@ function AdminPageContent() {
                 setSSaving(true);
                 let err: string | null;
                 if (editingStaff) {
-                  err = await updateStaff(editingStaff.id, name, editingStaff.active);
+                  err = await updateStaff(editingStaff.id, name, editingStaff.active, sRole);
                   if (!err && sPin) err = await setStaffPin(editingStaff.id, sPin);
                 } else {
-                  err = await createStaff(name, sPin);
+                  err = await createStaff(name, sPin, sRole);
                 }
                 setSSaving(false);
                 if (err) { setSError(staffErrorText(err)); return; }
@@ -5715,6 +5738,18 @@ function AdminPageContent() {
                 {sPin.length === 4 && WEAK_PINS.has(sPin) && (
                   <p className="text-xs text-red-500 mt-1">Bu PIN çox sadədir — 1111, 1234 kimi ardıcıl PINlər qəbul edilmir</p>
                 )}
+              </div>
+              <div>
+                <label className="text-xs font-medium text-stone-600 block mb-1">Vəzifə</label>
+                <div className="flex gap-0.5 bg-stone-100 rounded-xl p-0.5">
+                  {(['seller', 'waiter', 'manager'] as const).map(r => (
+                    <button key={r} type="button" onClick={() => setSRole(r)}
+                      className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${sRole === r ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
+                      {ROLE_NAMES[r]}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-stone-400 mt-1">Menecer icazə tələb olunan işləri öz PIN-i ilə təsdiqləyir (İcazələr)</p>
               </div>
               {sError && <p className="text-red-500 text-sm">{sError}</p>}
               <button

@@ -17,7 +17,8 @@ import {
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
   fetchStations, fetchStationReady, fetchStationReadyOrNull, type StationReady,
   fetchCouriersWithBalance, addCourierPayment, returnCourierOrder, fetchCourierCollections, changeOrderCourier,
-  fetchMenuOrNull, fetchCategoriesOrNull, fetchTablesOrNull, fetchHallsOrNull, fetchStaffOrNull, fetchModifierGroupsOrNull, readOpenShift,
+  fetchMenuOrNull, fetchCategoriesOrNull, fetchTablesOrNull, fetchHallsOrNull, fetchStaffAndRulesOrNull, fetchModifierGroupsOrNull, readOpenShift,
+  fetchTillRules, markBillPrinted,
 } from '@/lib/store';
 import { jsonOrNull, keepCategory, listOrNull, salesOrNull, shiftOrUnknown } from '@/lib/keep-on-fail';
 import { menuIndex, stationForItem, readyStationIds } from '@/lib/stations';
@@ -51,6 +52,10 @@ import { STATUS_COLORS, STATUS_LABELS, orderTotal, round2 } from '@/components/s
 import { otherPart } from '@/lib/pay-split';
 import { canLink, checkLink, clearLink, readLink, saveLink, type Terminal } from '@/lib/terminal-link';
 import { tillImage } from '@/lib/till-image';
+import { TILL_ACTIONS, addAction, approvedBy, cleanRules, managerByPinOffline, removalAction, ruleFor, rulesApply, strictest, type TillAction, type TillRules } from '@/lib/till-rules';
+import { ApprovalPad } from '@/components/seller/ApprovalPad';
+import DialogHost from '@/components/DialogHost';
+import { askConfirm, showAlert } from '@/lib/dialog-queue';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
 import { fitPlan, tableBox, tableRadius } from '@/lib/floor-plan';
 import { movedToTable, orderPlace as placeOf, tableTitle } from '@/lib/order-place';
@@ -126,6 +131,17 @@ async function readTerminalTables(companyId: string): Promise<{ tables: Restaura
   const d = await jsonOrNull(tillFetch(`/api/public-tables?companyId=${companyId}`));
   if (!Array.isArray(d?.tables)) return null;
   return { tables: normalizeTables(d.tables), halls: (d.halls ?? []) as Hall[] };
+}
+
+// The staff list and the till rules from the one route, or null when the read
+// failed. Rules undefined = not in the answer: keep the ones in hand. The exe
+// and the APK answer the staff from their own database, and keep the rules
+// with their settings — a disk read, not a request.
+async function readTerminalStaff(companyId: string): Promise<{ staff: Staff[]; rules: TillRules | null | undefined } | null> {
+  const d = await jsonOrNull(tillFetch(`/api/public-staff?companyId=${companyId}`));
+  if (!Array.isArray(d?.staff)) return null;
+  const rules = hasLocalDb() ? await fetchTillRules() : 'tillRules' in d ? cleanRules(d.tillRules) : undefined;
+  return { staff: d.staff as Staff[], rules };
 }
 
 const CANCEL_REASONS =['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
@@ -273,7 +289,17 @@ export default function SellerRoute(props: SellerProps = {}) {
     : <SellerPage {...props} />;
 }
 
-export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideToken, overrideLogoUrl, overrideBrandColor, overrideExpiresAt }: SellerProps = {}) {
+/** Every screen of the till, with its popups on top (see lib/dialog-queue.ts). */
+export function SellerPage(props: SellerProps = {}) {
+  return (
+    <>
+      <SellerScreens {...props} />
+      <DialogHost />
+    </>
+  );
+}
+
+function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, overrideLogoUrl, overrideBrandColor, overrideExpiresAt }: SellerProps = {}) {
   const router = useRouter();
   // Set before any effect runs, so the first read already proves which till
   // this is (lib/till-read-token.ts).
@@ -459,6 +485,91 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     }
   }
 
+  // ── Manager approval (lib/till-rules) ─────────────────────────────────────
+  // The owner's rules say, per role, which actions are free, need a manager's
+  // PIN, or are not allowed. They only apply where people sign in with PINs:
+  // without staff there is nobody to be a manager.
+  const [tillRules, setTillRules] = useState<TillRules | null>(null);
+  const [approval, setApproval] = useState<{ label: string; resolve: (approver: string | null) => void } | null>(null);
+  const [approvalPin, setApprovalPin] = useState('');
+  const [approvalMsg, setApprovalMsg] = useState('');
+  const [approvalBusy, setApprovalBusy] = useState(false);
+
+  const myRole = pinStaffList.find(s => s.id === activeStaff?.id)?.role ?? 'seller';
+  const rulesOn = rulesApply(pinStaffList) && !!activeStaff;
+
+  /** Not allowed at all for whoever is signed in? Says so, so the tap is refused on the spot. */
+  function refused(action: TillAction): boolean {
+    if (!rulesOn || ruleFor(tillRules, myRole, action) !== 'deny') return false;
+    showAlert(`İcazəniz yoxdur: ${TILL_ACTIONS.find(a => a.id === action)?.label ?? action}`);
+    return true;
+  }
+
+  /**
+   * Ask before doing these actions. Resolves ok with the approving manager's
+   * name (null when no PIN was needed), or not ok when refused or cancelled.
+   */
+  function guard(actions: TillAction[]): Promise<{ ok: boolean; approver: string | null }> {
+    if (!rulesOn) return Promise.resolve({ ok: true, approver: null });
+    const { rule, action } = strictest(tillRules, myRole, actions);
+    if (rule === 'free' || !action) return Promise.resolve({ ok: true, approver: null });
+    const label = TILL_ACTIONS.find(a => a.id === action)?.label ?? action;
+    if (rule === 'deny') {
+      showAlert(`İcazəniz yoxdur: ${label}`);
+      return Promise.resolve({ ok: false, approver: null });
+    }
+    return new Promise(resolve => {
+      setApprovalPin('');
+      setApprovalMsg('');
+      setApproval({ label, resolve: approver => resolve({ ok: !!approver, approver }) });
+    });
+  }
+
+  function closeApproval(approver: string | null) {
+    approval?.resolve(approver);
+    setApproval(null);
+    setApprovalPin('');
+    setApprovalMsg('');
+  }
+
+  // The server checks the PIN when there is a line (with the same lockout as
+  // the PIN screen); without one, the managers' hashes this till holds do.
+  async function pressApprovalPin(digit: string) {
+    if (approvalBusy || approvalPin.length >= 4) return;
+    const next = approvalPin + digit;
+    setApprovalPin(next);
+    setApprovalMsg('');
+    if (next.length < 4) return;
+    setApprovalBusy(true);
+    let manager: string | null = null;
+    let msg = '';
+    if (isOnline()) {
+      type PinReply = { ok: boolean; id?: string; name?: string; role?: string; error?: string; locked_until?: string; lockedUntil?: string };
+      const res = (overrideCompanyId
+        ? await tillPost<PinReply>('/api/verify-pin', { companyId: overrideCompanyId, pin: next, token: overrideToken, deviceId: getDeviceId() })
+        : await verifyStaffPin(next, getDeviceId())) as PinReply;
+      if (res.ok && res.id && res.name) {
+        const role = res.role ?? pinStaffList.find(s => s.id === res.id)?.role;
+        if (role === 'manager') manager = res.name;
+        else msg = 'Bu PIN menecerə aid deyil';
+      } else if (res.error === 'wrong') {
+        msg = 'Yanlış PIN';
+      } else if (res.error === 'locked') {
+        msg = 'Çox sayda yanlış cəhd — bir az gözləyin';
+      }
+      // Anything else is the line failing: the till's own copy answers below.
+    }
+    if (!manager && !msg) {
+      const m = await managerByPinOffline(next, pinStaffList);
+      if (m) manager = m.name;
+      else msg = isOnline() ? 'Yanlış PIN' : 'Oflayn — PIN tanınmadı';
+    }
+    setApprovalBusy(false);
+    if (manager) { closeApproval(manager); return; }
+    setApprovalPin('');
+    setApprovalMsg(msg);
+  }
+
   // Hardware keyboard on the lock screen (desktop terminals)
   useEffect(() => { setExpiresAt(getSession()?.expiresAt ?? null); }, []);
   useEffect(() => {
@@ -496,6 +607,12 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       setActiveStaff(null);
     }
   }, [pinStaffList, activeStaff]);
+
+  // Tarixçə was opened for one person: whoever signs in next starts on the
+  // orders, so they cannot read history someone else was let into.
+  useEffect(() => {
+    setView(v => (v === 'history' ? 'orders' : v));
+  }, [activeStaff?.id]);
 
   // order history
   const [historySearch, setHistorySearch]   = useState('');
@@ -646,7 +763,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
           listOrNull<MenuItem>(tillFetch(`/api/public-menu?companyId=${overrideCompanyId}`), 'items'),
           listOrNull<Category>(tillFetch(`/api/public-categories?companyId=${overrideCompanyId}`), 'categories'),
           readTerminalTables(overrideCompanyId),
-          listOrNull<Staff>(tillFetch(`/api/public-staff?companyId=${overrideCompanyId}`), 'staff'),
+          readTerminalStaff(overrideCompanyId),
           listOrNull<StationReady>(tillFetch(`/api/public-station-ready?companyId=${overrideCompanyId}`), 'ready'),
           listOrNull<ModifierGroup>(tillFetch(`/api/public-modifiers?companyId=${overrideCompanyId}`), 'groups'),
           listOrNull<Courier>(tillFetch(`/api/public-couriers?companyId=${overrideCompanyId}`), 'couriers'),
@@ -654,7 +771,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         if (m) setMenu(m);
         if (tb) { setTables(tb.tables); setHalls(tb.halls); }
         if (c) setAvailableCategories(c.filter(cat => cat.available));
-        if (st) setPinStaffList(st);
+        if (st) { setPinStaffList(st.staff); if (st.rules !== undefined) setTillRules(st.rules); }
         if (rd) setReadyRows(rd);
         if (kr) setCouriers(kr);
         // Keep the sets already in hand if the read failed: an empty list would
@@ -662,7 +779,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         if (mg) setModifierGroups(mg);
       } else {
         const [m, o, c, st, s, mg, tb, hl, kr] = await Promise.all([
-          fetchMenuOrNull(), fetchOrdersOrNull({ limit: 200 }), fetchCategoriesOrNull(), fetchStaffOrNull(), readOpenShift(), fetchModifierGroupsOrNull(),
+          fetchMenuOrNull(), fetchOrdersOrNull({ limit: 200 }), fetchCategoriesOrNull(), fetchStaffAndRulesOrNull(), readOpenShift(), fetchModifierGroupsOrNull(),
           fetchTablesOrNull(), fetchHallsOrNull(), fetchCouriersWithBalance(),
         ]);
         if (m) setMenu(m);
@@ -671,7 +788,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         if (hl) setHalls(hl);
         if (o) applyOrders(ticket, () => setOrders(o));
         if (c) setAvailableCategories(c.filter(cat => cat.available));
-        if (st) setPinStaffList(st);
+        if (st) { setPinStaffList(st.staff); if (st.rules !== undefined) setTillRules(st.rules); }
         if (mg) setModifierGroups(mg);
         setCouriers(kr);
       }
@@ -1079,7 +1196,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
 
   async function handleReprint(orderId: string) {
     const err = await retryPrintJobs(orderId);
-    if (err) { alert('Yenidən çap alınmadı: ' + err); return; }
+    if (err) { showAlert('Yenidən çap alınmadı: ' + err); return; }
     setPrintFailed(prev => { const next = new Set(prev); next.delete(orderId); return next; });
     flashSaved();
     // The agent may fail again on a still-dead printer, so don't just trust the
@@ -1186,10 +1303,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       // the screen has (lib/keep-on-fail) — a blip turned the till into
       // "Növbəni aç" (Test Restoran, 2026-10-06).
       Promise.all([
-        listOrNull<Staff>(tillFetch(`/api/public-staff?companyId=${overrideCompanyId}`), 'staff'),
+        readTerminalStaff(overrideCompanyId),
         shiftOrUnknown<CashShift>(tillFetch(`/api/public-shift?companyId=${overrideCompanyId}`)),
       ]).then(([st, s]) => {
-        if (st) setPinStaffList(st);
+        if (st) { setPinStaffList(st.staff); if (st.rules !== undefined) setTillRules(st.rules); }
         if (s !== undefined) setShift(s);
         setShiftChecked(true);
       });
@@ -1240,9 +1357,9 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     fetchCompanySettings(session.companyId ?? '').then(next => setBizSettings(prev => keepSettings(prev, next)));
     fetchBranding().then(({ logoUrl: l, brandColor: b }) => { setLogoUrl(l); applyBrand(b); });
     // Runs again after every pull: a failed read keeps what the screen has.
-    Promise.all([readOpenShift(), fetchStaffOrNull()]).then(([s, st]) => {
+    Promise.all([readOpenShift(), fetchStaffAndRulesOrNull()]).then(([s, st]) => {
       if (s !== undefined) setShift(s);
-      if (st) setPinStaffList(st);
+      if (st) { setPinStaffList(st.staff); if (st.rules !== undefined) setTillRules(st.rules); }
       setShiftChecked(true);
     });
     fetchOrdersCount().then(setTotalOrders);
@@ -1298,14 +1415,14 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       const ticket = beginOrdersRead();
       try {
         const [m, o, c, st, s, mg] = await Promise.all([
-          fetchMenuOrNull(), fetchOrdersOrNull({ limit: 200 }), fetchCategoriesOrNull(), fetchStaffOrNull(), readOpenShift(), fetchModifierGroupsOrNull(),
+          fetchMenuOrNull(), fetchOrdersOrNull({ limit: 200 }), fetchCategoriesOrNull(), fetchStaffAndRulesOrNull(), readOpenShift(), fetchModifierGroupsOrNull(),
         ]);
         if (m) setMenu(m);
         if (s !== undefined) setShift(s);
         if (mg) setModifierGroups(mg);
         if (o) applyOrders(ticket, () => setOrders(o));
         if (c) setAvailableCategories(c.filter(cat => cat.available));
-        if (st) setPinStaffList(st);
+        if (st) { setPinStaffList(st.staff); if (st.rules !== undefined) setTillRules(st.rules); }
       } catch { /* ignore focus sync errors */ }
     }
     function onVisible() {
@@ -1675,10 +1792,12 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     }
   }, [overrideCompanyId]);
 
-  function handleNav(id: View) {
+  async function handleNav(id: View) {
     if (id === 'kassa' && !kassaOn) return;
     if (id === 'couriers' && !deliveryOn) return;
-    if (!confirmDiscardRemovals()) return;
+    // Asked on every way in, before anything on screen is thrown away.
+    if (id === 'history' && view !== 'history' && !(await guard(['view_history'])).ok) return;
+    if (!(await confirmDiscardRemovals())) return;
     updatePendingRemovals({});
     setAppendOrderId(null);
     if (id === 'couriers') refreshCouriers();
@@ -1691,8 +1810,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     setView(id);
   }
 
-  function startNewOrder(type: OrderType, tableNum?: number, courierId?: string) {
-    if (!confirmDiscardRemovals()) return;
+  async function startNewOrder(type: OrderType, tableNum?: number, courierId?: string) {
+    if (!(await confirmDiscardRemovals())) return;
     updatePendingRemovals({});
     setAppendOrderId(null);
     setOrderType(type);
@@ -1718,8 +1837,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     setView('menu');
   }
 
-  function cancelAppend() {
-    if (!confirmDiscardRemovals()) return;
+  async function cancelAppend() {
+    if (!(await confirmDiscardRemovals())) return;
     updatePendingRemovals({});
     setAppendOrderId(null);
     setCart([]);
@@ -1739,6 +1858,21 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     // the old one. This also keeps a note edited alongside removals only, which was dropped.
     const editedNote = note.trim();
     const hasRemovals = Object.values(pendingRemovalsRef.current).some(n => n > 0);
+    // One manager's PIN covers the whole edit, by its strictest part: lines
+    // taken off (before or after the bill) and lines added after the bill.
+    let approver: string | null = null;
+    if (target) {
+      const actions: TillAction[] = [];
+      for (const [itemId, n] of Object.entries(pendingRemovalsRef.current)) {
+        const oi = target.items.find(x => x.id === itemId);
+        if (n > 0 && oi) actions.push(removalAction(target, oi));
+      }
+      const adding = cart.length > 0 ? addAction(target) : null;
+      if (adding) actions.push(adding);
+      const g = await guard(actions);
+      if (!g.ok) return;
+      approver = g.approver;
+    }
     if (target && hasRemovals && editedNote !== (target.note ?? '').trim()) {
       const noteError = overrideCompanyId
         ? (await postOrQueue(
@@ -1749,12 +1883,12 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
           )).ok ? null : 'failed'
         : await addItemsToOrder(orderId, [], editedNote);
       if (noteError) {
-        alert(`Qeyd yadda saxlanmadı.\n\nSəbəb: ${noteError}\n\nYenidən cəhd edin.`);
+        showAlert(`Qeyd yadda saxlanmadı.\n\nSəbəb: ${noteError}\n\nYenidən cəhd edin.`);
         return;
       }
       mutateOrders(prev => prev.map(o => o.id === orderId ? { ...o, note: editedNote || undefined } : o));
     }
-    if (target && !(await commitRemovals(target))) return;
+    if (target && !(await commitRemovals(target, approver))) return;
     // Only the note changed: save it, and send it to the kitchen on its own QEYD
     // slip. A cleared note is just saved — there is nothing to tell the cook.
     if (cart.length === 0 && !hasRemovals && target && editedNote !== (target.note ?? '').trim()) {
@@ -1788,7 +1922,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         : await addItemsToOrder(orderId, [], editedNote, noteTicket);
       setSubmitting(false);
       if (noteError) {
-        alert(`Qeyd göndərilmədi.\n\nSəbəb: ${noteError}\n\nYenidən cəhd edin.`);
+        showAlert(`Qeyd göndərilmədi.\n\nSəbəb: ${noteError}\n\nYenidən cəhd edin.`);
         return;
       }
       mutateOrders(prev => prev.map(o => o.id === orderId ? { ...o, note: editedNote || undefined } : o));
@@ -1842,7 +1976,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         : /closed|409/i.test(saveError)
         ? 'Sifariş artıq bağlanıb.'
         : saveError;
-      alert(`Məhsullar əlavə edilmədi.\n\nSəbəb: ${reason}\n\nYenidən cəhd edin.`);
+      showAlert(`Məhsullar əlavə edilmədi.\n\nSəbəb: ${reason}\n\nYenidən cəhd edin.`);
       return;
     }
     // Optimistically merge the new items into the order (status stays the same).
@@ -1858,16 +1992,22 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   // sent yet — the tap only moves a unit into pendingRemovals, and commitRemovals() below does the
   // writing. Five taps on a five-unit line therefore become one server call, one struck-through
   // "5 əd" line on the card and one LEGV slip, instead of five of each.
-  function handleDecrementItem(order: Order, oi: OrderItem) {
+  async function handleDecrementItem(order: Order, oi: OrderItem) {
     if (!oi.id || !isOrderOpen(order) || removing) return;
     const staged = pendingRemovalsRef.current[oi.id] ?? 0;
     if (staged >= oi.quantity) return;          // nothing left on the line to take off
+    // Not allowed for this person at all: say so now, not after five taps. A
+    // manager's PIN, when needed, is asked once when the edit is saved.
+    if (staged === 0 && refused(removalAction(order, oi))) return;
     // Already cooked: taking it off now bins real food, and somebody pays for it. Not
     // blocked — the guest may genuinely have changed their mind — but not a silent tap
     // either. Asked once per line, not once per unit; who did it is on the record
     // (removed_by, removed_at) when the batch lands.
-    if (staged === 0 && isItemReady(order, oi) && !confirm(`"${oi.menuItem.name}" hazırdır. Yenə də silinsin?`)) return;
-    updatePendingRemovals(p => ({ ...p, [oi.id!]: staged + 1 }));
+    if (staged === 0 && isItemReady(order, oi) && !(await askConfirm(`"${oi.menuItem.name}" hazırdır. Yenə də silinsin?`, { confirmLabel: 'Sil' }))) return;
+    // Read again: other taps may have landed while the question was open.
+    const now = pendingRemovalsRef.current[oi.id] ?? 0;
+    if (now >= oi.quantity) return;
+    updatePendingRemovals(p => ({ ...p, [oi.id!]: now + 1 }));
   }
 
   function takeBackOneRemoval(oi: OrderItem) {
@@ -1884,9 +2024,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   //
   // Returns false if the batch failed, so a caller chaining another write (submitAppend) can stop
   // rather than navigate away from removals that never landed.
-  async function commitRemovals(order: Order): Promise<boolean> {
+  async function commitRemovals(order: Order, approver: string | null): Promise<boolean> {
     const staged = Object.entries(pendingRemovalsRef.current).filter(([, n]) => n > 0);
     if (staged.length === 0) return true;
+    // The manager who approved goes on the record beside whoever removed it.
+    const removedBy = approvedBy(effectiveSeller, approver);
 
     const now = new Date().toISOString();
     const batch: { oi: OrderItem; count: number; newQty: number; ghostId: string }[] = [];
@@ -1907,10 +2049,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       ? (await postOrQueue(
           key,
           '/api/remove-order-items',
-          { orderId: order.id, lines, companyId: overrideCompanyId, token: overrideToken, removedBy: effectiveSeller },
+          { orderId: order.id, lines, companyId: overrideCompanyId, token: overrideToken, removedBy },
           overrideCompanyId,
         )).ok
-      : await removeOrderItems(order.id, lines, effectiveSeller, key);
+      : await removeOrderItems(order.id, lines, removedBy, key);
     const applied = ok ? batch : [];
     const failed = ok ? [] : batch.map(b => b.oi.menuItem.name);
 
@@ -1932,7 +2074,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
             // was ordered in; a partial removal's ghost belongs to the moment it happened.
             createdAt: full ? oi.createdAt : now,
             removedAt: now,
-            removedBy: effectiveSeller,
+            removedBy,
           });
           items = full
             ? items.filter(x => x.id !== oi.id)
@@ -1951,7 +2093,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     });
     setRemoving(false);
     if (failed.length > 0) {
-      alert(`Silinmədi: ${failed.join(', ')}\n\nYenidən cəhd edin.`);
+      showAlert(`Silinmədi: ${failed.join(', ')}\n\nYenidən cəhd edin.`);
       refreshOrders();
       return false;
     }
@@ -1963,10 +2105,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   // Staged units are not on the server yet, so walking away throws them out. Ask first —
   // a waiter who tapped "−" five times and left would otherwise believe the guest was
   // credited for drinks that are still on the bill.
-  function confirmDiscardRemovals(): boolean {
+  async function confirmDiscardRemovals(): Promise<boolean> {
     const total = Object.values(pendingRemovalsRef.current).reduce((s, n) => s + n, 0);
     if (total === 0) return true;
-    return confirm(`${total} ədəd silinmə hələ təsdiqlənməyib.\n\nÇıxsanız ləğv olunacaq. Davam edilsin?`);
+    return askConfirm(`${total} ədəd silinmə hələ təsdiqlənməyib.\n\nÇıxsanız ləğv olunacaq. Davam edilsin?`, { confirmLabel: 'Çıx' });
   }
 
   async function submitOrder() {
@@ -2044,7 +2186,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
         : /policy|permission/i.test(saveError)
         ? 'İcazə xətası.'
         : saveError;
-      alert(`Sifariş yadda saxlanılmadı.\n\nSəbəb: ${reason}\n\nYenidən cəhd edin.`);
+      showAlert(`Sifariş yadda saxlanılmadı.\n\nSəbəb: ${reason}\n\nYenidən cəhd edin.`);
       return;
     }
     mutateOrders(prev => [order, ...prev]);
@@ -2081,7 +2223,17 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       const ok = await printBill(order, overrideCompanyName || getSession()?.companyName || '', logoUrl, tableTitle(tables, order.tableNumber, order.tableName));
       if (!ok) {
         setPrinterConnected(false);
-        alert('Hesab çap olunmadı — yazıcı bağlantısını yoxlayın.');
+        showAlert('Hesab çap olunmadı — yazıcı bağlantısını yoxlayın.');
+        return;
+      }
+      // The guest has now seen these lines: from here, taking one off or adding
+      // to the order follows the after-bill rules (lib/till-rules).
+      const at = new Date().toISOString();
+      mutateOrders(prev => prev.map(o => o.id === order.id ? { ...o, billPrintedAt: at } : o));
+      if (overrideCompanyId) {
+        void postOrQueue(`bill:${order.id}:${at}`, '/api/bill-printed', { orderId: order.id, at, companyId: overrideCompanyId, token: overrideToken }, overrideCompanyId);
+      } else {
+        void markBillPrinted(order.id, at);
       }
     } finally {
       setPrintBillBusy(null);
@@ -2105,7 +2257,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       const ok = await printReceipt(order, overrideCompanyName || getSession()?.companyName || '', logoUrl, tableTitle(tables, order.tableNumber, order.tableName));
       if (!ok) {
         setPrinterConnected(false);
-        alert('Qəbz çap olunmadı — yazıcı bağlantısını yoxlayın.');
+        showAlert('Qəbz çap olunmadı — yazıcı bağlantısını yoxlayın.');
       }
     } finally {
       setPrintBillBusy(null);
@@ -2123,7 +2275,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     // orders went out that way on 7 Sep. Refuse, and say why — the lines are on
     // their way, and the next read brings them.
     if (order.items.length === 0) {
-      alert('Sifarişin məhsulları hələ yüklənməyib.\n\nBir neçə saniyə gözləyin, sonra yenidən cəhd edin.');
+      showAlert('Sifarişin məhsulları hələ yüklənməyib.\n\nBir neçə saniyə gözləyin, sonra yenidən cəhd edin.');
       refreshOrders();
       return;
     }
@@ -2156,6 +2308,8 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     if (order.items.length === 0) { setPayingOrder(null); refreshOrders(); return; }
     const fullTotal = orderTotal(order);
     const discountAmt = calcDiscount(fullTotal);
+    // Asked before the sheet closes, so a refused discount leaves it open to fix.
+    if (discountAmt > 0 && !(await guard(['discount'])).ok) return;
     const total = round2(fullTotal - discountAmt);
     // The courier is collecting: nothing is tendered here, so nothing goes into
     // the drawer and the whole discounted total rides out with the order.
@@ -2240,7 +2394,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     // outside a shift is money that will not be there when they do. Card money
     // never touches the drawer, so it has no shift to wait for.
     if (kassaOn && !shift && cashAmt > 0) {
-      alert('Növbə bağlıdır.\n\nKuryerdən nağd pul götürmək üçün əvvəlcə növbəni açın.');
+      showAlert('Növbə bağlıdır.\n\nKuryerdən nağd pul götürmək üçün əvvəlcə növbəni açın.');
       return;
     }
 
@@ -2274,7 +2428,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     setCourierBusy(false);
 
     if (done.length < parts.length) {
-      alert(done.length
+      showAlert(done.length
         ? 'Ödənişin yalnız bir hissəsi yazıldı. Kuryerin borcunu yoxlayıb qalanını yenidən qəbul edin.'
         : 'Ödəniş yazılmadı. Yenidən cəhd edin.');
       refreshCouriers();
@@ -2365,21 +2519,24 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     const cancelling = cancellingOrder;
     const reason = cancelReason === 'Digər' ? cancelOtherText.trim() : cancelReason;
     if (!reason) return;
+    const g = await guard(['cancel']);
+    if (!g.ok) return;
+    const by = approvedBy(effectiveSeller, g.approver);
     setCancelBusy(true);
     // Conditional in the DB — a no-op if the order got paid in the meantime
     const ok = overrideCompanyId
       ? (await postOrQueue(
           `cancel:${cancelling.id}`,
           '/api/cancel-order',
-          { orderId: cancelling.id, reason, by: effectiveSeller, companyId: overrideCompanyId, token: overrideToken },
+          { orderId: cancelling.id, reason, by, companyId: overrideCompanyId, token: overrideToken },
           overrideCompanyId,
         )).ok
-      : await cancelOrder(cancelling.id, reason, effectiveSeller);
+      : await cancelOrder(cancelling.id, reason, by);
     setCancelBusy(false);
     setCancellingOrder(null);
     if (ok) {
       mutateOrders(prev => prev.map(o => o.id === cancelling.id
-        ? { ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: effectiveSeller, cancelledAt: new Date().toISOString() }
+        ? { ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: by, cancelledAt: new Date().toISOString() }
         : o));
     } else {
       refreshOrders();
@@ -2626,7 +2783,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       }
     } catch {
       setShift(prevShift);
-      alert('Hərəkət yadda saxlanılmadı. Yenidən cəhd edin.');
+      showAlert('Hərəkət yadda saxlanılmadı. Yenidən cəhd edin.');
     }
   }
 
@@ -2640,7 +2797,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     // are still queued: the sales figure would be missing whatever has not
     // landed yet. Better to make them wait than to write a false record.
     if (!online || pendingCount > 0) {
-      alert(
+      showAlert(
         !online
           ? 'İnternet yoxdur — növbəni bağlamaq olmaz.\n\nBağlantı bərpa olunanda yenidən cəhd edin.'
           : `Hələ ${pendingCount} əməliyyat serverə göndərilməyib.\n\nGözləyin, sonra növbəni bağlayın.`,
@@ -2654,9 +2811,10 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     // never close at all — and a seller who cannot close will invent a payment.
     const freshCouriers = (await refreshCouriers()) ?? couriers;
     const owedNow = freshCouriers.reduce((s, c) => s + Math.max(0, c.outstanding ?? 0), 0);
-    if (owedNow > 0.005 && !confirm(
+    if (owedNow > 0.005 && !(await askConfirm(
       `Kuryerlərdə ${owedNow.toFixed(2)} ₼ borc qalıb.\n\nBu pul kassada deyil — növbənin hesabına daxil edilmir.\n\nNövbəni bağlayaq?`,
-    )) return;
+      { confirmLabel: 'Növbəni bağla' },
+    ))) return;
 
     const counted = parseFloat(countedInput) || 0;
     const countedCard = terminalInput === '' ? undefined : parseFloat(terminalInput) || 0;
@@ -2672,7 +2830,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
     // Closing on unread sales would save 0 ₼ as the shift's takings.
     if (!sales) {
       setShiftBusy(false);
-      alert('Satışlar oxunmadı — internet bağlantısını yoxlayıb yenidən cəhd edin.');
+      showAlert('Satışlar oxunmadı — internet bağlantısını yoxlayıb yenidən cəhd edin.');
       return;
     }
     const expected = fresh.openingCash + sales.cash + movementsTotal(fresh);
@@ -2697,7 +2855,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
       const more = overrideCompanyId
         ? await listOrNull<Order>(tillFetch(`/api/public-orders?companyId=${overrideCompanyId}&limit=200&offset=${orders.length}`), 'orders')
         : await fetchOrdersOrNull({ limit: 200, offset: orders.length });
-      if (!more) { alert('Sifarişlər yüklənmədi — internet bağlantısını yoxlayıb yenidən cəhd edin.'); return; }
+      if (!more) { showAlert('Sifarişlər yüklənmədi — internet bağlantısını yoxlayıb yenidən cəhd edin.'); return; }
       mutateOrders(prev => [...prev, ...more.filter((m: { id: string }) => !prev.some(p => p.id === m.id))]);
     } finally { setLoadingMore(false); }
   }
@@ -4294,6 +4452,19 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
             </div>
           </div>
         </>
+      )}
+
+      {/* A manager's PIN for an action the rules hold back — above every sheet */}
+      {approval && (
+        <ApprovalPad
+          action={approval.label}
+          pin={approvalPin}
+          msg={approvalMsg}
+          busy={approvalBusy}
+          onDigit={d => void pressApprovalPin(d)}
+          onBack={() => setApprovalPin(p => p.slice(0, -1))}
+          onCancel={() => closeApproval(null)}
+        />
       )}
 
       {/* Cancel order modal — bottom sheet on mobile */}

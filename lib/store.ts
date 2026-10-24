@@ -1,5 +1,5 @@
 import { guardQuery, refusal } from './order-rules';
-import { CashShift, Category, Courier, CourierLedger, CourierPayMethod, CourierPayment, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
+import { CashShift, Category, Courier, CourierLedger, CourierPayMethod, CourierPayment, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RestaurantTable, ShiftEdit, ShiftMovement, Staff, StaffRole, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
 import { courierPending, courierSold, courierStillOut, sumCollections, type Collections, type ShiftSales } from './courier-pending';
@@ -13,6 +13,7 @@ import { loginEventFromRow, type LoginEvent } from './login-events';
 import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
 import type { TillSettings } from './desktopPrint';
+import { cleanRules, type TillRules } from './till-rules';
 import type { HealthProblem, HealthReport } from './health-report';
 import type { AccountEdit, AccountKind, FinanceAccount, FinanceClosing, FinanceEntry, FinanceSource, FinanceTransaction, SourceKind } from './finance';
 
@@ -804,6 +805,7 @@ async function readOrders(opts?: OrderQuery): Promise<Order[]> {
       cancelledAt: o.cancelled_at ?? undefined,
       cancelledBy: o.cancelled_by ?? undefined,
       cancelReason: o.cancel_reason ?? undefined,
+      billPrintedAt: o.bill_printed_at ?? undefined,
       ...splitOrderItems(o.order_items),
     }));
   }
@@ -1074,6 +1076,20 @@ export async function moveOrderTable(orderId: string, tableId: number): Promise<
   return (data?.length ?? 0) > 0;
 }
 
+// "Hesab" was printed: from now on the after-bill rules apply (lib/till-rules).
+// The time is in the key, so printing the bill again is a new write.
+export async function markBillPrinted(orderId: string, at: string): Promise<boolean> {
+  const local = await toLocal(undefined, `bill:${orderId}:${at}`, '/api/bill-printed', { orderId, at });
+  if (local) return local.ok;
+
+  const { data, error } = await guardQuery(
+    supabase.from('orders').update({ bill_printed_at: at }).eq('id', orderId).eq('company_id', _companyId),
+    'edit',
+  ).select('id');
+  if (error) { console.error('[markBillPrinted]', error.message); return false; }
+  return (data?.length ?? 0) > 0;
+}
+
 // A different rider takes the order. Which one it will be is rarely known when
 // the order is rung up, so the courier picked at the till is a first guess.
 //
@@ -1259,18 +1275,40 @@ export async function editOrderPayment(orderId: string, cashAmount: number, card
 // themselves with a 4-digit PIN. All writes go through owner-only RPCs; the
 // PIN is verified server-side (hashed, company-wide lockout on brute force).
 
-export async function fetchStaffOrNull(opts?: ReadOpts): Promise<Staff[] | null> {
+/**
+ * The staff list and the till rules, read together so the rules cost the till
+ * no request of their own. Null = the staff read failed. `rules` undefined =
+ * the rules could not be read: keep what the screen has (fetchTillRules).
+ */
+export async function fetchStaffAndRulesOrNull(opts?: ReadOpts): Promise<{ staff: Staff[]; rules: TillRules | null | undefined } | null> {
   const local = await fromLocal(opts, async (till, companyId) =>
     ((await till.staff(companyId)) as { staff: Staff[] }).staff);
-  if (local) return local;
+  // The exe and the APK keep the rules with their settings: a disk read.
+  if (local) return { staff: local, rules: await fetchTillRules() };
 
   try {
-    const { data, error } = await supabase.from('staff')
-      .select('id, name, active, created_at')
-      .order('created_at');
+    type Extras = { approvers: { id: string; approve_hash: string }[]; rules: unknown };
+    const [{ data, error }, extras] = await Promise.all([
+      supabase.from('staff').select('id, name, active, role, created_at').order('created_at'),
+      // Managers' approval hashes (for a PIN checked offline) and the rules.
+      // A failure loses only these, not the list.
+      supabase.rpc('till_staff_extras').then(r => (r.error ? null : r.data as Extras | null), () => null),
+    ]);
     if (error || !data) return null;
-    return data.map(s => ({ id: s.id, name: s.name, active: s.active, createdAt: s.created_at }));
+    const hashes = new Map((extras?.approvers ?? []).map(a => [a.id, a.approve_hash]));
+    return {
+      staff: data.map(s => ({
+        id: s.id, name: s.name, active: s.active, createdAt: s.created_at,
+        role: (s.role as StaffRole) ?? 'seller',
+        approveHash: hashes.get(s.id),
+      })),
+      rules: extras ? cleanRules(extras.rules) : undefined,
+    };
   } catch { return null; }
+}
+
+export async function fetchStaffOrNull(opts?: ReadOpts): Promise<Staff[] | null> {
+  return (await fetchStaffAndRulesOrNull(opts))?.staff ?? null;
 }
 
 /** fetchStaffOrNull, with a failed read as an empty list — for screens that
@@ -1284,14 +1322,42 @@ function staffError(error: { message: string } | null): string | null {
   return error ? error.message : null;
 }
 
-export async function createStaff(name: string, pin: string): Promise<string | null> {
-  const { error } = await supabase.rpc('create_staff', { p_name: name, p_pin: pin });
+export async function createStaff(name: string, pin: string, role: StaffRole = 'seller'): Promise<string | null> {
+  const { error } = await supabase.rpc('create_staff', { p_name: name, p_pin: pin, p_role: role });
   return staffError(error);
 }
 
-export async function updateStaff(id: string, name: string, active: boolean): Promise<string | null> {
-  const { error } = await supabase.rpc('update_staff', { p_id: id, p_name: name, p_active: active });
+/** No role = leave it as it is. */
+export async function updateStaff(id: string, name: string, active: boolean, role?: StaffRole): Promise<string | null> {
+  const { error } = await supabase.rpc('update_staff', { p_id: id, p_name: name, p_active: active, p_role: role ?? null });
   return staffError(error);
+}
+
+// ─── Till rules (who needs a manager's PIN for what) ─────────────────────────
+// Read like the other owner's switches: the till's own copy first (exe, APK),
+// then the companies row. A terminal link with no session asks
+// /api/public-settings instead (app/seller/page.tsx).
+
+/**
+ * Null = the owner set no rules (everything free). Undefined = the read
+ * failed: keep what the screen has, never take a failure for "free".
+ */
+export async function fetchTillRules(): Promise<TillRules | null | undefined> {
+  // {} when the till's copy has none, so a till with a copy never falls through
+  // to a companies read it has no session for.
+  const local = await fromSettings(s => s.tillRules ?? {});
+  if (local !== null) return cleanRules(local);
+  try {
+    if (!_companyId) return undefined;
+    const { data, error } = await supabase.from('companies').select('till_rules').eq('id', _companyId).single();
+    if (error || !data) return undefined;
+    return cleanRules(data.till_rules);
+  } catch { return undefined; }
+}
+
+export async function saveTillRules(rules: TillRules): Promise<string | null> {
+  const { error } = await supabase.rpc('set_till_rules', { p_rules: rules });
+  return error ? error.message : null;
 }
 
 export async function setStaffPin(id: string, pin: string): Promise<string | null> {
@@ -1305,7 +1371,7 @@ export async function deleteStaff(id: string): Promise<string | null> {
 }
 
 export type PinResult =
-  | { ok: true; id: string; name: string }
+  | { ok: true; id: string; name: string; role?: StaffRole }
   | { ok: false; error: 'wrong'; attemptsLeft: number }
   | { ok: false; error: 'locked'; lockedUntil: string }
   | { ok: false; error: 'no_company' | 'network' };
@@ -1325,7 +1391,7 @@ export async function verifyStaffPin(pin: string, deviceId: string): Promise<Pin
   try {
     const { data, error } = await supabase.rpc('verify_staff_pin', { p_pin: pin, p_device_id: deviceId });
     if (error || !data) return { ok: false, error: 'network' };
-    if (data.ok) return { ok: true, id: data.id, name: data.name };
+    if (data.ok) return { ok: true, id: data.id, name: data.name, role: data.role ?? undefined };
     if (data.error === 'locked') return { ok: false, error: 'locked', lockedUntil: data.locked_until };
     if (data.error === 'wrong') return { ok: false, error: 'wrong', attemptsLeft: data.attempts_left ?? 0 };
     return { ok: false, error: 'no_company' };

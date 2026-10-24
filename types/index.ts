@@ -166,11 +166,15 @@ export interface CashShift {
 
 // Poster-style floor staff: identified by a 4-digit PIN on a logged-in
 // terminal instead of an auth account. The PIN hash never leaves the database.
+export type StaffRole = 'seller' | 'waiter' | 'manager';
+
 export interface Staff {
   id: string;
   name: string;
   active: boolean;
   createdAt: string;
+  role?: StaffRole;        // absent on a till that pulled before roles existed = seller
+  approveHash?: string;    // managers only: lets the till check their PIN offline (lib/till-rules)
 }
 
 // ─── Anbar (warehouse / inventory) ────────────────────────────────────────────
@@ -437,4 +441,7 @@ export interface Order {
   cancelledAt?: string;
   cancelledBy?: string;
   cancelReason?: string;
+  // When "Hesab" was last printed. Lines on that bill need the after-bill rule
+  // to come off, and adding to the order needs it too (lib/till-rules).
+  billPrintedAt?: string;
 }

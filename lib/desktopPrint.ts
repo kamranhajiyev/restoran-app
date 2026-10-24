@@ -49,6 +49,8 @@ export interface TillSettings {
   timezone?: string | null;
   workOpen?: string | null;
   workClose?: string | null;
+  /** Who needs a manager's PIN for what (lib/till-rules). Missing = all free. */
+  tillRules?: unknown;
 }
 
 /** The till's local database, present only in a build that ships the app. */

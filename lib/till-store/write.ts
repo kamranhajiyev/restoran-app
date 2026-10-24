@@ -418,6 +418,20 @@ function applyMove(id: string, body: Record<string, unknown>, companyId: string)
   return { ok: true };
 }
 
+// Mirrors app/api/bill-printed/route.ts.
+function applyBillPrinted(id: string, body: Record<string, unknown>, companyId: string): WriteResult {
+  const orderId = str(body.orderId);
+  const at = str(body.at);
+  if (!orderId || !at || Number.isNaN(Date.parse(at))) return { ok: false, error: 'bad_request' };
+
+  const found = openOrder(orderId, companyId, 'edit');
+  if ('error' in found) return { ok: false, error: found.error };
+
+  putOrder(companyId, { ...found, billPrintedAt: at });
+  enqueue(id, '/api/bill-printed', { ...body, companyId }, companyId);
+  return { ok: true };
+}
+
 // The same write as applyMove, on the other column that says where an order is
 // going. Open orders only — a paid courier order already carries its debt.
 function applyChangeCourier(id: string, body: Record<string, unknown>, companyId: string): WriteResult {
@@ -637,6 +651,7 @@ export function applyWrite(
       case '/api/update-order-status':      return applyStatus(id, body, companyId);
       case '/api/cancel-order':             return applyCancel(id, body, companyId);
       case '/api/move-table':               return applyMove(id, body, companyId);
+      case '/api/bill-printed':             return applyBillPrinted(id, body, companyId);
       case '/api/change-courier':           return applyChangeCourier(id, body, companyId);
       case '/api/open-shift':               return applyOpenShift(id, body, companyId);
       case '/api/add-shift-movement':       return applyMovement(id, body, companyId);

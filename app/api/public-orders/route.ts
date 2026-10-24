@@ -62,6 +62,7 @@ export async function GET(req: NextRequest) {
     cancelledAt: o.cancelled_at ?? undefined,
     cancelledBy: o.cancelled_by ?? undefined,
     cancelReason: o.cancel_reason ?? undefined,
+    billPrintedAt: o.bill_printed_at ?? undefined,
     // Same splitter as lib/store.ts fetchOrders: removed items never enter `items`,
     // so no total on this path can over-count them either.
     ...splitOrderItems(o.order_items as OrderItemRow[]),
