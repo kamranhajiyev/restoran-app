@@ -20,6 +20,7 @@
     "desktop:compile": "tsc -p electron/tsconfig.json",
     "desktop:till": "node scripts/build-desktop.mjs",
     "android:till": "node scripts/build-desktop.mjs --android",
+    "tunnel": "node scripts/tunnel.mjs",
     "desktop": "npm run desktop:compile && node scripts/run-electron.mjs",
     "desktop:preview": "npm run desktop:compile && node scripts/run-electron.mjs --url=https://restoran-app-git-development-p-f968e3-kamrans-projects-11d6b816.vercel.app",
     "desktop:winusb": "node scripts/build-winusb.mjs",
