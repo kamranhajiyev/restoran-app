@@ -15,7 +15,7 @@
 import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { markPrinted, wasPrinted } from './printed-jobs';
-import { SAFETY_NET_MS, listenTill, tillSignalUp, timerDue } from './till-signal';
+import { URGENT_SAFETY_NET_MS, listenTill, tillSignalUp, timerDue } from './till-signal';
 import { type TicketPayload } from './escpos';
 import { buildStationTicketRaster } from './station-ticket';
 import { tillPost } from './till-write';
@@ -611,9 +611,9 @@ export function startKitchenPrinting(auth: PrintAuth, loginLost?: () => void): (
 
   // Realtime sockets die quietly on sleep and Wi-Fi drops. Polling is the floor
   // under that: a ticket may be late, but it is never lost. A linked till whose
-  // signal is up only asks once a minute; with it down, every 4 s as before.
+  // signal is up only asks every three minutes; with it down, every 4 s as before.
   const timer = setInterval(() => {
-    if (channel || timerDue(lastDrainAt, Date.now(), tillSignalUp(), SAFETY_NET_MS)) void drainPrintQueue();
+    if (channel || timerDue(lastDrainAt, Date.now(), tillSignalUp(), URGENT_SAFETY_NET_MS)) void drainPrintQueue();
   }, channel ? POLL_MS : LINK_POLL_MS);
 
   return () => {

@@ -99,5 +99,13 @@ export function timerDue(lastRun: number, now: number, signalUp: boolean, slowMs
   return !signalUp || now - lastRun >= slowMs;
 }
 
-/** How long the safety-net timers wait while the signal is up. */
-export const SAFETY_NET_MS = 60_000;
+/**
+ * How long the safety-net timers wait while the signal is up. The signal brings
+ * every change at once, so these only matter if it dies without saying so; at
+ * one minute each they were most of what the tills asked the site all day
+ * (usage review, 2026-10-24).
+ */
+export const SAFETY_NET_MS = 5 * 60_000;
+
+/** The same, for what someone is standing waiting on: food ready, kitchen tickets. */
+export const URGENT_SAFETY_NET_MS = 3 * 60_000;

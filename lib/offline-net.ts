@@ -46,6 +46,18 @@ function setOnline(next: boolean): void {
  */
 const PROBE_MS = 4000;
 
+/**
+ * What the dial tone asks for. A plain file, so the CDN answers it and no
+ * function runs: /api/health was the site's busiest route, every till asking
+ * every 20 s all day (usage review, 2026-10-24). Under /api/ because that is
+ * the only path the exe and the APK will request (lib/till-store/handlers.ts).
+ */
+export const HEALTH_PATH = "/api/health.txt";
+
+/** How often the line is checked while it is up, and while it is down. */
+export const UP_CHECK_MS = 60_000;
+export const DOWN_CHECK_MS = 5_000;
+
 async function probe(): Promise<boolean> {
   const till = typeof window === "undefined" ? null : window.posNative?.till;
 
@@ -73,7 +85,7 @@ async function probe(): Promise<boolean> {
       // in the main process and its answer is dropped. That costs one request and
       // is the price of not having a handle on it from here.
       const res = await Promise.race([
-        till.api("/api/health"),
+        till.api(HEALTH_PATH),
         new Promise<null>(resolve => setTimeout(() => resolve(null), PROBE_MS)),
       ]);
       return res !== null && res.ok;
@@ -83,7 +95,7 @@ async function probe(): Promise<boolean> {
   }
 
   try {
-    const res = await fetch("/api/health", {
+    const res = await fetch(HEALTH_PATH, {
       method: "HEAD",
       cache: "no-store",
       signal: AbortSignal.timeout(PROBE_MS),
@@ -118,7 +130,7 @@ export function startConnectivityWatch(): () => void {
 
   const tick = async () => {
     await checkConnectivity();
-    timer = setTimeout(tick, _online ? 20_000 : 5_000);
+    timer = setTimeout(tick, _online ? UP_CHECK_MS : DOWN_CHECK_MS);
   };
 
   const hint = () => void checkConnectivity();

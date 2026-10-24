@@ -40,7 +40,8 @@ import { postOrQueue, isOnline, startConnectivityWatch, onConnectivityChange } f
 import { tillFetch, hasLocalDb, localCourierCollections, siteGet, setTillToken } from '@/lib/till-data';
 import { hasLocalData, pullAll, pullChanged, pullNewOrders, pullStationReady } from '@/lib/till-sync';
 import { focusRefreshDue } from '@/lib/focus-refresh';
-import { SAFETY_NET_MS, listenTill, onTillSignalStatus, tillSignalUp, timerDue, type TillSignal } from '@/lib/till-signal';
+import { rereadAfterSend } from '@/lib/open-reread';
+import { SAFETY_NET_MS, URGENT_SAFETY_NET_MS, listenTill, onTillSignalStatus, tillSignalUp, timerDue, type TillSignal } from '@/lib/till-signal';
 import TillSetup from '@/components/TillSetup';
 import SyncStatus from '@/components/SyncStatus';
 import OrderSyncDot from '@/components/OrderSyncDot';
@@ -896,14 +897,14 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // Desktop only. A browser reads Supabase directly and has nothing to catch up.
   //
   // With the restaurant's signal up (lib/till-signal.ts) the kitchen's tap
-  // arrives on it, and this only runs once a minute as a safety net.
+  // arrives on it, and this only runs every three minutes as a safety net.
   const lastReadyAt = useRef(0);
   useEffect(() => {
     if (!hasLocalDb()) return;
     const id = setInterval(() => {
       if (document.visibilityState === 'hidden') return;
       if (!isOnline()) return;
-      if (!timerDue(lastReadyAt.current, Date.now(), tillSignalUp(), SAFETY_NET_MS)) return;
+      if (!timerDue(lastReadyAt.current, Date.now(), tillSignalUp(), URGENT_SAFETY_NET_MS)) return;
       lastReadyAt.current = Date.now();
       void refreshReady();
     }, READY_EVERY_MS);
@@ -912,7 +913,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
 
   // Orders placed somewhere else reach the desktop till's screen within seconds,
   // not at the five-minute sweep. The screen is redrawn only when one arrived.
-  // Same safety-net rule as above while the signal is up.
+  // A safety net like the one above while the signal is up, every five minutes.
   const lastNewOrdersAt = useRef(0);
   const pullNew = useCallback(async () => {
     const companyId = overrideCompanyId ?? getSession()?.companyId ?? null;
@@ -960,10 +961,11 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     void pendingTotal().then(setPendingCount);
     void pendingOrderIds().then(setUnsent);
 
-    const drain = async (pull = true) => {
+    const drain = async (pull = true, opening = false) => {
       setSending(true);
+      let sent = 0;
       try {
-        await flushQueue(overrideCompanyId ?? getSession()?.companyId ?? null);
+        sent = (await flushQueue(overrideCompanyId ?? getSession()?.companyId ?? null)).synced;
       } finally {
         setSending(false);
       }
@@ -986,7 +988,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         await pullAll(companyId);
         setDataVersion(v => v + 1);
       }
-      void refreshOrders({ silent: true });
+      // On open the page is already reading the orders (lib/open-reread.ts).
+      if (rereadAfterSend({ opening, localDb: hasLocalDb(), sent })) void refreshOrders({ silent: true });
     };
 
     const off = onConnectivityChange(up => {
@@ -1000,7 +1003,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     // until the connection happened to flap, or until the five-minute refresh
     // below got round to it. That is the exact moment the queue most needs
     // sending: everything in it was taken while nobody could reach the server.
-    void drain();
+    void drain(true, true);
 
     // And whenever the waiter does something. The sweep above is a safety net,
     // not the mechanism: waiting for it meant an order taken on a machine with a
@@ -1457,7 +1460,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       refreshAll({ silent: true });
     };
     const id = setInterval(() => {
-      if (timerDue(last, Date.now(), tillSignalUp(), 3 * SAFETY_NET_MS)) sync();
+      if (timerDue(last, Date.now(), tillSignalUp(), 3 * 60_000)) sync();
     }, 40000);
     // Focus and visibilitychange fire together, and a window switched to often
     // re-read the lot every time (lib/focus-refresh.ts).
@@ -2694,8 +2697,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   }, [view, shift, overrideCompanyId]);
 
   // Detect when admin closes the shift externally
-  // — at once on the restaurant's signal, and on a clock that slows to once a
-  // minute while the signal is up.
+  // — at once on the restaurant's signal, and on a clock that slows to every
+  // five minutes while the signal is up.
   useEffect(() => {
     let last = Date.now();
     const check = async () => {

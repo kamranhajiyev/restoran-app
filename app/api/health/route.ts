@@ -1,9 +1,9 @@
 // The till's dial tone.
 //
-// Answers nothing and touches no database on purpose: the seller screen HEADs
-// this every few seconds to decide whether it is online, and that check must
-// stay cheap enough to run all service long. Never cached — a cached 200 would
-// tell a disconnected till it is fine.
+// Answers nothing and touches no database on purpose. Kept for exes and APKs
+// built before 2026-10-24, which still ask it; newer tills ask the plain file
+// public/api/health.txt, which costs no function call (lib/offline-net.ts).
+// Never cached — a cached 200 would tell a disconnected till it is fine.
 
 export const dynamic = "force-dynamic";
 
