@@ -74,6 +74,7 @@ import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt } from '@/lib/printer';
 import { isDesktop } from '@/lib/desktopPrint';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
+import { copySpot, keepLocalTables, nextTableName, resizeTable, tableBox, tableRadius, toggleShape } from '@/lib/floor-plan';
 import { orderPlace, orderPlaceKind, PlaceKind, tableTitle } from '@/lib/order-place';
 import { placeSales, tableSales } from '@/lib/place-sales';
 import { insertCopyAfter } from '@/lib/menu-copy';
@@ -795,6 +796,25 @@ function AdminPageContent() {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [alignGuides, setAlignGuides] = useState<{ type: 'h' | 'v'; pos: number }[]>([]);
   const canvasRef = useRef<HTMLDivElement>(null);
+  // Tables being dragged or with a save on its way: a reload must not put their
+  // old spot or shape back on screen (keepLocalTables, lib/floor-plan.ts).
+  const busyTablesRef = useRef(new Map<number, number>());
+  // Saves of one table go one after another, so the last one sent is the last
+  // one the database keeps.
+  const tableSaveChainRef = useRef(new Map<number, Promise<unknown>>());
+  const tablesRef = useRef<RestaurantTable[]>([]);
+  tablesRef.current = tables;
+  // When each table's last save came back: a list asked for before then is older.
+  const tableSavedAtRef = useRef(new Map<number, number>());
+  const setTablesFromServer = (server: RestaurantTable[], asked = Date.now()) => {
+    const busy = new Set(busyTablesRef.current.keys());
+    for (const [id, at] of tableSavedAtRef.current) if (at >= asked) busy.add(id);
+    setTables(prev => keepLocalTables(server, prev, busy));
+  };
+  const markTableBusy = (id: number, on: boolean) => {
+    const n = (busyTablesRef.current.get(id) ?? 0) + (on ? 1 : -1);
+    if (n > 0) busyTablesRef.current.set(id, n); else busyTablesRef.current.delete(id);
+  };
 
   // users tab
   const [companySlug, setCompanySlug] = useState<string | null>(null);
@@ -1446,13 +1466,14 @@ function AdminPageContent() {
     try {
       // Null is a failed read: keep what is on screen. An empty menu here was
       // saved by the next edit, and that deleted every dish (2026-10-08).
+      const asked = Date.now();
       const [m, o, c, tb, total, hl] = await Promise.all([
         fetchMenuOrNull(), fetchOrdersOrNull({ limit: 200 }), fetchCategoriesOrNull(), fetchTablesOrNull(), fetchOrdersCount(), fetchHallsOrNull(),
       ]);
       if (m) setMenu(m);
       if (o) setOrders(o);
       if (c) setCategories(c);
-      if (tb) setTables(tb);
+      if (tb) setTablesFromServer(tb, asked);
       if (hl) setHalls(hl);
       setTotalOrders(total);
       invalidateTodayStatsCache();
@@ -1469,8 +1490,9 @@ function AdminPageContent() {
         if (c) setCategories(c);
       }
       if (parts.has('tables')) {
+        const asked = Date.now();
         const [tb, hl] = await Promise.all([fetchTablesOrNull(), fetchHallsOrNull()]);
-        if (tb) setTables(tb);
+        if (tb) setTablesFromServer(tb, asked);
         if (hl) setHalls(hl);
       }
     } catch { /* ignore */ }
@@ -2104,23 +2126,25 @@ function AdminPageContent() {
   }
 
   // ── table canvas drag ─────────────────────────────────────────────────────
-  // Fallback slot for a table that has never been dragged (x/y still null). Keyed
-  // on the table's index in its hall — on the hall's length it put every such
+  // A table that has never been dragged (x/y still null) gets a fallback slot
+  // keyed on its index in its hall — on the hall's length it put every such
   // table on the same spot, so a freshly filled hall looked like one table.
-  function autoPos(idx: number): { x: number; y: number } {
-    return { x: 20 + (idx % 5) * 130, y: 20 + Math.floor(idx / 5) * 110 };
-  }
+  // tableBox (lib/floor-plan.ts) is shared with the till's map.
   function handleTableDragStart(e: React.MouseEvent, t: typeof tables[0]) {
     e.preventDefault();
     e.stopPropagation();
     setSelectedTableId(t.id);
-    const dragState = { id: t.id, ox: t.x ?? 20, oy: t.y ?? 20, mx: e.clientX, my: e.clientY };
+    // The caller passes the spot as drawn, so a never-dragged table starts from where it is.
+    const { x: ox, y: oy } = tableBox(t, 0);
+    const dragState = { id: t.id, ox, oy, mx: e.clientX, my: e.clientY };
     setDragging(dragState);
+    markTableBusy(t.id, true);
 
     // Snapshot the other tables once at drag start — they don't move during the
     // drag. Only this hall's: guides must not snap to a table on another plan.
     const otherTables = hallTables.filter(x => x.id !== t.id);
     let rafId: number | null = null;
+    let last: { x: number; y: number } | null = null;
 
     function onMove(ev: MouseEvent) {
       if (!canvasRef.current) return;
@@ -2144,8 +2168,8 @@ function AdminPageContent() {
         const dyOffsets = [0, h / 2, h];
 
         otherTables.forEach(other => {
-          const ow = other.w ?? 100; const oh = other.h ?? 70;
-          const ox2 = other.x ?? 20; const oy2 = other.y ?? 20;
+          // Where admin draws it, not 20,20: a never-dragged table sits in its row-of-five slot.
+          const { x: ox2, y: oy2, w: ow, h: oh } = tableBox(other, hallTables.indexOf(other));
           const oxPoints = [ox2, ox2 + ow / 2, ox2 + ow];
           const oyPoints = [oy2, oy2 + oh / 2, oy2 + oh];
 
@@ -2161,6 +2185,7 @@ function AdminPageContent() {
           });
         });
 
+        last = { x: newX, y: newY };
         // Separate state updates — never call setState inside another setState updater
         setAlignGuides(guides);
         setTables(prev => prev.map(x => x.id === dragState.id ? { ...x, x: newX, y: newY } : x));
@@ -2172,18 +2197,94 @@ function AdminPageContent() {
       window.removeEventListener('mouseup', onUp);
       setAlignGuides([]);
       setDragging(null);
-      setTables(prev => {
-        const updated = prev.find(x => x.id === dragState.id);
-        if (updated) updateTableLayout(updated.id, updated.x ?? 20, updated.y ?? 20, updated.w ?? 100, updated.h ?? 70, updated.shape ?? 'rect').then(err => {
-          if (err) { setDialog({ title: 'Saxlanmadı', message: 'Masanın yeri yadda saxlanmadı: ' + err }); return; }
-          setTableSavedToast(true);
-          setTimeout(() => setTableSavedToast(false), 2000);
-        });
-        return prev;
-      });
+      // A click that did not move the table saves nothing: each click of a
+      // double-click used to save the old shape after the double-click's new one.
+      const cur = tablesRef.current.find(x => x.id === dragState.id);
+      if (cur && last && (last.x !== ox || last.y !== oy)) saveTableLayout({ ...cur, ...last });
+      markTableBusy(dragState.id, false);
     }
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
+  }
+  // Saves the table as given — the caller builds it from the latest state, never
+  // from a copy taken earlier — after any save of it still on the way.
+  function saveTableLayout(t: typeof tables[0]) {
+    const { x, y, w, h } = tableBox(t, hallTables.findIndex(o => o.id === t.id));
+    markTableBusy(t.id, true);
+    const chain = tableSaveChainRef.current;
+    const done = (chain.get(t.id) ?? Promise.resolve())
+      .then(() => updateTableLayout(t.id, x, y, w, h, t.shape ?? 'rect'))
+      .then(err => {
+        if (err) { setDialog({ title: 'Saxlanmadı', message: 'Masanın yeri yadda saxlanmadı: ' + err }); return; }
+        setTableSavedToast(true);
+        setTimeout(() => setTableSavedToast(false), 2000);
+      })
+      .finally(() => {
+        tableSavedAtRef.current.set(t.id, Date.now());
+        markTableBusy(t.id, false);
+        if (chain.get(t.id) === done) chain.delete(t.id);
+      });
+    chain.set(t.id, done);
+  }
+  // The corner handle, as in Poster: drag it to make the table bigger or smaller.
+  function handleTableResizeStart(e: React.MouseEvent, t: typeof tables[0]) {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedTableId(t.id);
+    markTableBusy(t.id, true);
+    const start = { w: t.w ?? 100, h: t.h ?? 70, mx: e.clientX, my: e.clientY };
+    let rafId: number | null = null;
+    let last: { w: number; h: number } | null = null;
+    function onMove(ev: MouseEvent) {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        const size = resizeTable(start.w, start.h, ev.clientX - start.mx, ev.clientY - start.my);
+        last = size;
+        setTables(prev => prev.map(x => x.id === t.id ? { ...x, x: t.x, y: t.y, ...size } : x));
+      });
+    }
+    function onUp() {
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      const cur = tablesRef.current.find(x => x.id === t.id);
+      if (cur && last && (last.w !== start.w || last.h !== start.h)) saveTableLayout({ ...cur, x: t.x, y: t.y, ...last });
+      markTableBusy(t.id, false);
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+  // Same shape, size and seats, next number, just right of the original.
+  async function duplicateTable(t: typeof tables[0]) {
+    if (tSaving) return;
+    setTSaving(true);
+    const name = nextTableName(tables.map(x => x.name));
+    const err = await createTable(name, t.capacity, t.shape ?? 'rect', t.w, t.h, t.hallId ?? activeHallId);
+    if (err) { setDialog({ title: 'Xəta', message: err }); setTSaving(false); return; }
+    await placeNewTable(name, copySpot(tableBox(t, hallTables.findIndex(o => o.id === t.id))));
+    setTSaving(false);
+  }
+  // A new table gets its spot saved at once: one left to its row-of-five slot
+  // moved whenever a table before it in the list was deleted.
+  async function placeNewTable(name: string, at: { x: number; y: number } | null) {
+    const fresh = await fetchTablesOrNull();
+    if (!fresh) return;
+    const made = fresh.find(x => x.name === name && x.x == null);
+    if (!made) { setTablesFromServer(fresh); return; }
+    const inHall = fresh.filter(x => (x.hallId ?? halls[0]?.id ?? null) === activeHallId);
+    const spot = at ?? tableBox(made, inHall.findIndex(x => x.id === made.id));
+    const placed = { ...made, x: spot.x, y: spot.y };
+    setTablesFromServer(fresh.map(x => x.id === made.id ? placed : x));
+    setSelectedTableId(made.id);
+    saveTableLayout(placed);
+  }
+  // Double-click, as in Poster: square ↔ round.
+  function handleTableToggleShape(t: typeof tables[0]) {
+    const cur = tablesRef.current.find(x => x.id === t.id) ?? t;
+    const updated = { ...cur, shape: toggleShape(cur.shape, t.w ?? 100, t.h ?? 70) };
+    setTables(prev => prev.map(x => x.id === t.id ? updated : x));
+    saveTableLayout({ ...updated, x: t.x, y: t.y, w: t.w, h: t.h });
   }
   function handleCanvasMouseMove() {}
   function handleCanvasMouseUp() {}
@@ -4973,9 +5074,21 @@ function AdminPageContent() {
                     <button onClick={() => setTableView('list')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${tableView === 'list' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-600'}`}>Siyahı</button>
                   </div>
                 </div>
+                {/* One click adds the next number, as in Poster; the ✎ on the
+                    table renames it. */}
                 <button
-                  onClick={() => { setEditingTable(null); setTName(''); setTCapacity('4'); setTShape('rect'); setTHallId(activeHallId ?? ''); setShowTableForm(true); }}
-                  className="flex items-center gap-2 bg-primary-800 hover:bg-primary-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors"
+                  disabled={tSaving}
+                  onClick={async () => {
+                    setTSaving(true);
+                    // A small square; double-click or the corner handle shapes it after.
+                    const name = nextTableName(tables.map(t => t.name));
+                    const err = await createTable(name, 4, 'rect', 70, 70, activeHallId);
+                    if (err) { setDialog({ title: 'Xəta', message: err }); setTSaving(false); return; }
+                    // A failed reload keeps the list on screen, not a blank one.
+                    await placeNewTable(name, null);
+                    setTSaving(false);
+                  }}
+                  className="flex items-center gap-2 bg-primary-800 hover:bg-primary-900 disabled:opacity-60 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors"
                 >
                   <Plus className="w-4 h-4" /> Masa əlavə et
                 </button>
@@ -5018,12 +5131,7 @@ function AdminPageContent() {
                       const busy = orders.some(o => o.tableNumber === t.id && isOrderOpen(o));
                       const activeOrder = orders.find(o => o.tableNumber === t.id && isOrderOpen(o));
                       const isSelected = selectedTableId === t.id;
-                      const isRound = t.shape === 'round';
-                      const pos = autoPos(idx);
-                      const x = t.x ?? pos.x;
-                      const y = t.y ?? pos.y;
-                      const w = t.w ?? 100;
-                      const h = isRound ? w : (t.h ?? 70);
+                      const { x, y, w, h } = tableBox(t, idx);
                       const activeStatus = activeOrder?.status;
                       const statusColor = activeStatus === 'gözləyir' ? 'bg-primary-400' : activeStatus === 'hazırlanır' ? 'bg-blue-400' : activeStatus === 'hazırdır' ? 'bg-green-500' : '';
                       return (
@@ -5031,7 +5139,7 @@ function AdminPageContent() {
                           key={t.id}
                           style={{
                             left: x, top: y, width: w, height: h,
-                            borderRadius: isRound ? '50%' : 10,
+                            borderRadius: tableRadius(t.shape, w, h),
                             cursor: dragging?.id === t.id ? 'grabbing' : 'grab',
                           }}
                           className={`absolute flex flex-col items-center justify-center border-2 transition-shadow ${
@@ -5039,10 +5147,21 @@ function AdminPageContent() {
                           } ${busy ? 'bg-red-50 border-red-300' : 'bg-white border-stone-200'}`}
                           onMouseDown={e => handleTableDragStart(e, { ...t, x, y, w, h })}
                           onClick={e => { e.stopPropagation(); setSelectedTableId(t.id); }}
+                          onDoubleClick={e => { e.stopPropagation(); handleTableToggleShape({ ...t, x, y, w, h }); }}
+                          title="İki dəfə klik: dairəvi / dördbucaq"
                         >
+                          <div
+                            onMouseDown={e => handleTableResizeStart(e, { ...t, x, y, w, h })}
+                            onDoubleClick={e => e.stopPropagation()}
+                            className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize flex items-end justify-end p-0.5"
+                          >
+                            <span className="block w-2 h-2 border-r-2 border-b-2 border-stone-400" />
+                          </div>
                           {isSelected && (
-                            <div className="absolute -top-7 left-1/2 -translate-x-1/2 flex gap-1 bg-white rounded-lg shadow border border-stone-100 px-1.5 py-1">
+                            // Below the table when it sits at the top of the board: above, the board's edge cut the buttons off.
+                            <div className={`absolute ${y < 32 ? '-bottom-8' : '-top-7'} left-1/2 -translate-x-1/2 z-20 flex gap-1 bg-white rounded-lg shadow border border-stone-100 px-1.5 py-1`}>
                               <button onClick={e => { e.stopPropagation(); setQrTable(t); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-primary-700"><QrCode className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); duplicateTable({ ...t, x, y, w, h }); }} onMouseDown={e => e.stopPropagation()} title="Kopyala" className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-primary-700"><Copy className="w-3 h-3" /></button>
                               <button onClick={e => { e.stopPropagation(); setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setTHallId(t.hallId ?? activeHallId ?? ''); setShowTableForm(true); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-primary-700"><Pencil className="w-3 h-3" /></button>
                               <button onClick={e => { e.stopPropagation(); if (busy) { setDialog({ title: 'Silinmədi', message: 'Aktiv sifarişi olan masanı silmək olmaz.' }); return; } setDialog({ title: 'Masanı sil?', message: <><span className="font-medium text-stone-700">&ldquo;{t.name}&rdquo;</span> silinəcək.</>, onConfirm: () => deleteTable(t.id).then(err => { if (err) setDialog({ title: 'Silinmədi', message: err }); else setTables(prev => prev.filter(x => x.id !== t.id)); }) }); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
                             </div>
@@ -5282,8 +5401,11 @@ function AdminPageContent() {
                 e.preventDefault();
                 setTSaving(true);
                 const cap = Math.max(1, parseInt(tCapacity) || 4);
-                const sw = tShape === 'round' ? 90 : tShape === 'rect-v' ? 70 : 100;
-                const sh = tShape === 'round' ? 90 : tShape === 'rect-v' ? 100 : 70;
+                // A table resized on the board keeps its size when only its name
+                // or seats change; picking another shape here starts it fresh.
+                const keepSize = editingTable && editingTable.shape === tShape && editingTable.w && editingTable.h;
+                const sw = keepSize ? editingTable.w! : tShape === 'round' ? 90 : tShape === 'rect-v' ? 70 : 100;
+                const sh = keepSize ? editingTable.h! : tShape === 'round' ? 90 : tShape === 'rect-v' ? 100 : 70;
                 if (editingTable) {
                   const targetHall = tHallId || editingTable.hallId || activeHallId;
                   const err = await updateTable(editingTable.id, tName.trim(), cap)

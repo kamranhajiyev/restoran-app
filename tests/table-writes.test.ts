@@ -42,7 +42,8 @@ describe('admin tables screen', () => {
   const admin = readFileSync('app/admin/page.tsx', 'utf8');
 
   it('shows a failed save instead of "saved"', () => {
-    expect(admin).toMatch(/updateTableLayout\([^)]*\)\.then\(err => \{\s+if \(err\) \{ setDialog/);
+    // Layout saves wait for the one before them (saveTableLayout), so the .then sits on the next line.
+    expect(admin).toMatch(/updateTableLayout\([^)]*\)\)?\s*\.then\(err => \{\s+if \(err\) \{ setDialog/);
     expect(admin).toMatch(/const err = await updateTable\(/);
   });
 

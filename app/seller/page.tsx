@@ -51,6 +51,7 @@ import { otherPart } from '@/lib/pay-split';
 import { canLink, checkLink, clearLink, readLink, saveLink, type Terminal } from '@/lib/terminal-link';
 import { tillImage } from '@/lib/till-image';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
+import { fitPlan, tableBox, tableRadius } from '@/lib/floor-plan';
 import { movedToTable, orderPlace as placeOf, tableTitle } from '@/lib/order-place';
 import { flushQueue, pendingOrderIds, ADD_ORDER, sendOrderByLink } from '@/lib/sync';
 import { verifyPinOffline, rememberPin, forgetPins } from '@/lib/offline-pin';
@@ -1578,6 +1579,30 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
   const hallTables = useMemo(
     () => tables.filter(t => (t.hallId ?? firstHallId) === activeHallId),
     [tables, activeHallId, firstHallId],
+  );
+
+  // The floor plan is scaled to the width it has and the screen down to its
+  // bottom, so the whole hall shows at once (lib/floor-plan.ts).
+  const [planEl, setPlanEl] = useState<HTMLDivElement | null>(null);
+  const [planRoom, setPlanRoom] = useState({ width: 0, maxHeight: 440 });
+  useEffect(() => {
+    if (!planEl) return;
+    const measure = () => {
+      const r = planEl.getBoundingClientRect();
+      const width = Math.round(r.width);
+      // 32px: the new-order panel's bottom padding.
+      const maxHeight = Math.max(280, Math.round(window.innerHeight - r.top - 32));
+      setPlanRoom(p => (p.width === width && p.maxHeight === maxHeight ? p : { width, maxHeight }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(planEl);
+    window.addEventListener('resize', measure);
+    return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
+  }, [planEl]);
+  const plan = useMemo(
+    () => fitPlan(hallTables.map(tableBox), planRoom.width, planRoom.maxHeight),
+    [hallTables, planRoom],
   );
 
   useEffect(() => {
@@ -3741,18 +3766,46 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
           {view === 'new-order' && (
             <div className="flex-1 p-5 md:p-8 overflow-y-auto">
               <h1 className="text-lg font-semibold text-stone-900 mb-1">Yeni sifariş</h1>
-              <p className="text-sm text-stone-600 mb-6">Sifariş növünü seçin</p>
+              {orderType !== 'masa' && orderType !== 'kuryer' && <p className="text-sm text-stone-600 mb-6">Sifariş növünü seçin</p>}
 
               {/* Masa and Kuryer select — they need a second choice before the
-                  menu opens. Takeaway has nothing left to ask, so it starts. */}
+                  menu opens. Takeaway has nothing left to ask, so it starts.
+                  Once one is picked the cards shrink to a row, so the table
+                  map below gets the screen (lib/floor-plan.ts). */}
+              {orderType === 'masa' || orderType === 'kuryer' ? (
+                <div className="flex flex-wrap gap-2 mt-3 mb-4">
+                  {tablesOn && (
+                    <button
+                      onClick={() => setOrderType('masa')}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 text-sm font-semibold transition-all active:scale-95 ${orderType === 'masa' ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 bg-white text-stone-600 hover:border-primary-300'}`}
+                    >
+                      <UtensilsCrossed className="w-4 h-4" /> Masa
+                    </button>
+                  )}
+                  <button
+                    onClick={() => startNewOrder('takeaway')}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-stone-200 bg-white text-sm font-semibold text-stone-600 hover:border-primary-300 transition-all active:scale-95"
+                  >
+                    <span>🥡</span> Takeaway
+                  </button>
+                  {deliveryOn && (
+                    <button
+                      onClick={() => setOrderType('kuryer')}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 text-sm font-semibold transition-all active:scale-95 ${orderType === 'kuryer' ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 bg-white text-stone-600 hover:border-primary-300'}`}
+                    >
+                      <Bike className="w-4 h-4" /> Çatdırılma
+                    </button>
+                  )}
+                </div>
+              ) : (
               <div className={`grid ${deliveryOn ? 'grid-cols-2 sm:grid-cols-3 max-w-md' : 'grid-cols-2 max-w-xs'} gap-4 mb-8`}>
                 {tablesOn && (
                   <button
                     onClick={() => setOrderType('masa')}
-                    className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 ${orderType === 'masa' ? 'border-primary-800 bg-primary-50' : 'border-stone-200 bg-white hover:border-primary-300'}`}
+                    className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 border-stone-200 bg-white hover:border-primary-300"
                   >
-                    <UtensilsCrossed className={`w-8 h-8 ${orderType === 'masa' ? 'text-primary-800' : 'text-stone-500'}`} />
-                    <span className={`font-semibold text-sm ${orderType === 'masa' ? 'text-primary-800' : 'text-stone-600'}`}>Masa</span>
+                    <UtensilsCrossed className="w-8 h-8 text-stone-500" />
+                    <span className="font-semibold text-sm text-stone-600">Masa</span>
                   </button>
                 )}
                 <button
@@ -3765,13 +3818,14 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                 {deliveryOn && (
                   <button
                     onClick={() => setOrderType('kuryer')}
-                    className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 ${orderType === 'kuryer' ? 'border-primary-800 bg-primary-50' : 'border-stone-200 bg-white hover:border-primary-300'}`}
+                    className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 border-stone-200 bg-white hover:border-primary-300"
                   >
-                    <Bike className={`w-8 h-8 ${orderType === 'kuryer' ? 'text-primary-800' : 'text-stone-500'}`} />
-                    <span className={`font-semibold text-sm ${orderType === 'kuryer' ? 'text-primary-800' : 'text-stone-600'}`}>Çatdırılma</span>
+                    <Bike className="w-8 h-8 text-stone-500" />
+                    <span className="font-semibold text-sm text-stone-600">Çatdırılma</span>
                   </button>
                 )}
               </div>
+              )}
 
               {orderType === 'kuryer' && (
                 <div className="mb-8">
@@ -3809,9 +3863,11 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
 
               {orderType === 'masa' && (
                 <div>
-                  <p className="text-sm font-medium text-stone-700 mb-3">Masanı seçin</p>
-                  {halls.length > 1 && (
-                    <div className="flex flex-wrap gap-1 bg-stone-100 rounded-xl p-1 mb-3 max-w-fit">
+                  {/* Hall tabs and the legend share one row: every line here is
+                      room the map does not get. */}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3">
+                  {halls.length > 1 ? (
+                    <div className="flex flex-wrap gap-1 bg-stone-100 rounded-xl p-1 max-w-fit">
                       {halls.map(h => (
                         <button
                           key={h.id}
@@ -3824,27 +3880,26 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                         </button>
                       ))}
                     </div>
+                  ) : (
+                    <p className="text-sm font-medium text-stone-700">Masanı seçin</p>
                   )}
-                  <div className="flex items-center gap-3 text-xs text-stone-600 mb-4">
+                  <div className="flex items-center gap-3 text-xs text-stone-600">
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-100 border border-green-300 inline-block" /> Boş</span>
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block" /> Dolu</span>
                   </div>
+                  </div>
                   <div
-                    className="relative border border-stone-200 rounded-xl bg-white overflow-auto"
+                    ref={setPlanEl}
+                    className="relative border border-stone-200 rounded-xl bg-white overflow-hidden"
                     style={{
-                      height: 440,
-                      maxWidth: 700,
+                      height: plan.height,
                       backgroundImage: 'radial-gradient(circle, #d1d5db 1px, transparent 1px)',
                       backgroundSize: '24px 24px',
                     }}
                   >
                     {hallTables.map((t, i) => {
                       const busy = tableHasActive(t.id, orders);
-                      const posX = t.x ?? (20 + (i % 5) * 130);
-                      const posY = t.y ?? (20 + Math.floor(i / 5) * 110);
-                      const w = t.w ?? 100;
-                      const h = t.h ?? 70;
-                      const isRound = t.shape === 'round';
+                      const { x: posX, y: posY, w, h } = plan.place(tableBox(t, i));
                       const busyTotal = orders
                         .filter(o => o.tableNumber === t.id && isOrderOpen(o))
                         .reduce((s, o) => s + orderTotal(o), 0);
@@ -3858,7 +3913,7 @@ export function SellerPage({ overrideCompanyId, overrideCompanyName, overrideTok
                             top: posY,
                             width: w,
                             height: h,
-                            borderRadius: isRound ? '50%' : 12,
+                            borderRadius: tableRadius(t.shape, w, h),
                           }}
                           className={`flex flex-col items-center justify-center border-2 shadow-sm transition-all active:scale-95 hover:shadow-md hover:scale-105 ${
                             busy

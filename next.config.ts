@@ -28,8 +28,10 @@ const nextConfig: NextConfig = desktop
     }
   : {
       // The Android emulator reaches `npm run dev` on this Mac as 10.0.2.2 (the
-      // debug build of android/). Dev server only; no effect on a build.
-      allowedDevOrigins: ["10.0.2.2"],
+      // debug build of android/). A Cloudflare quick tunnel
+      // (`cloudflared tunnel --url http://localhost:3001`) lets someone off this
+      // Wi-Fi try a change on the testing database. Dev server only; no effect on a build.
+      allowedDevOrigins: ["10.0.2.2", "*.trycloudflare.com"],
     };
 
 export default nextConfig;
