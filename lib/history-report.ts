@@ -21,7 +21,6 @@ export type HistoryReport = {
   kart: number;
   kuryer: number;     // deliveries whose money is not back inside the view
   legv: { count: number; sum: number };
-  qaytarma: { count: number; sum: number };
 };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -34,11 +33,10 @@ export function historyReport<T extends ReportOrder>(
   const t = historyTotals(orders, total, paidInView);
   const paid = orders.filter(o => o.status === 'ödənilib');
   const endirim = paid.reduce((s, o) => s + (o.discountAmount ?? 0), 0);
-  // A delivery taken back from the rider is closed unpaid like any other, but
-  // still carries the debt it was sent out with: that is what tells it apart.
-  const closed = orders.filter(o => o.status === 'ləğv edildi');
-  const returned = closed.filter(o => (o.courierDebt ?? 0) > 0);
-  const cancelled = closed.filter(o => !((o.courierDebt ?? 0) > 0));
+  // A delivery the rider brought back is closed unpaid like any other. The till
+  // has no way to do that any more (the owner deletes it), so it has no line of
+  // its own: one that always read 0 only confused people (Natiq, 2026-10-24).
+  const cancelled = orders.filter(o => o.status === 'ləğv edildi');
   const sum = (list: T[]) => r2(list.reduce((s, o) => s + total(o), 0));
   return {
     count: paid.length,
@@ -49,7 +47,6 @@ export function historyReport<T extends ReportOrder>(
     kart: r2(t.kart),
     kuryer: r2(t.kuryer),
     legv: { count: cancelled.length, sum: sum(cancelled) },
-    qaytarma: { count: returned.length, sum: sum(returned) },
   };
 }
 
@@ -89,9 +86,8 @@ export function historyReportLines(r: HistoryReport, head: {
   if (r.kuryer > 0.005) lines.push({ text: row('Kuryer', money(r.kuryer)) });
   lines.push(
     { text: '-'.repeat(WIDTH) },
-    // The till's own words: there is no "ləğv" or "qaytarma" button anywhere.
+    // The till's own words: there is no "ləğv" button anywhere.
     { text: row(`Ödənişsiz bağlanan (${r.legv.count})`, money(r.legv.sum)) },
-    { text: row(`Kuryerdən geri alınan (${r.qaytarma.count})`, money(r.qaytarma.sum)) },
   );
   return lines;
 }

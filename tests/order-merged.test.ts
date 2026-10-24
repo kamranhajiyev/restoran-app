@@ -42,7 +42,7 @@ describe('the seller\'s order card', () => {
     const html = renderToStaticMarkup(createElement(OrderRow, {
       order, tableLabel: 'Masa 1', tz: 'Asia/Baku', printFailed: false, unsent: false,
       progress: { done: 0, total: 3 }, isItemReady: () => false,
-      onReprint: () => {}, onPay: () => {}, onCancel: () => {}, onReturn: () => {}, canPickCourier: false,
+      onReprint: () => {}, onPay: () => {}, onCancel: () => {}, canPickCourier: false,
       onAppend: () => {}, onMove: () => {}, onReassign: () => {}, onPrintBill: () => {}, billBusy: false,
       onStatusChange: () => {},
     }));

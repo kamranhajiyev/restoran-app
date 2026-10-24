@@ -69,6 +69,10 @@ that migration on production before the code reaches main?**
 İXLAS CAFE, 2026-10-07: the courier list read `deleted_at`, only on testing, and every courier vanished.
 Guard: none yet
 
+**Can the button be reached? Does the list it sits in ever show the thing it is for?**
+Natiq, Test Restoran, 2026-10-24: "Qaytarıldı" was only for paid courier orders, on a list that shows only open ones; the Hesabat line it fed always read 0.
+Guard: `tests/history-report.test.ts`
+
 ## 1. Bad internet (most of our bugs)
 
 Restaurants' internet drops for a few seconds at a time, often mid-action.

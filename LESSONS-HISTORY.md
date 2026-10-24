@@ -74,6 +74,16 @@ A failed read shows an empty list, not an error. İXLAS CAFE, 2026-10-07: the
 courier list asked for `deleted_at`, the migration was only on testing, and
 every courier vanished from the seller page, admin and exe.
 
+**Can the button be reached? Does the list it sits in ever show the thing it
+is for?**
+Natiq, Test Restoran, 2026-10-24: the Hesabat printed "Kuryerdən geri alınan
+(0)" and he could not find how to make it anything else. The "Qaytarıldı"
+button (2026-09-05) sat on the order row only for a paid courier order, but
+that list shows open orders only, so no one ever saw it. Deleting the order on
+the admin page already takes it off the sales and the courier's debt, so the
+button, its dialog and the Hesabat line were removed instead of moved; such an
+order now counts under "Ödənişsiz bağlanan".
+
 ## 1. Bad internet (most of our bugs)
 
 Restaurants' internet drops for a few seconds at a time, often mid-action.

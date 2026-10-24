@@ -16,7 +16,7 @@ import {
   fetchCompanySettings, verifyStaffPin, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
   fetchStations, fetchStationReady, fetchStationReadyOrNull, type StationReady,
-  fetchCouriersWithBalance, addCourierPayment, returnCourierOrder, fetchCourierCollections, changeOrderCourier,
+  fetchCouriersWithBalance, addCourierPayment, fetchCourierCollections, changeOrderCourier,
   fetchMenuOrNull, fetchCategoriesOrNull, fetchTablesOrNull, fetchHallsOrNull, fetchStaffAndRulesOrNull, fetchModifierGroupsOrNull, readOpenShift,
   fetchTillRules, markBillPrinted,
 } from '@/lib/store';
@@ -692,11 +692,6 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const [courierMode, setCourierMode]     = useState<CourierPayMode>('paid');
   /** Which rider the payment sheet is currently writing onto a link order. */
   const [payCourierBusy, setPayCourierBusy] = useState<string | null>(null);
-
-  // "Qaytarıldı" — the customer refused the food and the rider brought it back.
-  const [returningOrder, setReturningOrder] = useState<Order | null>(null);
-  const [returnReason, setReturnReason]     = useState('');
-  const [returnBusy, setReturnBusy]         = useState(false);
 
   // kassa (cash shift)
   const [shift, setShift]               = useState<CashShift | null>(null);
@@ -2517,35 +2512,6 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     }
   }
 
-  // The food came back. Cancels a closed courier order, which nothing else in
-  // this app is allowed to do — see supabase/migrations/20260905_couriers.sql.
-  async function confirmCourierReturn() {
-    if (!returningOrder || returnBusy) return;
-    const order = returningOrder;
-    const reason = returnReason.trim() || 'Müştəri imtina etdi';
-    setReturnBusy(true);
-    const ok = overrideCompanyId
-      ? (await postOrQueue(
-          `courier-return:${order.id}`,
-          '/api/return-courier-order',
-          { orderId: order.id, reason, by: effectiveSeller, companyId: overrideCompanyId, token: overrideToken },
-          overrideCompanyId,
-        )).ok
-      : await returnCourierOrder(order.id, reason, effectiveSeller);
-    setReturnBusy(false);
-    setReturningOrder(null);
-    setReturnReason('');
-
-    if (!ok) { refreshOrders(); return; }
-    mutateOrders(prev => prev.map(o => o.id === order.id
-      ? { ...o, status: 'ləğv edildi' as OrderStatus, cancelReason: reason, cancelledBy: effectiveSeller, cancelledAt: new Date().toISOString() }
-      : o));
-    // The debt left with the order.
-    const debt = order.courierDebt ?? 0;
-    setCouriers(prev => prev.map(c =>
-      c.id === order.courierId ? { ...c, outstanding: (c.outstanding ?? 0) - debt } : c));
-  }
-
   function openCancel(order: Order) {
     setCancellingOrder(order);
     setCancelReason(null);
@@ -3491,13 +3457,13 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 {prevOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
-                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
                     <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
-                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} onReturn={() => { setReturningOrder(o); setReturnReason(''); }} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
               </div>
@@ -4811,43 +4777,6 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
           </div>
         );
       })()}
-
-      {/* "Qaytarıldı" — the customer refused the food and it came back. */}
-      {returningOrder && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
-            <h3 className="font-bold text-lg text-stone-800 mb-1">Sifariş qaytarıldı</h3>
-            <p className="text-sm text-stone-600 mb-4">
-              №{orderLabel(returningOrder)} ləğv ediləcək və{' '}
-              {courierNames[returningOrder.courierId ?? ''] ?? 'kuryerin'} borcundan{' '}
-              <b className="tabular-nums">{(returningOrder.courierDebt ?? 0).toFixed(2)} ₼</b> silinəcək.
-            </p>
-            <input
-              type="text"
-              placeholder="Səbəb (istəyə bağlı)"
-              value={returnReason}
-              onChange={e => setReturnReason(e.target.value)}
-              className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 mb-4"
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={() => { setReturningOrder(null); setReturnReason(''); }}
-                className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50"
-              >
-                İmtina
-              </button>
-              <button
-                onClick={confirmCourierReturn}
-                disabled={returnBusy}
-                className="flex-1 py-3 rounded-xl bg-red-500 hover:bg-red-600 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2"
-              >
-                {returnBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
-                Qaytarıldı
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Payment modal — bottom sheet on mobile */}
       {payingOrder && (() => {

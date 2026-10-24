@@ -15,7 +15,7 @@ function desktopRow(order: Order) {
   const html = renderToStaticMarkup(createElement(OrderRow, {
     order, tableLabel: 'Masa 2', tz: 'Asia/Baku', printFailed: false, unsent: false,
     progress: { done: 0, total: 1 }, isItemReady: () => false,
-    onReprint: noop, onPay: noop, onCancel: noop, onReturn: noop, canPickCourier: false,
+    onReprint: noop, onPay: noop, onCancel: noop, canPickCourier: false,
     onAppend: noop, onMove: noop, onReassign: noop, onPrintBill: noop, billBusy: false,
     onStatusChange: noop,
   }));

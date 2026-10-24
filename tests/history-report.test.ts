@@ -24,7 +24,7 @@ describe('Hesabat', () => {
     const r = historyReport(orders, total);
     expect(r).toEqual({
       count: 3, toplam: 42, endirim: 2, cemi: 40, nagd: 22, kart: 6, kuryer: 12,
-      legv: { count: 1, sum: 7 }, qaytarma: { count: 1, sum: 9 },
+      legv: { count: 2, sum: 16 },
     });
   });
 
@@ -39,12 +39,15 @@ describe('Hesabat', () => {
   it('prints every line, with Kuryer only when some money is out', () => {
     const head = { companyName: 'Chinar', from: '2026-10-20T05:00:00Z', to: '2026-10-20T19:40:00Z', printedBy: 'Natiq', timezone: 'Asia/Baku' };
     const text = historyReportLines(historyReport(orders, total), head).map(l => l.text).join('\n');
-    for (const w of ['Hesabat 20.10.2026', 'Chinar', 'Natiq', 'Sifarişlərin sayı', 'Toplam', 'Endirimlər', 'CƏMİ', 'Nağd', 'Kart', 'Kuryer', 'Ödənişsiz bağlanan (1)', 'Kuryerdən geri alınan (1)']) {
+    for (const w of ['Hesabat 20.10.2026', 'Chinar', 'Natiq', 'Sifarişlərin sayı', 'Toplam', 'Endirimlər', 'CƏMİ', 'Nağd', 'Kart', 'Kuryer', 'Ödənişsiz bağlanan (2)']) {
       expect(text).toContain(w);
     }
     // Names the till does not use confused the owner (Test Restoran, 2026-10-24).
     expect(text).not.toContain('Ləğv');
     expect(text).not.toContain('Qaytarma');
+    // A courier return has no button any more (the owner deletes the order):
+    // a line that always read 0 left Natiq asking where his delivery went (2026-10-24).
+    expect(text).not.toContain('geri alınan');
     expect(text).toContain('09:00');
     const noCourier = historyReportLines(historyReport(orders.filter(o => o.id !== 'c'), total), head).map(l => l.text).join('\n');
     expect(noCourier).not.toMatch(/^Kuryer /m);

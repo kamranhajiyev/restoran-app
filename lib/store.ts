@@ -2063,19 +2063,6 @@ export async function deleteCourierPayment(paymentId: string, by: string): Promi
   return null;
 }
 
-// The customer refused the food and the rider brought it back. The only way a
-// closed order becomes cancelled — deliberately narrow, see the migration.
-export async function returnCourierOrder(orderId: string, reason: string, by: string): Promise<boolean> {
-  const local = await toLocal(undefined, `courier-return:${orderId}`, '/api/return-courier-order', { orderId, reason, by });
-  if (local) return local.ok;
-
-  const { data, error } = await supabase.rpc('cancel_courier_order', {
-    p_order_id: orderId, p_reason: reason, p_by: by,
-  });
-  if (error) { console.error('[returnCourierOrder]', error.message); return false; }
-  return data === true;
-}
-
 export async function recordWriteoff(warehouseId: string, stockItemId: string, qty: number, reason: string, id?: string): Promise<string | null> {
   const { error } = await supabase.rpc('record_writeoff', {
     p_warehouse_id: warehouseId, p_stock_item_id: stockItemId, p_qty: qty, p_reason: reason || null, p_id: id ?? null,

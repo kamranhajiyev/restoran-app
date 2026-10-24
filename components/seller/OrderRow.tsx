@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { AlertTriangle, Bike, ChevronDown, Printer, Undo2 } from 'lucide-react';
+import { AlertTriangle, Bike, ChevronDown, Printer } from 'lucide-react';
 import { isOrderOpen, type Order, type OrderItem, type OrderStatus } from '@/types';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import OrderItemsMerged from '@/components/OrderItemsMerged';
@@ -26,7 +26,7 @@ function ReadyBadge({ progress, allReady }: { progress: { done: number; total: n
   );
 }
 
-export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItemReady, onReprint, onPay, onCancel, onReturn, courierName, canPickCourier, onAppend, onMove, onReassign, onPrintBill, billBusy, onStatusChange }: {
+export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress, isItemReady, onReprint, onPay, onCancel, courierName, canPickCourier, onAppend, onMove, onReassign, onPrintBill, billBusy, onStatusChange }: {
   order: Order;
   tableLabel: string;
   tz: string;
@@ -40,7 +40,6 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
   onCancel: () => void;
   /** The food came back. Offered only on a closed courier order still carrying
    *  debt — the one case where a paid order may be cancelled. */
-  onReturn: () => void;
   courierName?: string;
   /** Whether a rider may be put on this order at all — a delivery that has one,
    *  or a link order still waiting for its first. Never a table or a takeaway. */
@@ -270,13 +269,6 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
                   Ödənişsiz bağla
                 </button>
               </>
-            )}
-            {/* Closed, but the money is still out on a bike and the food is back
-                on the counter. Nothing else in this app reopens a paid order. */}
-            {order.status === 'ödənilib' && (order.courierDebt ?? 0) > 0 && (
-              <button onClick={onReturn} className="flex items-center gap-1 border border-amber-300 text-amber-700 hover:bg-amber-50 text-xs font-semibold px-3 py-1.5 rounded transition-colors whitespace-nowrap">
-                <Undo2 className="w-3.5 h-3.5" />Qaytarıldı
-              </button>
             )}
           </div>
           <div className="text-right">
