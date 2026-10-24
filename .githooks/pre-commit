@@ -1,0 +1,17 @@
+#!/bin/sh
+# Runs the tests and the type check before a commit, as pre-push does before a
+# push: a broken commit caught here never has to be found and undone later.
+# It checks the files as they are on disk, not only what is staged.
+# Skip only in an emergency: git commit --no-verify
+echo "Running tests before commit..."
+npm test --silent || {
+  echo ""
+  echo "Tests failed — commit stopped. Fix them, or in an emergency: git commit --no-verify"
+  exit 1
+}
+echo "Type checking..."
+npx tsc --noEmit -p . || {
+  echo ""
+  echo "Type check failed — commit stopped."
+  exit 1
+}
