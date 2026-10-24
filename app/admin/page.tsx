@@ -84,6 +84,7 @@ import { insertCopyAfter } from '@/lib/menu-copy';
 import { moneyDiff, shiftCheck } from '@/lib/shift-check';
 import { coalesce, REFRESH_GATHER_MS } from '@/lib/coalesce';
 import { KASSA_GATHER_MS, KASSA_TICK_MS, kassaTickDue } from '@/lib/kassa-refresh';
+import { focusRefreshDue } from '@/lib/focus-refresh';
 import { changedOrderId, gatherOrderIds, patchOrders } from '@/lib/order-patch';
 import { onCompanyChange } from '@/lib/company-changes';
 import { DATA_TABLES, gatherParts, type Part } from '@/lib/data-refresh';
@@ -1157,7 +1158,8 @@ function AdminPageContent() {
       const visible = document.visibilityState !== 'hidden';
       if (kassaTickDue({ lastRun: last, now: Date.now(), realtimeUp, visible })) void reload();
     }, KASSA_TICK_MS);
-    const onVisible = () => { if (document.visibilityState === 'visible') void reload(); };
+    // Switching back to the tab often re-read the shift every time (lib/focus-refresh.ts).
+    const onVisible = () => { if (document.visibilityState === 'visible' && focusRefreshDue(last, Date.now())) void reload(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       clearInterval(interval);
@@ -1533,8 +1535,13 @@ function AdminPageContent() {
   }, []);
 
   useEffect(() => {
+    // The page has just loaded; switching back to the tab re-read everything
+    // every time (lib/focus-refresh.ts). Order changes arrive on the signal.
+    let last = Date.now();
     function onVisible() {
-      if (document.visibilityState === 'visible') refreshAllRef.current();
+      if (document.visibilityState !== 'visible' || !focusRefreshDue(last, Date.now())) return;
+      last = Date.now();
+      refreshAllRef.current();
     }
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);

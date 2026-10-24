@@ -22,6 +22,14 @@ describe('re-reading when the till comes back to the front', () => {
     expect(src).toMatch(/if \(!focusRefreshDue\(last, Date\.now\(\)\)\) return;\n\s+last = Date\.now\(\);\n\s+const ticket = beginOrdersRead\(\);/);
   });
 
+  it('gates coming back to the admin page and its Kassa tab', () => {
+    const src = readFileSync('app/admin/page.tsx', 'utf8');
+    expect(src).not.toMatch(/visibilityState === 'visible'\) refreshAllRef\.current\(\)/);
+    expect(src).toMatch(/!focusRefreshDue\(last, Date\.now\(\)\)\) return;\n\s+last = Date\.now\(\);\n\s+refreshAllRef\.current\(\);/);
+    expect(src).not.toMatch(/visibilityState === 'visible'\) void reload\(\)/);
+    expect(src).toMatch(/visibilityState === 'visible' && focusRefreshDue\(last, Date\.now\(\)\)\) void reload\(\)/);
+  });
+
   it('gates both on the link page', () => {
     const src = readFileSync('app/s/[slug]/[token]/page.tsx', 'utf8');
     expect(src).toMatch(/visibilityState === 'visible'\) onFocus\(\)/);
