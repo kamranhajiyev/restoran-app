@@ -484,8 +484,8 @@ const TABLES: Feature = {
       body: 'Masaları sürükləyərək zalın real düzülüşünü qurursunuz. Plan bir dəfə qurulur və hamı eyni şəkli görür.',
     },
     {
-      name: 'Forma və tutum',
-      body: 'Masa üfüqi, şaquli və ya dairəvi ola bilər, hər birinə neçə nəfərlik olduğunu yazırsınız. Plan zalın özünə oxşayanda ofisiant onu tez oxuyur.',
+      name: 'Masanın forması',
+      body: 'Masa üfüqi, şaquli və ya dairəvi ola bilər. Plan zalın özünə oxşayanda ofisiant onu tez oxuyur.',
     },
     {
       name: 'Plan və siyahı görünüşü',

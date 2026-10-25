@@ -777,7 +777,6 @@ function AdminPageContent() {
   const [showTableForm, setShowTableForm] = useState(false);
   const [editingTable, setEditingTable] = useState<RestaurantTable | null>(null);
   const [tName, setTName] = useState('');
-  const [tCapacity, setTCapacity] = useState('4');
   const [tSaving, setTSaving] = useState(false);
   const [qrTable, setQrTable] = useState<RestaurantTable | null>(null);
   const qrRef = useRef<HTMLDivElement>(null);
@@ -5230,7 +5229,7 @@ function AdminPageContent() {
                             <div className={`absolute ${y < 32 ? '-bottom-8' : '-top-7'} left-1/2 -translate-x-1/2 z-20 flex gap-1 bg-white rounded-lg shadow border border-stone-100 px-1.5 py-1`}>
                               <button onClick={e => { e.stopPropagation(); setQrTable(t); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-primary-700"><QrCode className="w-3 h-3" /></button>
                               <button onClick={e => { e.stopPropagation(); duplicateTable({ ...t, x, y, w, h }); }} onMouseDown={e => e.stopPropagation()} title="Kopyala" className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-primary-700"><Copy className="w-3 h-3" /></button>
-                              <button onClick={e => { e.stopPropagation(); setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setTHallId(t.hallId ?? activeHallId ?? ''); setShowTableForm(true); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-primary-700"><Pencil className="w-3 h-3" /></button>
+                              <button onClick={e => { e.stopPropagation(); setEditingTable(t); setTName(t.name); setTShape(t.shape ?? 'rect'); setTHallId(t.hallId ?? activeHallId ?? ''); setShowTableForm(true); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-primary-700"><Pencil className="w-3 h-3" /></button>
                               <button onClick={e => { e.stopPropagation(); if (busy) { setDialog({ title: 'Silinmədi', message: 'Aktiv sifarişi olan masanı silmək olmaz.' }); return; } setDialog({ title: 'Masanı sil?', message: <><span className="font-medium text-stone-700">&ldquo;{t.name}&rdquo;</span> silinəcək.</>, onConfirm: () => deleteTable(t.id).then(err => { if (err) setDialog({ title: 'Silinmədi', message: err }); else setTables(prev => prev.filter(x => x.id !== t.id)); }) }); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
                             </div>
                           )}
@@ -5261,7 +5260,6 @@ function AdminPageContent() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-stone-800 truncate">{t.name}</p>
-                          <p className="text-xs text-stone-500">{t.capacity} nəfər</p>
                         </div>
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${busy ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
                           {busy ? 'Dolu' : 'Boş'}
@@ -5270,7 +5268,7 @@ function AdminPageContent() {
                           <button onClick={() => setQrTable(t)} title="QR kod" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-primary-700 transition-colors">
                             <QrCode className="w-4 h-4" />
                           </button>
-                          <button onClick={() => { setEditingTable(t); setTName(t.name); setTCapacity(String(t.capacity)); setTShape(t.shape ?? 'rect'); setTHallId(t.hallId ?? activeHallId ?? ''); setShowTableForm(true); }} title="Düzəlt" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-primary-700 transition-colors">
+                          <button onClick={() => { setEditingTable(t); setTName(t.name); setTShape(t.shape ?? 'rect'); setTHallId(t.hallId ?? activeHallId ?? ''); setShowTableForm(true); }} title="Düzəlt" className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-primary-700 transition-colors">
                             <Pencil className="w-4 h-4" />
                           </button>
                           <button
@@ -5468,9 +5466,11 @@ function AdminPageContent() {
               onSubmit={async e => {
                 e.preventDefault();
                 setTSaving(true);
-                const cap = Math.max(1, parseInt(tCapacity) || 4);
+                // Seats are no longer asked (2026-10-25, Natiq: the name is
+                // enough); a table keeps what it had, a new one gets 4.
+                const cap = editingTable?.capacity ?? 4;
                 // A table resized on the board keeps its size when only its name
-                // or seats change; picking another shape here starts it fresh.
+                // changes; picking another shape here starts it fresh.
                 const keepSize = editingTable && editingTable.shape === tShape && editingTable.w && editingTable.h;
                 const sw = keepSize ? editingTable.w! : tShape === 'round' ? 90 : tShape === 'rect-v' ? 70 : 100;
                 const sh = keepSize ? editingTable.h! : tShape === 'round' ? 90 : tShape === 'rect-v' ? 100 : 70;
@@ -5500,18 +5500,6 @@ function AdminPageContent() {
                   onChange={e => setTName(e.target.value)}
                   className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                   placeholder="Masa 1"
-                  required
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-stone-600 block mb-1">Tutum (nəfər)</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={50}
-                  value={tCapacity}
-                  onChange={e => setTCapacity(e.target.value)}
-                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                   required
                 />
               </div>

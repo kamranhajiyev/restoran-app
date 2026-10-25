@@ -4100,10 +4100,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                           }`}
                         >
                           <span className="font-bold text-sm leading-tight truncate px-1 max-w-full">{t.name}</span>
-                          {busy && busyTotal > 0
-                            ? <span className="text-[10px] opacity-80 font-semibold">{busyTotal.toFixed(0)} ₼</span>
-                            : <span className="text-[10px] opacity-60">{t.capacity} nəfər</span>
-                          }
+                          {busy && busyTotal > 0 && <span className="text-[10px] opacity-80 font-semibold">{busyTotal.toFixed(0)} ₼</span>}
                         </button>
                       );
                     })}
