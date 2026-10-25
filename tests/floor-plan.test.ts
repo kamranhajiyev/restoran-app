@@ -4,7 +4,7 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { copySpot, fitPlan, keepLocalTables, MIN_TABLE, nextTableName, PLAN_PAD, resizeTable, tableBox, tableRadius, toggleShape } from '@/lib/floor-plan';
+import { copySpot, fitPlan, keepLocalTables, MIN_TABLE, nextTableName, PLAN_PAD, resizeTable, tableBox, tableRadius, tablesInHall, toggleShape } from '@/lib/floor-plan';
 
 // A hall laid out on a wide admin screen: the far table sits at x 1100.
 const wideHall = [
@@ -56,9 +56,22 @@ describe('floor plan fit', () => {
     expect(toggleShape('round', 70, 100)).toBe('rect-v');
   });
 
-  it('names a one-click table after the highest number in every hall', () => {
+  it('names a one-click table after the highest number in the names given', () => {
     expect(nextTableName([])).toBe('1');
     expect(nextTableName(['3', '16 (Zal 1)', 'Bar', 'Müdür'])).toBe('17');
+  });
+
+  it('starts every hall from 1, counting only that hall (2026-10-25, Natiq)', () => {
+    const tables = [
+      { name: '1', hallId: null }, { name: '27', hallId: 'main' },
+      { name: '1', hallId: 'terrace' }, { name: '2', hallId: 'terrace' },
+    ];
+    const next = (hall: string) => nextTableName(tablesInHall(tables, hall, 'main').map(t => t.name));
+    expect(next('main')).toBe('28');
+    expect(next('terrace')).toBe('3');
+    expect(next('new-hall')).toBe('1');
+    // A table with no hall sits in the first hall.
+    expect(tablesInHall(tables, 'main', 'main').map(t => t.name)).toEqual(['1', '27']);
   });
 
   it('puts a copied table just right of the original, not on top of it', () => {

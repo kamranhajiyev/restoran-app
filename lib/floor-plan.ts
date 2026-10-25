@@ -41,13 +41,24 @@ export function toggleShape(shape: RestaurantTable["shape"], w: number, h: numbe
 }
 
 /**
- * The name a table gets from one click on "Masa əlavə et", as in Poster: the
- * next number after the highest one in the restaurant (every hall, so two
- * halls don't both get a "5"). Renamed afterwards if the restaurant wants.
+ * The name a table gets from one click on "Masa əlavə et": the next number
+ * after the highest one in the names given. Admin gives it one hall's tables,
+ * so every hall starts from 1 (2026-10-25, Natiq); two halls each with a "5"
+ * are told apart by the hall name in front (withHall). Renamed afterwards if
+ * the restaurant wants.
  */
 export function nextTableName(names: string[]): string {
   const nums = names.map(n => parseInt(n.trim(), 10)).filter(n => Number.isFinite(n));
   return String(nums.length ? Math.max(...nums) + 1 : 1);
+}
+
+/**
+ * The tables of one hall. A table with no hall predates halls (or its
+ * company's first hall is only being made now): it sits in the first hall
+ * rather than nowhere.
+ */
+export function tablesInHall<T extends { hallId?: string | null }>(tables: T[], hallId: string | null, firstHallId: string | null): T[] {
+  return tables.filter(t => (t.hallId ?? firstHallId) === hallId);
 }
 
 /** Where a copied table lands: just right of the original, same row. */

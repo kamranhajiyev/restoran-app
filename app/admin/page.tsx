@@ -79,7 +79,7 @@ import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt } from '@/lib/printer';
 import { isDesktop } from '@/lib/desktopPrint';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
-import { copySpot, keepLocalTables, nextTableName, resizeTable, tableBox, tableRadius, toggleShape } from '@/lib/floor-plan';
+import { copySpot, keepLocalTables, nextTableName, resizeTable, tableBox, tableRadius, tablesInHall, toggleShape } from '@/lib/floor-plan';
 import { orderPlace, orderPlaceKind, PlaceKind, tableTitle } from '@/lib/order-place';
 import { placeSales, tableSales } from '@/lib/place-sales';
 import { insertCopyAfter } from '@/lib/menu-copy';
@@ -2093,11 +2093,9 @@ function AdminPageContent() {
   }
 
   // ── zallar ────────────────────────────────────────────────────────────────
-  // A table with no hall_id predates halls (or its company's first hall is only
-  // being made now) — show it in the first hall rather than nowhere.
   const firstHallId = halls[0]?.id ?? null;
   const hallTables = useMemo(
-    () => tables.filter(t => (t.hallId ?? firstHallId) === activeHallId),
+    () => tablesInHall(tables, activeHallId, firstHallId),
     [tables, activeHallId, firstHallId],
   );
   const activeHall = halls.find(h => h.id === activeHallId) ?? null;
@@ -2296,7 +2294,7 @@ function AdminPageContent() {
   async function duplicateTable(t: typeof tables[0]) {
     if (tSaving) return;
     setTSaving(true);
-    const name = nextTableName(tables.map(x => x.name));
+    const name = nextTableName(hallTables.map(x => x.name));
     const err = await createTable(name, t.capacity, t.shape ?? 'rect', t.w, t.h, t.hallId ?? activeHallId);
     if (err) { setDialog({ title: 'Xəta', message: err }); setTSaving(false); return; }
     await placeNewTable(name, copySpot(tableBox(t, hallTables.findIndex(o => o.id === t.id))));
@@ -2307,9 +2305,10 @@ function AdminPageContent() {
   async function placeNewTable(name: string, at: { x: number; y: number } | null) {
     const fresh = await fetchTablesOrNull();
     if (!fresh) return;
-    const made = fresh.find(x => x.name === name && x.x == null);
+    // Another hall can have a table of the same name: look only in this one.
+    const inHall = tablesInHall(fresh, activeHallId, halls[0]?.id ?? null);
+    const made = inHall.find(x => x.name === name && x.x == null);
     if (!made) { setTablesFromServer(fresh); return; }
-    const inHall = fresh.filter(x => (x.hallId ?? halls[0]?.id ?? null) === activeHallId);
     const spot = at ?? tableBox(made, inHall.findIndex(x => x.id === made.id));
     const placed = { ...made, x: spot.x, y: spot.y };
     setTablesFromServer(fresh.map(x => x.id === made.id ? placed : x));
@@ -5150,7 +5149,7 @@ function AdminPageContent() {
                   onClick={async () => {
                     setTSaving(true);
                     // A small square; double-click or the corner handle shapes it after.
-                    const name = nextTableName(tables.map(t => t.name));
+                    const name = nextTableName(hallTables.map(t => t.name));
                     const err = await createTable(name, 4, 'rect', 70, 70, activeHallId);
                     if (err) { setDialog({ title: 'Xəta', message: err }); setTSaving(false); return; }
                     // A failed reload keeps the list on screen, not a blank one.
