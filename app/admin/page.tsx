@@ -54,6 +54,7 @@ import {
   addDays, dayDiff, dayOfWeek, dayToDate, tzHour, tzTime, cutoffMinutes,
 } from '@/lib/business-day';
 import { supabase } from '@/lib/supabase';
+import { PICTURE_CACHE, shrinkPicture } from '@/lib/shrink-picture';
 import { CashShift, Category, Hall, MenuItem, MenuItemVariant, ModifierGroup, Order, OrderStatus, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockItem, TrashItem, isOrderOpen } from '@/types';
 import AppDialog, { DialogState } from '@/components/AppDialog';
 import AnbarPanel from '@/components/AnbarPanel';
@@ -1591,11 +1592,13 @@ function AdminPageContent() {
 
   // ── image ──────────────────────────────────────────────────────────────────
   async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const picked = e.target.files?.[0];
+    if (!picked) return;
+    const file = await shrinkPicture(picked);
     const path = imagePath('menu', file.name);
     if (!path) return;
-    const { error } = await supabase.storage.from('menu-images').upload(path, file);
+    // Every upload gets a new name, so a copy may be kept for a year.
+    const { error } = await supabase.storage.from('menu-images').upload(path, file, { cacheControl: PICTURE_CACHE });
     if (error) { setDialog({ title: 'Xəta', message: 'Şəkil yüklənmədi: ' + error.message }); return; }
     const { data } = supabase.storage.from('menu-images').getPublicUrl(path);
     setForm(f => ({ ...f, image: data.publicUrl }));

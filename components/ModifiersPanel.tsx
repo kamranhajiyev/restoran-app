@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Plus, Pencil, Trash2, X, Check, SlidersHorizontal, ImagePlus } from 'lucide-react';
 import { imagePath, saveModifierGroups } from '@/lib/store';
 import { supabase } from '@/lib/supabase';
+import { PICTURE_CACHE, shrinkPicture } from '@/lib/shrink-picture';
 import { MenuItem, ModifierGroup, ModifierOption } from '@/types';
 import { DialogState } from '@/components/AppDialog';
 
@@ -73,14 +74,15 @@ export default function ModifiersPanel({
   }
 
   async function handleImageFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const picked = e.target.files?.[0];
+    if (!picked) return;
     const idx = imgTargetIdx.current;
     setUploadingIdx(idx);
     try {
+      const file = await shrinkPicture(picked);
       const path = imagePath('modifier', file.name);
       if (!path) return;
-      const { error } = await supabase.storage.from('menu-images').upload(path, file);
+      const { error } = await supabase.storage.from('menu-images').upload(path, file, { cacheControl: PICTURE_CACHE });
       if (error) { setDialog({ title: 'Xəta', message: 'Şəkil yüklənmədi: ' + error.message }); return; }
       const { data } = supabase.storage.from('menu-images').getPublicUrl(path);
       setOptions(prev => prev.map((o, i) => i === idx ? { ...o, image: data.publicUrl } : o));

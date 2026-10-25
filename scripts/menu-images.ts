@@ -23,6 +23,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { matchPictures, parseMenuPage, pictureStoragePath } from '@/lib/menu-images';
+import { PICTURE_CACHE } from '@/lib/shrink-picture';
+import { shrinkPictureBuffer } from '@/lib/shrink-picture-node';
 
 const LIVE_REF = 'laxeqbztathmxfbkkthb';
 const BUCKET = 'menu-images';
@@ -82,8 +84,11 @@ async function main() {
     fs.writeFileSync(path.join(dir, `${item.name.trim().replace(/[/\\:]/g, '-')}.${ext}`), body);
     if (!upload) continue;
 
-    const storagePath = pictureStoragePath(company.id, ext);
-    const up = await db.storage.from(BUCKET).upload(storagePath, body, { contentType: type });
+    // The folder keeps the original; the till only needs a small one.
+    const small = await shrinkPictureBuffer(body, 'webp').catch(() => null);
+    const storagePath = pictureStoragePath(company.id, small ? 'webp' : ext);
+    const up = await db.storage.from(BUCKET).upload(storagePath, small?.body ?? body,
+      { contentType: small?.type ?? type, cacheControl: PICTURE_CACHE });
     if (up.error) { failed.push(`${item.name} (upload: ${up.error.message})`); continue; }
     const publicUrl = db.storage.from(BUCKET).getPublicUrl(storagePath).data.publicUrl;
     const { error } = await db.from('menu_items')
