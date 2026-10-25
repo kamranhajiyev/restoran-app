@@ -18,6 +18,7 @@
     "menu-images": "tsx --env-file-if-exists=.env.local scripts/menu-images.ts",
     "shrink-pictures": "tsx --env-file-if-exists=.env.local scripts/shrink-pictures.ts",
     "import-menu": "tsx --env-file-if-exists=.env.local scripts/import-menu.ts",
+    "create-owner": "tsx --env-file-if-exists=.env.local scripts/create-owner.ts",
     "desktop:compile": "tsc -p electron/tsconfig.json",
     "desktop:till": "node scripts/build-desktop.mjs",
     "android:till": "node scripts/build-desktop.mjs --android",

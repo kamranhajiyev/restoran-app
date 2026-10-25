@@ -1,0 +1,15 @@
+{
+  "name": "Odessa Döner",
+
+  "productCategories": ["İsti İçkilər", "Soyuq İçkilər"],
+  "rename": [
+    ["Ət Dönəri", "Dana Əti Dönəri"],
+    ["Dana ətli", "Dana əti"],
+    ["təndər", "təndir"],
+    ["Mərcə", "Mərci"],
+    ["Peraşkə", "Peraşki"],
+    ["çiyər", "ciyər"],
+    ["Vegetarıan", "Vegetarian"],
+    ["dəmər", "dəmir"]
+  ]
+}

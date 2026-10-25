@@ -1,6 +1,7 @@
 // Pictures for a menu that was imported from another restaurant's online menu.
 //
-// The online menu (a Clopos e-menu, a monyo.az page or a Poster menu.ps.me page) shows each product with its
+// The online menu (a Clopos e-menu, a monyo.az page, a Poster menu.ps.me page, or a
+// restaurant's own site with schema.org data) shows each product with its
 // picture. These functions read that page and pair each picture with our own
 // product of the same name. Downloading and uploading live in
 // scripts/menu-images.ts; everything here is plain logic so it can be tested.
@@ -93,13 +94,77 @@ export function psMeProducts(html: string): PsMeProduct[] {
   return out;
 }
 
+type Json = Record<string, unknown>;
+
+const isType = (o: Json, t: string) => ([] as unknown[]).concat(o['@type']).includes(t);
+
+function firstImage(image: unknown, pageUrl: string): string | null {
+  const first = ([] as unknown[]).concat(image)[0];
+  const src = typeof first === 'string' ? first : (first as Json | undefined)?.url;
+  return typeof src === 'string' && src ? new URL(src, pageUrl).href : null;
+}
+
+function offerPrice(offers: unknown): number | null {
+  const first = ([] as unknown[]).concat(offers)[0] as Json | undefined;
+  const n = parseFloat(String(first?.price ?? '').replace(',', '.'));
+  return isNaN(n) || n < 0 ? null : Math.round(n * 100) / 100;
+}
+
+/** Every Product or MenuItem in a page's schema.org data (<script type="application/ld+json">),
+ *  which many restaurants' own sites carry for Google (odessadoner.com/menu).
+ *  A MenuItem without its own category takes the name of the MenuSection it sits in. */
+export function jsonLdProducts(html: string, pageUrl: string): PsMeProduct[] {
+  const seen = new Set<string>();
+  const out: PsMeProduct[] = [];
+  const walk = (node: unknown, section: string) => {
+    if (Array.isArray(node)) { node.forEach(n => walk(n, section)); return; }
+    if (!node || typeof node !== 'object') return;
+    const o = node as Json;
+    if ((isType(o, 'Product') || isType(o, 'MenuItem')) && typeof o.name === 'string') {
+      const name = decodeHtml(o.name).replace(/\s+/g, ' ').trim();
+      if (name && !seen.has(pictureKey(name))) {
+        seen.add(pictureKey(name));
+        out.push({
+          name,
+          category: typeof o.category === 'string' ? o.category.trim() : section,
+          price: offerPrice(o.offers),
+          photo: firstImage(o.image, pageUrl),
+        });
+      }
+      return;
+    }
+    const inside = isType(o, 'MenuSection') && typeof o.name === 'string' ? o.name.trim() : section;
+    Object.values(o).forEach(v => walk(v, inside));
+  };
+  for (const m of html.matchAll(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g)) {
+    try { walk(JSON.parse(m[1]), ''); } catch { /* a broken block says nothing about the menu */ }
+  }
+  return out;
+}
+
+/** Products with their category and price, from a page that carries them:
+ *  a Poster menu.ps.me page, or any site with schema.org data. Feeds the converter. */
+export function pageProducts(html: string, pageUrl: string): PsMeProduct[] {
+  return new URL(pageUrl).hostname === 'menu.ps.me' ? psMeProducts(html) : jsonLdProducts(html, pageUrl);
+}
+
 /** Reads whichever kind of online menu the link points at. */
 export function parseMenuPage(html: string, pageUrl: string): PagePicture[] {
   const host = new URL(pageUrl).hostname;
   if (host.endsWith('monyo.az')) return parseMonyoPage(html, pageUrl);
   if (host.endsWith('clopos.menu')) return parseCloposPage(html);
-  if (host === 'menu.ps.me') return psMeProducts(html).map(p => ({ name: p.name, imageUrl: p.photo }));
-  throw new Error(`Unknown menu site: ${host} (Clopos, monyo.az or menu.ps.me only)`);
+  const products = pageProducts(html, pageUrl);
+  if (products.length === 0) {
+    throw new Error(`No menu found on ${host} (Clopos, monyo.az, menu.ps.me, or a site with schema.org Product data)`);
+  }
+  return products.map(p => ({ name: p.name, imageUrl: p.photo }));
+}
+
+/** A company's spelling fixes (scripts/configs/<company>.json "rename"), as
+ *  [from, to] pairs replaced anywhere in a name. The converter writes the fixed
+ *  names, so the picture script fixes the page's names the same way before matching. */
+export function applyRenames(name: string, renames: [string, string][] = []): string {
+  return renames.reduce((n, [from, to]) => (from ? n.split(from).join(to) : n), name);
 }
 
 /** Pairs our products with the page's pictures by name. A product that

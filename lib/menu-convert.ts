@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { COL } from './excel';
-import { psMeProducts } from './menu-images';
+import { applyRenames, pageProducts } from './menu-images';
 import type { MenuTextResult } from './menu-text';
 
 // Another POS's menu export turned into the same file the admin import reads.
@@ -12,12 +12,13 @@ import type { MenuTextResult } from './menu-text';
 //   Poster  — no fixed layout: column numbers and how sizes are written live in
 //             the company's config. Sometimes dishes and products are two files.
 //
-// A Poster online menu page (menu.ps.me) works too, with no export at all:
-// convertPsMePage reads names, categories and prices off the page.
+// An online menu page works too, with no export at all: convertMenuPage reads
+// names, categories and prices off a Poster menu.ps.me page or any site that
+// carries schema.org Product data (odessadoner.com/menu).
 //
 // One config per company in scripts/configs/<company>.json.
 
-export type Source = 'clopos' | 'poster' | 'psme';
+export type Source = 'clopos' | 'poster' | 'psme' | 'jsonld';
 type Kind = 'meal' | 'product' | 'set';
 
 interface PosterSheet {
@@ -43,6 +44,9 @@ export interface ConvertConfig {
   variantLabels?: string[];
   categoryFallthrough?: boolean;
   skipIfNoPrice?: boolean;
+  /** Spelling fixes as [from, to], replaced anywhere in names and categories
+   *  (the paper menu's "Dana əti" where the site says "Dana ətli"). Before the Növ rules. */
+  rename?: [string, string][];
 }
 
 interface Item {
@@ -156,14 +160,16 @@ export function convertMenu(wb: XLSX.WorkBook, cfg: ConvertConfig, products?: XL
   return toResult(items, cfg, source, notes);
 }
 
-/** A Poster online menu page (menu.ps.me/<id>) as the import file. */
-export function convertPsMePage(html: string, cfg: ConvertConfig): ConvertResult {
+/** An online menu page (menu.ps.me/<id>, or a site with schema.org data) as the import file. */
+export function convertMenuPage(html: string, pageUrl: string, cfg: ConvertConfig): ConvertResult {
   const kindOf = kindRule(cfg);
-  const items: Item[] = psMeProducts(html).map(p => ({
-    category: p.category, name: p.name, price: p.price, cost: null, kind: kindOf(p.category, p.name), variants: [],
-  }));
-  if (items.length === 0) throw new Error('No products found on the page. Is it a menu.ps.me/<id> link?');
-  return toResult(items, cfg, 'psme', []);
+  const items: Item[] = pageProducts(html, pageUrl).map(p => {
+    const name = applyRenames(p.name, cfg.rename);
+    const category = applyRenames(p.category, cfg.rename);
+    return { category, name, price: p.price, cost: null, kind: kindOf(category, name), variants: [] };
+  });
+  if (items.length === 0) throw new Error('No products found on the page. Is it a menu.ps.me/<id> link or a site with schema.org Product data?');
+  return toResult(items, cfg, new URL(pageUrl).hostname === 'menu.ps.me' ? 'psme' : 'jsonld', []);
 }
 
 function toResult(items: Item[], cfg: ConvertConfig, source: Source, notes: string[]): ConvertResult {

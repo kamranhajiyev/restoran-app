@@ -11,8 +11,13 @@
  *   // A monyo.az menu works the same way
  *   npm run menu-images -- --company cinar --url "https://monyo.az/v4/?r=cinarrestoran"
  *
+ *   // So do menu.ps.me and a restaurant's own site with schema.org Product data
+ *   npm run menu-images -- --company odessa-doner --url https://odessadoner.com/menu
+ *
  * --company is the company's slug. A product that already has a picture keeps
  * it unless --replace is given, so a second run uploads nothing twice.
+ * The "rename" fixes in scripts/configs/<company>.json, if there is one, are
+ * applied to the page's names first, so dishes renamed by the converter still match.
  *
  * The database is the one in .env.local (testing). Production is refused
  * unless --production is given, and only on the owner's say-so (AGENTS.md):
@@ -22,7 +27,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createClient } from '@supabase/supabase-js';
-import { matchPictures, parseMenuPage, pictureStoragePath } from '@/lib/menu-images';
+import { applyRenames, matchPictures, parseMenuPage, pictureStoragePath } from '@/lib/menu-images';
 import { PICTURE_CACHE } from '@/lib/shrink-picture';
 import { shrinkPictureBuffer } from '@/lib/shrink-picture-node';
 
@@ -60,7 +65,11 @@ async function main() {
 
   const res = await fetch(pageUrl);
   if (!res.ok) fail(`Menu page answered ${res.status}.`);
-  const page = parseMenuPage(await res.text(), pageUrl);
+  const configPath = path.join(__dirname, 'configs', `${slug}.json`);
+  const renames: [string, string][] = fs.existsSync(configPath)
+    ? JSON.parse(fs.readFileSync(configPath, 'utf-8')).rename ?? []
+    : [];
+  const page = parseMenuPage(await res.text(), pageUrl).map(p => ({ ...p, name: applyRenames(p.name, renames) }));
   if (page.length === 0) fail('No products found on the page. Is it a Clopos …/products or monyo.az/v4/?r=… page?');
 
   const m = matchPictures(products, page, { replace: has('--replace') });

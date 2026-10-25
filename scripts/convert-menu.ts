@@ -10,6 +10,9 @@
  *   // A Poster online menu page instead of a file:
  *   npm run convert -- --company cinar-lounge --url https://menu.ps.me/SWoDd4Ipp8E
  *
+ *   // Or the restaurant's own site, when it carries schema.org Product data:
+ *   npm run convert -- --company odessa-doner --url https://odessadoner.com/menu
+ *
  * Output: <file>-converted.xlsx next to --file (for --url: ~/Downloads/<company>-converted.xlsx),
  * checked with the import's own reader first.
  * Which POS the file came from is read from the file. One config per company in
@@ -20,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import * as XLSX from 'xlsx';
 import { parseMenuFile } from '@/lib/excel';
-import { convertMenu, convertPsMePage, type ConvertConfig } from '@/lib/menu-convert';
+import { convertMenu, convertMenuPage, type ConvertConfig } from '@/lib/menu-convert';
 import { menuTextWorkbook } from '@/lib/menu-text';
 
 const args = process.argv.slice(2);
@@ -47,10 +50,9 @@ async function main() {
 
   let result;
   if (pageUrl) {
-    if (new URL(pageUrl).hostname !== 'menu.ps.me') { console.error('--url takes a menu.ps.me link only.'); process.exit(1); }
     const res = await fetch(pageUrl);
     if (!res.ok) { console.error(`Menu page answered ${res.status}.`); process.exit(1); }
-    result = convertPsMePage(await res.text(), cfg);
+    result = convertMenuPage(await res.text(), pageUrl, cfg);
   } else {
     result = convertMenu(XLSX.readFile(file!), cfg, productsFile ? XLSX.readFile(productsFile) : undefined);
   }

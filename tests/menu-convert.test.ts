@@ -4,7 +4,7 @@
 import * as XLSX from 'xlsx';
 import { describe, expect, it } from 'vitest';
 import { parseMenuFile } from '@/lib/excel';
-import { convertMenu, convertPsMePage, detectSource, type ConvertConfig } from '@/lib/menu-convert';
+import { convertMenu, convertMenuPage, detectSource, type ConvertConfig } from '@/lib/menu-convert';
 import { menuTextWorkbook } from '@/lib/menu-text';
 
 function book(sheets: Record<string, unknown[][]>): XLSX.WorkBook {
@@ -85,7 +85,9 @@ describe('menu converter', () => {
   });
 });
 
-describe('convertPsMePage', () => {
+const PSME = "https://menu.ps.me/SWoDd4Ipp8E";
+
+describe("convertMenuPage (menu.ps.me)", () => {
   const page = `<script id="menu-data" type="application/json">[
     {"name":"Basdırma et","categoryName":"Pive cerezleri","price":5,"photo":null},
     {"name":"Tum","categoryName":"Pive cerezleri","price":2,"photo":null},
@@ -100,7 +102,7 @@ describe('convertPsMePage', () => {
   };
 
   it('makes the import file from the page, with Növ from the config', async () => {
-    const result = convertPsMePage(page, cfg);
+    const result = convertMenuPage(page, PSME, cfg);
     expect(result.source).toBe('psme');
     expect(result.rows.map(r => [r['Məhsul'], r['Növ']])).toEqual([
       ['Basdırma et', 'Yemək'], ['Tum', 'Məhsul'], ['Red Bull', 'Məhsul'], ['Set 3. ( Qelyan, Cola 1Lt,Tum )', 'Set'],
@@ -112,6 +114,33 @@ describe('convertPsMePage', () => {
   });
 
   it('refuses a page with no menu on it', () => {
-    expect(() => convertPsMePage('<html></html>', cfg)).toThrow(/No products/);
+    expect(() => convertMenuPage("<html></html>", PSME, cfg)).toThrow(/No products/);
+  });
+});
+
+describe('convertMenuPage (a site with schema.org data)', () => {
+  const ld = (name: string, category: string, price: string) =>
+    ({ '@type': 'ListItem', item: { '@type': 'Product', name, category, offers: { price } } });
+  const page = `<script type="application/ld+json">${JSON.stringify({ '@type': 'ItemList', itemListElement: [
+    ld('Dana ətli lavaş', 'Ət Dönəri', '3.60'),
+    ld('Cola / Fanta / Sprite (dəmər banka)', 'Soyuq İçkilər', '2.00'),
+  ] })}</script>`;
+  const cfg: ConvertConfig = {
+    name: 'Odessa Döner',
+    productCategories: ['Soyuq İçkilər'],
+    rename: [['Ət Dönəri', 'Dana Əti Dönəri'], ['Dana ətli', 'Dana əti'], ['dəmər', 'dəmir']],
+  };
+
+  it('writes the fixed spellings, with Növ from the config, and the import reads it', async () => {
+    const result = convertMenuPage(page, 'https://odessadoner.com/menu', cfg);
+    expect(result.source).toBe('jsonld');
+    expect(result.rows.map(r => [r['Kateqoriya'], r['Məhsul'], r['Növ']])).toEqual([
+      ['Dana Əti Dönəri', 'Dana əti lavaş', 'Yemək'],
+      ['Soyuq İçkilər', 'Cola / Fanta / Sprite (dəmir banka)', 'Məhsul'],
+    ]);
+    const buf: Buffer = XLSX.write(menuTextWorkbook(result), { type: 'buffer', bookType: 'xlsx' });
+    const preview = await parseMenuFile(new File([new Uint8Array(buf)], 'm.xlsx'), [], []);
+    expect(preview.errors).toEqual([]);
+    expect(preview.newItems.map(i => i.price)).toEqual([3.6, 2]);
   });
 });

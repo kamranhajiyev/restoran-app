@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { matchPictures, parseCloposPage, parseMenuPage, parseMonyoPage, pictureKey, pictureStoragePath, psMeProducts } from '@/lib/menu-images';
+import {
+  applyRenames, jsonLdProducts, matchPictures, parseCloposPage, parseMenuPage, parseMonyoPage, pictureKey, pictureStoragePath, psMeProducts,
+} from '@/lib/menu-images';
 
 // The shape a Clopos e-menu page carries its products in: JSON with escaped quotes.
 const product = (name: string, media: string) =>
@@ -40,9 +42,9 @@ describe('parseMonyoPage', () => {
     ]);
   });
 
-  it('is picked by the link, and an unknown site is refused', () => {
+  it('is picked by the link, and a site with no menu on it is refused', () => {
     expect(parseMenuPage(card('Kofe', 'uploads/k.jpg'), page)).toHaveLength(1);
-    expect(() => parseMenuPage('', 'https://example.com/menu')).toThrow();
+    expect(() => parseMenuPage('', 'https://example.com/menu')).toThrow();  // no menu data on it
   });
 });
 
@@ -103,5 +105,48 @@ describe('menu.ps.me (Poster online menu)', () => {
 
   it('finds nothing on a page without the menu data', () => {
     expect(psMeProducts('<html></html>')).toEqual([]);
+  });
+});
+
+describe("a restaurant's own site (schema.org data)", () => {
+  const PAGE = 'https://odessadoner.com/menu';
+  const ld = (data: unknown) => `<script type="application/ld+json">${JSON.stringify(data)}</script>`;
+  const product = (name: string, category: string, price: string, image?: unknown) =>
+    ({ '@type': 'ListItem', item: { '@type': 'Product', name, category, image, offers: { '@type': 'Offer', price } } });
+  const html = ld({ '@type': 'Organization', name: 'Odessa Döner', logo: '/logo.png' }) + ld([{
+    '@type': 'ItemList', itemListElement: [
+      product('Toyuq çörək', 'Toyuq Dönəri', '2.20', ['https://res.cloudinary.com/x/a.jpg']),
+      product('Dana ətli  lavaş', 'Ət Dönəri', '3.60', '/img/b.jpg'),
+      product('Borş', 'Şorbalar', '3.50'),
+      product('Toyuq çörək', 'Toyuq Dönəri', '9'),
+    ],
+  }]) + '<script type="application/ld+json">{broken</script>';
+
+  it('reads every product once, with category, price and a full picture link', () => {
+    expect(jsonLdProducts(html, PAGE)).toEqual([
+      { name: 'Toyuq çörək', category: 'Toyuq Dönəri', price: 2.2, photo: 'https://res.cloudinary.com/x/a.jpg' },
+      { name: 'Dana ətli lavaş', category: 'Ət Dönəri', price: 3.6, photo: 'https://odessadoner.com/img/b.jpg' },
+      { name: 'Borş', category: 'Şorbalar', price: 3.5, photo: null },
+    ]);
+  });
+
+  it('reads a schema.org Menu too, a dish taking its section as category', () => {
+    const menu = ld({ '@type': 'Menu', hasMenuSection: [{ '@type': 'MenuSection', name: 'Salatlar', hasMenuItem: [
+      { '@type': 'MenuItem', name: 'Çoban salatı', image: { url: 'https://x/c.jpg' }, offers: [{ price: 3 }] },
+    ] }] });
+    expect(jsonLdProducts(menu, PAGE)).toEqual([{ name: 'Çoban salatı', category: 'Salatlar', price: 3, photo: 'https://x/c.jpg' }]);
+  });
+
+  it('is picked by parseMenuPage for any other site, which is refused only when it has no menu data', () => {
+    expect(parseMenuPage(html, PAGE).map(p => p.name)).toEqual(['Toyuq çörək', 'Dana ətli lavaş', 'Borş']);
+    expect(() => parseMenuPage('<html></html>', PAGE)).toThrow(/No menu found/);
+  });
+
+  it("applies a company's spelling fixes, so renamed dishes still find their picture", () => {
+    const renames: [string, string][] = [['Dana ətli', 'Dana əti'], ['Mərcə', 'Mərci']];
+    expect(applyRenames('Dana ətli lavaş + Mərcə şorbası', renames)).toBe('Dana əti lavaş + Mərci şorbası');
+    const page = parseMenuPage(html, PAGE).map(p => ({ ...p, name: applyRenames(p.name, renames) }));
+    expect(matchPictures([{ id: '1', name: 'Dana əti lavaş', image: null }], page).matched).toHaveLength(1);
+    expect(applyRenames('Borş')).toBe('Borş');
   });
 });
