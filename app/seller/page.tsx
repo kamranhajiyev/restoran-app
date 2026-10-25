@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
+import { pinKey } from '@/lib/pin-keys';
 import {
   addOrder, addItemsToOrder, removeOrderItems, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, setCompanyContext,
   fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchOpenShift, fetchShifts, openShift, closeShift, addShiftMovement, fetchShiftSales,
@@ -585,8 +586,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   useEffect(() => {
     if (!pinLocked) return;
     const h = (e: KeyboardEvent) => {
-      if (/^\d$/.test(e.key)) pressPin(e.key);
-      else if (e.key === 'Backspace') setPinInput(p => p.slice(0, -1));
+      const k = pinKey(e);
+      if (k && typeof k === 'object') pressPin(k.digit);
+      else if (k === 'back') setPinInput(p => p.slice(0, -1));
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);

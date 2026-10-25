@@ -2,8 +2,11 @@
 
 // The box a manager types their PIN into when an action needs approval
 // (lib/till-rules). Only the keypad: checking the PIN is the seller page's job.
+// A laptop keyboard types into it too (2026-10-25, Natiq); Esc closes it.
 
+import { useEffect } from 'react';
 import { Delete, ShieldCheck, X } from 'lucide-react';
+import { pinKey } from '@/lib/pin-keys';
 
 export function ApprovalPad({ action, pin, msg, busy, onDigit, onBack, onCancel }: {
   action: string;
@@ -14,6 +17,21 @@ export function ApprovalPad({ action, pin, msg, busy, onDigit, onBack, onCancel 
   onBack: () => void;
   onCancel: () => void;
 }) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const k = pinKey(e);
+      if (!k) return;
+      // The box sits above everything: a digit must not also land in a field behind it.
+      e.preventDefault();
+      if (busy) return;
+      if (typeof k === 'object') onDigit(k.digit);
+      else if (k === 'back') { if (pin.length > 0) onBack(); }
+      else onCancel();
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [busy, pin, onDigit, onBack, onCancel]);
+
   const key = 'w-16 h-16 rounded-2xl bg-white border border-stone-200 text-2xl font-semibold text-stone-700 hover:bg-stone-50 active:scale-95 transition-all disabled:opacity-50';
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4">
