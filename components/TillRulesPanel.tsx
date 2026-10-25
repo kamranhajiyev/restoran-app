@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { KeyRound, Lock, ShieldCheck } from 'lucide-react';
 import { fetchTillRules, saveTillRules } from '@/lib/store';
-import { ROLE_NAMES, TILL_ACTIONS, TILL_RULES_NEW, ruleFor, type Rule, type RuledRole, type TillAction, type TillRules } from '@/lib/till-rules';
+import { ROLE_NAMES, TILL_ACTIONS, TILL_RULES_NEW, fixedRule, ruleFor, type Rule, type RuledRole, type TillAction, type TillRules } from '@/lib/till-rules';
 import type { Staff } from '@/types';
 
 const ROLES: RuledRole[] = ['seller', 'waiter'];
@@ -88,17 +88,18 @@ export default function TillRulesPanel({ staff }: { staff: Staff[] }) {
           <div className="divide-y divide-stone-100">
             {TILL_ACTIONS.map(a => {
               const current = ruleFor(rules, role, a.id);
+              const fixed = fixedRule(role, a.id);
               return (
                 <div key={a.id} className="flex items-center justify-between gap-3 py-3 flex-wrap">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-stone-800">{a.label}</p>
-                    <p className="text-xs text-stone-500">{a.hint}</p>
+                    <p className="text-xs text-stone-500">{fixed ? `${ROLE_NAMES[role]} üçün həmişə açıqdır` : a.hint}</p>
                   </div>
                   <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5 shrink-0">
                     {RULES.map(r => {
                       const Icon = r.icon;
                       return (
-                        <button key={r.id} disabled={saving} onClick={() => current !== r.id && set(a.id, r.id)}
+                        <button key={r.id} disabled={saving || !!fixed} onClick={() => current !== r.id && set(a.id, r.id)}
                           className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors disabled:opacity-60 ${current === r.id ? r.on : 'text-stone-500 hover:text-stone-700'}`}>
                           <Icon className="w-3.5 h-3.5" />{r.label}
                         </button>

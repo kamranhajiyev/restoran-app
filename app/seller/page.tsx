@@ -501,6 +501,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
 
   const myRole = pinStaffList.find(s => s.id === activeStaff?.id)?.role ?? 'seller';
   const rulesOn = rulesApply(pinStaffList) && !!activeStaff;
+  // "Qadağan" for Kassa hides it altogether: no tab, and no "Növbəni aç".
+  const kassaShown = kassaOn && !(rulesOn && ruleFor(tillRules, myRole, 'kassa') === 'deny');
+  const couriersShown = deliveryOn && !(rulesOn && ruleFor(tillRules, myRole, 'couriers') === 'deny');
 
   /** Not allowed at all for whoever is signed in? Says so, so the tap is refused on the spot. */
   function refused(action: TillAction): boolean {
@@ -613,11 +616,19 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     }
   }, [pinStaffList, activeStaff]);
 
-  // Tarixçə was opened for one person: whoever signs in next starts on the
-  // orders, so they cannot read history someone else was let into.
+  // Tarixçə and Kassa were opened for one person: whoever signs in next starts
+  // on the orders, so they cannot use what someone else was let into.
   useEffect(() => {
-    setView(v => (v === 'history' ? 'orders' : v));
+    setView(v => (v === 'history' || v === 'kassa' || v === 'couriers' ? 'orders' : v));
   }, [activeStaff?.id]);
+
+  // The owner closed Kassa or Kuryerlər to this role while it was open on screen.
+  useEffect(() => {
+    if (!kassaShown) setView(v => (v === 'kassa' ? 'orders' : v));
+  }, [kassaShown]);
+  useEffect(() => {
+    if (!couriersShown) setView(v => (v === 'couriers' ? 'orders' : v));
+  }, [couriersShown]);
 
   // order history
   const [historySearch, setHistorySearch]   = useState('');
@@ -1798,10 +1809,12 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   }, [overrideCompanyId]);
 
   async function handleNav(id: View) {
-    if (id === 'kassa' && !kassaOn) return;
-    if (id === 'couriers' && !deliveryOn) return;
+    if (id === 'kassa' && !kassaShown) return;
+    if (id === 'couriers' && !couriersShown) return;
     // Asked on every way in, before anything on screen is thrown away.
     if (id === 'history' && view !== 'history' && !(await guard(['view_history'])).ok) return;
+    if (id === 'kassa' && view !== 'kassa' && !(await guard(['kassa'])).ok) return;
+    if (id === 'couriers' && view !== 'couriers' && !(await guard(['couriers'])).ok) return;
     if (!(await confirmDiscardRemovals())) return;
     updatePendingRemovals({});
     setAppendOrderId(null);
@@ -2678,6 +2691,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       // undefined is a failed read, not a closed shift: on a blip the seller was
       // thrown to Sifarişlər from Kassa or Tarixçə (Test Restoran, 2026-10-06).
       if (open === null && shift) { setShift(null); setView('orders'); }
+      // Opened on another till: a waiter kept off the kassa is waiting for it.
+      else if (open && !shift) setShift(open);
     };
     const id = setInterval(() => {
       if (timerDue(last, Date.now(), tillSignalUp(), SAFETY_NET_MS)) void check();
@@ -2723,6 +2738,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   }, [view, loadHistory]);
 
   async function handleOpenShift() {
+    if (!(await guard(['kassa'])).ok) return;
     const cash = parseFloat(openCashInput) || 0;
     setShiftBusy(true);
     let s = null;
@@ -2980,11 +2996,11 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
           {[
             { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
             { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
-            ...(kassaOn ? [{ id: 'kassa' as View, label: 'Kassa', icon: Wallet }] : []),
+            ...(kassaShown ? [{ id: 'kassa' as View, label: 'Kassa', icon: Wallet }] : []),
             // Only where the owner turned çatdırılma on: a restaurant that does
             // not deliver should not carry an empty tab around for the life of
             // the app.
-            ...(deliveryOn ? [{ id: 'couriers' as View, label: 'Kuryerlər', icon: Bike }] : []),
+            ...(couriersShown ? [{ id: 'couriers' as View, label: 'Kuryerlər', icon: Bike }] : []),
             { id: 'history' as View,   label: 'Tarixçə',      icon: History },
           ].map(n => {
             const Icon = n.icon;
@@ -3142,6 +3158,26 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     );
   }
 
+  if (!shift && kassaOn && !kassaShown) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#f7f3ed] px-4">
+        <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm text-center">
+          <div className="w-12 h-12 rounded-2xl bg-stone-200 flex items-center justify-center mx-auto mb-3">
+            <Wallet className="w-6 h-6 text-stone-500" />
+          </div>
+          <h1 className="text-xl font-bold text-stone-800">Növbə açılmayıb</h1>
+          <p className="text-stone-600 text-sm mt-1 mb-6">Kassir və ya menecer növbəni açandan sonra işə başlaya bilərsiniz.</p>
+          <button
+            onClick={() => { sessionStorage.removeItem('activeStaff'); setActiveStaff(null); }}
+            className="w-full bg-primary-800 hover:bg-primary-900 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+          >
+            <KeyRound className="w-4 h-4" /> Başqa əməkdaş
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!shift && kassaOn) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f7f3ed] px-4">
@@ -3180,6 +3216,17 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
             </button>
           )}
         </div>
+        {approval && (
+          <ApprovalPad
+            action={approval.label}
+            pin={approvalPin}
+            msg={approvalMsg}
+            busy={approvalBusy}
+            onDigit={d => void pressApprovalPin(d)}
+            onBack={() => setApprovalPin(p => p.slice(0, -1))}
+            onCancel={() => closeApproval(null)}
+          />
+        )}
       </div>
     );
   }
@@ -4370,8 +4417,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         {[
           { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
           { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
-          ...(kassaOn ? [{ id: 'kassa' as View, label: 'Kassa', icon: Wallet }] : []),
-          ...(deliveryOn ? [{ id: 'couriers' as View, label: 'Kuryerlər', icon: Bike }] : []),
+          ...(kassaShown ? [{ id: 'kassa' as View, label: 'Kassa', icon: Wallet }] : []),
+          ...(couriersShown ? [{ id: 'couriers' as View, label: 'Kuryerlər', icon: Bike }] : []),
           { id: 'history' as View,   label: 'Tarixçə',      icon: History },
         ].map(n => {
           const Icon = n.icon;

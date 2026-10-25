@@ -12,7 +12,7 @@
 import bcrypt from 'bcryptjs';
 import type { Order, OrderItem, Staff, StaffRole } from '../types';
 
-export type TillAction = 'remove_item' | 'remove_after_bill' | 'add_after_bill' | 'cancel' | 'discount' | 'view_history';
+export type TillAction = 'remove_item' | 'remove_after_bill' | 'add_after_bill' | 'cancel' | 'discount' | 'view_history' | 'kassa' | 'couriers';
 export type Rule = 'free' | 'pin' | 'deny';
 /** The roles the owner sets rules for. A manager needs none. */
 export type RuledRole = Exclude<StaffRole, 'manager'>;
@@ -25,7 +25,22 @@ export const TILL_ACTIONS: { id: TillAction; label: string; hint: string }[] = [
   { id: 'cancel',            label: 'Ödənişsiz bağlamaq',         hint: 'Sifarişi pul almadan bağlamaq' },
   { id: 'discount',          label: 'Endirim etmək',              hint: 'Ödənişdə endirim vermək' },
   { id: 'view_history',      label: 'Tarixçəyə baxmaq',           hint: 'Keçmiş sifarişləri və günün satışını görmək' },
+  { id: 'kassa',             label: 'Kassa',                      hint: 'Kassa bölməsini görmək, növbəni açmaq və bağlamaq' },
+  { id: 'couriers',          label: 'Kuryerlər',                  hint: 'Kuryerlər bölməsini görmək və onlardan pul qəbul etmək' },
 ];
+
+/**
+ * Rules the owner cannot change. The seller keeps the kassa: closed to the
+ * seller and the waiter alike, nobody but a manager could open a shift.
+ */
+const FIXED: Partial<Record<RuledRole, Partial<Record<TillAction, Rule>>>> = {
+  seller: { kassa: 'free' },
+};
+
+/** The rule this role always has for this action, or null when the owner picks. */
+export function fixedRule(role: RuledRole, action: TillAction): Rule | null {
+  return FIXED[role]?.[action] ?? null;
+}
 
 export const ROLE_NAMES: Record<StaffRole, string> = {
   seller: 'Satıcı',
@@ -47,6 +62,8 @@ const STRICTNESS: Record<Rule, number> = { free: 0, pin: 1, deny: 2 };
  */
 export function ruleFor(rules: TillRules | null | undefined, role: StaffRole | undefined, action: TillAction): Rule {
   if (!rules || !role || role === 'manager') return 'free';
+  const fixed = fixedRule(role, action);
+  if (fixed) return fixed;
   const r = rules[role]?.[action];
   return r === 'pin' || r === 'deny' ? r : 'free';
 }

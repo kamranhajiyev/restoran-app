@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  TILL_RULES_NEW, addAction, approvedBy, cleanRules, managerByPinOffline, removalAction, ruleFor, rulesApply, strictest,
+  TILL_RULES_NEW, addAction, approvedBy, cleanRules, fixedRule, managerByPinOffline, removalAction, ruleFor, rulesApply, strictest,
 } from '@/lib/till-rules';
 import type { Staff } from '@/types';
 
@@ -135,9 +135,54 @@ describe('the seller page', () => {
 
   it('asks before Tarixçə opens, and closes it when someone else signs in', () => {
     expect(ruleFor(TILL_RULES_NEW, 'seller', 'view_history')).toBe('pin');
-    expect(seller).toMatch(/id === 'history' && view !== 'history' && !\(await guard\(\['view_history'\]\)\)\.ok\) return;\s+if \(!\(await confirmDiscardRemovals/);
-    expect(seller).toMatch(/setView\(v => \(v === 'history' \? 'orders' : v\)\);\s+\}, \[activeStaff\?\.id\]\);/);
+    expect(seller).toMatch(/id === 'history' && view !== 'history' && !\(await guard\(\['view_history'\]\)\)\.ok\) return;(\s+if \(id === '(kassa|couriers)' [^\n]+)+\n\s+if \(!\(await confirmDiscardRemovals/);
+    expect(seller).toMatch(/setView\(v => \(v === 'history' \|\| v === 'kassa' \|\| v === 'couriers' \? 'orders' : v\)\);\s+\}, \[activeStaff\?\.id\]\);/);
     // The only way into Tarixçə is the menu, through handleNav.
     expect(seller).not.toMatch(/setView\('history'\)/);
+  });
+});
+
+// 2026-10-25: the owner wants waiters kept off the kassa, but someone must
+// always be able to open the shift.
+describe('Kassa', () => {
+  it('is the owner\'s choice for the waiter, and always open to the seller and the manager', () => {
+    const rules = { seller: { kassa: 'deny' }, waiter: { kassa: 'deny' } } as const;
+    expect(ruleFor(rules, 'waiter', 'kassa')).toBe('deny');
+    expect(ruleFor(rules, 'seller', 'kassa')).toBe('free');
+    expect(ruleFor(rules, 'manager', 'kassa')).toBe('free');
+    expect(fixedRule('seller', 'kassa')).toBe('free');
+    expect(fixedRule('waiter', 'kassa')).toBeNull();
+    // A restaurant that set rules before Kassa existed keeps it open.
+    expect(ruleFor(TILL_RULES_NEW, 'waiter', 'kassa')).toBe('free');
+  });
+
+  it('is locked on the İcazələr page where it is fixed', () => {
+    expect(readFileSync('components/TillRulesPanel.tsx', 'utf8')).toMatch(/disabled=\{saving \|\| !!fixed\}/);
+  });
+
+  it('when closed, hides the tab and "Növbəni aç", and asks for a PIN on both ways in', () => {
+    expect(seller).toMatch(/const kassaShown = kassaOn && !\(rulesOn && ruleFor\(tillRules, myRole, 'kassa'\) === 'deny'\)/);
+    expect(seller).not.toMatch(/\(kassaOn \? \[\{ id: 'kassa'/);
+    expect(seller.match(/\(kassaShown \? \[\{ id: 'kassa'/g)?.length).toBe(2);
+    expect(seller).toMatch(/if \(id === 'kassa' && !kassaShown\) return;/);
+    expect(seller).toMatch(/if \(!shift && kassaOn && !kassaShown\) \{/);
+    expect(seller).toMatch(/async function handleOpenShift\(\) \{\s+if \(!\(await guard\(\['kassa'\]\)\)\.ok\) return;/);
+    expect(seller).toMatch(/id === 'kassa' && view !== 'kassa' && !\(await guard\(\['kassa'\]\)\)\.ok/);
+    expect(seller).not.toMatch(/setView\('kassa'\)/);
+  });
+
+  it('Kuryerlər works the same way: hidden when closed, a PIN when held back', () => {
+    expect(ruleFor({ waiter: { couriers: 'deny' } }, 'waiter', 'couriers')).toBe('deny');
+    expect(ruleFor(TILL_RULES_NEW, 'waiter', 'couriers')).toBe('free');
+    expect(seller).toMatch(/const couriersShown = deliveryOn && !\(rulesOn && ruleFor\(tillRules, myRole, 'couriers'\) === 'deny'\)/);
+    expect(seller).not.toMatch(/\(deliveryOn \? \[\{ id: 'couriers'/);
+    expect(seller.match(/\(couriersShown \? \[\{ id: 'couriers'/g)?.length).toBe(2);
+    expect(seller).toMatch(/if \(id === 'couriers' && !couriersShown\) return;/);
+    expect(seller).toMatch(/id === 'couriers' && view !== 'couriers' && !\(await guard\(\['couriers'\]\)\)\.ok/);
+    expect(seller).not.toMatch(/setView\('couriers'\)/);
+  });
+
+  it('lets a waiting till start when the shift is opened elsewhere', () => {
+    expect(seller).toMatch(/else if \(open && !shift\) setShift\(open\);/);
   });
 });
