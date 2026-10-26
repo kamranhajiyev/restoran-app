@@ -38,7 +38,7 @@ on:
     paths: ['android/**', 'lib/android-bridge.ts', 'lib/android-till.ts', 'lib/till-store/**', 'lib/android-browsers.mjs', 'scripts/build-desktop.mjs', '.github/workflows/android.yml']
 
 env:
-  PREVIEW_URL: https://restoran-app-git-development-p-f968e3-kamrans-projects-11d6b816.vercel.app
+  PREVIEW_URL: https://restoran-app-git-developmen-f968e3-abdulla-bashiroglus-projects.vercel.app
 
 jobs:
   build:
