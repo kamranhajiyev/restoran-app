@@ -411,6 +411,9 @@ export interface Order {
   // a price change, and its name that day. Absent on every other order.
   orderType?: string;
   orderTypeName?: string;
+  // Xidmət haqqı percent the order was taken under (lib/service-charge). The
+  // amount is not kept: orderTotal works it out from the dishes on it now.
+  serviceChargePercent?: number;
   items: OrderItem[];
   // Items the waiter pulled off the order. Kept OUT of `items` on purpose: every
   // total, the Analiz report, the Excel export and the customer receipt all read

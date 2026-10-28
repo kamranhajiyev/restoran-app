@@ -15,6 +15,7 @@ import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
 import type { TillSettings } from './desktopPrint';
 import { cleanRules, type TillRules } from './till-rules';
 import { cleanOrderTypes, menuPriceColumn, orderTypeColumns, type OrderType } from './order-types';
+import { cleanServiceCharge, serviceChargeColumn, type ServiceCharge } from './service-charge';
 import type { HealthProblem, HealthReport } from './health-report';
 import type { AccountEdit, AccountKind, FinanceAccount, FinanceClosing, FinanceEntry, FinanceSource, FinanceTransaction, SourceKind } from './finance';
 
@@ -789,6 +790,7 @@ async function readOrders(opts?: OrderQuery): Promise<Order[]> {
       tableName: o.table_name ?? undefined,
       orderType: o.order_type ?? undefined,
       orderTypeName: o.order_type_name ?? undefined,
+      serviceChargePercent: o.service_charge_percent ? Number(o.service_charge_percent) : undefined,
       sellerName: o.waiter_name,
       staffId: o.staff_id ?? undefined,
       courierId: o.courier_id ?? undefined,
@@ -925,6 +927,7 @@ export async function addOrder(order: Order, opts?: ReadOpts): Promise<string | 
       created_at: order.createdAt,
       company_id: _companyId,
       ...orderTypeColumns(order),
+      ...serviceChargeColumn(order),
     });
     if (orderError) { console.error('[addOrder orders]', orderError); return orderError.message; }
     if (order.items.length === 0) return null;
@@ -1373,18 +1376,44 @@ export async function saveTillRules(rules: TillRules): Promise<string | null> {
 
 /** Undefined = the read failed: keep what the screen has. */
 export async function fetchOrderTypes(): Promise<OrderType[] | undefined> {
-  const local = await fromSettings(s => s.orderTypes ?? []);
-  if (local !== null) return cleanOrderTypes(local);
-  try {
-    if (!_companyId) return undefined;
-    const { data, error } = await supabase.from('companies').select('order_types').eq('id', _companyId).single();
-    if (error || !data) return undefined;
-    return cleanOrderTypes(data.order_types);
-  } catch { return undefined; }
+  return (await fetchSaleSettings())?.types;
 }
 
 export async function saveOrderTypes(types: OrderType[]): Promise<string | null> {
   const { error } = await supabase.rpc('set_order_types', { p_types: types });
+  return error ? error.message : null;
+}
+
+// ─── Xidmət haqqı (lib/service-charge) ──────────────────────────────────────
+
+/**
+ * The order types and the Xidmət haqqı in one read: the exe and the APK from
+ * their own copy (so it holds offline), everyone else from the companies row.
+ * Undefined when it could not be read, so a screen never saves over the real one.
+ */
+export async function fetchSaleSettings(): Promise<{ types: OrderType[]; serviceCharge: ServiceCharge } | undefined> {
+  const local = await fromSettings(s => s);
+  if (local !== null) return { types: cleanOrderTypes(local.orderTypes ?? []), serviceCharge: cleanServiceCharge(local.serviceCharge) };
+  try {
+    if (!_companyId) return undefined;
+    const { data, error } = await supabase.from('companies').select('order_types, service_charge').eq('id', _companyId).single();
+    if (error || !data) return undefined;
+    return { types: cleanOrderTypes(data.order_types), serviceCharge: cleanServiceCharge(data.service_charge) };
+  } catch { return undefined; }
+}
+
+/** The Xidmət haqqı alone, for the QR menu: the guest's anon key may read this
+ *  column of companies but not order_types. Off when it cannot be read. */
+export async function fetchGuestServiceCharge(): Promise<ServiceCharge> {
+  try {
+    if (!_companyId) return cleanServiceCharge(null);
+    const { data, error } = await supabase.from('companies').select('service_charge').eq('id', _companyId).single();
+    return cleanServiceCharge(error ? null : data?.service_charge);
+  } catch { return cleanServiceCharge(null); }
+}
+
+export async function saveServiceCharge(sc: ServiceCharge): Promise<string | null> {
+  const { error } = await supabase.rpc('set_service_charge', { p_charge: sc });
   return error ? error.message : null;
 }
 

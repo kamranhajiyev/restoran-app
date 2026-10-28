@@ -22,6 +22,7 @@ import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 import { claim, idempotencyKey } from '@/lib/idempotency';
 import { printedStationColumn } from '@/lib/stations';
 import { menuPriceColumn, orderTypeColumns } from '@/lib/order-types';
+import { serviceChargeColumn } from '@/lib/service-charge';
 import type { Order } from '@/types';
 
 export async function POST(req: NextRequest) {
@@ -70,6 +71,7 @@ export async function POST(req: NextRequest) {
     created_at: order.createdAt,
     company_id: companyId,
     ...orderTypeColumns(order),
+    ...serviceChargeColumn(order),
   });
 
   let { error: orderError } = await insertOrder(!!keepOrderNumber);

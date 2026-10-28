@@ -9,6 +9,7 @@ import { mergeLines } from './add-again';
 import { isValidIp } from './station-printer';
 import { installAndroidBridge } from './android-bridge';
 import { formatDateTime } from './dates';
+import { orderServiceCharge } from './service-charge';
 
 installAndroidBridge();
 
@@ -253,6 +254,7 @@ async function send(lines: Line[], logo?: Logo | null): Promise<boolean> {
 // paper the guest actually reads (customer request, 2026-10-28).
 export function billLines(order: Order, companyName: string, table?: string): Line[] {
   const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
+  const service = orderServiceCharge(order);
   const discount = order.discountAmount ?? 0;
 
   const lines: Line[] = [...head(order, companyName, 'HESAB', table), ...itemLines(order)];
@@ -260,11 +262,10 @@ export function billLines(order: Order, companyName: string, table?: string): Li
   lines.push({ text: '='.repeat(WIDTH) });
   // A discount agreed before payment still belongs on the bill — the customer
   // is being asked for the net figure, not the menu one.
-  if (discount > 0) {
-    lines.push({ text: row('Cəmi:', money(gross)) });
-    lines.push({ text: row('Endirim:', `-${money(discount)}`) });
-  }
-  lines.push({ text: row('ÖDƏNİLƏCƏK:', money(gross - discount)), big: true });
+  if (service > 0 || discount > 0) lines.push({ text: row('Cəmi:', money(gross)) });
+  if (service > 0) lines.push(serviceLine(order, service));
+  if (discount > 0) lines.push({ text: row('Endirim:', `-${money(discount)}`) });
+  lines.push({ text: row('ÖDƏNİLƏCƏK:', money(gross + service - discount)), big: true });
   lines.push({ text: '-'.repeat(WIDTH), center: true });
   lines.push({ text: 'Təşəkkürlər!', center: true });
   return lines;
@@ -280,46 +281,61 @@ export async function printBill(order: Order, companyName: string, logoUrl?: str
   }
 }
 
+// Xidmət haqqı on its own line, unlike an order type's price change: the guest
+// is meant to see why the total is more than the dishes (lib/service-charge).
+function serviceLine(order: Order, service: number): Line {
+  return { text: row(`Xidmət haqqı (${order.serviceChargePercent}%):`, money(service)) };
+}
+
+export function receiptLines(order: Order, companyName: string, table?: string): Line[] {
+  // A courier order closed on debt tenders nothing, so cash+card is 0. Reading
+  // the total off that would print a 0.00 receipt and, worse, divide by zero
+  // when reconstructing a percentage discount below.
+  const debt = order.courierDebt ?? 0;
+  const paid = (order.cashAmount ?? 0) + (order.cardAmount ?? 0) || debt;
+  const total = paid + (order.discountAmount ?? 0);
+
+  const lines: Line[] = [...head(order, companyName, undefined, table), ...itemLines(order)];
+
+  lines.push({ text: '='.repeat(WIDTH) });
+
+  const discount = order.discountAmount ?? 0;
+  const service = orderServiceCharge(order);
+  if (service > 0) {
+    lines.push({ text: row('Cəmi:', money(order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0))) });
+    lines.push(serviceLine(order, service));
+  } else if (discount > 0) {
+    lines.push({ text: row('Cəmi:', money(total)) });
+  }
+  if (discount > 0) {
+    // The percentage the cashier typed isn't stored — only the manat it came
+    // to — so it's read back off the pre-discount total.
+    const pct = total > 0 ? Math.round((discount / total) * 100) : 0;
+    const label = order.discountType === '%' ? `Endirim (${pct}%)` : 'Endirim';
+    lines.push({ text: row(label, `-${money(discount)}`) });
+  }
+
+  lines.push({ text: row('CƏMİ:', money(paid)), big: true });
+
+  if ((order.cashAmount ?? 0) > 0) lines.push({ text: row('Nağd:', money(order.cashAmount!)) });
+  if ((order.cardAmount ?? 0) > 0) lines.push({ text: row('Kart:', money(order.cardAmount!)) });
+  if ((order.changeAmount ?? 0) > 0) lines.push({ text: row('Qaytarıldı:', money(order.changeAmount!)) });
+  // The guest has not paid yet — the rider collects at the door. Saying so on
+  // the slip is the difference between a receipt and a demand for money.
+  if (debt > 0) {
+    lines.push({ text: row('ÖDƏNİLMƏYİB:', money(debt)) });
+    lines.push({ text: 'Kuryer yığacaq', center: true });
+  }
+
+  lines.push({ text: '-'.repeat(WIDTH), center: true });
+  lines.push({ text: 'Təşəkkürlər!', center: true });
+  return lines;
+}
+
 export async function printReceipt(order: Order, companyName: string, logoUrl?: string | null, table?: string): Promise<boolean> {
   try {
     const logo = await loadLogo(logoUrl);
-    // A courier order closed on debt tenders nothing, so cash+card is 0. Reading
-    // the total off that would print a 0.00 receipt and, worse, divide by zero
-    // when reconstructing a percentage discount below.
-    const debt = order.courierDebt ?? 0;
-    const paid = (order.cashAmount ?? 0) + (order.cardAmount ?? 0) || debt;
-    const total = paid + (order.discountAmount ?? 0);
-
-    const lines: Line[] = [...head(order, companyName, undefined, table), ...itemLines(order)];
-
-    lines.push({ text: '='.repeat(WIDTH) });
-
-    const discount = order.discountAmount ?? 0;
-    if (discount > 0) {
-      lines.push({ text: row('Cəmi:', money(total)) });
-      // The percentage the cashier typed isn't stored — only the manat it came
-      // to — so it's read back off the pre-discount total.
-      const pct = total > 0 ? Math.round((discount / total) * 100) : 0;
-      const label = order.discountType === '%' ? `Endirim (${pct}%)` : 'Endirim';
-      lines.push({ text: row(label, `-${money(discount)}`) });
-    }
-
-    lines.push({ text: row('CƏMİ:', money(paid)), big: true });
-
-    if ((order.cashAmount ?? 0) > 0) lines.push({ text: row('Nağd:', money(order.cashAmount!)) });
-    if ((order.cardAmount ?? 0) > 0) lines.push({ text: row('Kart:', money(order.cardAmount!)) });
-    if ((order.changeAmount ?? 0) > 0) lines.push({ text: row('Qaytarıldı:', money(order.changeAmount!)) });
-    // The guest has not paid yet — the rider collects at the door. Saying so on
-    // the slip is the difference between a receipt and a demand for money.
-    if (debt > 0) {
-      lines.push({ text: row('ÖDƏNİLMƏYİB:', money(debt)) });
-      lines.push({ text: 'Kuryer yığacaq', center: true });
-    }
-
-    lines.push({ text: '-'.repeat(WIDTH), center: true });
-    lines.push({ text: 'Təşəkkürlər!', center: true });
-
-    return await send(lines, logo);
+    return await send(receiptLines(order, companyName, table), logo);
   } catch (err) {
     console.error('[Printer] Cap alinmadi:', err);
     return false;

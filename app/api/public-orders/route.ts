@@ -42,6 +42,7 @@ export async function GET(req: NextRequest) {
     tableName: o.table_name ?? undefined,
     orderType: o.order_type ?? undefined,
     orderTypeName: o.order_type_name ?? undefined,
+    serviceChargePercent: o.service_charge_percent ? Number(o.service_charge_percent) : undefined,
     sellerName: o.waiter_name,
     staffId: o.staff_id ?? undefined,
     // Without these the payment sheet cannot tell a delivery from a walk-in:

@@ -2,6 +2,7 @@
 // app/seller/page.tsx unchanged.
 
 import type { Order, OrderStatus } from '@/types';
+import { orderServiceCharge } from '@/lib/service-charge';
 
 export const STATUS_COLORS: Record<OrderStatus, string> = {
   'gözləyir':  'bg-primary-100 text-primary-700',
@@ -33,7 +34,8 @@ export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+// The dishes, plus the Xidmət haqqı (lib/service-charge), less a discount.
 export function orderTotal(order: Order): number {
   const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
-  return round2(gross - (order.discountAmount ?? 0));
+  return round2(gross + orderServiceCharge(order) - (order.discountAmount ?? 0));
 }

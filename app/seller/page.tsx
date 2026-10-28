@@ -19,7 +19,7 @@ import {
   fetchStations, fetchStationReady, fetchStationReadyOrNull, type StationReady,
   fetchCouriersWithBalance, addCourierPayment, fetchCourierCollections, changeOrderCourier,
   fetchMenuOrNull, fetchCategoriesOrNull, fetchTablesOrNull, fetchHallsOrNull, fetchStaffAndRulesOrNull, fetchModifierGroupsOrNull, readOpenShift,
-  fetchTillRules, markBillPrinted, fetchOrderTypes,
+  fetchTillRules, markBillPrinted, fetchSaleSettings,
 } from '@/lib/store';
 import { jsonOrNull, keepCategory, listOrNull, salesOrNull, shiftOrUnknown } from '@/lib/keep-on-fail';
 import { menuIndex, stationForItem, readyStationIds } from '@/lib/stations';
@@ -64,6 +64,7 @@ import {
   changeFor, changeLabel, cleanOrderTypes, DEFAULT_ORDER_TYPES, NO_CHANGE, orderTypeFields, pricedLine, shownTypes,
   typedPrice, typeFlow, type OrderType as SaleType,
 } from '@/lib/order-types';
+import { addedCharge, chargeFor, cleanServiceCharge, newOrderTypeId, NO_SERVICE_CHARGE, orderServiceCharge, serviceAmount, type ServiceCharge } from '@/lib/service-charge';
 import { fitPlan, tableBox, tableRadius } from '@/lib/floor-plan';
 import { movedToTable, orderPlace as placeOf, tableTitle, withHall } from '@/lib/order-place';
 import { flushQueue, pendingOrderIds, ADD_ORDER, sendOrderByLink } from '@/lib/sync';
@@ -191,16 +192,16 @@ function ordersBetween(from: string, to: string, companyId: string | null | unde
     : fetchOrdersOrNull({ from, to, limit: 1000 });
 }
 
-// The owner's order types. The exe and the APK keep them with their settings
-// and a signed-in till reads the companies row (both fetchOrderTypes); a link
-// in a browser has no session for that row and asks /api/public-settings.
-// Null when the read failed: keep the ones in hand.
-async function readSaleTypes(linkCompanyId: string | null): Promise<SaleType[] | null> {
+// The owner's order types and Xidmət haqqı. The exe and the APK keep them with
+// their settings and a signed-in till reads the companies row (both
+// fetchSaleSettings); a link in a browser has no session for that row and asks
+// /api/public-settings. Null when the read failed: keep the ones in hand.
+async function readSaleSettings(linkCompanyId: string | null): Promise<{ types: SaleType[]; serviceCharge: ServiceCharge } | null> {
   if (linkCompanyId && !hasLocalDb()) {
     const d = await jsonOrNull(tillFetch(`/api/public-settings?companyId=${linkCompanyId}`));
-    return d?.settings ? cleanOrderTypes(d.settings.orderTypes) : null;
+    return d?.settings ? { types: cleanOrderTypes(d.settings.orderTypes), serviceCharge: cleanServiceCharge(d.settings.serviceCharge) } : null;
   }
-  return (await fetchOrderTypes()) ?? null;
+  return (await fetchSaleSettings()) ?? null;
 }
 
 // The station panel reads tables over the public API, which hands back raw DB
@@ -217,6 +218,29 @@ type OrderType = 'masa' | 'takeaway' | 'kuryer';
 // settled at the counter. 'debt' tenders nothing and books the total against the
 // rider instead.
 type CourierPayMode = 'paid' | 'debt';
+
+// The cart's total, with the Xidmət haqqı on its own line when there is one,
+// the way the bill will print it.
+function CartTotal({ dishes, percent, charge, big }: { dishes: number; percent: number; charge: number; big?: boolean }) {
+  return (
+    <div className="space-y-1">
+      {charge > 0 && (
+        <>
+          <div className="flex justify-between text-sm text-stone-500">
+            <span>Məbləğ:</span><span>{dishes.toFixed(2)} ₼</span>
+          </div>
+          <div className="flex justify-between text-sm text-stone-500">
+            <span>Xidmət haqqı ({percent}%):</span><span>{charge.toFixed(2)} ₼</span>
+          </div>
+        </>
+      )}
+      <div className="flex justify-between items-center">
+        <span className="text-sm text-stone-600">Cəmi:</span>
+        <span className={`font-bold text-primary-700 ${big ? 'text-xl' : 'text-lg'}`}>{(dishes + charge).toFixed(2)} ₼</span>
+      </div>
+    </div>
+  );
+}
 
 // The picture on a "Yeni sifariş" card. A type the owner added gets a plain tag.
 function SaleTypeIcon({ t, small }: { t: SaleType; small?: boolean }) {
@@ -395,6 +419,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // or straight to the menu); this is which card started it, and its prices.
   const [saleTypes, setSaleTypes]           = useState<SaleType[]>(DEFAULT_ORDER_TYPES);
   const [saleTypeId, setSaleTypeId]         = useState<string | null>(null);
+  const [serviceCharge, setServiceCharge]   = useState<ServiceCharge>(NO_SERVICE_CHARGE);
   const [selectedTable, setSelectedTable]   = useState<number | null>(null);
   // Couriers. `outstanding` on each row is what the rider is holding: the server's
   // figure, already adjusted by anything this till has done since its last sync.
@@ -1581,7 +1606,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     const companyId = overrideCompanyId ?? getSession()?.companyId ?? null;
     if (!companyId) return;
     const editsSoon = gatherParts(parts => { void refreshParts(parts); });
-    const loadSaleTypes = () => readSaleTypes(overrideCompanyId ?? null).then(t => { if (t) setSaleTypes(t); });
+    const loadSaleTypes = () => readSaleSettings(overrideCompanyId ?? null).then(s => {
+      if (s) { setSaleTypes(s.types); setServiceCharge(s.serviceCharge); }
+    });
     void loadSaleTypes();
     let channel = supabase.channel('seller-data');
     for (const table of DATA_TABLES) {
@@ -2208,6 +2235,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       courierId: orderType === 'kuryer' ? selectedCourier! : undefined,
       note: note.trim() || undefined,
       ...orderTypeFields(saleType),
+      ...(cartPercent > 0 ? { serviceChargePercent: cartPercent } : {}),
     };
     // The desktop till prints the kitchen ticket itself, before the write; see
     // printKitchenNow. It needs the order's number for that, so it asks its own
@@ -2963,6 +2991,10 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const saleType = saleTypes.find(t => t.id === saleTypeId) ?? null;
   const activeChange = appendOrder ? changeFor(appendOrder.orderType, saleTypes) : saleType?.change ?? NO_CHANGE;
   const offeredTypes = shownTypes(saleTypes, { tablesOn, deliveryOn });
+  // Xidmət haqqı on what is in the cart: the open order's percent when adding
+  // to one (it was set when the order was taken), otherwise the new order's.
+  const cartPercent = appendOrder ? appendOrder.serviceChargePercent ?? 0 : chargeFor(serviceCharge, newOrderTypeId(saleType, orderType));
+  const cartCharge = appendOrder ? addedCharge(appendOrder, cart) : serviceAmount(cartTotal, cartPercent);
   // The line under the cart's title: where this order is going, with the
   // type's name in front when it is one the owner added ("Banket · Masa 5").
   function cartHeading(): string {
@@ -4428,10 +4460,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                     className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary-400"
                   />
                   <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-stone-600">Cəmi:</span>
-                    <span className="font-bold text-lg text-primary-700">{cartTotal.toFixed(2)} ₼</span>
-                  </div>
+                  <CartTotal dishes={cartTotal} percent={cartPercent} charge={cartCharge} />
                   <button
                     onClick={submitOrder}
                     disabled={submit.disabled}
@@ -4454,7 +4483,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   >
                     {(() => {
                       const barCount = cartCount > 0 ? cartCount : appendOrder ? appendOrder.items.reduce((s, oi) => s + oi.quantity, 0) : 0;
-                      const barTotal = cartCount > 0 ? cartTotal : appendOrder ? appendOrder.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0) : 0;
+                      const barTotal = cartCount > 0 ? cartTotal + cartCharge : appendOrder ? appendOrder.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0) + orderServiceCharge(appendOrder) : 0;
                       return (
                         <>
                           <span className="bg-white/20 text-white text-xs font-bold px-2 py-0.5 rounded-full min-w-[1.5rem] text-center">{barCount}</span>
@@ -4554,10 +4583,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary-400"
               />
               <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-stone-600">Cəmi:</span>
-                <span className="font-bold text-xl text-primary-700">{cartTotal.toFixed(2)} ₼</span>
-              </div>
+              <CartTotal dishes={cartTotal} percent={cartPercent} charge={cartCharge} big />
               <button
                 onClick={submitOrder}
                 disabled={submit.disabled}
@@ -4985,6 +5011,12 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   </li>
                 ))}
               </ul>
+              {orderServiceCharge(payingOrder) > 0 && (
+                <div className="flex justify-between text-sm text-stone-600 -mt-2 mb-3">
+                  <span>Xidmət haqqı ({payingOrder.serviceChargePercent}%)</span>
+                  <span>{orderServiceCharge(payingOrder).toFixed(2)} ₼</span>
+                </div>
+              )}
               {/* Discount row */}
               <div className="flex items-center gap-2 mb-3">
                 <div className="flex rounded-lg overflow-hidden border border-stone-200 shrink-0">

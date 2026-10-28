@@ -53,6 +53,7 @@ export interface TillSettings {
   tillRules?: unknown;
   /** Sifariş növləri as companies.order_types holds them (lib/order-types). */
   orderTypes?: unknown;
+  serviceCharge?: unknown;
 }
 
 /** The till's local database, present only in a build that ships the app. */

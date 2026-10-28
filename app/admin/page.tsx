@@ -65,6 +65,8 @@ import ModifiersPanel from '@/components/ModifiersPanel';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import TillRulesPanel from '@/components/TillRulesPanel';
 import OrderTypesPanel from '@/components/OrderTypesPanel';
+import ServiceChargePanel from '@/components/ServiceChargePanel';
+import { orderServiceCharge } from '@/lib/service-charge';
 import { ROLE_NAMES } from '@/lib/till-rules';
 import type { StaffRole } from '@/types';
 import PasswordField from '@/components/PasswordField';
@@ -231,7 +233,7 @@ const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
   tables:     { title: 'Masalar',                 subtitle: 'Restoran masalarını idarə et' },
   anbar:      { title: 'Anbar',                   subtitle: 'Anbarlar, qalıqlar, tədarükçülər və bazarlıqlar' },
   couriers:   { title: 'Kuryerlər',               subtitle: 'Kuryerlər, borclar və ödənişlər' },
-  settings:   { title: 'Tənzimləmələr',           subtitle: 'Sifariş növləri və girişlər' },
+  settings:   { title: 'Tənzimləmələr',           subtitle: 'Sifariş növləri, xidmət haqqı və girişlər' },
 };
 
 function LineChartSvg({ data }: { data: { label: string; fullLabel: string; rev: number }[] }) {
@@ -587,7 +589,8 @@ function AdminPageContent() {
   // 'categories' merged into 'menu', 'logins' moved under Tənzimləmələr — keep old links working
   const tab = (rawTab === 'categories' ? 'menu' : rawTab === 'logins' ? 'settings' : rawTab as Tab | null) ?? 'stats';
   // Tənzimləmələr sub-view. Absent ?sub= means Sifariş növləri.
-  const settingsSub: 'növlər' | 'girişlər' = rawTab === 'logins' || searchParams.get('sub') === 'girisler' ? 'girişlər' : 'növlər';
+  const settingsSub: 'növlər' | 'xidmət' | 'girişlər' = rawTab === 'logins' || searchParams.get('sub') === 'girisler' ? 'girişlər'
+    : searchParams.get('sub') === 'xidmet' ? 'xidmət' : 'növlər';
   // Statistika sub-view. Absent ?sub= means Ümumi, so existing /admin?tab=stats links are unchanged.
   const statsSub: 'ümumi' | 'analiz' = searchParams.get('sub') === 'analiz' ? 'analiz' : 'ümumi';
   const usersSub = searchParams.get('sub');
@@ -2744,7 +2747,7 @@ function AdminPageContent() {
   const repCatMap: Record<string, { rev: number; cost: number }> = {};
   chartPaid.forEach(o => {
     const gross = o.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
-    const ratio = gross > 0 ? orderTotal(o) / gross : 1;
+    const ratio = gross > 0 ? (orderTotal(o) - orderServiceCharge(o)) / gross : 1;
     o.items.forEach(oi => {
       const menuItem = menu.find(m => m.id === oi.menuItem.id);
       const cat = menuItem?.category || oi.menuItem.category || 'Digər';
@@ -2761,7 +2764,7 @@ function AdminPageContent() {
   const itemMap: Record<string, { name: string; cat: string; qty: number; rev: number; cost: number }> = {};
   chartPaid.forEach(o => {
     const gross = o.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
-    const ratio = gross > 0 ? orderTotal(o) / gross : 1;
+    const ratio = gross > 0 ? (orderTotal(o) - orderServiceCharge(o)) / gross : 1;
     o.items.forEach(oi => {
       const k = oi.menuItem.id;
       if (!itemMap[k]) itemMap[k] = { name: oi.menuItem.name, cat: oi.menuItem.category || 'Digər', qty: 0, rev: 0, cost: 0 };
@@ -2794,7 +2797,7 @@ function AdminPageContent() {
   const sizeMap: Record<string, Record<string, { qty: number; rev: number; cost: number }>> = {};
   chartPaid.forEach(o => {
     const gross = o.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
-    const ratio = gross > 0 ? orderTotal(o) / gross : 1;
+    const ratio = gross > 0 ? (orderTotal(o) - orderServiceCharge(o)) / gross : 1;
     o.items.forEach(oi => {
       const byVar = (sizeMap[oi.menuItem.id] ??= {});
       const v = (byVar[oi.variantId ?? ''] ??= { qty: 0, rev: 0, cost: 0 });
@@ -3788,6 +3791,7 @@ function AdminPageContent() {
                   const rider = order.courierId ? courierNames[order.courierId] : undefined;
                   // What the order type added or took off (lib/order-types).
                   const extra = typeExtra(order.items);
+                  const service = orderServiceCharge(order);
                   return (
                     <div key={order.id} className={`${flagged ? 'bg-amber-50 ' : ''}${i < visibleOrders.length - 1 ? 'border-b border-stone-50' : ''}`}>
                       {/* Row */}
@@ -3831,6 +3835,14 @@ function AdminPageContent() {
                             {extra > 0 ? '+' : '−'}{Math.abs(extra).toFixed(2)} ₼
                           </span>
                         )}
+                        {service > 0 && (
+                          <span
+                            title={`Xidmət haqqı ${order.serviceChargePercent}%`}
+                            className="text-xs font-semibold text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-1.5 py-0.5 flex-shrink-0 hidden sm:inline"
+                          >
+                            Xidmət +{service.toFixed(2)} ₼
+                          </span>
+                        )}
                         {removedCount > 0 && (
                           <span className="text-xs font-semibold text-amber-700 bg-amber-100 border border-amber-300 rounded-lg px-1.5 py-0.5 flex-shrink-0 hidden sm:inline">
                             🗑 {removedCount} silinib
@@ -3847,6 +3859,12 @@ function AdminPageContent() {
                               <span>Məhsul</span><span className="text-right">Say</span><span className="text-right">Cəmi</span>
                             </div>
                             <OrderItemHistory order={order} tz={bizSettings.timezone} showMenuPrice />
+                            {service > 0 && (
+                              <div className="grid grid-cols-[1fr_80px] gap-2 text-sm text-sky-700 pt-2 mt-1 border-t border-stone-200">
+                                <span>Xidmət haqqı ({order.serviceChargePercent}%)</span>
+                                <span className="text-right font-medium">{service.toFixed(2)} ₼</span>
+                              </div>
+                            )}
                           </div>
                           {order.note && <OrderNote note={order.note} className="text-xs text-stone-500 italic mb-3" />}
                           {/* The struck-through lines above already carry who and when; this
@@ -4798,10 +4816,10 @@ function AdminPageContent() {
           {/* ── TƏNZİMLƏMƏLƏR ──────────────────────────────────────────── */}
           {tab === 'settings' && (
             <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5 w-fit mb-4">
-              {(['növlər', 'girişlər'] as const).map(s => (
-                <button key={s} onClick={() => router.replace(s === 'girişlər' ? '/admin?tab=settings&sub=girisler' : '/admin?tab=settings')}
+              {(['növlər', 'xidmət', 'girişlər'] as const).map(s => (
+                <button key={s} onClick={() => router.replace(s === 'girişlər' ? '/admin?tab=settings&sub=girisler' : s === 'xidmət' ? '/admin?tab=settings&sub=xidmet' : '/admin?tab=settings')}
                   className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${settingsSub === s ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
-                  {s === 'növlər' ? 'Sifariş növləri' : 'Girişlər'}
+                  {s === 'növlər' ? 'Sifariş növləri' : s === 'xidmət' ? 'Xidmət haqqı' : 'Girişlər'}
                 </button>
               ))}
             </div>
@@ -4825,6 +4843,10 @@ function AdminPageContent() {
                 setDeliveryToggleBusy(false);
               }}
             />
+          )}
+
+          {tab === 'settings' && settingsSub === 'xidmət' && (
+            <ServiceChargePanel tablesOn={tablesOn} deliveryOn={deliveryOn} />
           )}
 
           {/* ── KURYERLƏR ──────────────────────────────────────────────── */}
