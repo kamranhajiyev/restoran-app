@@ -247,28 +247,33 @@ async function send(lines: Line[], logo?: Logo | null): Promise<boolean> {
 
 // The bill the waiter carries to the table, printed while the order is still
 // open. Deliberately not the same paper as printReceipt: the money has not been
-// taken yet, so there is no cash/card split, no change and no thank-you — only
-// what was eaten and what it comes to. "HESAB" at the top is what stops a
-// customer from treating it as proof of payment.
+// taken yet, so there is no cash/card split and no change — only what was eaten
+// and what it comes to. "HESAB" at the top is what stops a customer from
+// treating it as proof of payment. The thank-you is on it too: this is the
+// paper the guest actually reads (customer request, 2026-10-28).
+export function billLines(order: Order, companyName: string, table?: string): Line[] {
+  const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
+  const discount = order.discountAmount ?? 0;
+
+  const lines: Line[] = [...head(order, companyName, 'HESAB', table), ...itemLines(order)];
+
+  lines.push({ text: '='.repeat(WIDTH) });
+  // A discount agreed before payment still belongs on the bill — the customer
+  // is being asked for the net figure, not the menu one.
+  if (discount > 0) {
+    lines.push({ text: row('Cəmi:', money(gross)) });
+    lines.push({ text: row('Endirim:', `-${money(discount)}`) });
+  }
+  lines.push({ text: row('ÖDƏNİLƏCƏK:', money(gross - discount)), big: true });
+  lines.push({ text: '-'.repeat(WIDTH), center: true });
+  lines.push({ text: 'Təşəkkürlər!', center: true });
+  return lines;
+}
+
 export async function printBill(order: Order, companyName: string, logoUrl?: string | null, table?: string): Promise<boolean> {
   try {
     const logo = await loadLogo(logoUrl);
-    const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
-    const discount = order.discountAmount ?? 0;
-
-    const lines: Line[] = [...head(order, companyName, 'HESAB', table), ...itemLines(order)];
-
-    lines.push({ text: '='.repeat(WIDTH) });
-    // A discount agreed before payment still belongs on the bill — the customer
-    // is being asked for the net figure, not the menu one.
-    if (discount > 0) {
-      lines.push({ text: row('Cəmi:', money(gross)) });
-      lines.push({ text: row('Endirim:', `-${money(discount)}`) });
-    }
-    lines.push({ text: row('ÖDƏNİLƏCƏK:', money(gross - discount)), big: true });
-    lines.push({ text: '-'.repeat(WIDTH), center: true });
-
-    return await send(lines, logo);
+    return await send(billLines(order, companyName, table), logo);
   } catch (err) {
     console.error('[Printer] Hesab cap alinmadi:', err);
     return false;
