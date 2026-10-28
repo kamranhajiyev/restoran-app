@@ -6,7 +6,7 @@ import {
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
   ShoppingCart, ChevronLeft, ChevronRight, ChevronDown, Wallet,
   History, Search, Delete, KeyRound, Trash2, Check, Bell, BellOff, Printer, CloudOff,
-  Bike,
+  Bike, Tag,
 } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
@@ -19,7 +19,7 @@ import {
   fetchStations, fetchStationReady, fetchStationReadyOrNull, type StationReady,
   fetchCouriersWithBalance, addCourierPayment, fetchCourierCollections, changeOrderCourier,
   fetchMenuOrNull, fetchCategoriesOrNull, fetchTablesOrNull, fetchHallsOrNull, fetchStaffAndRulesOrNull, fetchModifierGroupsOrNull, readOpenShift,
-  fetchTillRules, markBillPrinted,
+  fetchTillRules, markBillPrinted, fetchOrderTypes,
 } from '@/lib/store';
 import { jsonOrNull, keepCategory, listOrNull, salesOrNull, shiftOrUnknown } from '@/lib/keep-on-fail';
 import { menuIndex, stationForItem, readyStationIds } from '@/lib/stations';
@@ -60,6 +60,10 @@ import { ApprovalPad } from '@/components/seller/ApprovalPad';
 import DialogHost from '@/components/DialogHost';
 import { askConfirm, showAlert } from '@/lib/dialog-queue';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
+import {
+  changeFor, changeLabel, cleanOrderTypes, DEFAULT_ORDER_TYPES, NO_CHANGE, orderTypeFields, pricedLine, shownTypes,
+  typedPrice, typeFlow, type OrderType as SaleType,
+} from '@/lib/order-types';
 import { fitPlan, tableBox, tableRadius } from '@/lib/floor-plan';
 import { movedToTable, orderPlace as placeOf, tableTitle, withHall } from '@/lib/order-place';
 import { flushQueue, pendingOrderIds, ADD_ORDER, sendOrderByLink } from '@/lib/sync';
@@ -187,6 +191,18 @@ function ordersBetween(from: string, to: string, companyId: string | null | unde
     : fetchOrdersOrNull({ from, to, limit: 1000 });
 }
 
+// The owner's order types. The exe and the APK keep them with their settings
+// and a signed-in till reads the companies row (both fetchOrderTypes); a link
+// in a browser has no session for that row and asks /api/public-settings.
+// Null when the read failed: keep the ones in hand.
+async function readSaleTypes(linkCompanyId: string | null): Promise<SaleType[] | null> {
+  if (linkCompanyId && !hasLocalDb()) {
+    const d = await jsonOrNull(tillFetch(`/api/public-settings?companyId=${linkCompanyId}`));
+    return d?.settings ? cleanOrderTypes(d.settings.orderTypes) : null;
+  }
+  return (await fetchOrderTypes()) ?? null;
+}
+
 // The station panel reads tables over the public API, which hands back raw DB
 // rows (hall_id, not hallId) — bring them to the shape the rest of the page uses.
 type ApiTableRow = Omit<RestaurantTable, 'hallId'> & { hall_id?: string | null };
@@ -201,6 +217,13 @@ type OrderType = 'masa' | 'takeaway' | 'kuryer';
 // settled at the counter. 'debt' tenders nothing and books the total against the
 // rider instead.
 type CourierPayMode = 'paid' | 'debt';
+
+// The picture on a "Yeni sifariş" card. A type the owner added gets a plain tag.
+function SaleTypeIcon({ t, small }: { t: SaleType; small?: boolean }) {
+  if (t.builtIn === 'takeaway') return <span className={small ? '' : 'text-4xl'}>🥡</span>;
+  const Icon = t.builtIn === 'masa' ? UtensilsCrossed : t.builtIn === 'delivery' ? Bike : Tag;
+  return <Icon className={small ? 'w-4 h-4' : 'w-8 h-8 text-stone-500'} />;
+}
 
 function tableHasActive(n: number, orders: Order[]): boolean {
   return orders.some(o => o.tableNumber === n && isOrderOpen(o));
@@ -367,6 +390,11 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const [deliveryOn, setDeliveryOn]         = useState(false);
   const [kassaOn, setKassaOn]               = useState(false);
   const [orderType, setOrderType]           = useState<OrderType | null>(null);
+  // Sifariş növləri (lib/order-types): the owner's list, and the one this new
+  // order was started under. `orderType` above stays the flow (table, courier
+  // or straight to the menu); this is which card started it, and its prices.
+  const [saleTypes, setSaleTypes]           = useState<SaleType[]>(DEFAULT_ORDER_TYPES);
+  const [saleTypeId, setSaleTypeId]         = useState<string | null>(null);
   const [selectedTable, setSelectedTable]   = useState<number | null>(null);
   // Couriers. `outstanding` on each row is what the rider is holding: the server's
   // figure, already adjusted by anything this till has done since its last sync.
@@ -1553,6 +1581,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     const companyId = overrideCompanyId ?? getSession()?.companyId ?? null;
     if (!companyId) return;
     const editsSoon = gatherParts(parts => { void refreshParts(parts); });
+    const loadSaleTypes = () => readSaleTypes(overrideCompanyId ?? null).then(t => { if (t) setSaleTypes(t); });
+    void loadSaleTypes();
     let channel = supabase.channel('seller-data');
     for (const table of DATA_TABLES) {
       channel = onCompanyChange(channel, table, companyId, () => editsSoon(table));
@@ -1560,6 +1590,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     channel = onCompanyChange(channel, 'companies', companyId, async () => {
       const [te, ke, de] = await Promise.all([fetchTablesEnabled(), fetchKassaEnabled(), fetchDeliveryEnabled()]);
       setTablesOn(te); setKassaOn(ke); setDeliveryOn(de);
+      void loadSaleTypes();
       // The owner just switched çatdırılma off and a seller may be standing on
       // one of its screens — the nav item they arrived through is gone, so
       // leaving them there is a dead end.
@@ -1584,14 +1615,27 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       && (price === undefined || ci.menuItem.price === price);
   }
 
+  // `item.price` is the menu price (size and modifiers in it); the order type's
+  // change goes on here, the one place a line gets its price, and the line
+  // keeps the menu price beside it (lib/order-types pricedLine).
   function addToCart(item: MenuItem, mods?: string, variantId?: string, modifiersDetail?: SelectedModifier[]) {
+    const { price, menuPrice } = pricedLine(item.price, activeChange);
+    const priced = price === item.price ? item : { ...item, price };
     setCart(prev => {
-      const ex = prev.find(ci => sameCartLine(ci, item.id, mods, item.price));
+      const ex = prev.find(ci => sameCartLine(ci, item.id, mods, price));
       if (ex) return prev.map(ci =>
-        sameCartLine(ci, item.id, mods, item.price) ? { ...ci, quantity: ci.quantity + 1 } : ci
+        sameCartLine(ci, item.id, mods, price) ? { ...ci, quantity: ci.quantity + 1 } : ci
       );
-      return [...prev, { menuItem: item, quantity: 1, modifiers: mods, variantId, modifiersDetail }];
+      return [...prev, { menuItem: priced, quantity: 1, modifiers: mods, variantId, modifiersDetail, ...(menuPrice !== undefined ? { menuPrice } : {}) }];
     });
+  }
+
+  // "+" on a line already in the cart: one more of that line, at its price.
+  // Going through addToCart would put the type's change on a second time.
+  function addCartLineAgain(item: MenuItem, mods?: string) {
+    setCart(prev => prev.map(ci =>
+      sameCartLine(ci, item.id, mods, item.price) ? { ...ci, quantity: ci.quantity + 1 } : ci
+    ));
   }
 
   // The "+" beside a line already on the order: one more of it, into the new batch.
@@ -1820,12 +1864,24 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     setAppendOrderId(null);
     if (id === 'couriers') refreshCouriers();
     if (id === 'new-order') {
-      // Tables off used to mean "there is only one kind of order". With
-      // çatdırılma on there are two, so the chooser has to appear after all.
-      if (!tablesOn && !deliveryOn) { startNewOrder('takeaway'); return; }
-      setOrderType(null); setCart([]); setSelectedCourier(null);
+      // One kind of order that needs no table or courier: nothing to choose,
+      // so it starts. Two or more, and the chooser has to appear after all.
+      if (offeredTypes.length === 1 && typeFlow(offeredTypes[0], tablesOn) === 'takeaway') {
+        void pickSaleType(offeredTypes[0]);
+        return;
+      }
+      setOrderType(null); setSaleTypeId(null); setCart([]); setSelectedCourier(null);
     }
     setView(id);
+  }
+
+  // A card on "Yeni sifariş": remember which one (its prices), then run the
+  // flow it starts — a table, a courier, or straight to the menu.
+  async function pickSaleType(t: SaleType) {
+    setSaleTypeId(t.id);
+    const flow = typeFlow(t, tablesOn);
+    if (flow === 'takeaway') await startNewOrder('takeaway');
+    else setOrderType(flow);
   }
 
   async function startNewOrder(type: OrderType, tableNum?: number, courierId?: string) {
@@ -2151,6 +2207,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       staffId: activeStaff?.id,
       courierId: orderType === 'kuryer' ? selectedCourier! : undefined,
       note: note.trim() || undefined,
+      ...orderTypeFields(saleType),
     };
     // The desktop till prints the kitchen ticket itself, before the write; see
     // printKitchenNow. It needs the order's number for that, so it asks its own
@@ -2208,7 +2265,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       return;
     }
     mutateOrders(prev => [order, ...prev]);
-    setCart([]); setNote(''); setPrintKitchen(true); setSelectedTable(null); setOrderType(null); setSelectedCourier(null);
+    setCart([]); setNote(''); setPrintKitchen(true); setSelectedTable(null); setOrderType(null); setSaleTypeId(null); setSelectedCourier(null);
     setMobileCartOpen(false);
     setView('orders');
     // No payment sheet here on purpose. It used to open the moment the order was
@@ -2901,6 +2958,22 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const cartTotal   = cart.reduce((s, ci) => s + ci.menuItem.price * ci.quantity, 0);
   const cartCount   = cart.reduce((s, ci) => s + ci.quantity, 0);
   const appendOrder = appendOrderId ? orders.find(o => o.id === appendOrderId) ?? null : null;
+  // The type this cart is priced under: the open order's when adding to one,
+  // otherwise the card the new order was started from.
+  const saleType = saleTypes.find(t => t.id === saleTypeId) ?? null;
+  const activeChange = appendOrder ? changeFor(appendOrder.orderType, saleTypes) : saleType?.change ?? NO_CHANGE;
+  const offeredTypes = shownTypes(saleTypes, { tablesOn, deliveryOn });
+  // The line under the cart's title: where this order is going, with the
+  // type's name in front when it is one the owner added ("Banket · Masa 5").
+  function cartHeading(): string {
+    if (appendOrder) return `№${orderLabel(appendOrder)}-ə əlavə`;
+    const place = orderType === 'kuryer' ? `Kuryer · ${courierNames[selectedCourier ?? ''] ?? ''}`
+      : !tablesOn ? 'Yeni sifariş'
+      : orderType === 'takeaway' ? 'Takeaway'
+      : tableName(selectedTable);
+    if (!saleType || saleType.builtIn) return place;
+    return orderType === 'masa' ? `${saleType.name} · ${place}` : saleType.name;
+  }
   // The edit screen's button also sends removals and a changed note (a QEYD slip)
   // on their own, so an empty cart doesn't disable it then.
   const submit = submitButton({
@@ -3999,58 +4072,44 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   menu opens. Takeaway has nothing left to ask, so it starts.
                   Once one is picked the cards shrink to a row, so the table
                   map below gets the screen (lib/floor-plan.ts). */}
+              {/* One card per type the owner has on (lib/order-types). The
+                  price change is shown small, for the waiter. */}
+              {offeredTypes.length === 0 && (
+                <p className="text-sm text-stone-500 mt-3">Aktiv sifariş növü yoxdur. Admin panelində Tənzimləmələr → Sifariş növləri.</p>
+              )}
               {orderType === 'masa' || orderType === 'kuryer' ? (
                 <div className="flex flex-wrap gap-2 mt-3 mb-4">
-                  {tablesOn && (
-                    <button
-                      onClick={() => setOrderType('masa')}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 text-sm font-semibold transition-all active:scale-95 ${orderType === 'masa' ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 bg-white text-stone-600 hover:border-primary-300'}`}
-                    >
-                      <UtensilsCrossed className="w-4 h-4" /> Masa
-                    </button>
-                  )}
-                  <button
-                    onClick={() => startNewOrder('takeaway')}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-stone-200 bg-white text-sm font-semibold text-stone-600 hover:border-primary-300 transition-all active:scale-95"
-                  >
-                    <span>🥡</span> Takeaway
-                  </button>
-                  {deliveryOn && (
-                    <button
-                      onClick={() => setOrderType('kuryer')}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 text-sm font-semibold transition-all active:scale-95 ${orderType === 'kuryer' ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 bg-white text-stone-600 hover:border-primary-300'}`}
-                    >
-                      <Bike className="w-4 h-4" /> Çatdırılma
-                    </button>
-                  )}
+                  {offeredTypes.map(t => {
+                    const on = saleTypeId ? saleTypeId === t.id : typeFlow(t, tablesOn) === orderType && !!t.builtIn;
+                    const label = changeLabel(t.change);
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => void pickSaleType(t)}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl border-2 text-sm font-semibold transition-all active:scale-95 ${on ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 bg-white text-stone-600 hover:border-primary-300'}`}
+                      >
+                        <SaleTypeIcon t={t} small /> {t.name}
+                        {label && <span className="text-xs font-semibold text-stone-500">{label}</span>}
+                      </button>
+                    );
+                  })}
                 </div>
               ) : (
-              <div className={`grid ${deliveryOn ? 'grid-cols-2 sm:grid-cols-3 max-w-md' : 'grid-cols-2 max-w-xs'} gap-4 mb-8`}>
-                {tablesOn && (
-                  <button
-                    onClick={() => setOrderType('masa')}
-                    className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 border-stone-200 bg-white hover:border-primary-300"
-                  >
-                    <UtensilsCrossed className="w-8 h-8 text-stone-500" />
-                    <span className="font-semibold text-sm text-stone-600">Masa</span>
-                  </button>
-                )}
-                <button
-                  onClick={() => startNewOrder('takeaway')}
-                  className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 border-stone-200 bg-white hover:border-primary-300 transition-all active:scale-95"
-                >
-                  <span className="text-4xl">🥡</span>
-                  <span className="font-semibold text-sm text-stone-600">Takeaway</span>
-                </button>
-                {deliveryOn && (
-                  <button
-                    onClick={() => setOrderType('kuryer')}
-                    className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 border-stone-200 bg-white hover:border-primary-300"
-                  >
-                    <Bike className="w-8 h-8 text-stone-500" />
-                    <span className="font-semibold text-sm text-stone-600">Çatdırılma</span>
-                  </button>
-                )}
+              <div className={`grid ${offeredTypes.length >= 3 ? 'grid-cols-2 sm:grid-cols-3 max-w-md' : 'grid-cols-2 max-w-xs'} gap-4 mb-8`}>
+                {offeredTypes.map(t => {
+                  const label = changeLabel(t.change);
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => void pickSaleType(t)}
+                      className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 border-stone-200 bg-white hover:border-primary-300"
+                    >
+                      <SaleTypeIcon t={t} />
+                      <span className="font-semibold text-sm text-stone-600 text-center break-words">{t.name}</span>
+                      {label && <span className="-mt-2 text-xs font-semibold text-stone-500">{label}</span>}
+                    </button>
+                  );
+                })}
               </div>
               )}
 
@@ -4318,7 +4377,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                           }
                           <div className="p-2.5">
                             <p className="text-sm font-medium text-stone-800 leading-tight">{item.name}</p>
-                            <p className="text-primary-700 font-bold text-sm mt-0.5">{item.price.toFixed(2)} ₼</p>
+                            <p className="text-primary-700 font-bold text-sm mt-0.5">{typedPrice(item.price, activeChange).toFixed(2)} ₼</p>
                           </div>
                         </button>
                       </div>
@@ -4340,7 +4399,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                     <div className="flex items-center justify-between">
                       <div>
                         <h2 className="font-bold text-stone-800">{appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className="text-primary-700">({cartCount})</span>}</h2>
-                        <p className="text-xs text-stone-500">{appendOrder ? `№${orderLabel(appendOrder)}-ə əlavə` : orderType === 'kuryer' ? `Kuryer · ${courierNames[selectedCourier ?? ''] ?? ''}` : !tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                        <p className="text-xs text-stone-500">{cartHeading()}</p>
                       </div>
                       {cart.length > 0 && (
                         <button onClick={() => setClearConfirm(true)} className="w-7 h-7 flex items-center justify-center rounded-lg text-stone-400 hover:text-red-500 hover:bg-red-50 transition-colors">
@@ -4354,10 +4413,10 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                     last line; once the list reaches the bottom it scrolls and the footer stays put. */}
                 <div className="min-h-0 overflow-y-auto px-4 py-3">
                   {appendOrder
-                    ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} removing={removing} />
+                    ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} removing={removing} />
                     : cart.length === 0
                     ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
-                    : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
+                    : <CartItems cart={cart} addToCart={addCartLineAgain} removeFromCart={removeFromCart} />
                   }
                 </div>
                 <div className="px-4 py-3 border-t space-y-3">
@@ -4463,7 +4522,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                     <h2 className="font-bold text-stone-800">
                       {appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className="text-primary-700">({cartCount})</span>}
                     </h2>
-                    <p className="text-xs text-stone-500">{appendOrder ? `№${orderLabel(appendOrder)}-ə əlavə` : orderType === 'kuryer' ? `Kuryer · ${courierNames[selectedCourier ?? ''] ?? ''}` : !tablesOn ? 'Yeni sifariş' : orderType === 'takeaway' ? 'Takeaway' : tableName(selectedTable)}</p>
+                    <p className="text-xs text-stone-500">{cartHeading()}</p>
                   </div>
                   <div className="flex items-center gap-1">
                     {cart.length > 0 && (
@@ -4480,10 +4539,10 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-3">
               {appendOrder
-                ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addToCart} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} removing={removing} />
+                ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} removing={removing} />
                 : cart.length === 0
                 ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
-                : <CartItems cart={cart} addToCart={addToCart} removeFromCart={removeFromCart} />
+                : <CartItems cart={cart} addToCart={addCartLineAgain} removeFromCart={removeFromCart} />
               }
             </div>
             <div className="px-4 py-4 border-t space-y-3 bg-white shrink-0">
@@ -5070,7 +5129,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                         onClick={() => setSelectedVariant({ id: v.id, name: v.name, price: v.price })}
                         className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${selectedVariant?.id === v.id ? 'border-primary-800 bg-primary-50 text-primary-800' : 'border-stone-200 text-stone-600 hover:border-stone-300'}`}
                       >
-                        {v.name} — {v.price.toFixed(2)} ₼
+                        {v.name} — {typedPrice(v.price, activeChange).toFixed(2)} ₼
                       </button>
                     ))}
                   </div>
@@ -5111,7 +5170,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
             {modifierDraft && (
               <p className="mt-4 text-sm text-stone-600 flex items-baseline justify-between">
                 <span>Qiymət</span>
-                <span className="text-lg font-bold text-stone-800">{modifierDraft.price.toFixed(2)} ₼</span>
+                <span className="text-lg font-bold text-stone-800">{typedPrice(modifierDraft.price, activeChange).toFixed(2)} ₼</span>
               </p>
             )}
             <div className="flex gap-2 mt-4">
