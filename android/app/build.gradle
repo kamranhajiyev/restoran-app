@@ -25,24 +25,41 @@ def copyTill = tasks.register('copyTill', Sync) {
 // A release without the page would open nothing with the internet down — the
 // one thing it is for. Stop the build rather than ship that.
 gradle.taskGraph.whenReady { graph ->
-    if (graph.allTasks.any { it.name == 'assembleRelease' } && !new File(tillExport, 'seller/index.html').exists()) {
+    if (graph.allTasks.any { it.name ==~ /(assemble|bundle)\w*Release/ } && !new File(tillExport, 'seller/index.html').exists()) {
         throw new GradleException('out-android/ has no till: run `npm run android:till` first')
     }
 }
 
 android {
     namespace 'com.possiblle.pos'
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
         applicationId 'com.possiblle.pos'
         minSdk 26
-        targetSdk 35
+        // Google Play takes no new app or update below 36 since 2026-08-31.
+        // From 35 on, Android draws the app under the status bar (MainActivity
+        // makes room for it).
+        targetSdk 36
         // 0.4.4 → 404, so every release is a higher number than the one before.
         versionCode appVersion.tokenize('.').collect { it as int }.inject(0) { n, p -> n * 100 + p }
         versionName appVersion
         buildConfigField 'String', 'POS_URL', "\"${posUrl}\""
         buildConfigField 'boolean', 'BUNDLED', 'true'
+    }
+
+    // Two apps from one code. "direct" is the APK we hand out and attach to
+    // GitHub releases; it updates itself (Updater.java). "play" goes to Google
+    // Play as an .aab: Play bans an app that installs its own new version, so
+    // it has no updater and no install permission, and Play updates it.
+    flavorDimensions = ['store']
+    productFlavors {
+        direct {
+            dimension 'store'
+        }
+        play {
+            dimension 'store'
+        }
     }
 
     sourceSets {

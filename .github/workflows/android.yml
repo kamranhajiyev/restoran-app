@@ -1,4 +1,5 @@
-# Builds the Android till APK (android/).
+# Builds the Android till APK (android/), and for production also the .aab
+# for Google Play (the same app without its own updater).
 #
 # The APK carries its own copy of the seller page, like the exe, so it opens and
 # sells with the internet down — and every change to the page needs a new APK.
@@ -102,27 +103,40 @@ jobs:
         # and it must open production, not the preview.
         run: |
           if [ "${{ inputs.release }}" = "true" ] || [[ "$GITHUB_REF" == refs/tags/apk-* ]]; then
-            ./gradlew assembleRelease
+            ./gradlew assembleDirectRelease bundlePlayRelease
           elif [ "${{ github.event_name }}" = "push" ]; then
-            ./gradlew assembleRelease -PposUrl="$PREVIEW_URL"
+            ./gradlew assembleDirectRelease -PposUrl="$PREVIEW_URL"
           elif [ -n "${{ inputs.url }}" ]; then
-            ./gradlew assembleRelease -PposUrl="${{ inputs.url }}"
+            ./gradlew assembleDirectRelease -PposUrl="${{ inputs.url }}"
           else
-            ./gradlew assembleRelease
+            ./gradlew assembleDirectRelease bundlePlayRelease
           fi
-          mv app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/PossibllePOS.apk
+          mkdir -p app/build/out
+          mv app/build/outputs/apk/direct/release/app-direct-release.apk app/build/out/PossibllePOS.apk
+          if [ -f app/build/outputs/bundle/playRelease/app-play-release.aab ]; then
+            mv app/build/outputs/bundle/playRelease/app-play-release.aab app/build/out/PossibllePOS.aab
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: PossibllePOS-apk
-          path: android/app/build/outputs/apk/release/PossibllePOS.apk
+          path: android/app/build/out/PossibllePOS.apk
           if-no-files-found: error
+
+      # The Google Play app (the "play" flavor: no updater), uploaded by hand in
+      # Play Console. Only a production build makes one: a preview's .aab would
+      # send customers' tills to the test site.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PossibllePOS-play-aab
+          path: android/app/build/out/PossibllePOS.aab
+          if-no-files-found: ignore
 
       - name: Attach to release
         if: inputs.release
         uses: softprops/action-gh-release@v2
         with:
-          files: android/app/build/outputs/apk/release/PossibllePOS.apk
+          files: android/app/build/out/PossibllePOS.apk
           # The exe's job made this draft; the APK joins it. Publishing it on
           # GitHub sends both to the restaurants.
           draft: true
@@ -152,5 +166,5 @@ jobs:
           tag_name: v${{ env.VERSION }}
           name: Android APK ${{ env.VERSION }}
           body: Only the Android APK. Exe tills skip this release.
-          files: android/app/build/outputs/apk/release/PossibllePOS.apk
+          files: android/app/build/out/PossibllePOS.apk
           draft: true
