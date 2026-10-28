@@ -20,6 +20,9 @@ export default function SiteFooter() {
           <Link href="/yukle" className="text-xs text-gray-400 hover:text-black transition-colors">
             Windows tətbiqi
           </Link>
+          <Link href="/privacy" className="text-xs text-gray-400 hover:text-black transition-colors">
+            Məxfilik siyasəti
+          </Link>
         </nav>
         <div className="flex items-center justify-between text-xs text-gray-400">
           <Link href="/" className="font-bold text-black text-sm">possiblle</Link>
