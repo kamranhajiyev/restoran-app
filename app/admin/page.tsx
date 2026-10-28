@@ -10,7 +10,7 @@ import {
   Coffee, BarChart2, Package, Bike, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
   GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link, Printer, Check, ArrowUp, ArrowDown, ChefHat,
-  Building2, AtSign, Landmark, ChevronLeft, ChevronRight,
+  Building2, AtSign, Landmark, ChevronLeft, ChevronRight, Settings,
 } from 'lucide-react';
 import { hallsMoved, nextHallPosition } from '@/lib/hall-order';
 import {
@@ -64,6 +64,7 @@ import StationsPanel from '@/components/StationsPanel';
 import ModifiersPanel from '@/components/ModifiersPanel';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import TillRulesPanel from '@/components/TillRulesPanel';
+import OrderTypesPanel from '@/components/OrderTypesPanel';
 import { ROLE_NAMES } from '@/lib/till-rules';
 import type { StaffRole } from '@/types';
 import PasswordField from '@/components/PasswordField';
@@ -81,6 +82,7 @@ import { isDesktop } from '@/lib/desktopPrint';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
 import { copySpot, keepLocalTables, nextTableName, resizeTable, tableBox, tableRadius, tablesInHall, toggleShape } from '@/lib/floor-plan';
 import { orderPlace, orderPlaceKind, PlaceKind, tableTitle } from '@/lib/order-place';
+import { placeWithType, typeExtra } from '@/lib/order-types';
 import { placeSales, tableSales } from '@/lib/place-sales';
 import { insertCopyAfter } from '@/lib/menu-copy';
 import { moneyDiff, shiftCheck } from '@/lib/shift-check';
@@ -133,7 +135,7 @@ const STATUS_LABELS: Record<OrderStatus, string> = {
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
 
-type Tab = 'stats' | 'orders' | 'kassa' | 'maliyye' | 'menu' | 'users' | 'tables' | 'anbar' | 'couriers' | 'logins';
+type Tab = 'stats' | 'orders' | 'kassa' | 'maliyye' | 'menu' | 'users' | 'tables' | 'anbar' | 'couriers' | 'settings';
 
 type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
@@ -214,9 +216,9 @@ const NAV_ITEMS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'menu',       label: 'Menyu',         icon: Coffee },
   { id: 'users',      label: 'Əməkdaşlar', icon: Users },
   { id: 'tables',     label: 'Masalar',     icon: LayoutDashboard },
-  { id: 'anbar',      label: 'Anbar',       icon: Package },
+  { id: 'anbar',     label: 'Anbar',       icon: Package },
   { id: 'couriers',   label: 'Kuryerlər',   icon: Bike },
-  { id: 'logins',     label: 'Girişlər',    icon: Globe },
+  { id: 'settings',   label: 'Tənzimləmələr', icon: Settings },
 ];
 
 const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
@@ -229,7 +231,7 @@ const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
   tables:     { title: 'Masalar',                 subtitle: 'Restoran masalarını idarə et' },
   anbar:      { title: 'Anbar',                   subtitle: 'Anbarlar, qalıqlar, tədarükçülər və bazarlıqlar' },
   couriers:   { title: 'Kuryerlər',               subtitle: 'Kuryerlər, borclar və ödənişlər' },
-  logins:     { title: 'Girişlər',                subtitle: 'Sistemə kim, haradan daxil olub' },
+  settings:   { title: 'Tənzimləmələr',           subtitle: 'Sifariş növləri və girişlər' },
 };
 
 function LineChartSvg({ data }: { data: { label: string; fullLabel: string; rev: number }[] }) {
@@ -582,8 +584,10 @@ function AdminPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const rawTab = searchParams.get('tab');
-  // 'categories' merged into 'menu' — keep old links working
-  const tab = (rawTab === 'categories' ? 'menu' : rawTab as Tab | null) ?? 'stats';
+  // 'categories' merged into 'menu', 'logins' moved under Tənzimləmələr — keep old links working
+  const tab = (rawTab === 'categories' ? 'menu' : rawTab === 'logins' ? 'settings' : rawTab as Tab | null) ?? 'stats';
+  // Tənzimləmələr sub-view. Absent ?sub= means Sifariş növləri.
+  const settingsSub: 'növlər' | 'girişlər' = rawTab === 'logins' || searchParams.get('sub') === 'girisler' ? 'girişlər' : 'növlər';
   // Statistika sub-view. Absent ?sub= means Ümumi, so existing /admin?tab=stats links are unchanged.
   const statsSub: 'ümumi' | 'analiz' = searchParams.get('sub') === 'analiz' ? 'analiz' : 'ümumi';
   const usersSub = searchParams.get('sub');
@@ -1045,9 +1049,9 @@ function AdminPageContent() {
 
   // Login history is rarely opened — fetched once, on first visit to the tab.
   useEffect(() => {
-    if (tab !== 'logins' || !sessionReady || loginsLoaded) return;
+    if (tab !== 'settings' || settingsSub !== 'girişlər' || !sessionReady || loginsLoaded) return;
     fetchLoginEvents().then(ev => { if (ev) { setLoginEvents(ev); setLoginsLoaded(true); } });
-  }, [tab, sessionReady, loginsLoaded]);
+  }, [tab, settingsSub, sessionReady, loginsLoaded]);
 
   // Stats orders are fetched per selected range — only the period being viewed is downloaded.
   // Fetched ranges are cached in memory: fully-past ranges forever, ranges touching today for 60s.
@@ -3780,8 +3784,10 @@ function AdminPageContent() {
                   // Where it went, and on a delivery who took it. Empty string
                   // for the company that runs neither tables nor delivery, and
                   // then the second line is not drawn at all.
-                  const place = orderPlace(order, placeCfg);
+                  const place = placeWithType(orderPlace(order, placeCfg), order);
                   const rider = order.courierId ? courierNames[order.courierId] : undefined;
+                  // What the order type added or took off (lib/order-types).
+                  const extra = typeExtra(order.items);
                   return (
                     <div key={order.id} className={`${flagged ? 'bg-amber-50 ' : ''}${i < visibleOrders.length - 1 ? 'border-b border-stone-50' : ''}`}>
                       {/* Row */}
@@ -3817,6 +3823,14 @@ function AdminPageContent() {
                             🏷️ -{order.discountAmount!.toFixed(2)} ₼
                           </span>
                         )}
+                        {extra !== 0 && (
+                          <span
+                            title={order.orderTypeName ? `${order.orderTypeName}: qiymət dəyişikliyi` : 'Qiymət dəyişikliyi'}
+                            className={`text-xs font-semibold rounded-lg px-1.5 py-0.5 flex-shrink-0 hidden sm:inline border ${extra > 0 ? 'text-amber-800 bg-amber-50 border-amber-300' : 'text-green-700 bg-green-50 border-green-200'}`}
+                          >
+                            {extra > 0 ? '+' : '−'}{Math.abs(extra).toFixed(2)} ₼
+                          </span>
+                        )}
                         {removedCount > 0 && (
                           <span className="text-xs font-semibold text-amber-700 bg-amber-100 border border-amber-300 rounded-lg px-1.5 py-0.5 flex-shrink-0 hidden sm:inline">
                             🗑 {removedCount} silinib
@@ -3832,7 +3846,7 @@ function AdminPageContent() {
                             <div className="hidden sm:grid grid-cols-[1fr_80px_80px] gap-2 text-xs font-medium text-stone-500 uppercase tracking-wide pb-1 border-b border-stone-200 mb-2">
                               <span>Məhsul</span><span className="text-right">Say</span><span className="text-right">Cəmi</span>
                             </div>
-                            <OrderItemHistory order={order} tz={bizSettings.timezone} />
+                            <OrderItemHistory order={order} tz={bizSettings.timezone} showMenuPrice />
                           </div>
                           {order.note && <OrderNote note={order.note} className="text-xs text-stone-500 italic mb-3" />}
                           {/* The struck-through lines above already carry who and when; this
@@ -4781,6 +4795,38 @@ function AdminPageContent() {
             </div>
           )}
 
+          {/* ── TƏNZİMLƏMƏLƏR ──────────────────────────────────────────── */}
+          {tab === 'settings' && (
+            <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5 w-fit mb-4">
+              {(['növlər', 'girişlər'] as const).map(s => (
+                <button key={s} onClick={() => router.replace(s === 'girişlər' ? '/admin?tab=settings&sub=girisler' : '/admin?tab=settings')}
+                  className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${settingsSub === s ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
+                  {s === 'növlər' ? 'Sifariş növləri' : 'Girişlər'}
+                </button>
+              ))}
+            </div>
+          )}
+          {/* Sifariş növləri. Masa and Çatdırılma flip the same flags as the
+              Masalar and Kuryerlər switches. */}
+          {tab === 'settings' && settingsSub === 'növlər' && (
+            <OrderTypesPanel
+              tablesOn={tablesOn}
+              deliveryOn={deliveryOn}
+              onTablesOn={async next => {
+                setTablesToggleBusy(true);
+                setTablesOn(next);
+                await setTablesEnabled(next);
+                setTablesToggleBusy(false);
+              }}
+              onDeliveryOn={async next => {
+                setDeliveryToggleBusy(true);
+                setDeliveryOn(next);
+                await setDeliveryEnabled(next);
+                setDeliveryToggleBusy(false);
+              }}
+            />
+          )}
+
           {/* ── KURYERLƏR ──────────────────────────────────────────────── */}
           {tab === 'couriers' && (
             <div className="max-w-3xl space-y-4">
@@ -4822,8 +4868,8 @@ function AdminPageContent() {
             </div>
           )}
 
-          {/* ── LOGINS ─────────────────────────────────────────────────── */}
-          {tab === 'logins' && (
+          {/* ── GİRİŞLƏR (under Tənzimləmələr) ─────────────────────────── */}
+          {tab === 'settings' && settingsSub === 'girişlər' && (
             <div className="max-w-3xl space-y-4">
               {!loginsLoaded && (
                 <div className="bg-white rounded-xl border border-stone-100 p-16 text-center">

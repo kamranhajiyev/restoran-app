@@ -14,10 +14,14 @@ import { formatTime } from '@/lib/dates';
 // `isItemReady` marks the lines whose sex has finished them. Optional: the admin
 // panel shows this same history for closed orders, where readiness is long past
 // being interesting.
-export default function OrderItemHistory({ order, tz, isItemReady }: {
+//
+// `showMenuPrice` (admin only) strikes the menu price through beside a line its
+// order type re-priced, so the owner sees what the type added or took off.
+export default function OrderItemHistory({ order, tz, isItemReady, showMenuPrice }: {
   order: Order;
   tz: string;
   isItemReady?: (item: OrderItem) => boolean;
+  showMenuPrice?: boolean;
 }) {
   const batches = itemBatches(order);
 
@@ -68,7 +72,12 @@ export default function OrderItemHistory({ order, tz, isItemReady }: {
                   {oi.modifiers && <span className="text-xs text-primary-600 ml-1">({oi.modifiers})</span>}
                 </span>
                 <span className={`mx-4 ${isItemReady?.(oi) ? 'text-green-600' : 'text-stone-500'}`}>{oi.quantity} əd</span>
-                <span className="font-medium">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
+                <span className="font-medium">
+                  {showMenuPrice && oi.menuPrice != null && oi.menuPrice !== oi.menuItem.price && (
+                    <span className="text-xs text-stone-400 line-through mr-1">{(oi.menuPrice * oi.quantity).toFixed(2)}</span>
+                  )}
+                  {(oi.menuItem.price * oi.quantity).toFixed(2)} ₼
+                </span>
               </div>
             )
           ))}
