@@ -46,9 +46,10 @@ export const DEFAULT_ORDER_TYPES: OrderType[] = [
 const round = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 /** A menu price under this order type, rounded to the qəpik. A discount never
- *  takes a dish below 0. */
+ *  takes a dish below 0, and a free one (0 ₼) stays free: "+1 ₼" must not start
+ *  charging for the bread. */
 export function typedPrice(price: number, change: PriceChange): number {
-  if (!change.amount) return price;
+  if (!change.amount || price <= 0) return price;
   const delta = change.unit === '%' ? price * change.amount / 100 : change.amount;
   return Math.max(0, round(price + change.sign * delta));
 }

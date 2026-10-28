@@ -30,6 +30,14 @@ describe('adding one more of a line already on the order', () => {
     });
   });
 
+  // Review, 2026-10-29: on a Xarici (+0.27 ₼) order, "+" on Fanta 0.33 L sold
+  // at 1.27 came back at 1.54 — the cart put the type's change on the charged
+  // price a second time. It starts from the menu price the line kept.
+  it('starts from the menu price on a line its order type re-priced', () => {
+    const oi: OrderItem = { id: 'r4', menuItem: { ...fanta, price: 1.27 }, menuPrice: 1, quantity: 1, modifiers: '0.33 L', variantId: 'v33' };
+    expect(addAgainLine(oi, [fanta])?.item.price).toBe(1);
+  });
+
   it('is not offered for a product switched off or deleted since', () => {
     const oi: OrderItem = { id: 'r3', menuItem: ayran, quantity: 1 };
     expect(addAgainLine(oi, [{ ...ayran, available: false }])).toBeNull();

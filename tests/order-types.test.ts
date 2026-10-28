@@ -22,6 +22,10 @@ describe('typedPrice', () => {
     expect(typedPrice(10, { sign: -1, amount: 1.5, unit: 'azn' })).toBe(8.5);
   });
 
+  it('leaves a free dish free', () => {
+    expect(typedPrice(0, { sign: 1, amount: 1, unit: 'azn' })).toBe(0);
+  });
+
   it('never goes below zero', () => {
     expect(typedPrice(0.5, { sign: -1, amount: 1, unit: 'azn' })).toBe(0);
   });
