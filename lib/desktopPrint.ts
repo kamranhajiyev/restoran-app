@@ -51,6 +51,8 @@ export interface TillSettings {
   workClose?: string | null;
   /** Who needs a manager's PIN for what (lib/till-rules). Missing = all free. */
   tillRules?: unknown;
+  /** Sifariş növləri as companies.order_types holds them (lib/order-types). */
+  orderTypes?: unknown;
 }
 
 /** The till's local database, present only in a build that ships the app. */

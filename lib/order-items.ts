@@ -13,6 +13,7 @@ export interface OrderItemRow {
   created_at?: string | null;
   removed_at?: string | null;
   removed_by?: string | null;
+  menu_price?: number | string | null;
 }
 
 export function mapOrderItem(oi: OrderItemRow): OrderItem {
@@ -29,6 +30,7 @@ export function mapOrderItem(oi: OrderItemRow): OrderItem {
     modifiers: oi.modifiers ?? undefined,
     modifiersDetail: oi.modifiers_detail ?? undefined,
     variantId: oi.variant_id ?? undefined,
+    menuPrice: oi.menu_price != null ? Number(oi.menu_price) : undefined,
     createdAt: oi.created_at ?? undefined,
     removedAt: oi.removed_at ?? undefined,
     removedBy: oi.removed_by ?? undefined,

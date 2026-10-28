@@ -14,6 +14,7 @@ import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
 import type { TillSettings } from './desktopPrint';
 import { cleanRules, type TillRules } from './till-rules';
+import { cleanOrderTypes, menuPriceColumn, orderTypeColumns, type OrderType } from './order-types';
 import type { HealthProblem, HealthReport } from './health-report';
 import type { AccountEdit, AccountKind, FinanceAccount, FinanceClosing, FinanceEntry, FinanceSource, FinanceTransaction, SourceKind } from './finance';
 
@@ -786,6 +787,8 @@ async function readOrders(opts?: OrderQuery): Promise<Order[]> {
       tillNumber: o.till_number ?? undefined,
       tableNumber: o.table_id ?? 0,
       tableName: o.table_name ?? undefined,
+      orderType: o.order_type ?? undefined,
+      orderTypeName: o.order_type_name ?? undefined,
       sellerName: o.waiter_name,
       staffId: o.staff_id ?? undefined,
       courierId: o.courier_id ?? undefined,
@@ -921,6 +924,7 @@ export async function addOrder(order: Order, opts?: ReadOpts): Promise<string | 
       note: order.note ?? null,
       created_at: order.createdAt,
       company_id: _companyId,
+      ...orderTypeColumns(order),
     });
     if (orderError) { console.error('[addOrder orders]', orderError); return orderError.message; }
     if (order.items.length === 0) return null;
@@ -943,6 +947,7 @@ export async function addOrder(order: Order, opts?: ReadOpts): Promise<string | 
       // Unticked "Mətbəxə çap et": the print triggers skip the line.
       no_print: oi.noPrint ?? false,
       printed_station_id: printedStationColumn(oi.printedStationId),
+      ...menuPriceColumn(oi),
     }));
     const { error: itemsError } = await supabase.from('order_items').insert(rows);
     if (itemsError) { console.error('[addOrder items]', itemsError); return itemsError.message; }
@@ -989,6 +994,7 @@ export async function addItemsToOrder(
         variant_id: oi.variantId ?? null,
         no_print: oi.noPrint ?? false,
         printed_station_id: printedStationColumn(oi.printedStationId),
+        ...menuPriceColumn(oi),
       }));
       const { error } = await supabase.from('order_items').insert(rows);
       if (error) { console.error('[addItemsToOrder]', error); return error.message; }
@@ -1357,6 +1363,28 @@ export async function fetchTillRules(): Promise<TillRules | null | undefined> {
 
 export async function saveTillRules(rules: TillRules): Promise<string | null> {
   const { error } = await supabase.rpc('set_till_rules', { p_rules: rules });
+  return error ? error.message : null;
+}
+
+// ─── Sifariş növləri (lib/order-types) ──────────────────────────────────────
+// Read like the till rules: the till's own copy first (exe, APK), then the
+// companies row. A terminal link with no session gets them from
+// /api/public-settings.
+
+/** Undefined = the read failed: keep what the screen has. */
+export async function fetchOrderTypes(): Promise<OrderType[] | undefined> {
+  const local = await fromSettings(s => s.orderTypes ?? []);
+  if (local !== null) return cleanOrderTypes(local);
+  try {
+    if (!_companyId) return undefined;
+    const { data, error } = await supabase.from('companies').select('order_types').eq('id', _companyId).single();
+    if (error || !data) return undefined;
+    return cleanOrderTypes(data.order_types);
+  } catch { return undefined; }
+}
+
+export async function saveOrderTypes(types: OrderType[]): Promise<string | null> {
+  const { error } = await supabase.rpc('set_order_types', { p_types: types });
   return error ? error.message : null;
 }
 
