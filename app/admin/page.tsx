@@ -72,7 +72,7 @@ import type { StaffRole } from '@/types';
 import PasswordField from '@/components/PasswordField';
 import { validatePassword } from '@/lib/password';
 import { exportMenuExcel, exportOrdersExcel, exportAnalizExcel, parseMenuFile, ImportPreview, AnalizRow } from '@/lib/excel';
-import { cleanSetItems, itemKind, KIND_LABEL, partVariant, setChoices, setLine, setSplit, soldInSets, soldInSetSizes, withSets, type ItemKind } from '@/lib/set-items';
+import { cleanSetItems, GONE_PART, itemKind, KIND_LABEL, partVariant, setChoices, setLine, setNeedsFix, setSplit, soldInSets, soldInSetSizes, withSets, type ItemKind } from '@/lib/set-items';
 import { formRecipeLines, kindChangeStock, leftStockMessage, recipeLostMessage } from '@/lib/kind-change';
 import { cleanRecipe } from '@/lib/recipes';
 import { azNormalize } from '@/lib/az-text';
@@ -1688,6 +1688,11 @@ function AdminPageContent() {
   // with stock left in Anbar needs to say what happens to it.
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // A deleted part goes to no sex and takes no stock: the set is not saved with one.
+    if (form.kind === 'set' && form.setItems.some(p => !menu.some(m => m.id === p.id))) {
+      setDialog({ title: GONE_PART, message: 'Setin tərkibində silinmiş məhsul var. Onu × ilə çıxarın, lazımdırsa yenisini əlavə edin.' });
+      return;
+    }
     const before = editingId ? menu.find(m => m.id === editingId) : undefined;
     const change = kindChangeStock(before ? itemKind(before) : null, form.kind);
     if (change === 'drop-recipe') {
@@ -2475,8 +2480,8 @@ function AdminPageContent() {
                   || !form.setItems.some((x, j) => j !== i && x.id === p.id && x.variantId === v.id));
                 return (
                   <div key={`${p.id}-${i}`} className="flex items-center gap-2">
-                    <span className="flex-1 min-w-0 text-sm text-stone-700 break-words">
-                      {part?.name ?? 'Silinmiş məhsul'}
+                    <span className={`flex-1 min-w-0 text-sm break-words ${part ? 'text-stone-700' : 'text-red-600 font-medium'}`}>
+                      {part?.name ?? `${GONE_PART} — silin`}
                       {part && <span className="text-xs text-stone-400 ml-1.5">{KIND_LABEL[itemKind(part)]}</span>}
                     </span>
                     {part?.variants?.length ? (
@@ -4480,7 +4485,7 @@ function AdminPageContent() {
                               </p>
                             )}
                             {itemKind(item) === 'set' && (
-                              <p className="text-xs text-primary-800 mt-0.5 break-words">{setLine(item.setItems, menu) || 'Tərkibi yoxdur — “Düzəlt” ilə əlavə edin'}</p>
+                              <p className={`text-xs mt-0.5 break-words ${setNeedsFix(item.setItems, menu) ? 'text-red-600 font-medium' : 'text-primary-800'}`}>{setLine(item.setItems, menu) || 'Tərkibi yoxdur — “Düzəlt” ilə əlavə edin'}</p>
                             )}
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">

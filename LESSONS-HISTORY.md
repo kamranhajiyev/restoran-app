@@ -28,6 +28,15 @@ Restoran, 2026-10-16: Anbar's delete was a real delete, refused for anything
 ever used, and it would have left receipts not adding up; an inqrediyent now
 goes to the Zibil qutusu (`20261027_stock_item_trash.sql`).
 
+**When something points at an item deleted since, does the screen say so, or
+quietly leave it out?**
+A set, a recipe, a link: the thing it names can be deleted under it. Natiq, Test
+Restoran, 2026-10-29: Set 1 (Ayran + Dolma) still held a Dolma that had been
+deleted and made again. The menu list left the missing part out, so the set
+read "Ayran × 1" and nobody noticed; when sets started going to each part's
+sex, the bar got the Ayran and the kitchen got nothing. Now the list shows
+"Silinmiş məhsul" in red, and the form will not save a set holding one.
+
 **When an account or a restaurant is switched off, is it off everywhere, or only
 on the screen?**
 Logging the screen out is not taking the key back. Code review, 2026-10-08:
@@ -182,6 +191,17 @@ reloaded on it — "Yüklənir...", back to the top (`keepSettings`).
 Where "not loaded" and "empty" mean different things, a new item is empty.
 Test Restoran, 2026-10-14: a set made from the quick-add row opened in Düzəlt
 with no Set button and no contents until the page was refreshed (`submitQuickAdd`).
+
+**A screen keeps its own copy of the menu (or any list). When it meets an id
+that copy does not hold, does it fetch again, or hide the thing?**
+Natiq, Test Restoran, 2026-10-29: he deleted Set 1, made it again and sold it.
+The sex screens had loaded the menu before, and learn of changes only over
+realtime; with the socket quietly down they kept refreshing orders but never
+the menu. A dish the screen did not know went to no sex, so Mətbəx showed the
+Plov from Set 2 and Bar the Fanta, and the new set's Dolma and Ayran showed
+nowhere, while the database, reading the live menu, would have printed them.
+Now an order naming a dish the screen does not know reloads the menu, once per
+id (`unknownMenuIds` in `lib/stations.ts`).
 
 **Does an action on one device reach the others on the same login? When the
 server stops taking a login, does the screen say so?**

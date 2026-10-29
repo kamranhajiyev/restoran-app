@@ -96,6 +96,22 @@ export function menuIndex(menu: MenuItem[]): Map<string, MenuItem> {
   return new Map(menu.map(m => [m.id, m]));
 }
 
+// Dishes on these orders that the screen's menu does not hold. A dish it does
+// not know goes to no sex on screen, while the printer, reading the live menu,
+// prints it. Natiq, Test Restoran, 2026-10-29: a set made after the sex screen
+// loaded its menu showed nowhere. The screen asks for the menu again when this
+// finds an id it has not asked about yet.
+export function unknownMenuIds(orders: Pick<Order, 'items'>[], menuById: Map<string, MenuItem>): string[] {
+  const out = new Set<string>();
+  for (const o of orders) {
+    for (const i of o.items) {
+      const id = String(i.menuItem.id);
+      if (!menuById.has(id)) out.add(id);
+    }
+  }
+  return [...out];
+}
+
 // Every sex with something to prepare on this order. Removed lines don't count —
 // a cancelled dish is not work — but a sex whose only line was removed still needs
 // to see the strike-through, which is handled by the card filter, not here.

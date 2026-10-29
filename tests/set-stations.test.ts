@@ -103,3 +103,41 @@ describe('every screen splits the same way', () => {
     expect(sql).toMatch(/revoke execute on function public\.prep_lines\([^)]*\) from public, anon, authenticated/);
   });
 });
+
+// Test Restoran, 2026-10-29: Set 1 held a Dolma deleted since. The menu list
+// left it out, so nobody saw it, and the kitchen never heard of the Dolma.
+describe('a set holding a deleted item', () => {
+  it('shows it, in red, so the owner can fix it', async () => {
+    const { setLine, setNeedsFix } = await import('@/lib/set-items');
+    const parts = [{ id: 'fanta', qty: 1 }, { id: 'gone', qty: 1 }];
+    expect(setLine(parts, menu)).toBe('Fanta × 1 · Silinmiş məhsul × 1');
+    expect(setNeedsFix(parts, menu)).toBe(true);
+    expect(setNeedsFix([{ id: 'fanta', qty: 1 }], menu)).toBe(false);
+    expect(setNeedsFix([{ id: 'plov', qty: 1 }], menu)).toBe(true);   // size not picked
+    const admin = readFileSync('app/admin/page.tsx', 'utf8');
+    expect(admin).toMatch(/setNeedsFix\(item\.setItems, menu\) \? 'text-red-600/);
+  });
+
+  it('cannot be saved', () => {
+    const admin = readFileSync('app/admin/page.tsx', 'utf8');
+    const submit = admin.slice(admin.indexOf('e.preventDefault();\n    // A deleted part'));
+    expect(submit.slice(0, 400)).toMatch(/form\.setItems\.some\(p => !menu\.some\(m => m\.id === p\.id\)\)\) \{\s*setDialog\([^;]*\);\s*return;/);
+  });
+});
+
+// Natiq, Test Restoran, 2026-10-29: a set made after the sex screen loaded its
+// menu showed at no sex; the screen only learns the menu over realtime.
+describe('a dish the sex screen does not know yet', () => {
+  it('is found, so the screen reloads its menu', async () => {
+    const { unknownMenuIds } = await import('@/lib/stations');
+    const orders = [{ items: [line('fanta', 1), { menuItem: { id: 'new-set', name: 'Set 3' } as MenuItem, quantity: 1 }] }];
+    expect(unknownMenuIds(orders, byId)).toEqual(['new-set']);
+    expect(unknownMenuIds([{ items: [line('set2', 1)] }], byId)).toEqual([]);
+  });
+
+  it('makes the sex screen ask for the menu again', () => {
+    const page = readFileSync('app/station/page.tsx', 'utf8');
+    expect(page).toMatch(/unknownMenuIds\(orders, menuById\)/);
+    expect(page).toMatch(/fetchMenuOrNull\(\)\.then\(m => \{\s*if \(m\) setMenu\(m\);/);
+  });
+});

@@ -41,6 +41,11 @@ there where history needs it?**
 Test Restoran, 2026-10-06: a deactivated courier was still in the Kuryerlər tab.
 Guard: `lib/couriers`, `tests/courier-lists.test.ts`, `tests/login-events-keep-name.test.ts`, `tests/stock-trash.test.ts`
 
+**When something points at an item deleted since, does the screen say so, or
+quietly leave it out?**
+Natiq, Test Restoran, 2026-10-29: Set 1 held a deleted Dolma; the menu list hid it and the kitchen never got it.
+Guard: `tests/set-stations.test.ts`
+
 **When an account or a restaurant is switched off, is it off everywhere, or only
 on the screen?**
 Code review, 2026-10-08: a switched-off account was logged out, but the database still took its token.
@@ -152,6 +157,11 @@ Guard: `tests/history-report.test.ts`
 **When a safety rule blocks an action, does the screen offer to do the blocked part too (after saying what it will remove), instead of sending the user to do it by hand?**
 Test Restoran, 2026-10-24: a hall with tables could not be deleted; the owner had to remove every table one by one.
 Guard: `tests/hall-delete.test.ts`
+
+**A screen keeps its own copy of the menu (or any list). When it meets an id
+that copy does not hold, does it fetch again, or hide the thing?**
+Natiq, Test Restoran, 2026-10-29: a set made after the sex screen opened showed at no sex.
+Guard: `tests/set-stations.test.ts`
 
 **Does an action on one device reach the others on the same login? When the
 server stops taking a login, does the screen say so?**

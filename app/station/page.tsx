@@ -15,7 +15,7 @@ import {
   setCompanyContext, fetchMenuOrNull, fetchOrdersOrNull, fetchStationsOrNull, fetchTables, fetchHalls,
   fetchStationReadyOrNull, markStationReady, unmarkStationReady, StationReady,
 } from '@/lib/store';
-import { menuIndex, sliceForStation, readyStationIds } from '@/lib/stations';
+import { menuIndex, sliceForStation, readyStationIds, unknownMenuIds } from '@/lib/stations';
 import { itemBatches } from '@/lib/order-items';
 import { snapshotOrders, diffOrderAlerts, OrdersSnapshot } from '@/lib/orderAlerts';
 import { unlockSound, playNewOrder, playItemRemoved } from '@/lib/sound';
@@ -282,6 +282,21 @@ export default function StationPage() {
   // ── This sex's work ─────────────────────────────────────────────────────────
   const menuById = useMemo(() => menuIndex(menu), [menu]);
   const stationId = station?.id ?? null;
+
+  // A dish this screen's menu does not hold would show nowhere, so a new one on
+  // an order reloads the menu. Each id is asked about once: a dish deleted since
+  // stays unknown, and must not reload the menu on every refresh.
+  const askedMenuIds = useRef(new Set<string>());
+  useEffect(() => {
+    if (!ready) return;
+    const fresh = unknownMenuIds(orders, menuById).filter(id => !askedMenuIds.current.has(id));
+    if (fresh.length === 0) return;
+    for (const id of fresh) askedMenuIds.current.add(id);
+    fetchMenuOrNull().then(m => {
+      if (m) setMenu(m);
+      else for (const id of fresh) askedMenuIds.current.delete(id);
+    });
+  }, [ready, orders, menuById]);
 
   // Orders this sex has genuinely finished. Not just "a ready row exists": if the
   // waiter added another beer after we said done, the card has to come back or that

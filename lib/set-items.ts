@@ -32,16 +32,29 @@ export function partVariant(part: { variantId?: string }, item: Pick<MenuItem, '
   return part.variantId ? item?.variants?.find(v => v.id === part.variantId) : undefined;
 }
 
-/** "Ayran × 1 · Fanta · 0.5L × 2", for the menu list. A part deleted since is
- *  left out; a product with sizes and none picked says so, for the owner to fix. */
+/** "Ayran × 1 · Fanta · 0.5L × 2", for the menu list. A part deleted since, or
+ *  a product with sizes and none picked, says so, for the owner to fix: a
+ *  deleted part goes to no sex and takes no stock (Test Restoran, 2026-10-29:
+ *  Set 1 held a deleted Dolma, and the kitchen never heard of it). */
 export function setLine(parts: SetPart[] | undefined, menu: Pick<MenuItem, 'id' | 'name' | 'variants'>[]): string {
-  return (parts ?? []).flatMap(p => {
+  return (parts ?? []).map(p => {
     const item = menu.find(m => m.id === p.id);
-    if (!item) return [];
+    if (!item) return `${GONE_PART} × ${p.qty}`;
     const size = partVariant(p, item);
     const label = size ? ` · ${size.name}` : item.variants?.length ? ' · variant seçilməyib' : '';
-    return [`${item.name}${label} × ${p.qty}`];
+    return `${item.name}${label} × ${p.qty}`;
   }).join(' · ');
+}
+
+export const GONE_PART = 'Silinmiş məhsul';
+
+/** A part the owner must fix before the set works: deleted since, or a product
+ *  with sizes and none picked. The menu list shows such a set in red. */
+export function setNeedsFix(parts: SetPart[] | undefined, menu: Pick<MenuItem, 'id' | 'variants'>[]): boolean {
+  return (parts ?? []).some(p => {
+    const item = menu.find(m => m.id === p.id);
+    return !item || (!!item.variants?.length && !partVariant(p, item));
+  });
 }
 
 /** How many of each product went out inside sets. `sold` is how many times each
