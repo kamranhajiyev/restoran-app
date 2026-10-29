@@ -89,7 +89,12 @@ describe('Cəmi is counted in one place', () => {
     expect(quick).toMatch(/modifierGroupIds: modifiersLoaded \? \[\] : undefined,/);
   });
 
-  it('the public menu does not send a set\'s contents', () => {
-    expect(readFileSync('app/api/public-menu/route.ts', 'utf8')).not.toMatch(/set_items/);
+  // It sends them since 2026-10-29: the exe and APK need them to print each
+  // part at its own sex (tests/set-stations.test.ts). Only the restaurant's
+  // own till may read it.
+  it('the public menu sends a set\'s contents only to the restaurant\'s own till', () => {
+    const route = readFileSync('app/api/public-menu/route.ts', 'utf8');
+    expect(route.indexOf('refuseTillRead(req, companyId)')).toBeGreaterThan(-1);
+    expect(route.indexOf('refuseTillRead(req, companyId)')).toBeLessThan(route.indexOf("from('menu_items')"));
   });
 });

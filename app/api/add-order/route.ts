@@ -20,7 +20,7 @@
 import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 import { claim, idempotencyKey } from '@/lib/idempotency';
-import { printedStationColumn } from '@/lib/stations';
+import { printedStationColumn, printedStationsColumn } from '@/lib/stations';
 import { menuPriceColumn, orderTypeColumns } from '@/lib/order-types';
 import { serviceChargeColumn } from '@/lib/service-charge';
 import type { Order } from '@/types';
@@ -132,6 +132,7 @@ export async function POST(req: NextRequest) {
       no_print: oi.noPrint ?? false,
       // Already printed by the desktop till: the trigger records it, it does not queue it.
       printed_station_id: printedStationColumn(oi.printedStationId),
+      printed_station_ids: printedStationsColumn(oi.printedStationIds),
       ...menuPriceColumn(oi),
     }));
     const { error: itemsError } = await db.from('order_items').upsert(rows, { onConflict: 'id' });

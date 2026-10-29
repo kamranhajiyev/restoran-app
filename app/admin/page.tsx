@@ -2353,7 +2353,15 @@ function AdminPageContent() {
           </select>
         </div>
 
-        {stations.length > 0 && (
+        {/* A set's parts each go to their own sex (lib/stations prepLines), so
+            the set has none to pick. */}
+        {stations.length > 0 && form.kind === 'set' && (
+          <div>
+            <label className="text-xs font-medium text-stone-600 mb-1.5 block">Sex</label>
+            <p className="text-sm text-stone-500 py-2">İçindəkilər öz sexlərinə gedir</p>
+          </div>
+        )}
+        {stations.length > 0 && form.kind !== 'set' && (
           <div>
             <label className="text-xs font-medium text-stone-600 mb-1.5 block">Sex</label>
             <select value={form.stationId} onChange={e => setForm(f => ({ ...f, stationId: e.target.value }))}

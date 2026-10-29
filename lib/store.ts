@@ -4,7 +4,7 @@ import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
 import { courierPending, courierSold, courierStillOut, sumCollections, type Collections, type ShiftSales } from './courier-pending';
 import { courierDeleteBlock } from './couriers';
-import { printedStationColumn } from './stations';
+import { printedStationColumn, printedStationsColumn } from './stations';
 import { menuRowBatches } from './set-items';
 import { cleanRecipe } from './recipes';
 import type { LeftStock } from './kind-change';
@@ -950,6 +950,7 @@ export async function addOrder(order: Order, opts?: ReadOpts): Promise<string | 
       // Unticked "Mətbəxə çap et": the print triggers skip the line.
       no_print: oi.noPrint ?? false,
       printed_station_id: printedStationColumn(oi.printedStationId),
+      printed_station_ids: printedStationsColumn(oi.printedStationIds),
       ...menuPriceColumn(oi),
     }));
     const { error: itemsError } = await supabase.from('order_items').insert(rows);
@@ -997,6 +998,7 @@ export async function addItemsToOrder(
         variant_id: oi.variantId ?? null,
         no_print: oi.noPrint ?? false,
         printed_station_id: printedStationColumn(oi.printedStationId),
+        printed_station_ids: printedStationsColumn(oi.printedStationIds),
         ...menuPriceColumn(oi),
       }));
       const { error } = await supabase.from('order_items').insert(rows);

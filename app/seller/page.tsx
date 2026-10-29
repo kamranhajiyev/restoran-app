@@ -22,7 +22,7 @@ import {
   fetchTillRules, markBillPrinted, fetchSaleSettings,
 } from '@/lib/store';
 import { jsonOrNull, keepCategory, listOrNull, salesOrNull, shiftOrUnknown } from '@/lib/keep-on-fail';
-import { menuIndex, stationForItem, readyStationIds } from '@/lib/stations';
+import { menuIndex, lineReady, readyStationIds } from '@/lib/stations';
 import { unlockSound, armSoundOnFirstGesture, playOrderReady } from '@/lib/sound';
 import { applyBrand } from '@/lib/branding';
 import { orderClosedAt } from '@/lib/order-items';
@@ -3045,18 +3045,14 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     const ready = readyByOrder.get(o.id);
     if (!ready || ready.size === 0) return { done: 0, total: o.items.length };
     let done = 0;
-    for (const item of o.items) {
-      const sid = stationForItem(item, menuById, stations);
-      if (sid && ready.has(sid)) done++;
-    }
+    for (const item of o.items) if (lineReady(item, ready, menuById, stations)) done++;
     return { done, total: o.items.length };
   }, [readyByOrder, menuById, stations]);
 
   const isItemReady = useCallback((o: Order, item: OrderItem): boolean => {
     const ready = readyByOrder.get(o.id);
     if (!ready) return false;
-    const sid = stationForItem(item, menuById, stations);
-    return !!sid && ready.has(sid);
+    return lineReady(item, ready, menuById, stations);
   }, [readyByOrder, menuById, stations]);
 
   const historyQuery = historySearch.trim().toLowerCase();

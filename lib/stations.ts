@@ -31,9 +31,65 @@ export function stationForItem(
   menuById: Map<string, MenuItem>,
   stations: Station[],
 ): string | null {
-  const menuItem = menuById.get(item.menuItem.id);
+  const menuItem = menuById.get(String(item.menuItem.id));
   if (!menuItem) return null;
   return resolveStationId(menuItem.stationId, stations);
+}
+
+// What a line is to the sexes. A dish is itself, at its own sex. A set is what
+// is inside it, each part at the sex that makes it: "Plov (Set 1)" in the
+// kitchen and "Ayran (Set 1)" at the bar, with the set's count times the part's.
+// A set whose parts were all deleted since goes whole to its own sex, so it is
+// never lost. public.prep_lines() is the same rule in SQL, for the server's
+// tickets; the two must name the same sexes.
+//
+// A part keeps the line's id with ":<n>" after it, so a screen can key on it.
+export function prepLines(
+  item: OrderItem,
+  menuById: Map<string, MenuItem>,
+  stations: Station[],
+): { stationId: string; item: OrderItem }[] {
+  const menuItem = menuById.get(String(item.menuItem.id));
+  if (!menuItem) return [];
+  const parts = (menuItem.setItems ?? []).flatMap((p, n) => {
+    const inside = menuById.get(String(p.id));
+    const stationId = inside && resolveStationId(inside.stationId, stations);
+    if (!inside || !stationId) return [];
+    const size = p.variantId ? inside.variants?.find(v => v.id === p.variantId) : undefined;
+    return [{
+      stationId,
+      item: {
+        ...item,
+        id: item.id ? `${item.id}:${n}` : undefined,
+        menuItem: { ...inside, name: `${inside.name}${size ? ` · ${size.name}` : ''} (${item.menuItem.name})` },
+        quantity: item.quantity * Math.max(1, p.qty),
+      },
+    }];
+  });
+  if (parts.length > 0) return parts;
+  const own = resolveStationId(menuItem.stationId, stations);
+  return own ? [{ stationId: own, item }] : [];
+}
+
+// Whether a line is on the counter: every sex it went to has said so. A set is
+// ready when the kitchen's plov and the bar's ayran both are.
+export function lineReady(
+  item: OrderItem,
+  ready: Set<string>,
+  menuById: Map<string, MenuItem>,
+  stations: Station[],
+): boolean {
+  const ids = stationsForItem(item, menuById, stations);
+  return ids.length > 0 && ids.every(id => ready.has(id));
+}
+
+// Every sex a line goes to: one for a dish, one or more for a set.
+export function stationsForItem(
+  item: OrderItem,
+  menuById: Map<string, MenuItem>,
+  stations: Station[],
+): string[] {
+  return [...new Set(prepLines(item, menuById, stations).map(l => l.stationId))];
 }
 
 export function menuIndex(menu: MenuItem[]): Map<string, MenuItem> {
@@ -50,8 +106,7 @@ export function stationsInOrder(
 ): Set<string> {
   const ids = new Set<string>();
   for (const item of order.items) {
-    const id = stationForItem(item, menuById, stations);
-    if (id) ids.add(id);
+    for (const id of stationsForItem(item, menuById, stations)) ids.add(id);
   }
   return ids;
 }
@@ -82,7 +137,7 @@ export function readyStationIds(
     // optimistic local write makes "…41.000Z", and the two sort differently inside
     // the same second.
     const stale = order.items.some(item => {
-      if (stationForItem(item, menuById, stations) !== row.stationId) return false;
+      if (!stationsForItem(item, menuById, stations).includes(row.stationId)) return false;
       const addedMs = item.createdAt ? Date.parse(item.createdAt) : NaN;
       return !Number.isNaN(addedMs) && !Number.isNaN(readyMs) && addedMs > readyMs;
     });
@@ -91,7 +146,8 @@ export function readyStationIds(
   return out;
 }
 
-// This sex's share of an order: its active lines and its removed lines.
+// This sex's share of an order: its active lines and its removed lines. A set
+// comes as the parts made here (prepLines), not as the set.
 //
 // `since` is this sex's last ready_at, when it has one. A card only re-opens
 // because work landed after that instant (see readyStationIds), and re-showing
@@ -105,7 +161,8 @@ export function sliceForStation(
   stations: Station[],
   since?: string | null,
 ): { items: OrderItem[]; removedItems: OrderItem[] } {
-  const mine = (i: OrderItem) => stationForItem(i, menuById, stations) === stationId;
+  const mine = (list: OrderItem[]) => list.flatMap(i =>
+    prepLines(i, menuById, stations).filter(l => l.stationId === stationId).map(l => l.item));
 
   const sinceMs = since ? Date.parse(since) : NaN;
   // Fail open: an unparseable time on either side keeps the line rather than
@@ -117,11 +174,9 @@ export function sliceForStation(
     if (Number.isNaN(addedMs)) return true;
     return addedMs > sinceMs;
   };
-  const kept = (i: OrderItem) => mine(i) && stillOpen(i);
-
   return {
-    items: order.items.filter(kept),
-    removedItems: (order.removedItems ?? []).filter(kept),
+    items: mine(order.items).filter(stillOpen),
+    removedItems: mine(order.removedItems ?? []).filter(stillOpen),
   };
 }
 
@@ -137,4 +192,11 @@ export function printedStationColumn(v: unknown): string | null {
 // that isn't a station id is dropped; the worst that costs is a second slip.
 export function printedStationList(v: unknown): string[] {
   return Array.isArray(v) ? v.map(printedStationColumn).filter((x): x is string => x !== null) : [];
+}
+
+// order_items.printed_station_ids: every sex the till printed a line at. A set
+// goes to more than one, and one id would leave the others to print it again.
+export function printedStationsColumn(v: unknown): string[] | null {
+  const ids = printedStationList(v);
+  return ids.length > 0 ? ids : null;
 }

@@ -121,6 +121,7 @@ export interface OrderItem {
   menuPrice?: number;
   noPrint?: boolean;    // "Mətbəxə çap et" was unticked — no kitchen slip for this line
   printedStationId?: string; // the desktop till already printed this line's ticket there itself
+  printedStationIds?: string[]; // every sex it printed at — a set goes to more than one
   createdAt?: string;   // groups the item into a batch: the original order, or a later "Əlavə et"
   removedAt?: string;   // set = struck through on the order card, and excluded from every total
   removedBy?: string;

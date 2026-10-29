@@ -21,7 +21,7 @@ import { buildStationTicketRaster } from './station-ticket';
 import { tillPost } from './till-write';
 import { siteGet } from './till-data';
 import { tableTitle } from './order-place';
-import { resolveStationId } from './stations';
+import { prepLines, stationsForItem } from './stations';
 import { isUsbPrinter } from './station-printer';
 import { printRawToUsb } from './printer';
 import { installAndroidBridge } from './android-bridge';
@@ -454,21 +454,21 @@ export async function printKitchenNow(t: KitchenTicket): Promise<OrderItem[]> {
   if (stations.length === 0) return t.items;
 
   // Same split as the trigger: a dish with no station of its own goes to the
-  // first one.
+  // first one, and a set's parts each go to their own (prepLines).
   const menuById = new Map(t.menu.map(m => [String(m.id), m]));
-  const groups = new Map<string, number[]>();
+  const groups = new Map<string, { i: number; line: OrderItem }[]>();
   t.items.forEach((oi, i) => {
     if (oi.noPrint || oi.removedAt) return;
-    const id = resolveStationId(menuById.get(String(oi.menuItem.id))?.stationId, stations);
-    if (!id) return;
-    groups.set(id, [...(groups.get(id) ?? []), i]);
+    for (const { stationId, item } of prepLines(oi, menuById, stations)) {
+      groups.set(stationId, [...(groups.get(stationId) ?? []), { i, line: item }]);
+    }
   });
 
-  const printed = new Map<number, string>();
+  const printed = new Map<number, Set<string>>();
   const at = new Date().toISOString();
   // One at a time: two stations often share one printer, and two tickets on
   // the same socket at once come out as one unreadable slip.
-  for (const [stationId, idx] of groups) {
+  for (const [stationId, lines] of groups) {
     const station = stations.find(s => s.id === stationId);
     if (!station?.printerIp) continue;
     const payload: TicketPayload = {
@@ -480,20 +480,26 @@ export async function printKitchenNow(t: KitchenTicket): Promise<OrderItem[]> {
       waiter: t.waiter,
       note: t.note,
       at,
-      items: idx
-        .map(i => ({ name: t.items[i].menuItem.name, qty: t.items[i].quantity, modifiers: t.items[i].modifiers ?? null }))
+      items: lines
+        .map(({ line }) => ({ name: line.menuItem.name, qty: line.quantity, modifiers: line.modifiers ?? null }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     };
     try {
       await printTo(native, station.printerIp, station.printerPort ?? 9100,
         await buildStationTicketRaster(payload, t.tableName), LOCAL_PRINT_MS);
-      for (const i of idx) printed.set(i, stationId);
+      for (const { i } of lines) printed.set(i, (printed.get(i) ?? new Set()).add(stationId));
     } catch (err) {
       console.error(`[print] till → ${station.name}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  return t.items.map((oi, i) => printed.has(i) ? { ...oi, printedStationId: printed.get(i) } : oi);
+  // printedStationId alone is what a server from before printed_station_ids
+  // reads, so a line that went to one sex still carries it.
+  return t.items.map((oi, i) => {
+    const done = [...(printed.get(i) ?? [])];
+    if (done.length === 0) return oi;
+    return { ...oi, printedStationIds: done, ...(done.length === 1 ? { printedStationId: done[0] } : {}) };
+  });
 }
 
 export interface NoteTicket {
@@ -534,8 +540,7 @@ export async function printNoteNow(t: NoteTicket): Promise<string[]> {
   const ids = new Set<string>();
   for (const oi of t.items) {
     if (oi.noPrint) continue;
-    const id = resolveStationId(menuById.get(String(oi.menuItem.id))?.stationId, stations);
-    if (id) ids.add(id);
+    for (const id of stationsForItem(oi, menuById, stations)) ids.add(id);
   }
   if (ids.size === 0) ids.add(stations[0].id);
 
