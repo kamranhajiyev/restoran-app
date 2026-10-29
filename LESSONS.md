@@ -135,7 +135,7 @@ Guard: `tests/sync-server-error.test.ts`
 
 **Does this work in both the exe and the browser till?**
 They take different paths (exe: local database and `pay:` replay; browser: IndexedDB queue).
-Guard: `tests/exe-till.test.ts`, `tests/link-order-via-server.test.ts`
+Guard: `tests/exe-till.test.ts`, `tests/link-order-via-server.test.ts`, `tests/browser-usb-kitchen.test.ts`
 
 **When the exe comes back to the front, can the page take a click?**
 Latte Art, 2026-10-09: Kart would not take a click until the payment sheet was reopened.

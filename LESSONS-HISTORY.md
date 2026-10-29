@@ -175,6 +175,11 @@ none, and two drains could run at once and send each write twice.
 They take different paths (the exe has a local database and a `pay:` key
 replay; the browser has its own IndexedDB queue). A fix in one path often
 misses the other.
+2026-10-30: a sex set to "USB" printed on the till's receipt printer only in
+the exe and the Android app; in the browser till nothing collected its
+tickets, so a café with one USB printer got the receipt and no kitchen slip.
+The browser now collects those sexes' tickets, and only theirs, and only with
+a USB printer plugged in (`lib/print-claim.ts`).
 
 **When the exe comes back to the front, can the page take a click?**
 Windows can give the window focus back without its page. Latte Art, 2026-10-09:

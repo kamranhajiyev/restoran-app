@@ -32,7 +32,7 @@ let device: USBDevice | null = null;
 let iface = 0;
 let endpoint = 1;
 
-function isWebUSBAvailable(): boolean {
+export function isWebUSBAvailable(): boolean {
   return typeof navigator !== 'undefined' && 'usb' in navigator;
 }
 
@@ -126,6 +126,11 @@ function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
 export async function printRawToUsb(bytes: Uint8Array): Promise<void> {
   if (!wifiTill() && !device && !(await connectPrinter())) throw new Error('USB printer not connected');
   if (!(await sendBytes(new Uint8Array(bytes)))) throw new Error('USB printer did not take the ticket');
+}
+
+/** A USB printer is open, or one this site was granted opens now. Never asks. */
+export async function usbPrinterReady(): Promise<boolean> {
+  return !!device || connectPrinter();
 }
 
 export async function connectPrinter(): Promise<boolean> {

@@ -35,7 +35,7 @@ import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, printHistoryReport, openCashDrawer } from '@/lib/printer';
 import { historyReport, historyReportLines } from '@/lib/history-report';
 import { installExeFocusFix } from '@/lib/exe-focus';
-import { drainPrintQueue, isDesktop, nextLocalOrderNumber, printKitchenNow, printNoteNow, startKitchenPrinting } from '@/lib/desktopPrint';
+import { collectsTickets, drainPrintQueue, isDesktop, nextLocalOrderNumber, printKitchenNow, printNoteNow, startKitchenPrinting } from '@/lib/desktopPrint';
 import StationPrinters from '@/components/StationPrinters';
 import { postOrQueue, isOnline, startConnectivityWatch, onConnectivityChange } from '@/lib/offline-net';
 import { tillFetch, hasLocalDb, localCourierCollections, siteGet, setTillToken } from '@/lib/till-data';
@@ -1448,8 +1448,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   }, [router, overrideCompanyId, overrideCompanyName, overrideBrandColor, overrideExpiresAt, dataVersion, beginOrdersRead, applyOrders, showCategories]);
 
   // ── Kitchen printers ────────────────────────────────────────────────────────
-  // Only inside the desktop shell, and only with a real login: claiming tickets
-  // goes through RLS. In a browser this is a no-op, so the tablets are unaffected.
+  // Inside the desktop shell, or a browser with the till's USB printer for the
+  // sexes set to "USB" (lib/desktopPrint.ts). Elsewhere a no-op, so the tablets
+  // are unaffected.
   //
   // What decides it is the session on the machine, not the route that drew the
   // page. The register runs the terminal link inside the shell with an owner
@@ -1462,7 +1463,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // A till opened with only its terminal link and nobody signed in used to stop
   // here, and its sexes never printed. It collects through the link's token now.
   useEffect(() => {
-    if (!isDesktop()) return;
+    if (!collectsTickets()) return;
     const companyId = getSession()?.companyId;
     if (companyId) {
       if (overrideCompanyId && overrideCompanyId !== companyId) return;

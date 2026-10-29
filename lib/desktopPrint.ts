@@ -7,10 +7,10 @@
 // only its own restaurant's tickets, and the machine-specific part — putting
 // bytes on a socket — is the one thing it asks the native side to do.
 //
-// Runs only inside the Electron shell or the Android app (lib/android-bridge.ts).
-// In a plain browser posNative is absent
-// and every entry point below is a no-op, so the same bundle is safe on the
-// tablets and phones that will never see a printer.
+// Runs inside the Electron shell or the Android app (lib/android-bridge.ts).
+// A plain browser cannot reach the network printers; it collects only the
+// tickets of sexes set to "USB", and only with a USB printer plugged in, so the
+// same bundle is safe on the tablets and phones that will never see a printer.
 
 import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { supabase } from './supabase';
@@ -23,7 +23,8 @@ import { siteGet } from './till-data';
 import { tableTitle } from './order-place';
 import { prepLines, stationsForItem } from './stations';
 import { isUsbPrinter } from './station-printer';
-import { printRawToUsb } from './printer';
+import { isWebUSBAvailable, printRawToUsb, usbPrinterReady } from './printer';
+import { claimPending } from './print-claim';
 import { installAndroidBridge } from './android-bridge';
 import type { MenuItem, OrderItem, Station } from '@/types';
 
@@ -156,6 +157,16 @@ export function isDesktop(): boolean {
   return typeof window !== 'undefined' && window.posNative?.isDesktop === true;
 }
 
+/** A plain browser that may have the till's USB printer — see the header. */
+function isBrowserUsbTill(): boolean {
+  return typeof window !== 'undefined' && !window.posNative && isWebUSBAvailable();
+}
+
+/** This till collects kitchen tickets: the exe and Android app all of them, a browser its USB sexes'. */
+export function collectsTickets(): boolean {
+  return isDesktop() || isBrowserUsbTill();
+}
+
 const MAX_ATTEMPTS = 5;
 const POLL_MS = 15_000;   // safety net under the realtime push
 const LINK_POLL_MS = 4_000; // a linked till has no push, so this is how tickets arrive
@@ -199,15 +210,22 @@ export type PrintAuth =
   | { kind: 'link'; companyId: string; token: string };
 
 interface JobSource {
-  claim(): Promise<ClaimedJob[] | null>;
+  /** `only`: just these sexes' tickets, the rest left for another till. */
+  claim(only?: string[]): Promise<ClaimedJob[] | null>;
   stations(): Promise<Map<string, StationPrinter>>;
   /** Table and hall names, for putting on the ticket in place of the bare id. */
   tables(): Promise<Places>;
   report(id: string, outcome: Outcome): Promise<void>;
 }
 
-const sessionSource: JobSource = {
-  async claim() {
+const sessionSource = (companyId: string): JobSource => ({
+  async claim(only) {
+    if (only) {
+      const res = await claimPending(supabase, companyId, CLAIM_LIMIT, only);
+      if (res.status === 401) { await loginRejected(); return null; }
+      if ('error' in res) { console.error('[print] claim', res.error); return null; }
+      return res.jobs as unknown as ClaimedJob[];
+    }
     const { data, error, status } = await supabase.rpc('claim_print_jobs', { p_limit: CLAIM_LIMIT });
     // The server no longer takes this till's login. Asking again every 15 s
     // changes nothing — the phone till did that for an hour, printing nothing
@@ -249,13 +267,13 @@ const sessionSource: JobSource = {
             },
     ).eq('id', id);
   },
-};
+});
 
 function linkSource(companyId: string, token: string): JobSource {
   return {
-    async claim() {
+    async claim(only) {
       const res = await tillPost<{ ok: boolean; jobs?: ClaimedJob[]; error?: string }>(
-        '/api/claim-print-jobs', { companyId, token, limit: CLAIM_LIMIT });
+        '/api/claim-print-jobs', { companyId, token, limit: CLAIM_LIMIT, stationIds: only });
       if (!res.ok) { console.error('[print] claim', res.error); return null; }
       return res.jobs ?? [];
     },
@@ -308,7 +326,7 @@ export async function saveStationPrinter(
   return res.ok;
 }
 
-let source: JobSource = sessionSource;
+let source: JobSource | null = null;
 
 // What the seller page does when the login is gone for good: back to the login
 // screen, where staff can see it and sign in again.
@@ -336,6 +354,7 @@ let stationCacheAt = 0;
 
 async function stations() {
   if (stationCache && Date.now() - stationCacheAt < 60_000) return stationCache;
+  if (!source) return new Map<string, StationPrinter>();
   stationCache = await source.stations();
   stationCacheAt = Date.now();
   return stationCache;
@@ -348,25 +367,27 @@ let tableCacheAt = 0;
 
 async function tables() {
   if (tableCache && Date.now() - tableCacheAt < 60_000) return tableCache;
+  if (!source) return { tables: [], halls: [] };
   tableCache = await source.tables();
   tableCacheAt = Date.now();
   return tableCache;
 }
 
-async function runJob(job: ClaimedJob): Promise<void> {
+async function runJob(source: JobSource, job: ClaimedJob): Promise<void> {
   // Printed here before, its report lost: say so again, do not print again.
   if (wasPrinted(job.id)) return source.report(job.id, { result: 'printed' });
 
-  // Back into the queue, untouched, when this machine cannot print the job for
-  // a reason that is nobody's fault and costs no attempt.
   const native = window.posNative;
-  if (!native) return source.report(job.id, { result: 'release' });
-
   const station = job.station_id ? (await stations()).get(job.station_id) : undefined;
 
   // No printer configured for this station yet. The ticket is not lost — it
   // prints the moment an IP is set, and costs no attempt in the meantime.
   if (!station?.ip) return source.report(job.id, { result: 'release' });
+
+  // Back into the queue, untouched, when this machine cannot print the job for
+  // a reason that is nobody's fault and costs no attempt: a browser and a
+  // network printer.
+  if (!native && !isUsbPrinter(station.ip)) return source.report(job.id, { result: 'release' });
 
   try {
     const known = await tables();
@@ -565,8 +586,18 @@ export async function printNoteNow(t: NoteTicket): Promise<string[]> {
 }
 
 /** A sex's ticket to wherever its printer is: the network, or this till's USB printer. */
-function printTo(native: PosNative, ip: string, port: number, bytes: Uint8Array, timeoutMs?: number): Promise<void> {
-  return isUsbPrinter(ip) ? printRawToUsb(bytes) : native.print(ip, port, bytes, timeoutMs);
+function printTo(native: PosNative | undefined, ip: string, port: number, bytes: Uint8Array, timeoutMs?: number): Promise<void> {
+  if (isUsbPrinter(ip)) return printRawToUsb(bytes);
+  if (!native) return Promise.reject(new Error('no network printing in a browser'));
+  return native.print(ip, port, bytes, timeoutMs);
+}
+
+// A browser takes only what its own USB printer can print, and only while one
+// is plugged in: a phone or tablet with Chrome has WebUSB too, and no printer,
+// and must not take the kitchen's tickets and burn their attempts.
+async function browserStations(): Promise<string[]> {
+  const usb = [...(await stations())].filter(([, s]) => isUsbPrinter(s.ip)).map(([id]) => id);
+  return usb.length && (await usbPrinterReady()) ? usb : [];
 }
 
 let draining = false;
@@ -582,18 +613,21 @@ let printingActive = false;
 let lastDrainAt = 0;
 
 export async function drainPrintQueue(): Promise<void> {
-  if (!isDesktop() || !printingActive) return;
+  const from = source;
+  if (!collectsTickets() || !printingActive || !from) return;
   if (draining) { drainAgain = true; return; }
   draining = true;
   lastDrainAt = Date.now();
   try {
     do {
       drainAgain = false;
-      const jobs = await source.claim();
+      const only = isDesktop() ? undefined : await browserStations();
+      if (only?.length === 0) continue;
+      const jobs = await from.claim(only);
       // Sequential, not Promise.all: one printer, and two tickets interleaved on
       // the same socket come out as one unreadable slip.
       for (const job of jobs ?? []) {
-        await runJob(job);
+        await runJob(from, job);
       }
     } while (drainAgain);
   } finally {
@@ -603,9 +637,9 @@ export async function drainPrintQueue(): Promise<void> {
 
 // Call once from the seller screen. Returns the teardown.
 export function startKitchenPrinting(auth: PrintAuth, loginLost?: () => void): () => void {
-  if (!isDesktop()) return () => {};
+  if (!collectsTickets()) return () => {};
 
-  source = auth.kind === 'session' ? sessionSource : linkSource(auth.companyId, auth.token);
+  source = auth.kind === 'session' ? sessionSource(auth.companyId) : linkSource(auth.companyId, auth.token);
   onLoginLost = loginLost ?? null;
   stationCache = null;
   tableCache = null;
