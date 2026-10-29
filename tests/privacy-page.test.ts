@@ -17,6 +17,9 @@ describe('the privacy page', () => {
     expect(page).toMatch(/Məlumatların silinməsi/);
     expect(page).toMatch(/Deleting data/);
     expect(page).toMatch(/wa\.me\/\d+/);
+    // Google Play asks for an email to reach the developer.
+    expect(page).toMatch(/mailto:\$\{SUPPORT_EMAIL\}/);
+    expect(page).toMatch(/SUPPORT_EMAIL = '[^']+@[^']+'/);
   });
 
   it('promises no location, contacts or photos, and the Android app asks for none', () => {

@@ -13,7 +13,8 @@ export const metadata: Metadata = {
 };
 
 const UPDATED = '28.10.2026';
-const SUPPORT_WHATSAPP = 'https://wa.me/994998989876';
+const SUPPORT_EMAIL = 'help.possiblle@gmail.com';
+const SUPPORT_WHATSAPP ='https://wa.me/994998989876';
 const SUPPORT_PHONE = '+994 99 898 98 76';
 
 type Section = { title: string; body: string };
@@ -109,6 +110,10 @@ export default function PrivacyPage() {
             <h3 className="font-bold text-base">Əlaqə / Contact</h3>
             <p className="text-sm text-gray-500 mt-1.5 leading-relaxed">
               Silmə istəyi və suallar üçün / For deletion requests and questions:{' '}
+              <a href={`mailto:${SUPPORT_EMAIL}`} className="text-black font-semibold underline">
+                {SUPPORT_EMAIL}
+              </a>
+              {' · '}
               <a href={SUPPORT_WHATSAPP} className="text-black font-semibold underline">
                 WhatsApp {SUPPORT_PHONE}
               </a>
