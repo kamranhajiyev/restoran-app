@@ -19,11 +19,10 @@ function storage() {
 }
 
 /** An Android WebView: PosAndroid, no WebUSB. `fail` makes every print refuse. */
-function android(opts: { fail?: string; found?: string[]; typed?: string | null } = {}) {
+function android(opts: { fail?: string; found?: string[] } = {}) {
   const prints: { ip: string; port: number; bytes: number[] }[] = [];
   const win: Record<string, unknown> = {
     btoa: (s: string) => Buffer.from(s, 'binary').toString('base64'),
-    prompt: () => opts.typed ?? null,
     PosAndroid: {
       print(id: string, ip: string, port: number, base64: string) {
         prints.push({ ip, port, bytes: [...Buffer.from(base64, 'base64')] });
@@ -89,33 +88,58 @@ describe('the Android app bridge', () => {
   });
 });
 
+/**
+ * Answers the till's popups (lib/dialog-queue.ts) as the cashier would, one
+ * answer per question in turn; an alert is just closed. Returns what was asked.
+ */
+async function answering(answers: (number | string | null)[]): Promise<string[]> {
+  const { tillDialogs } = await import('@/lib/dialog-queue');
+  const asked: string[] = [];
+  const seen = new Set<number>();
+  tillDialogs.subscribe(() => {
+    const cur = tillDialogs.current();
+    if (!cur || seen.has(cur.id)) return;
+    seen.add(cur.id);
+    asked.push(cur.title);
+    const answer = cur.kind === 'alert' ? true : answers.shift() ?? null;
+    queueMicrotask(() => tillDialogs.answer(cur.id, answer));
+  });
+  return asked;
+}
+
 describe('the receipt printer on the Android till', () => {
   it('asks for the Wi-Fi IP once, then prints there', async () => {
-    const { prints } = android({ typed: ' 192.168.1.60 ' });
+    const { prints } = android();
+    const asked = await answering([' 192.168.1.60 ']);
     const printer = await import('@/lib/printer');
     expect(await printer.connectPrinter()).toBe(false);
     expect(await printer.selectPrinter()).toBe(true);
+    expect(asked).toEqual(['Çek printerinin IP ünvanı']);
     expect(await printer.connectPrinter()).toBe(true);
     expect(await printer.openCashDrawer()).toBe(true);
     expect(prints).toEqual([{ ip: '192.168.1.60', port: 9100, bytes: DRAWER }]);
   });
 
   it('does not keep an IP that is not one', async () => {
-    android({ typed: 'printer' });
+    android();
+    const asked = await answering(['printer']);
     const printer = await import('@/lib/printer');
     expect(await printer.selectPrinter()).toBe(false);
+    expect(asked).toEqual(['Çek printerinin IP ünvanı', 'IP düzgün deyil']);
     expect(await printer.connectPrinter()).toBe(false);
   });
 
   it('says it did not print when the printer is off, so the till offers to pick again', async () => {
-    android({ typed: '192.168.1.60', fail: 'timeout' });
+    android({ fail: 'timeout' });
+    await answering(['192.168.1.60']);
     const printer = await import('@/lib/printer');
     await printer.selectPrinter();
     expect(await printer.openCashDrawer()).toBe(false);
   });
 
   it('prints a sex set to "USB" on the same receipt printer', async () => {
-    const { prints } = android({ typed: '192.168.1.60' });
+    const { prints } = android();
+    await answering(['192.168.1.60']);
     const printer = await import('@/lib/printer');
     await printer.selectPrinter();
     await printer.printRawToUsb(new Uint8Array([7]));
@@ -123,18 +147,116 @@ describe('the receipt printer on the Android till', () => {
   });
 });
 
+/** A USB printer as WebUSB hands it over, recording what was sent to it. */
+function usbPrinter(sent: number[][]) {
+  return {
+    configuration: { interfaces: [{ interfaceNumber: 0, alternates: [{ endpoints: [{ direction: 'out', type: 'bulk', endpointNumber: 1 }] }] }] },
+    open: async () => {},
+    claimInterface: async () => {},
+    releaseInterface: async () => {},
+    close: async () => {},
+    transferOut: async (_e: number, b: Uint8Array) => { sent.push([...b]); },
+  };
+}
+
+/** The exe: posNative and WebUSB both. `usb` is the printer on the cable, if any. */
+function exe(opts: { usb?: ReturnType<typeof usbPrinter>; local?: ReturnType<typeof storage> } = {}) {
+  const print = vi.fn(async () => {});
+  const local = opts.local ?? storage();
+  vi.stubGlobal('window', { posNative: { isDesktop: true, print, till: {} } });
+  vi.stubGlobal('localStorage', local);
+  vi.stubGlobal('navigator', {
+    usb: {
+      getDevices: async () => (opts.usb ? [opts.usb] : []),
+      requestDevice: async () => { if (!opts.usb) throw new Error('No device selected'); return opts.usb; },
+    },
+  });
+  return { print, local };
+}
+
+const USB = 0;
+const IP = 1;
+
 describe('the exe', () => {
-  it('keeps its USB receipt printer, even with a Wi-Fi IP left in storage', async () => {
-    const print = vi.fn(async () => {});
+  it('asks USB or IP, and USB prints on the cable', async () => {
+    const sent: number[][] = [];
+    const { print } = exe({ usb: usbPrinter(sent) });
+    const asked = await answering([USB]);
+    const printer = await import('@/lib/printer');
+    expect(await printer.selectPrinter()).toBe(true);
+    expect(asked).toEqual(['Çek printeri necə qoşulub?']);
+    expect(await printer.openCashDrawer()).toBe(true);
+    expect(sent).toEqual([DRAWER]);
+    expect(print).not.toHaveBeenCalled();
+  });
+
+  it('picks IP even with a USB printer on the cable, then prints on the LAN', async () => {
+    const sent: number[][] = [];
+    const { print } = exe({ usb: usbPrinter(sent) });
+    const asked = await answering([IP, '192.168.1.60']);
+    const printer = await import('@/lib/printer');
+    expect(await printer.connectPrinter()).toBe(true);           // the USB one, until IP is picked
+    expect(await printer.selectPrinter()).toBe(true);
+    expect(asked).toEqual(['Çek printeri necə qoşulub?', 'Çek printerinin IP ünvanı']);
+    expect(await printer.openCashDrawer()).toBe(true);
+    expect(print).toHaveBeenCalledWith('192.168.1.60', 9100, new Uint8Array(DRAWER));
+    expect(sent).toEqual([]);
+  });
+
+  it('remembers IP after a restart, and sends a "USB" sex there too', async () => {
+    const first = exe();
+    await answering([IP, '192.168.1.60']);
+    expect(await (await import('@/lib/printer')).selectPrinter()).toBe(true);
+
+    vi.resetModules();
+    const sent: number[][] = [];
+    const { print } = exe({ usb: usbPrinter(sent), local: first.local });
+    const printer = await import('@/lib/printer');
+    expect(await printer.connectPrinter()).toBe(true);
+    await printer.printRawToUsb(new Uint8Array([7]));
+    expect(print).toHaveBeenCalledWith('192.168.1.60', 9100, new Uint8Array([7]));
+    expect(sent).toEqual([]);
+  });
+
+  it('goes back to USB when USB is picked again', async () => {
+    const sent: number[][] = [];
+    const { print } = exe({ usb: usbPrinter(sent) });
+    await answering([IP, '192.168.1.60', USB]);
+    const printer = await import('@/lib/printer');
+    await printer.selectPrinter();
+    await printer.selectPrinter();
+    expect(await printer.openCashDrawer()).toBe(true);
+    expect(sent).toEqual([DRAWER]);
+    expect(print).not.toHaveBeenCalled();
+  });
+
+  it('keeps USB with a LAN IP left in storage, until IP is picked', async () => {
     const local = storage();
     local.setItem('restoran_receipt_printer_ip', '192.168.1.60');
-    vi.stubGlobal('window', { posNative: { isDesktop: true, print, till: {} } });
-    vi.stubGlobal('localStorage', local);
-    vi.stubGlobal('navigator', { usb: { getDevices: async () => [] } });
+    const { print } = exe({ local });
     const printer = await import('@/lib/printer');
     expect(await printer.connectPrinter()).toBe(false);
     expect(await printer.openCashDrawer()).toBe(false);
     expect(print).not.toHaveBeenCalled();
+  });
+
+  it('has no printer when the choice is closed', async () => {
+    const { print } = exe();
+    await answering([null]);
+    const printer = await import('@/lib/printer');
+    expect(await printer.selectPrinter()).toBe(false);
+    expect(await printer.openCashDrawer()).toBe(false);
+    expect(print).not.toHaveBeenCalled();
+  });
+
+  it('never asks USB or IP in the browser, which has no socket to reach a LAN printer', async () => {
+    vi.stubGlobal('window', {});
+    vi.stubGlobal('localStorage', storage());
+    vi.stubGlobal('navigator', { usb: { getDevices: async () => [], requestDevice: async () => { throw new Error('none'); } } });
+    const asked = await answering([IP, '192.168.1.60']);
+    const printer = await import('@/lib/printer');
+    expect(await printer.selectPrinter()).toBe(false);
+    expect(asked).toEqual([]);
   });
 
   it('still serves menu pictures from its own cache', async () => {

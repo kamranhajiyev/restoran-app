@@ -10,6 +10,7 @@ import { isValidIp } from './station-printer';
 import { installAndroidBridge } from './android-bridge';
 import { formatDateTime } from './dates';
 import { orderServiceCharge } from './service-charge';
+import { tillDialogs } from './dialog-queue';
 
 installAndroidBridge();
 
@@ -38,13 +39,32 @@ export function isWebUSBAvailable(): boolean {
 
 // The Android app has no WebUSB — its WebView leaves it out — but it can reach
 // the Wi-Fi. So there the receipt printer is an IP, kept on the device, and the
-// bytes go through the app's socket like a sex's ticket. The exe has both, and
-// keeps its USB printer.
+// bytes go through the app's socket like a sex's ticket. The exe has both, so
+// the cashier picks USB or IP there, and the till remembers which.
 const RECEIPT_IP_KEY = 'restoran_receipt_printer_ip';
+const RECEIPT_KIND_KEY = 'restoran_receipt_printer_kind';
 const RECEIPT_PORT = 9100;
 
+function hasSocket(): boolean {
+  return typeof window !== 'undefined' && !!window.posNative;
+}
+
 function wifiTill(): boolean {
-  return typeof window !== 'undefined' && !!window.posNative && !isWebUSBAvailable();
+  return hasSocket() && !isWebUSBAvailable();
+}
+
+/** The receipt goes to the saved IP: always on Android, on the exe when IP was picked. */
+function ipReceipt(): boolean {
+  if (wifiTill()) return true;
+  if (!hasSocket()) return false;
+  try { return localStorage.getItem(RECEIPT_KIND_KEY) === 'ip'; } catch { return false; }
+}
+
+function setIpReceipt(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(RECEIPT_KIND_KEY, 'ip');
+    else localStorage.removeItem(RECEIPT_KIND_KEY);
+  } catch { /* the choice lasts until the page closes */ }
 }
 
 function receiptIp(): string | null {
@@ -54,13 +74,16 @@ function receiptIp(): string | null {
   } catch { return null; }
 }
 
-/** Ask for the Wi-Fi receipt printer's IP. The current one is filled in to correct. */
-function askReceiptIp(): boolean {
-  const typed = window.prompt('Çek printerinin IP ünvanı (məs: 192.168.1.50)', receiptIp() ?? '');
+/**
+ * Ask for the LAN receipt printer's IP. The current one is filled in to correct.
+ * The till's own box, not window.prompt: the exe has no prompt at all.
+ */
+async function askReceiptIp(): Promise<boolean> {
+  const typed = await tillDialogs.ask('Çek printerinin IP ünvanı', { value: receiptIp() ?? '', placeholder: '192.168.1.50' });
   if (typed === null) return false;
   const ip = typed.trim();
   if (!isValidIp(ip)) {
-    alert('IP düzgün deyil (məs: 192.168.1.50)');
+    await tillDialogs.alert('IP düzgün deyil\n\nNümunə: 192.168.1.50');
     return false;
   }
   try { localStorage.setItem(RECEIPT_IP_KEY, ip); } catch { return false; }
@@ -91,7 +114,7 @@ let queue: Promise<unknown> = Promise.resolve();
 
 function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
   const next = queue.then(async () => {
-    if (wifiTill()) {
+    if (ipReceipt()) {
       const ip = receiptIp();
       if (!ip) return false;
       try {
@@ -124,7 +147,7 @@ function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
  * so the ticket stays in the queue exactly as one for a LAN printer that is off.
  */
 export async function printRawToUsb(bytes: Uint8Array): Promise<void> {
-  if (!wifiTill() && !device && !(await connectPrinter())) throw new Error('USB printer not connected');
+  if (!ipReceipt() && !device && !(await connectPrinter())) throw new Error('USB printer not connected');
   if (!(await sendBytes(new Uint8Array(bytes)))) throw new Error('USB printer did not take the ticket');
 }
 
@@ -134,7 +157,7 @@ export async function usbPrinterReady(): Promise<boolean> {
 }
 
 export async function connectPrinter(): Promise<boolean> {
-  if (wifiTill()) return receiptIp() !== null;
+  if (ipReceipt()) return receiptIp() !== null;
   if (!isWebUSBAvailable()) return false;
   try {
     // getDevices() returns only what this site was already granted, which in
@@ -156,10 +179,25 @@ export async function connectPrinter(): Promise<boolean> {
 export async function selectPrinter(): Promise<boolean> {
   if (wifiTill()) return askReceiptIp();
   if (!isWebUSBAvailable()) return false;
+  // The exe can reach a LAN printer as well as a USB one, so the cashier says
+  // which. The browser has no socket: USB only, no question. The USB picker
+  // still runs on the button's click — the choice is our own popup, answered
+  // by that click, so requestDevice keeps the gesture it needs.
+  if (hasSocket()) {
+    const pick = await tillDialogs.choose('Çek printeri necə qoşulub?', ['USB', 'IP (şəbəkə)']);
+    if (pick === null) return false;
+    if (pick === 1) {
+      if (!(await askReceiptIp())) return false;
+      await disconnectPrinter();
+      setIpReceipt(true);
+      return true;
+    }
+  }
   try {
     const d = await navigator.usb.requestDevice({ filters: USB_FILTERS });
     await openDevice(d);
     device = d;
+    setIpReceipt(false);
     return true;
   } catch (err) {
     console.error('[Printer] Yazıcı seçimi xətası:', err);
@@ -179,13 +217,13 @@ export async function disconnectPrinter(): Promise<void> {
 const printerName = (d: USBDevice) => d.productName || 'USB yazıcı';
 
 export async function getPrinterList(): Promise<string[]> {
-  if (wifiTill()) return receiptIp() ? [receiptIp()!] : [];
+  if (ipReceipt()) return receiptIp() ? [receiptIp()!] : [];
   if (!isWebUSBAvailable()) return [];
   return (await navigator.usb.getDevices()).map(printerName);
 }
 
 export function getSavedPrinter(): string | null {
-  if (wifiTill()) return receiptIp();
+  if (ipReceipt()) return receiptIp();
   return device ? printerName(device) : null;
 }
 

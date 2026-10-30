@@ -57,6 +57,7 @@ import { supabase } from '@/lib/supabase';
 import { PICTURE_CACHE, shrinkPicture } from '@/lib/shrink-picture';
 import { CashShift, Category, Hall, MenuItem, MenuItemVariant, ModifierGroup, Order, OrderStatus, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockItem, TrashItem, isOrderOpen } from '@/types';
 import AppDialog, { DialogState } from '@/components/AppDialog';
+import DialogHost from '@/components/DialogHost';
 import AnbarPanel from '@/components/AnbarPanel';
 import CourierPanel from '@/components/CourierPanel';
 import FinancePanel from '@/components/FinancePanel';
@@ -6250,6 +6251,8 @@ function AdminPageContent() {
       )}
 
       <AppDialog dialog={dialog} onClose={() => setDialog(null)} />
+      {/* "Yazıcı seç" asks USB or IP through the till's popups (lib/printer.ts). */}
+      <DialogHost />
     </div>
   );
 }

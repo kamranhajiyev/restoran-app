@@ -141,6 +141,10 @@ Guard: `tests/exe-till.test.ts`, `tests/link-order-via-server.test.ts`, `tests/b
 Latte Art, 2026-10-09: Kart would not take a click until the payment sheet was reopened.
 Guard: `lib/exe-focus`, `tests/exe-focus.test.ts`
 
+**Can every printer be connected the ways the hardware comes: USB and LAN?**
+Customer, 2026-10-30: the sexes printed by IP, but the exe's receipt printer was USB only.
+Guard: `tests/android-print.test.ts` ("the exe")
+
 **When data refreshes in the background, does a screen someone is reading start
 over?**
 Exe, 2026-10-08: every 5-minute pull reloaded Tarixçə back to the top.
