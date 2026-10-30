@@ -4,6 +4,7 @@
 import { NextRequest } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { priceGuestLines, type GuestLine, type MenuRow } from '@/lib/guest-order';
+import { chargeFor, cleanServiceCharge, orderTypeId, serviceChargeColumn } from '@/lib/service-charge';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest) {
   const db = createServerClient();
 
   const { data: company, error: companyError } = await db.from('companies')
-    .select('id, qr_enabled, menu_only, tables_enabled')
+    .select('id, qr_enabled, menu_only, tables_enabled, service_charge')
     .eq('id', body.companyId).eq('active', true).is('trashed_at', null).maybeSingle();
   if (companyError) return Response.json({ ok: false, error: companyError.message }, { status: 500 });
   // Same rule as the menu page: a menu-only shop takes no orders.
@@ -48,6 +49,8 @@ export async function POST(req: NextRequest) {
     status: 'gözləyir',
     note: String(body.note ?? '').slice(0, 500) || null,
     created_at: new Date().toISOString(),
+    // Xidmət haqqı like any order of its kind: at a table it is a Masa order.
+    ...serviceChargeColumn({ serviceChargePercent: chargeFor(cleanServiceCharge(company.service_charge), orderTypeId({ tableNumber: tableId ?? 0 })) }),
   });
   if (orderError) {
     // Sent twice — the first one landed.

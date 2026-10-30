@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The APK we hand out only. Google Play bans an app that installs its own
+     new version, so the play flavor has none of this. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Updater.java: the app installs its own new version, after the waiter confirms. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <application>
+        <receiver
+            android:name=".Updater$InstallResult"
+            android:exported="false" />
+    </application>
+</manifest>

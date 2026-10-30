@@ -57,9 +57,9 @@ describe('what goes inside a set', () => {
     expect(searchByName(menu, '  ')).toHaveLength(menu.length);
   });
 
-  it('shows under the set in the menu list, without parts deleted since', () => {
+  it('shows under the set in the menu list, a part deleted since named as such', () => {
     expect(setLine(menu[2].setItems, menu)).toBe('ATENA AYRAN 200 ML × 1 · Yarpaq dolması × 2');
-    expect(setLine([{ id: 'gone', qty: 1 }, { id: 'cay', qty: 1 }], menu)).toBe('Çay × 1');
+    expect(setLine([{ id: 'gone', qty: 1 }, { id: 'cay', qty: 1 }], menu)).toBe('Silinmiş məhsul × 1 · Çay × 1');
     expect(setLine(undefined, menu)).toBe('');
   });
 

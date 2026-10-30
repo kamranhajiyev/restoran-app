@@ -9,6 +9,8 @@ import { mergeLines } from './add-again';
 import { isValidIp } from './station-printer';
 import { installAndroidBridge } from './android-bridge';
 import { formatDateTime } from './dates';
+import { orderServiceCharge } from './service-charge';
+import { tillDialogs } from './dialog-queue';
 
 installAndroidBridge();
 
@@ -31,19 +33,38 @@ let device: USBDevice | null = null;
 let iface = 0;
 let endpoint = 1;
 
-function isWebUSBAvailable(): boolean {
+export function isWebUSBAvailable(): boolean {
   return typeof navigator !== 'undefined' && 'usb' in navigator;
 }
 
 // The Android app has no WebUSB — its WebView leaves it out — but it can reach
 // the Wi-Fi. So there the receipt printer is an IP, kept on the device, and the
-// bytes go through the app's socket like a sex's ticket. The exe has both, and
-// keeps its USB printer.
+// bytes go through the app's socket like a sex's ticket. The exe has both, so
+// the cashier picks USB or IP there, and the till remembers which.
 const RECEIPT_IP_KEY = 'restoran_receipt_printer_ip';
+const RECEIPT_KIND_KEY = 'restoran_receipt_printer_kind';
 const RECEIPT_PORT = 9100;
 
+function hasSocket(): boolean {
+  return typeof window !== 'undefined' && !!window.posNative;
+}
+
 function wifiTill(): boolean {
-  return typeof window !== 'undefined' && !!window.posNative && !isWebUSBAvailable();
+  return hasSocket() && !isWebUSBAvailable();
+}
+
+/** The receipt goes to the saved IP: always on Android, on the exe when IP was picked. */
+function ipReceipt(): boolean {
+  if (wifiTill()) return true;
+  if (!hasSocket()) return false;
+  try { return localStorage.getItem(RECEIPT_KIND_KEY) === 'ip'; } catch { return false; }
+}
+
+function setIpReceipt(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(RECEIPT_KIND_KEY, 'ip');
+    else localStorage.removeItem(RECEIPT_KIND_KEY);
+  } catch { /* the choice lasts until the page closes */ }
 }
 
 function receiptIp(): string | null {
@@ -53,13 +74,16 @@ function receiptIp(): string | null {
   } catch { return null; }
 }
 
-/** Ask for the Wi-Fi receipt printer's IP. The current one is filled in to correct. */
-function askReceiptIp(): boolean {
-  const typed = window.prompt('Çek printerinin IP ünvanı (məs: 192.168.1.50)', receiptIp() ?? '');
+/**
+ * Ask for the LAN receipt printer's IP. The current one is filled in to correct.
+ * The till's own box, not window.prompt: the exe has no prompt at all.
+ */
+async function askReceiptIp(): Promise<boolean> {
+  const typed = await tillDialogs.ask('Çek printerinin IP ünvanı', { value: receiptIp() ?? '', placeholder: '192.168.1.50' });
   if (typed === null) return false;
   const ip = typed.trim();
   if (!isValidIp(ip)) {
-    alert('IP düzgün deyil (məs: 192.168.1.50)');
+    await tillDialogs.alert('IP düzgün deyil\n\nNümunə: 192.168.1.50');
     return false;
   }
   try { localStorage.setItem(RECEIPT_IP_KEY, ip); } catch { return false; }
@@ -90,7 +114,7 @@ let queue: Promise<unknown> = Promise.resolve();
 
 function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
   const next = queue.then(async () => {
-    if (wifiTill()) {
+    if (ipReceipt()) {
       const ip = receiptIp();
       if (!ip) return false;
       try {
@@ -123,12 +147,17 @@ function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
  * so the ticket stays in the queue exactly as one for a LAN printer that is off.
  */
 export async function printRawToUsb(bytes: Uint8Array): Promise<void> {
-  if (!wifiTill() && !device && !(await connectPrinter())) throw new Error('USB printer not connected');
+  if (!ipReceipt() && !device && !(await connectPrinter())) throw new Error('USB printer not connected');
   if (!(await sendBytes(new Uint8Array(bytes)))) throw new Error('USB printer did not take the ticket');
 }
 
+/** A USB printer is open, or one this site was granted opens now. Never asks. */
+export async function usbPrinterReady(): Promise<boolean> {
+  return !!device || connectPrinter();
+}
+
 export async function connectPrinter(): Promise<boolean> {
-  if (wifiTill()) return receiptIp() !== null;
+  if (ipReceipt()) return receiptIp() !== null;
   if (!isWebUSBAvailable()) return false;
   try {
     // getDevices() returns only what this site was already granted, which in
@@ -150,10 +179,25 @@ export async function connectPrinter(): Promise<boolean> {
 export async function selectPrinter(): Promise<boolean> {
   if (wifiTill()) return askReceiptIp();
   if (!isWebUSBAvailable()) return false;
+  // The exe can reach a LAN printer as well as a USB one, so the cashier says
+  // which. The browser has no socket: USB only, no question. The USB picker
+  // still runs on the button's click — the choice is our own popup, answered
+  // by that click, so requestDevice keeps the gesture it needs.
+  if (hasSocket()) {
+    const pick = await tillDialogs.choose('Çek printeri necə qoşulub?', ['USB', 'IP (şəbəkə)']);
+    if (pick === null) return false;
+    if (pick === 1) {
+      if (!(await askReceiptIp())) return false;
+      await disconnectPrinter();
+      setIpReceipt(true);
+      return true;
+    }
+  }
   try {
     const d = await navigator.usb.requestDevice({ filters: USB_FILTERS });
     await openDevice(d);
     device = d;
+    setIpReceipt(false);
     return true;
   } catch (err) {
     console.error('[Printer] Yazıcı seçimi xətası:', err);
@@ -173,13 +217,13 @@ export async function disconnectPrinter(): Promise<void> {
 const printerName = (d: USBDevice) => d.productName || 'USB yazıcı';
 
 export async function getPrinterList(): Promise<string[]> {
-  if (wifiTill()) return receiptIp() ? [receiptIp()!] : [];
+  if (ipReceipt()) return receiptIp() ? [receiptIp()!] : [];
   if (!isWebUSBAvailable()) return [];
   return (await navigator.usb.getDevices()).map(printerName);
 }
 
 export function getSavedPrinter(): string | null {
-  if (wifiTill()) return receiptIp();
+  if (ipReceipt()) return receiptIp();
   return device ? printerName(device) : null;
 }
 
@@ -247,74 +291,94 @@ async function send(lines: Line[], logo?: Logo | null): Promise<boolean> {
 
 // The bill the waiter carries to the table, printed while the order is still
 // open. Deliberately not the same paper as printReceipt: the money has not been
-// taken yet, so there is no cash/card split, no change and no thank-you — only
-// what was eaten and what it comes to. "HESAB" at the top is what stops a
-// customer from treating it as proof of payment.
+// taken yet, so there is no cash/card split and no change — only what was eaten
+// and what it comes to. "HESAB" at the top is what stops a customer from
+// treating it as proof of payment. The thank-you is on it too: this is the
+// paper the guest actually reads (customer request, 2026-10-28).
+export function billLines(order: Order, companyName: string, table?: string): Line[] {
+  const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
+  const service = orderServiceCharge(order);
+  const discount = order.discountAmount ?? 0;
+
+  const lines: Line[] = [...head(order, companyName, 'HESAB', table), ...itemLines(order)];
+
+  lines.push({ text: '='.repeat(WIDTH) });
+  // A discount agreed before payment still belongs on the bill — the customer
+  // is being asked for the net figure, not the menu one.
+  if (service > 0 || discount > 0) lines.push({ text: row('Cəmi:', money(gross)) });
+  if (service > 0) lines.push(serviceLine(order, service));
+  if (discount > 0) lines.push({ text: row('Endirim:', `-${money(discount)}`) });
+  lines.push({ text: row('ÖDƏNİLƏCƏK:', money(gross + service - discount)), big: true });
+  lines.push({ text: '-'.repeat(WIDTH), center: true });
+  lines.push({ text: 'Təşəkkürlər!', center: true });
+  return lines;
+}
+
 export async function printBill(order: Order, companyName: string, logoUrl?: string | null, table?: string): Promise<boolean> {
   try {
     const logo = await loadLogo(logoUrl);
-    const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
-    const discount = order.discountAmount ?? 0;
-
-    const lines: Line[] = [...head(order, companyName, 'HESAB', table), ...itemLines(order)];
-
-    lines.push({ text: '='.repeat(WIDTH) });
-    // A discount agreed before payment still belongs on the bill — the customer
-    // is being asked for the net figure, not the menu one.
-    if (discount > 0) {
-      lines.push({ text: row('Cəmi:', money(gross)) });
-      lines.push({ text: row('Endirim:', `-${money(discount)}`) });
-    }
-    lines.push({ text: row('ÖDƏNİLƏCƏK:', money(gross - discount)), big: true });
-    lines.push({ text: '-'.repeat(WIDTH), center: true });
-
-    return await send(lines, logo);
+    return await send(billLines(order, companyName, table), logo);
   } catch (err) {
     console.error('[Printer] Hesab cap alinmadi:', err);
     return false;
   }
 }
 
+// Xidmət haqqı on its own line, unlike an order type's price change: the guest
+// is meant to see why the total is more than the dishes (lib/service-charge).
+function serviceLine(order: Order, service: number): Line {
+  return { text: row(`Xidmət haqqı (${order.serviceChargePercent}%):`, money(service)) };
+}
+
+export function receiptLines(order: Order, companyName: string, table?: string): Line[] {
+  // A courier order closed on debt tenders nothing, so cash+card is 0. Reading
+  // the total off that would print a 0.00 receipt and, worse, divide by zero
+  // when reconstructing a percentage discount below.
+  const debt = order.courierDebt ?? 0;
+  const paid = (order.cashAmount ?? 0) + (order.cardAmount ?? 0) || debt;
+  const total = paid + (order.discountAmount ?? 0);
+
+  const lines: Line[] = [...head(order, companyName, undefined, table), ...itemLines(order)];
+
+  lines.push({ text: '='.repeat(WIDTH) });
+
+  const discount = order.discountAmount ?? 0;
+  const service = orderServiceCharge(order);
+  if (service > 0) {
+    lines.push({ text: row('Cəmi:', money(order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0))) });
+    lines.push(serviceLine(order, service));
+  } else if (discount > 0) {
+    lines.push({ text: row('Cəmi:', money(total)) });
+  }
+  if (discount > 0) {
+    // The percentage the cashier typed isn't stored — only the manat it came
+    // to — so it's read back off the pre-discount total.
+    const pct = total > 0 ? Math.round((discount / total) * 100) : 0;
+    const label = order.discountType === '%' ? `Endirim (${pct}%)` : 'Endirim';
+    lines.push({ text: row(label, `-${money(discount)}`) });
+  }
+
+  lines.push({ text: row('CƏMİ:', money(paid)), big: true });
+
+  if ((order.cashAmount ?? 0) > 0) lines.push({ text: row('Nağd:', money(order.cashAmount!)) });
+  if ((order.cardAmount ?? 0) > 0) lines.push({ text: row('Kart:', money(order.cardAmount!)) });
+  if ((order.changeAmount ?? 0) > 0) lines.push({ text: row('Qaytarıldı:', money(order.changeAmount!)) });
+  // The guest has not paid yet — the rider collects at the door. Saying so on
+  // the slip is the difference between a receipt and a demand for money.
+  if (debt > 0) {
+    lines.push({ text: row('ÖDƏNİLMƏYİB:', money(debt)) });
+    lines.push({ text: 'Kuryer yığacaq', center: true });
+  }
+
+  lines.push({ text: '-'.repeat(WIDTH), center: true });
+  lines.push({ text: 'Təşəkkürlər!', center: true });
+  return lines;
+}
+
 export async function printReceipt(order: Order, companyName: string, logoUrl?: string | null, table?: string): Promise<boolean> {
   try {
     const logo = await loadLogo(logoUrl);
-    // A courier order closed on debt tenders nothing, so cash+card is 0. Reading
-    // the total off that would print a 0.00 receipt and, worse, divide by zero
-    // when reconstructing a percentage discount below.
-    const debt = order.courierDebt ?? 0;
-    const paid = (order.cashAmount ?? 0) + (order.cardAmount ?? 0) || debt;
-    const total = paid + (order.discountAmount ?? 0);
-
-    const lines: Line[] = [...head(order, companyName, undefined, table), ...itemLines(order)];
-
-    lines.push({ text: '='.repeat(WIDTH) });
-
-    const discount = order.discountAmount ?? 0;
-    if (discount > 0) {
-      lines.push({ text: row('Cəmi:', money(total)) });
-      // The percentage the cashier typed isn't stored — only the manat it came
-      // to — so it's read back off the pre-discount total.
-      const pct = total > 0 ? Math.round((discount / total) * 100) : 0;
-      const label = order.discountType === '%' ? `Endirim (${pct}%)` : 'Endirim';
-      lines.push({ text: row(label, `-${money(discount)}`) });
-    }
-
-    lines.push({ text: row('CƏMİ:', money(paid)), big: true });
-
-    if ((order.cashAmount ?? 0) > 0) lines.push({ text: row('Nağd:', money(order.cashAmount!)) });
-    if ((order.cardAmount ?? 0) > 0) lines.push({ text: row('Kart:', money(order.cardAmount!)) });
-    if ((order.changeAmount ?? 0) > 0) lines.push({ text: row('Qaytarıldı:', money(order.changeAmount!)) });
-    // The guest has not paid yet — the rider collects at the door. Saying so on
-    // the slip is the difference between a receipt and a demand for money.
-    if (debt > 0) {
-      lines.push({ text: row('ÖDƏNİLMƏYİB:', money(debt)) });
-      lines.push({ text: 'Kuryer yığacaq', center: true });
-    }
-
-    lines.push({ text: '-'.repeat(WIDTH), center: true });
-    lines.push({ text: 'Təşəkkürlər!', center: true });
-
-    return await send(lines, logo);
+    return await send(receiptLines(order, companyName, table), logo);
   } catch (err) {
     console.error('[Printer] Cap alinmadi:', err);
     return false;

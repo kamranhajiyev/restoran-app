@@ -107,6 +107,6 @@ describe('the Android app update', () => {
     expect(apk).not.toMatch(/setup-android/);
     // The tag takes the production branch of both the key check and the build.
     expect(apk).toMatch(/elif \[ "\$\{\{ inputs\.release \}\}" = "true" \] \|\| \[\[ "\$GITHUB_REF" == refs\/tags\/apk-\* \]\]; then\s+# Every till/);
-    expect(apk).toMatch(/if \[ "\$\{\{ inputs\.release \}\}" = "true" \] \|\| \[\[ "\$GITHUB_REF" == refs\/tags\/apk-\* \]\]; then\s+\.\/gradlew assembleRelease\n/);
+    expect(apk).toMatch(/if \[ "\$\{\{ inputs\.release \}\}" = "true" \] \|\| \[\[ "\$GITHUB_REF" == refs\/tags\/apk-\* \]\]; then\s+\.\/gradlew assembleDirectRelease bundlePlayRelease\n/);
   });
 });

@@ -65,7 +65,12 @@ class Updater {
     // refuses to be used until it is installed.
     private volatile boolean required;
 
-    Updater(Activity activity, WebView web) {
+    // The Google Play app's stand-in (src/play/) returns null here.
+    static Updater create(Activity activity, WebView web) {
+        return new Updater(activity, web);
+    }
+
+    private Updater(Activity activity, WebView web) {
         this.activity = activity;
         this.web = web;
         this.prefs = activity.getSharedPreferences("update", Context.MODE_PRIVATE);

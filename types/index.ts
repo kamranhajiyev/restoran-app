@@ -115,8 +115,13 @@ export interface OrderItem {
   // includes these prices, so no total needs to read this.
   modifiersDetail?: SelectedModifier[];
   variantId?: string;   // which variant was chosen — drives per-variant stock deduction
+  // The menu price before the order type's change (lib/order-types), when the
+  // type changed it. menuItem.price is what was charged and what every total
+  // reads; this is only for showing what the type added or took off.
+  menuPrice?: number;
   noPrint?: boolean;    // "Mətbəxə çap et" was unticked — no kitchen slip for this line
   printedStationId?: string; // the desktop till already printed this line's ticket there itself
+  printedStationIds?: string[]; // every sex it printed at — a set goes to more than one
   createdAt?: string;   // groups the item into a batch: the original order, or a later "Əlavə et"
   removedAt?: string;   // set = struck through on the order card, and excluded from every total
   removedBy?: string;
@@ -403,6 +408,13 @@ export interface Order {
   // instead of the table's current name, so a rename or a deleted table does
   // not change history. Absent on an order the server has not seen yet.
   tableName?: string;
+  // The order type (lib/order-types) when it is one the owner added or one with
+  // a price change, and its name that day. Absent on every other order.
+  orderType?: string;
+  orderTypeName?: string;
+  // Xidmət haqqı percent the order was taken under (lib/service-charge). The
+  // amount is not kept: orderTotal works it out from the dishes on it now.
+  serviceChargePercent?: number;
   items: OrderItem[];
   // Items the waiter pulled off the order. Kept OUT of `items` on purpose: every
   // total, the Analiz report, the Excel export and the customer receipt all read

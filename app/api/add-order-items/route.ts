@@ -1,9 +1,10 @@
 import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
 import { claim, idempotencyKey } from '@/lib/idempotency';
-import { printedStationColumn, printedStationList } from '@/lib/stations';
+import { printedStationColumn, printedStationList, printedStationsColumn } from '@/lib/stations';
 import type { SelectedModifier } from '@/types';
 import { refusal } from '@/lib/order-rules';
+import { menuPriceColumn } from '@/lib/order-types';
 
 interface IncomingItem {
   // The desktop till names its own lines so it can edit them during an outage;
@@ -19,6 +20,9 @@ interface IncomingItem {
   variantId?: string;
   noPrint?: boolean;
   printedStationId?: string;
+  printedStationIds?: string[];
+  /** The menu price, when the order's type changed it (lib/order-types). */
+  menuPrice?: number;
 }
 
 export async function POST(req: NextRequest) {
@@ -71,6 +75,8 @@ export async function POST(req: NextRequest) {
     no_print: oi.noPrint ?? false,
     // Already printed by the desktop till: the trigger records it, it does not queue it.
     printed_station_id: printedStationColumn(oi.printedStationId),
+    printed_station_ids: printedStationsColumn(oi.printedStationIds),
+    ...menuPriceColumn(oi),
   }));
 
   if (rows.length > 0) {

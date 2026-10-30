@@ -1,7 +1,8 @@
 'use client';
 import { use, useEffect, useState } from 'react';
 import { ShoppingCart, X, Plus, Minus, Coffee } from 'lucide-react';
-import { fetchCompanyBySlug, setCompanyContext, fetchTablesEnabled, fetchQrEnabled, fetchMenuOnly } from '@/lib/store';
+import { fetchCompanyBySlug, setCompanyContext, fetchTablesEnabled, fetchQrEnabled, fetchMenuOnly, fetchGuestServiceCharge } from '@/lib/store';
+import { chargeFor, NO_SERVICE_CHARGE, orderTypeId, serviceAmount, type ServiceCharge } from '@/lib/service-charge';
 import { applyBrand } from '@/lib/branding';
 import { supabase } from '@/lib/supabase';
 import { MenuItem, MenuItemVariant, RestaurantTable } from '@/types';
@@ -46,6 +47,7 @@ export default function CustomerMenuPage({
   const [address, setAddress]     = useState('');
   const [menuOnly, setMenuOnly] = useState(false);
   const [companyId, setCompanyId] = useState('');
+  const [serviceCharge, setServiceCharge] = useState<ServiceCharge>(NO_SERVICE_CHARGE);
   // One id per order, so pressing again after a lost reply sends the same one.
   const [orderId, setOrderId] = useState(() => crypto.randomUUID());
 
@@ -62,13 +64,14 @@ export default function CustomerMenuPage({
       applyBrand(company.brandColor);
       setCompanyContext(company.id);
       setCompanyId(company.id);
-      const [menuRes, catRes, tableRes, tablesEnabled, qrEnabled, menuOnlyVal] = await Promise.all([
+      const [menuRes, catRes, tableRes, tablesEnabled, qrEnabled, menuOnlyVal, sc] = await Promise.all([
         supabase.rpc('get_public_menu_items', { p_company_id: company.id }),
         supabase.rpc('get_public_categories', { p_company_id: company.id }),
         tableId ? supabase.rpc('get_public_table', { p_company_id: company.id, p_table_id: tableId }) : Promise.resolve({ data: [], error: null }),
         fetchTablesEnabled(),
         fetchQrEnabled(),
         fetchMenuOnly(),
+        fetchGuestServiceCharge(),
       ]);
 
       if (!qrEnabled && !menuOnlyVal || (tableId && !tablesEnabled)) {
@@ -116,6 +119,7 @@ export default function CustomerMenuPage({
       const firstCat = availableCats.find((cat: { name: string }) => visible.some((i: MenuItem) => i.category === cat.name));
       if (firstCat) setActiveCategory(firstCat.name);
       setMenuOnly(menuOnlyVal);
+      setServiceCharge(sc);
       setLoading(false);
     }
     load();
@@ -163,7 +167,12 @@ export default function CustomerMenuPage({
     });
   }
 
-  const cartTotal = cart.reduce((s, c) => s + c.menuItem.price * c.quantity, 0);
+  const dishesSum = cart.reduce((s, c) => s + c.menuItem.price * c.quantity, 0);
+  // Xidmət haqqı as /api/guest-order will put it on the order, so the guest
+  // sees the total the bill will say.
+  const servicePercent = chargeFor(serviceCharge, orderTypeId({ tableNumber: table?.id ?? 0 }));
+  const serviceSum = serviceAmount(dishesSum, servicePercent);
+  const cartTotal = dishesSum + serviceSum;
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
   const visibleItems = menu.filter(i => i.category === activeCategory);
 
@@ -402,6 +411,12 @@ export default function CustomerMenuPage({
               ))}
             </div>
             <div className="p-5 border-t border-gray-100 space-y-3">
+              {serviceSum > 0 && (
+                <div className="space-y-1 text-sm text-gray-500">
+                  <div className="flex justify-between"><span>Məbləğ</span><span>{dishesSum.toFixed(2)} ₼</span></div>
+                  <div className="flex justify-between"><span>Xidmət haqqı ({servicePercent}%)</span><span>{serviceSum.toFixed(2)} ₼</span></div>
+                </div>
+              )}
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-500">Cəmi</span>
                 <span className="font-bold text-gray-800">{cartTotal.toFixed(2)} ₼</span>

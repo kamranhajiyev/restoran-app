@@ -10,7 +10,7 @@ import {
   Coffee, BarChart2, Package, Bike, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
   GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link, Printer, Check, ArrowUp, ArrowDown, ChefHat,
-  Building2, AtSign, Landmark, ChevronLeft, ChevronRight,
+  Building2, AtSign, Landmark, ChevronLeft, ChevronRight, Settings,
 } from 'lucide-react';
 import { hallsMoved, nextHallPosition } from '@/lib/hall-order';
 import {
@@ -57,6 +57,7 @@ import { supabase } from '@/lib/supabase';
 import { PICTURE_CACHE, shrinkPicture } from '@/lib/shrink-picture';
 import { CashShift, Category, Hall, MenuItem, MenuItemVariant, ModifierGroup, Order, OrderStatus, RestaurantTable, ShiftEdit, ShiftMovement, Staff, Station, StockItem, TrashItem, isOrderOpen } from '@/types';
 import AppDialog, { DialogState } from '@/components/AppDialog';
+import DialogHost from '@/components/DialogHost';
 import AnbarPanel from '@/components/AnbarPanel';
 import CourierPanel from '@/components/CourierPanel';
 import FinancePanel from '@/components/FinancePanel';
@@ -64,12 +65,15 @@ import StationsPanel from '@/components/StationsPanel';
 import ModifiersPanel from '@/components/ModifiersPanel';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import TillRulesPanel from '@/components/TillRulesPanel';
+import OrderTypesPanel from '@/components/OrderTypesPanel';
+import ServiceChargePanel from '@/components/ServiceChargePanel';
+import { orderServiceCharge } from '@/lib/service-charge';
 import { ROLE_NAMES } from '@/lib/till-rules';
 import type { StaffRole } from '@/types';
 import PasswordField from '@/components/PasswordField';
 import { validatePassword } from '@/lib/password';
 import { exportMenuExcel, exportOrdersExcel, exportAnalizExcel, parseMenuFile, ImportPreview, AnalizRow } from '@/lib/excel';
-import { cleanSetItems, itemKind, KIND_LABEL, partVariant, setChoices, setLine, setSplit, soldInSets, soldInSetSizes, withSets, type ItemKind } from '@/lib/set-items';
+import { cleanSetItems, GONE_PART, itemKind, KIND_LABEL, partVariant, setChoices, setLine, setNeedsFix, setSplit, soldInSets, soldInSetSizes, withSets, type ItemKind } from '@/lib/set-items';
 import { formRecipeLines, kindChangeStock, leftStockMessage, recipeLostMessage } from '@/lib/kind-change';
 import { cleanRecipe } from '@/lib/recipes';
 import { azNormalize } from '@/lib/az-text';
@@ -81,6 +85,7 @@ import { isDesktop } from '@/lib/desktopPrint';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
 import { copySpot, keepLocalTables, nextTableName, resizeTable, tableBox, tableRadius, tablesInHall, toggleShape } from '@/lib/floor-plan';
 import { orderPlace, orderPlaceKind, PlaceKind, tableTitle } from '@/lib/order-place';
+import { placeWithType, typeExtra } from '@/lib/order-types';
 import { placeSales, tableSales } from '@/lib/place-sales';
 import { insertCopyAfter } from '@/lib/menu-copy';
 import { moneyDiff, shiftCheck } from '@/lib/shift-check';
@@ -133,7 +138,7 @@ const STATUS_LABELS: Record<OrderStatus, string> = {
 };
 const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır', 'ödənilib'];
 
-type Tab = 'stats' | 'orders' | 'kassa' | 'maliyye' | 'menu' | 'users' | 'tables' | 'anbar' | 'couriers' | 'logins';
+type Tab = 'stats' | 'orders' | 'kassa' | 'maliyye' | 'menu' | 'users' | 'tables' | 'anbar' | 'couriers' | 'settings';
 
 type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
 type FormVariant = { id: string; name: string; price: string; costPrice: string };
@@ -214,9 +219,9 @@ const NAV_ITEMS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'menu',       label: 'Menyu',         icon: Coffee },
   { id: 'users',      label: 'Əməkdaşlar', icon: Users },
   { id: 'tables',     label: 'Masalar',     icon: LayoutDashboard },
-  { id: 'anbar',      label: 'Anbar',       icon: Package },
+  { id: 'anbar',     label: 'Anbar',       icon: Package },
   { id: 'couriers',   label: 'Kuryerlər',   icon: Bike },
-  { id: 'logins',     label: 'Girişlər',    icon: Globe },
+  { id: 'settings',   label: 'Tənzimləmələr', icon: Settings },
 ];
 
 const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
@@ -229,7 +234,7 @@ const PAGE_META: Record<Tab, { title: string; subtitle: string }> = {
   tables:     { title: 'Masalar',                 subtitle: 'Restoran masalarını idarə et' },
   anbar:      { title: 'Anbar',                   subtitle: 'Anbarlar, qalıqlar, tədarükçülər və bazarlıqlar' },
   couriers:   { title: 'Kuryerlər',               subtitle: 'Kuryerlər, borclar və ödənişlər' },
-  logins:     { title: 'Girişlər',                subtitle: 'Sistemə kim, haradan daxil olub' },
+  settings:   { title: 'Tənzimləmələr',           subtitle: 'Sifariş növləri, xidmət haqqı və girişlər' },
 };
 
 function LineChartSvg({ data }: { data: { label: string; fullLabel: string; rev: number }[] }) {
@@ -582,8 +587,11 @@ function AdminPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const rawTab = searchParams.get('tab');
-  // 'categories' merged into 'menu' — keep old links working
-  const tab = (rawTab === 'categories' ? 'menu' : rawTab as Tab | null) ?? 'stats';
+  // 'categories' merged into 'menu', 'logins' moved under Tənzimləmələr — keep old links working
+  const tab = (rawTab === 'categories' ? 'menu' : rawTab === 'logins' ? 'settings' : rawTab as Tab | null) ?? 'stats';
+  // Tənzimləmələr sub-view. Absent ?sub= means Sifariş növləri.
+  const settingsSub: 'növlər' | 'xidmət' | 'girişlər' = rawTab === 'logins' || searchParams.get('sub') === 'girisler' ? 'girişlər'
+    : searchParams.get('sub') === 'xidmet' ? 'xidmət' : 'növlər';
   // Statistika sub-view. Absent ?sub= means Ümumi, so existing /admin?tab=stats links are unchanged.
   const statsSub: 'ümumi' | 'analiz' = searchParams.get('sub') === 'analiz' ? 'analiz' : 'ümumi';
   const usersSub = searchParams.get('sub');
@@ -1045,9 +1053,9 @@ function AdminPageContent() {
 
   // Login history is rarely opened — fetched once, on first visit to the tab.
   useEffect(() => {
-    if (tab !== 'logins' || !sessionReady || loginsLoaded) return;
+    if (tab !== 'settings' || settingsSub !== 'girişlər' || !sessionReady || loginsLoaded) return;
     fetchLoginEvents().then(ev => { if (ev) { setLoginEvents(ev); setLoginsLoaded(true); } });
-  }, [tab, sessionReady, loginsLoaded]);
+  }, [tab, settingsSub, sessionReady, loginsLoaded]);
 
   // Stats orders are fetched per selected range — only the period being viewed is downloaded.
   // Fetched ranges are cached in memory: fully-past ranges forever, ranges touching today for 60s.
@@ -1681,6 +1689,11 @@ function AdminPageContent() {
   // with stock left in Anbar needs to say what happens to it.
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // A deleted part goes to no sex and takes no stock: the set is not saved with one.
+    if (form.kind === 'set' && form.setItems.some(p => !menu.some(m => m.id === p.id))) {
+      setDialog({ title: GONE_PART, message: 'Setin tərkibində silinmiş məhsul var. Onu × ilə çıxarın, lazımdırsa yenisini əlavə edin.' });
+      return;
+    }
     const before = editingId ? menu.find(m => m.id === editingId) : undefined;
     const change = kindChangeStock(before ? itemKind(before) : null, form.kind);
     if (change === 'drop-recipe') {
@@ -2346,7 +2359,15 @@ function AdminPageContent() {
           </select>
         </div>
 
-        {stations.length > 0 && (
+        {/* A set's parts each go to their own sex (lib/stations prepLines), so
+            the set has none to pick. */}
+        {stations.length > 0 && form.kind === 'set' && (
+          <div>
+            <label className="text-xs font-medium text-stone-600 mb-1.5 block">Sex</label>
+            <p className="text-sm text-stone-500 py-2">İçindəkilər öz sexlərinə gedir</p>
+          </div>
+        )}
+        {stations.length > 0 && form.kind !== 'set' && (
           <div>
             <label className="text-xs font-medium text-stone-600 mb-1.5 block">Sex</label>
             <select value={form.stationId} onChange={e => setForm(f => ({ ...f, stationId: e.target.value }))}
@@ -2460,8 +2481,8 @@ function AdminPageContent() {
                   || !form.setItems.some((x, j) => j !== i && x.id === p.id && x.variantId === v.id));
                 return (
                   <div key={`${p.id}-${i}`} className="flex items-center gap-2">
-                    <span className="flex-1 min-w-0 text-sm text-stone-700 break-words">
-                      {part?.name ?? 'Silinmiş məhsul'}
+                    <span className={`flex-1 min-w-0 text-sm break-words ${part ? 'text-stone-700' : 'text-red-600 font-medium'}`}>
+                      {part?.name ?? `${GONE_PART} — silin`}
                       {part && <span className="text-xs text-stone-400 ml-1.5">{KIND_LABEL[itemKind(part)]}</span>}
                     </span>
                     {part?.variants?.length ? (
@@ -2740,7 +2761,7 @@ function AdminPageContent() {
   const repCatMap: Record<string, { rev: number; cost: number }> = {};
   chartPaid.forEach(o => {
     const gross = o.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
-    const ratio = gross > 0 ? orderTotal(o) / gross : 1;
+    const ratio = gross > 0 ? (orderTotal(o) - orderServiceCharge(o)) / gross : 1;
     o.items.forEach(oi => {
       const menuItem = menu.find(m => m.id === oi.menuItem.id);
       const cat = menuItem?.category || oi.menuItem.category || 'Digər';
@@ -2757,7 +2778,7 @@ function AdminPageContent() {
   const itemMap: Record<string, { name: string; cat: string; qty: number; rev: number; cost: number }> = {};
   chartPaid.forEach(o => {
     const gross = o.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
-    const ratio = gross > 0 ? orderTotal(o) / gross : 1;
+    const ratio = gross > 0 ? (orderTotal(o) - orderServiceCharge(o)) / gross : 1;
     o.items.forEach(oi => {
       const k = oi.menuItem.id;
       if (!itemMap[k]) itemMap[k] = { name: oi.menuItem.name, cat: oi.menuItem.category || 'Digər', qty: 0, rev: 0, cost: 0 };
@@ -2790,7 +2811,7 @@ function AdminPageContent() {
   const sizeMap: Record<string, Record<string, { qty: number; rev: number; cost: number }>> = {};
   chartPaid.forEach(o => {
     const gross = o.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
-    const ratio = gross > 0 ? orderTotal(o) / gross : 1;
+    const ratio = gross > 0 ? (orderTotal(o) - orderServiceCharge(o)) / gross : 1;
     o.items.forEach(oi => {
       const byVar = (sizeMap[oi.menuItem.id] ??= {});
       const v = (byVar[oi.variantId ?? ''] ??= { qty: 0, rev: 0, cost: 0 });
@@ -3780,8 +3801,11 @@ function AdminPageContent() {
                   // Where it went, and on a delivery who took it. Empty string
                   // for the company that runs neither tables nor delivery, and
                   // then the second line is not drawn at all.
-                  const place = orderPlace(order, placeCfg);
+                  const place = placeWithType(orderPlace(order, placeCfg), order);
                   const rider = order.courierId ? courierNames[order.courierId] : undefined;
+                  // What the order type added or took off (lib/order-types).
+                  const extra = typeExtra(order.items);
+                  const service = orderServiceCharge(order);
                   return (
                     <div key={order.id} className={`${flagged ? 'bg-amber-50 ' : ''}${i < visibleOrders.length - 1 ? 'border-b border-stone-50' : ''}`}>
                       {/* Row */}
@@ -3817,6 +3841,22 @@ function AdminPageContent() {
                             🏷️ -{order.discountAmount!.toFixed(2)} ₼
                           </span>
                         )}
+                        {extra !== 0 && (
+                          <span
+                            title={order.orderTypeName ? `${order.orderTypeName}: qiymət dəyişikliyi` : 'Qiymət dəyişikliyi'}
+                            className={`text-xs font-semibold rounded-lg px-1.5 py-0.5 flex-shrink-0 hidden sm:inline border ${extra > 0 ? 'text-amber-800 bg-amber-50 border-amber-300' : 'text-green-700 bg-green-50 border-green-200'}`}
+                          >
+                            {extra > 0 ? '+' : '−'}{Math.abs(extra).toFixed(2)} ₼
+                          </span>
+                        )}
+                        {service > 0 && (
+                          <span
+                            title={`Xidmət haqqı ${order.serviceChargePercent}%`}
+                            className="text-xs font-semibold text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-1.5 py-0.5 flex-shrink-0 hidden sm:inline"
+                          >
+                            Xidmət +{service.toFixed(2)} ₼
+                          </span>
+                        )}
                         {removedCount > 0 && (
                           <span className="text-xs font-semibold text-amber-700 bg-amber-100 border border-amber-300 rounded-lg px-1.5 py-0.5 flex-shrink-0 hidden sm:inline">
                             🗑 {removedCount} silinib
@@ -3832,7 +3872,13 @@ function AdminPageContent() {
                             <div className="hidden sm:grid grid-cols-[1fr_80px_80px] gap-2 text-xs font-medium text-stone-500 uppercase tracking-wide pb-1 border-b border-stone-200 mb-2">
                               <span>Məhsul</span><span className="text-right">Say</span><span className="text-right">Cəmi</span>
                             </div>
-                            <OrderItemHistory order={order} tz={bizSettings.timezone} />
+                            <OrderItemHistory order={order} tz={bizSettings.timezone} showMenuPrice />
+                            {service > 0 && (
+                              <div className="grid grid-cols-[1fr_80px] gap-2 text-sm text-sky-700 pt-2 mt-1 border-t border-stone-200">
+                                <span>Xidmət haqqı ({order.serviceChargePercent}%)</span>
+                                <span className="text-right font-medium">{service.toFixed(2)} ₼</span>
+                              </div>
+                            )}
                           </div>
                           {order.note && <OrderNote note={order.note} className="text-xs text-stone-500 italic mb-3" />}
                           {/* The struck-through lines above already carry who and when; this
@@ -4440,7 +4486,7 @@ function AdminPageContent() {
                               </p>
                             )}
                             {itemKind(item) === 'set' && (
-                              <p className="text-xs text-primary-800 mt-0.5 break-words">{setLine(item.setItems, menu) || 'Tərkibi yoxdur — “Düzəlt” ilə əlavə edin'}</p>
+                              <p className={`text-xs mt-0.5 break-words ${setNeedsFix(item.setItems, menu) ? 'text-red-600 font-medium' : 'text-primary-800'}`}>{setLine(item.setItems, menu) || 'Tərkibi yoxdur — “Düzəlt” ilə əlavə edin'}</p>
                             )}
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
@@ -4781,6 +4827,42 @@ function AdminPageContent() {
             </div>
           )}
 
+          {/* ── TƏNZİMLƏMƏLƏR ──────────────────────────────────────────── */}
+          {tab === 'settings' && (
+            <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5 w-fit mb-4">
+              {(['növlər', 'xidmət', 'girişlər'] as const).map(s => (
+                <button key={s} onClick={() => router.replace(s === 'girişlər' ? '/admin?tab=settings&sub=girisler' : s === 'xidmət' ? '/admin?tab=settings&sub=xidmet' : '/admin?tab=settings')}
+                  className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${settingsSub === s ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
+                  {s === 'növlər' ? 'Sifariş növləri' : s === 'xidmət' ? 'Xidmət haqqı' : 'Girişlər'}
+                </button>
+              ))}
+            </div>
+          )}
+          {/* Sifariş növləri. Masa and Çatdırılma flip the same flags as the
+              Masalar and Kuryerlər switches. */}
+          {tab === 'settings' && settingsSub === 'növlər' && (
+            <OrderTypesPanel
+              tablesOn={tablesOn}
+              deliveryOn={deliveryOn}
+              onTablesOn={async next => {
+                setTablesToggleBusy(true);
+                setTablesOn(next);
+                await setTablesEnabled(next);
+                setTablesToggleBusy(false);
+              }}
+              onDeliveryOn={async next => {
+                setDeliveryToggleBusy(true);
+                setDeliveryOn(next);
+                await setDeliveryEnabled(next);
+                setDeliveryToggleBusy(false);
+              }}
+            />
+          )}
+
+          {tab === 'settings' && settingsSub === 'xidmət' && (
+            <ServiceChargePanel tablesOn={tablesOn} deliveryOn={deliveryOn} />
+          )}
+
           {/* ── KURYERLƏR ──────────────────────────────────────────────── */}
           {tab === 'couriers' && (
             <div className="max-w-3xl space-y-4">
@@ -4822,8 +4904,8 @@ function AdminPageContent() {
             </div>
           )}
 
-          {/* ── LOGINS ─────────────────────────────────────────────────── */}
-          {tab === 'logins' && (
+          {/* ── GİRİŞLƏR (under Tənzimləmələr) ─────────────────────────── */}
+          {tab === 'settings' && settingsSub === 'girişlər' && (
             <div className="max-w-3xl space-y-4">
               {!loginsLoaded && (
                 <div className="bg-white rounded-xl border border-stone-100 p-16 text-center">
@@ -6169,6 +6251,8 @@ function AdminPageContent() {
       )}
 
       <AppDialog dialog={dialog} onClose={() => setDialog(null)} />
+      {/* "Yazıcı seç" asks USB or IP through the till's popups (lib/printer.ts). */}
+      <DialogHost />
     </div>
   );
 }

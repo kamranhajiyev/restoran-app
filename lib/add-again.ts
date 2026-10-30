@@ -20,7 +20,10 @@ export function addAgainLine(oi: OrderItem, menu: MenuItem[]): {
   const picked = !!(oi.variantId || oi.modifiers || oi.modifiersDetail?.length);
   if (!picked) return { item: current };
   return {
-    item: { ...current, price: oi.menuItem.price },
+    // The menu price the line was sold from, not the price charged: the cart
+    // puts the order type's change on again (lib/order-types pricedLine), and
+    // starting from the charged price would add it twice.
+    item: { ...current, price: oi.menuPrice ?? oi.menuItem.price },
     mods: oi.modifiers,
     variantId: oi.variantId,
     detail: oi.modifiersDetail,

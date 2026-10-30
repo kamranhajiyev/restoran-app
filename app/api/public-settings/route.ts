@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   const db = createServerClient();
   const { data, error } = await db
     .from('companies')
-    .select('tables_enabled, delivery_enabled, kassa_enabled, print_receipt, sound_enabled, menu_only, logo_url, brand_color, timezone, work_open, work_close, till_rules')
+    .select('tables_enabled, delivery_enabled, kassa_enabled, print_receipt, sound_enabled, menu_only, logo_url, brand_color, timezone, work_open, work_close, till_rules, order_types, service_charge')
     .eq('id', companyId)
     .single();
 
@@ -50,6 +50,10 @@ export async function GET(req: NextRequest) {
       workClose: data.work_close ?? null,
       // Kept on the exe and the APK with the rest, so the rules hold offline.
       tillRules: data.till_rules ?? null,
+      // Sifariş növləri and their prices, kept on the till with the rest.
+      orderTypes: data.order_types ?? null,
+      // Xidmət haqqı, the same way.
+      serviceCharge: data.service_charge ?? null,
     },
   });
 }

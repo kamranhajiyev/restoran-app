@@ -4,7 +4,7 @@ import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
 import { courierPending, courierSold, courierStillOut, sumCollections, type Collections, type ShiftSales } from './courier-pending';
 import { courierDeleteBlock } from './couriers';
-import { printedStationColumn } from './stations';
+import { printedStationColumn, printedStationsColumn } from './stations';
 import { menuRowBatches } from './set-items';
 import { cleanRecipe } from './recipes';
 import type { LeftStock } from './kind-change';
@@ -14,6 +14,8 @@ import { supabase } from './supabase';
 import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
 import type { TillSettings } from './desktopPrint';
 import { cleanRules, type TillRules } from './till-rules';
+import { cleanOrderTypes, menuPriceColumn, orderTypeColumns, type OrderType } from './order-types';
+import { cleanServiceCharge, serviceChargeColumn, type ServiceCharge } from './service-charge';
 import type { HealthProblem, HealthReport } from './health-report';
 import type { AccountEdit, AccountKind, FinanceAccount, FinanceClosing, FinanceEntry, FinanceSource, FinanceTransaction, SourceKind } from './finance';
 
@@ -786,6 +788,9 @@ async function readOrders(opts?: OrderQuery): Promise<Order[]> {
       tillNumber: o.till_number ?? undefined,
       tableNumber: o.table_id ?? 0,
       tableName: o.table_name ?? undefined,
+      orderType: o.order_type ?? undefined,
+      orderTypeName: o.order_type_name ?? undefined,
+      serviceChargePercent: o.service_charge_percent ? Number(o.service_charge_percent) : undefined,
       sellerName: o.waiter_name,
       staffId: o.staff_id ?? undefined,
       courierId: o.courier_id ?? undefined,
@@ -921,6 +926,8 @@ export async function addOrder(order: Order, opts?: ReadOpts): Promise<string | 
       note: order.note ?? null,
       created_at: order.createdAt,
       company_id: _companyId,
+      ...orderTypeColumns(order),
+      ...serviceChargeColumn(order),
     });
     if (orderError) { console.error('[addOrder orders]', orderError); return orderError.message; }
     if (order.items.length === 0) return null;
@@ -943,6 +950,8 @@ export async function addOrder(order: Order, opts?: ReadOpts): Promise<string | 
       // Unticked "Mətbəxə çap et": the print triggers skip the line.
       no_print: oi.noPrint ?? false,
       printed_station_id: printedStationColumn(oi.printedStationId),
+      printed_station_ids: printedStationsColumn(oi.printedStationIds),
+      ...menuPriceColumn(oi),
     }));
     const { error: itemsError } = await supabase.from('order_items').insert(rows);
     if (itemsError) { console.error('[addOrder items]', itemsError); return itemsError.message; }
@@ -989,6 +998,8 @@ export async function addItemsToOrder(
         variant_id: oi.variantId ?? null,
         no_print: oi.noPrint ?? false,
         printed_station_id: printedStationColumn(oi.printedStationId),
+        printed_station_ids: printedStationsColumn(oi.printedStationIds),
+        ...menuPriceColumn(oi),
       }));
       const { error } = await supabase.from('order_items').insert(rows);
       if (error) { console.error('[addItemsToOrder]', error); return error.message; }
@@ -1357,6 +1368,54 @@ export async function fetchTillRules(): Promise<TillRules | null | undefined> {
 
 export async function saveTillRules(rules: TillRules): Promise<string | null> {
   const { error } = await supabase.rpc('set_till_rules', { p_rules: rules });
+  return error ? error.message : null;
+}
+
+// ─── Sifariş növləri (lib/order-types) ──────────────────────────────────────
+// Read like the till rules: the till's own copy first (exe, APK), then the
+// companies row. A terminal link with no session gets them from
+// /api/public-settings.
+
+/** Undefined = the read failed: keep what the screen has. */
+export async function fetchOrderTypes(): Promise<OrderType[] | undefined> {
+  return (await fetchSaleSettings())?.types;
+}
+
+export async function saveOrderTypes(types: OrderType[]): Promise<string | null> {
+  const { error } = await supabase.rpc('set_order_types', { p_types: types });
+  return error ? error.message : null;
+}
+
+// ─── Xidmət haqqı (lib/service-charge) ──────────────────────────────────────
+
+/**
+ * The order types and the Xidmət haqqı in one read: the exe and the APK from
+ * their own copy (so it holds offline), everyone else from the companies row.
+ * Undefined when it could not be read, so a screen never saves over the real one.
+ */
+export async function fetchSaleSettings(): Promise<{ types: OrderType[]; serviceCharge: ServiceCharge } | undefined> {
+  const local = await fromSettings(s => s);
+  if (local !== null) return { types: cleanOrderTypes(local.orderTypes ?? []), serviceCharge: cleanServiceCharge(local.serviceCharge) };
+  try {
+    if (!_companyId) return undefined;
+    const { data, error } = await supabase.from('companies').select('order_types, service_charge').eq('id', _companyId).single();
+    if (error || !data) return undefined;
+    return { types: cleanOrderTypes(data.order_types), serviceCharge: cleanServiceCharge(data.service_charge) };
+  } catch { return undefined; }
+}
+
+/** The Xidmət haqqı alone, for the QR menu: the guest's anon key may read this
+ *  column of companies but not order_types. Off when it cannot be read. */
+export async function fetchGuestServiceCharge(): Promise<ServiceCharge> {
+  try {
+    if (!_companyId) return cleanServiceCharge(null);
+    const { data, error } = await supabase.from('companies').select('service_charge').eq('id', _companyId).single();
+    return cleanServiceCharge(error ? null : data?.service_charge);
+  } catch { return cleanServiceCharge(null); }
+}
+
+export async function saveServiceCharge(sc: ServiceCharge): Promise<string | null> {
+  const { error } = await supabase.rpc('set_service_charge', { p_charge: sc });
   return error ? error.message : null;
 }
 

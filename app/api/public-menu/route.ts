@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   const db = createServerClient();
   const { data, error } = await db
     .from('menu_items')
-    .select('id, name, price, category, available, qr_visible, variants, cost_price, image, station_id, position')
+    .select('id, name, price, category, available, qr_visible, variants, cost_price, image, station_id, position, set_items')
     .eq('company_id', companyId)
     .order('position');
 
@@ -41,6 +41,8 @@ export async function GET(req: NextRequest) {
     costPrice: r.cost_price ? Number(r.cost_price) : undefined,
     image: r.image ?? undefined,
     stationId: r.station_id ?? null,
+    // A set's parts, so the exe and APK send each to its own sex (lib/stations prepLines).
+    setItems: Array.isArray(r.set_items) && r.set_items.length > 0 ? r.set_items : undefined,
     modifierGroupIds: byItem.get(r.id as string) ?? [],
   }));
 

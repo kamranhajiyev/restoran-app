@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { orderTotal } from '@/components/seller/order-format';
+import { orderServiceCharge } from './service-charge';
 import { Category, MenuItem, MenuItemVariant, Order } from '@/types';
 import { orderClosedAt } from '@/lib/order-items';
 import { orderLabel } from './order-label';
@@ -76,6 +77,8 @@ export function exportOrdersExcel(orders: Order[], timezone: string, courierName
       'Status': o.status,
       'Məhsullar': o.items.map(i => `${i.menuItem.name} x${i.quantity}`).join(', '),
       'Endirim (₼)': o.discountAmount ?? 0,
+      // Already inside Cəmi; its own column so the owner can add it up.
+      'Xidmət haqqı (₼)': orderServiceCharge(o),
       // A courier's money is booked on courierCash/courierCard, not the till
       // fields; without it a paid-back delivery read as never paid.
       'Nağd (₼)': excelMoney(o).cash,
