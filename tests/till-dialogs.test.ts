@@ -38,6 +38,31 @@ describe('till dialogs', () => {
     expect(await second).toBe(true);
   });
 
+  it('choose answers which button, or null for Ləğv et', async () => {
+    const q = createDialogQueue();
+    const picked = q.choose('Çek printeri necə qoşulub?', ['USB', 'IP (şəbəkə)']);
+    expect(q.current()!.choices).toEqual(['USB', 'IP (şəbəkə)']);
+    q.answer(q.current()!.id, 1);
+    expect(await picked).toBe(1);
+
+    const closed = q.choose('Çek printeri necə qoşulub?', ['USB', 'IP (şəbəkə)']);
+    q.answer(q.current()!.id, null);
+    expect(await closed).toBeNull();
+  });
+
+  it('ask starts from the current value and answers what was typed', async () => {
+    const q = createDialogQueue();
+    const typed = q.ask('Çek printerinin IP ünvanı', { value: '192.168.1.50' });
+    expect(q.current()!.value).toBe('192.168.1.50');
+    q.answer(q.current()!.id, '192.168.1.60');
+    expect(await typed).toBe('192.168.1.60');
+  });
+
+  it('the exe has no window.prompt, so the printer code never calls it', () => {
+    const src = readFileSync('lib/printer.ts', 'utf8');
+    expect(src.match(/(?<![\w.])(window\.)?(alert|confirm|prompt)\(/g)).toBeNull();
+  });
+
   it('the first paragraph is the title', () => {
     expect(splitMessage('1 ədəd silinmə hələ təsdiqlənməyib.\n\nÇıxsanız ləğv olunacaq. Davam edilsin?')).toEqual({
       title: '1 ədəd silinmə hələ təsdiqlənməyib.',

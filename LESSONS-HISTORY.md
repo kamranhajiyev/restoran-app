@@ -209,6 +209,14 @@ Azerbaijani date data and fall back to year first; Node has it, so the tests
 passed. Every date now goes through `lib/dates.ts`, which puts day, month, year
 in order itself ("24.10.2026 13:15").
 
+**Can every printer be connected the ways the hardware comes: USB and LAN?**
+Customer, 2026-10-30: the kitchen and bar sexes were set up by IP and printed,
+but the receipt printer was on the LAN too, and the exe had no place to type its
+IP: "Yazıcı seç" only looked for USB. The Android app already asked for an IP,
+because it has no USB, but through window.prompt, which the exe does not have.
+Now "Yazıcı seç" in the exe asks "USB" or "IP (şəbəkə)" in the till's own popup,
+remembers the answer, and an IP printer prints over the same socket as the sexes.
+
 ## 3. Money
 
 **Can the screen calculate a total from data that has not loaded yet?**
