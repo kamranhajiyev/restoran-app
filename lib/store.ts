@@ -2450,6 +2450,25 @@ export async function setSoundEnabled(enabled: boolean): Promise<void> {
   if (error) console.error('[setSoundEnabled]', error);
 }
 
+// The "MASA DƏYİŞDİ" slip at the stations. Only the admin reads it: the move
+// trigger checks it in the database, so no till needs to know. Null when the
+// read failed — the switch must not show "on" for a restaurant that turned it off.
+export async function fetchPrintTableMove(): Promise<boolean | null> {
+  try {
+    if (!_companyId) return null;
+    const { data, error } = await supabase.from('companies').select('print_table_move').eq('id', _companyId).single();
+    if (error || !data) return null;
+    return data.print_table_move !== false;
+  } catch { return null; }
+}
+
+// supabase/migrations/20261103_table_move_slip.sql
+export async function setPrintTableMove(enabled: boolean): Promise<boolean> {
+  const { error } = await supabase.rpc('set_print_table_move', { enabled });
+  if (error) { console.error('[setPrintTableMove]', error); return false; }
+  return true;
+}
+
 export async function fetchKassaEnabled(): Promise<boolean> {
   const local = await fromSettings(s => s.kassaEnabled);
   if (local !== null) return local;

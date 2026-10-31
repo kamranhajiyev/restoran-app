@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Pencil, Trash2, X, Check, ChefHat, Printer, Bell } from 'lucide-react';
-import { saveStations, assignItemsToStation, fetchSoundEnabled, setSoundEnabled } from '@/lib/store';
+import { Plus, Pencil, Trash2, X, Check, ChefHat, Printer, Bell, ArrowRightLeft } from 'lucide-react';
+import { saveStations, assignItemsToStation, fetchSoundEnabled, setSoundEnabled, fetchPrintTableMove, setPrintTableMove } from '@/lib/store';
 import { MenuItem, Station } from '@/types';
 import { DialogState } from '@/components/AppDialog';
 import { USB_PRINTER, isUsbPrinter, isValidPrinterTarget, printerLabel } from '@/lib/station-printer';
@@ -32,12 +32,30 @@ export default function StationsPanel({
   const [assignFor, setAssignFor] = useState<Station | null>(null);
   const [soundOn, setSoundOn] = useState(true);
 
+  // Undefined while loading, null if the read failed: the switch can't be
+  // pressed on a guess.
+  const [moveSlipOn, setMoveSlipOn] = useState<boolean | null | undefined>(undefined);
+  const [moveSlipBusy, setMoveSlipBusy] = useState(false);
+
   useEffect(() => { fetchSoundEnabled().then(setSoundOn); }, []);
+  useEffect(() => { fetchPrintTableMove().then(setMoveSlipOn); }, []);
 
   async function toggleSound() {
     const next = !soundOn;
     setSoundOn(next);
     await setSoundEnabled(next);
+  }
+
+  async function toggleMoveSlip() {
+    if (moveSlipOn == null || moveSlipBusy) return;
+    const next = !moveSlipOn;
+    setMoveSlipBusy(true);
+    setMoveSlipOn(next);
+    if (!await setPrintTableMove(next)) {
+      setMoveSlipOn(!next);
+      setDialog({ title: 'Xəta', message: 'Ayar yadda saxlanmadı. Yenidən cəhd edin.' });
+    }
+    setMoveSlipBusy(false);
   }
 
   const countByStation = useMemo(() => {
@@ -136,6 +154,30 @@ export default function StationsPanel({
           className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${soundOn ? 'bg-primary-800' : 'bg-stone-300'}`}
         >
           <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${soundOn ? 'translate-x-5' : ''}`} />
+        </button>
+      </div>
+
+      {/* The trigger in 20261103_table_move_slip.sql reads this; the tills don't. */}
+      <div className="bg-white rounded-xl border border-stone-100 card p-4 mb-5 flex items-center gap-3">
+        <ArrowRightLeft className="w-4 h-4 text-stone-400 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-stone-700">Masa dəyişəndə sexlərə bildiriş çap et</p>
+          <p className="text-xs text-stone-500 mt-0.5">
+            {moveSlipOn === undefined
+              ? 'Yüklənir…'
+              : moveSlipOn === null
+              ? 'Ayar yüklənmədi — səhifəni yeniləyin'
+              : moveSlipOn
+              ? 'Açıq sifariş başqa masaya keçəndə sexlər "MASA DƏYİŞDİ" çeki alır'
+              : 'Deaktivdir — masa dəyişəndə sexlərə çek çıxmır, mətbəx köhnə masanı görür'}
+          </p>
+        </div>
+        <button
+          onClick={toggleMoveSlip}
+          disabled={moveSlipOn == null || moveSlipBusy}
+          className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${moveSlipOn ? 'bg-primary-800' : 'bg-stone-300'}`}
+        >
+          <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${moveSlipOn ? 'translate-x-5' : ''}`} />
         </button>
       </div>
 
