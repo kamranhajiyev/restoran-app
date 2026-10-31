@@ -77,40 +77,8 @@ export async function login(username: string, password: string): Promise<LoginRe
 
     if (error || !data.user) return { error: 'invalid' };
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('name, role, company_id, active, station_id')
-      .eq('id', data.user.id)
-      .single();
-
-    if (!profile) return { error: 'invalid' };
-    if (!profile.active) return { error: 'inactive' };
-
-    let companyName: string | null = null;
-    let expiresAt: string | null = null;
-
-    if (profile.company_id) {
-      const { data: co } = await supabase
-        .from('companies')
-        .select('name, expires_at, active, trashed_at')
-        .eq('id', profile.company_id)
-        .single();
-      if (!co || !co.active || co.trashed_at) return { error: 'inactive' };
-      companyName = co.name ?? null;
-      expiresAt = co.expires_at ?? null;
-    }
-
-    const session: Session = {
-      id: data.user.id,
-      name: profile.name,
-      role: profile.role as Role,
-      companyId: profile.company_id ?? null,
-      companyName,
-      expiresAt,
-      stationId: profile.station_id ?? null,
-    };
-
-    localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+    const result = await sessionFor(data.user.id);
+    if ('error' in result) return result;
 
     // Fire-and-forget: the audit trail must never block or fail a login.
     if (data.session?.access_token) {
@@ -120,10 +88,50 @@ export async function login(username: string, password: string): Promise<LoginRe
       }).catch(() => {});
     }
 
-    return { session };
+    return result;
   } catch {
     return { error: 'invalid' };
   }
+}
+
+// The app's own session for whoever supabase is now signed in as, saved to this
+// device. Shared by the login form and the superadmin's "Bax" (lib/view-as-session).
+export async function sessionFor(userId: string): Promise<LoginResult> {
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('name, role, company_id, active, station_id')
+    .eq('id', userId)
+    .single();
+
+  if (!profile) return { error: 'invalid' };
+  if (!profile.active) return { error: 'inactive' };
+
+  let companyName: string | null = null;
+  let expiresAt: string | null = null;
+
+  if (profile.company_id) {
+    const { data: co } = await supabase
+      .from('companies')
+      .select('name, expires_at, active, trashed_at')
+      .eq('id', profile.company_id)
+      .single();
+    if (!co || !co.active || co.trashed_at) return { error: 'inactive' };
+    companyName = co.name ?? null;
+    expiresAt = co.expires_at ?? null;
+  }
+
+  const session: Session = {
+    id: userId,
+    name: profile.name,
+    role: profile.role as Role,
+    companyId: profile.company_id ?? null,
+    companyName,
+    expiresAt,
+    stationId: profile.station_id ?? null,
+  };
+
+  localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+  return { session };
 }
 
 // Where a role lands after login. One function because the landing page and the
@@ -163,6 +171,9 @@ export function logout() {
   // Signing in again is proof enough — don't make the next owner face the lock.
   unlockAdmin();
   forgetTill();
+  // Çıxış in the middle of "Bax" ends the visit too; the saved superadmin login
+  // must not linger for whoever signs in next.
+  forgetViewAs();
 }
 
 // Use inside onAuthStateChange callbacks instead of logout().
@@ -171,6 +182,19 @@ export function clearLocalSession() {
   localStorage.removeItem(AUTH_KEY);
   unlockAdmin();
   forgetTill();
+  forgetViewAs();
+}
+
+// The superadmin's own logins, kept while they look at a restaurant as its
+// owner (lib/view-as-session). Here so logging out can drop them.
+export const VIEW_AS_KEY = 'restoran_view_as';
+
+export function putSession(session: Session) {
+  localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+}
+
+export function forgetViewAs() {
+  try { localStorage.removeItem(VIEW_AS_KEY); } catch { /* private mode */ }
 }
 
 export async function validateSession(session: Session): Promise<boolean> {

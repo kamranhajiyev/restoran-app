@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Quicksand } from 'next/font/google';
 import { SITE_URL } from '@/lib/site';
 import DesktopUpdate from '@/components/DesktopUpdate';
+import ViewAsBar from '@/components/ViewAsBar';
 import './globals.css';
 
 const quicksand = Quicksand({
@@ -43,6 +44,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${quicksand.variable} font-sans antialiased min-h-screen bg-gray-50`}>
         {children}
         <DesktopUpdate />
+        <ViewAsBar />
       </body>
     </html>
   );

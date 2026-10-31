@@ -2,9 +2,10 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  LogOut, Plus, Building2, Trash2, EyeOff, Eye, X, ShieldCheck, UserCircle, MapPin, Phone, User, KeyRound, RotateCcw, PanelLeftClose, PanelLeftOpen, Menu, Calendar, Globe, Activity,
+  LogOut, Plus, Building2, Trash2, EyeOff, Eye, X, ShieldCheck, UserCircle, MapPin, Phone, User, KeyRound, RotateCcw, PanelLeftClose, PanelLeftOpen, Menu, Calendar, Globe, Activity, LogIn,
 } from 'lucide-react';
 import { getSession, logout } from '@/lib/auth';
+import { backToSuperadmin, startViewAs } from '@/lib/view-as-session';
 import {
   fetchCompanies, createCompany, trashCompany, toggleCompanyActive, updateCompanyName, updateCompanyExpiry,
   fetchAllUsers, createUser, deleteUser, toggleUserActive, updateCompanyProfile, updateOwnerAccount,
@@ -102,6 +103,9 @@ export default function SuperadminPage() {
   const [companyTrash, setCompanyTrash] = useState<TrashItem[]>([]);
   const [showTrash, setShowTrash] = useState(false);
 
+  // "Bax": the company whose admin is being opened
+  const [viewAsId, setViewAsId] = useState<string | null>(null);
+
   // shared confirm/notice dialog
   const [dialog, setDialog] = useState<DialogState | null>(null);
 
@@ -115,11 +119,27 @@ export default function SuperadminPage() {
   const [pwShowCurrent, setPwShowCurrent] = useState(false);
 
   useEffect(() => {
-    const session = getSession();
-    if (!session || session.role !== 'superadmin') { router.replace('/login'); return; }
-    loadData();
-    fetchCompanyTrash().then(setCompanyTrash);
+    // Coming back from "Bax": the superadmin's own login goes back first.
+    backToSuperadmin().then(() => {
+      const session = getSession();
+      if (!session || session.role !== 'superadmin') { router.replace('/login'); return; }
+      loadData();
+      fetchCompanyTrash().then(setCompanyTrash);
+    });
   }, [router]);
+
+  async function handleViewAs(c: Company) {
+    setViewAsId(c.id);
+    const err = await startViewAs(c.id);
+    if (err) {
+      setViewAsId(null);
+      setDialog({ title: 'Açılmadı', message: err });
+      return;
+    }
+    // A full load, so the admin page starts from the owner's login with nothing
+    // of the superadmin's left in memory.
+    window.location.assign('/admin');
+  }
 
   async function loadData(): Promise<Company[]> {
     setLoading(true);
@@ -559,6 +579,17 @@ export default function SuperadminPage() {
                       {c.active ? 'Aktiv' : 'Deaktiv'}
                     </span>
                     <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => handleViewAs(c)}
+                        disabled={!c.ownerUser || !c.active || viewAsId !== null}
+                        title={!c.ownerUser ? 'Admin hesabı yoxdur' : !c.active ? 'Şirkət deaktivdir' : 'Admin panelinə sahibi kimi bax'}
+                        className="h-8 px-2.5 flex items-center gap-1 rounded-lg text-xs font-medium text-[#2779a7] hover:bg-[#2779a7]/10 disabled:text-gray-300 disabled:hover:bg-transparent transition-colors"
+                      >
+                        {viewAsId === c.id
+                          ? <span className="w-3.5 h-3.5 border-2 border-gray-200 border-t-[#2779a7] rounded-full animate-spin" />
+                          : <LogIn className="w-3.5 h-3.5" />}
+                        Bax
+                      </button>
                       <button
                         onClick={() => openProfileModal(c)}
                         title="Profil və admin hesabı"
