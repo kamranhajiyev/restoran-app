@@ -6,7 +6,7 @@ import {
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
   ShoppingCart, ChevronLeft, ChevronRight, ChevronDown, Wallet,
   History, Search, Delete, KeyRound, Trash2, Check, Bell, BellOff, Printer, CloudOff,
-  Bike, Tag,
+  Bike, Tag, List,
 } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
@@ -34,6 +34,7 @@ import { CashShift, Category, Courier, CourierPayMethod, CourierPendingOrder, Ha
 import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, printHistoryReport, openCashDrawer } from '@/lib/printer';
 import { historyReport, historyReportLines } from '@/lib/history-report';
+import { itemSales, itemSalesLines, shownSizes } from '@/lib/item-sales';
 import { installExeFocusFix } from '@/lib/exe-focus';
 import { collectsTickets, drainPrintQueue, isDesktop, nextLocalOrderNumber, printKitchenNow, printNoteNow, startKitchenPrinting } from '@/lib/desktopPrint';
 import StationPrinters from '@/components/StationPrinters';
@@ -726,6 +727,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // The from–to the list was loaded for, printed on the Hesabat.
   const [historyWindow, setHistoryWindow]   = useState<{ from: string; to: string } | null>(null);
   const [reportBusy, setReportBusy]         = useState(false);
+  const [itemsOpen, setItemsOpen]           = useState(false);
+  const [itemsBusy, setItemsBusy]           = useState(false);
   const [loadingMore, setLoadingMore]       = useState(false);
 
   // cancel modal — preset reason required, free text only for "Digər"
@@ -2398,6 +2401,33 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     }
   }
 
+  // Tarixçə's Məhsullar on paper: what each item sold in view, as the list shows it.
+  async function handlePrintItems() {
+    if (itemsBusy || !historyWindow) return;
+    setItemsBusy(true);
+    try {
+      let ready = printerConnected;
+      if (!ready) {
+        ready = await selectPrinter();
+        setPrinterConnected(ready);
+        if (!ready) return;
+      }
+      const shiftNo = historyShifts.findIndex(s => s.id === historyShiftId);
+      const lines = itemSalesLines(itemSales(historyOrders), menu, {
+        companyName: overrideCompanyName || getSession()?.companyName || '',
+        from: historyWindow.from,
+        timezone: bizSettings.timezone,
+        shift: shiftNo >= 0 ? `Növbə ${shiftNo + 1}` : undefined,
+      });
+      if (!(await printHistoryReport(lines))) {
+        setPrinterConnected(false);
+        showAlert('Məhsullar çap olunmadı — yazıcı bağlantısını yoxlayın.');
+      }
+    } finally {
+      setItemsBusy(false);
+    }
+  }
+
   // Pre-fill cash with the total — the common case is exact cash payment;
   // the field selects on focus so a different amount can be typed straight over it.
   function openPayment(order: Order) {
@@ -3076,6 +3106,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const historyPaidIds = historyCollected.paidOrderIds ? new Set(historyCollected.paidOrderIds) : undefined;
   const { nagd: historyNagd, kart: historyKart, kuryer: historyKuryer, cemi: historyRevenue } =
     historyTotals(historyOrders, orderTotal, historyPaidIds);
+  // Məhsullar: every order in view like the boxes, not only the ones the search shows.
+  const historyItems = itemSales(historyOrders);
 
   // ── sidebar (desktop only) ────────────────────────────────────────────────
 
@@ -3632,6 +3664,14 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setItemsOpen(true)}
+                  disabled={historyLoading || !historyWindow}
+                  className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
+                >
+                  <List className="w-3.5 h-3.5" />
+                  Məhsullar
+                </button>
                 <button
                   onClick={handlePrintReport}
                   disabled={historyLoading || reportBusy || !historyWindow}
@@ -4645,6 +4685,64 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
               >
                 {cancelBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
                 Ödənişsiz bağla
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tarixçə's Məhsullar: what each item sold in the day or shift in view.
+          Counted by lib/item-sales, as admin's Analiz is. */}
+      {itemsOpen && view === 'history' && (
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50" onClick={() => setItemsOpen(false)}>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-md max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 pt-5 pb-3">
+              <div>
+                <h3 className="font-bold text-lg text-stone-800">Məhsullar</h3>
+                <p className="text-sm text-stone-500">
+                  {(() => { const i = historyShifts.findIndex(s => s.id === historyShiftId); return i >= 0 ? `Növbə ${i + 1}` : 'Bütün gün'; })()}
+                </p>
+              </div>
+              <button onClick={() => setItemsOpen(false)} className="p-2 rounded-lg text-stone-400 hover:bg-stone-100" aria-label="Bağla">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5">
+              {historyItems.items.length === 0 ? (
+                <p className="text-sm text-stone-500 py-6 text-center">Satılan məhsul yoxdur</p>
+              ) : historyItems.items.map(s => (
+                <div key={s.id} className="py-2 border-b border-stone-100 last:border-0">
+                  <div className="flex items-baseline gap-3">
+                    <span className="flex-1 min-w-0 break-words text-sm text-stone-800">{s.name}</span>
+                    <span className="text-sm text-stone-600 whitespace-nowrap">{s.qty} ədəd</span>
+                    <span className="w-20 text-right text-sm font-semibold text-stone-800 whitespace-nowrap">{s.rev.toFixed(2)} ₼</span>
+                  </div>
+                  {shownSizes(menu, s).map(z => (
+                    <div key={z.name} className="flex items-baseline gap-3 pl-3 text-xs text-stone-500">
+                      <span className="flex-1 min-w-0 break-words">{z.name}</span>
+                      <span className="whitespace-nowrap">{z.qty} ədəd</span>
+                      <span className="w-20 text-right whitespace-nowrap">{z.rev.toFixed(2)} ₼</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <div className="px-5 pt-3 pb-5 border-t border-stone-100">
+              {historyItems.service > 0.005 && (
+                <div className="flex justify-between text-sm text-stone-600 mb-1">
+                  <span>Xidmət haqqı</span><span>{historyItems.service.toFixed(2)} ₼</span>
+                </div>
+              )}
+              <div className="flex justify-between font-bold text-stone-900 mb-3">
+                <span>Cəmi</span><span>{historyItems.total.toFixed(2)} ₼</span>
+              </div>
+              <button
+                onClick={handlePrintItems}
+                disabled={itemsBusy || historyItems.items.length === 0}
+                className="w-full py-3 rounded-xl bg-primary-800 hover:bg-primary-900 disabled:opacity-40 text-white font-semibold text-sm flex items-center justify-center gap-2"
+              >
+                <Printer className="w-4 h-4" />
+                {itemsBusy ? 'Çap olunur...' : 'Çap et'}
               </button>
             </div>
           </div>
