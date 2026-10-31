@@ -38,13 +38,13 @@ describe('a guest order', () => {
   // (customer request, 2026-10-29). The percent comes from the company row.
   it('pays the Xidmət haqqı of its order type, never one the guest sends', () => {
     const route = readFileSync('app/api/guest-order/route.ts', 'utf8');
-    expect(route).toContain('...serviceChargeColumn({ serviceChargePercent: chargeFor(cleanServiceCharge(company.service_charge), orderTypeId({ tableNumber: tableId ?? 0 })) })');
+    expect(route).toContain('...serviceChargeColumn({ serviceChargePercent: chargeFor(cleanServiceCharge(company.service_charge), orderType.id) })');
     expect(route).not.toMatch(/body\.service/);
   });
 
   it('shows the guest the same charge the order will get', () => {
     const page = readFileSync('app/[slug]/menu/page.tsx', 'utf8');
-    expect(page).toContain('chargeFor(serviceCharge, orderTypeId({ tableNumber: table?.id ?? 0 }))');
+    expect(page).toContain("chargeFor(serviceCharge, linkType?.id ?? '')");
     expect(page).toContain('const cartTotal = dishesSum + serviceSum;');
   });
 

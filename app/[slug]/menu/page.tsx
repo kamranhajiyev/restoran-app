@@ -2,12 +2,37 @@
 import { use, useEffect, useState } from 'react';
 import { ShoppingCart, X, Plus, Minus, Coffee } from 'lucide-react';
 import { fetchCompanyBySlug, setCompanyContext, fetchTablesEnabled, fetchQrEnabled, fetchMenuOnly, fetchGuestServiceCharge } from '@/lib/store';
-import { chargeFor, NO_SERVICE_CHARGE, orderTypeId, serviceAmount, type ServiceCharge } from '@/lib/service-charge';
+import { chargeFor, NO_SERVICE_CHARGE, serviceAmount, type ServiceCharge } from '@/lib/service-charge';
+import { typedPrice, type PriceChange } from '@/lib/order-types';
 import { applyBrand } from '@/lib/branding';
 import { supabase } from '@/lib/supabase';
 import { MenuItem, MenuItemVariant, RestaurantTable } from '@/types';
 
 type Screen = 'menu' | 'confirm';
+
+// The order type this link is for, as /api/guest-order GET tells it.
+interface LinkType { id: string; name: string; builtIn: string | null; change: PriceChange }
+
+// Why a link's type takes no orders, in the guest's words.
+const TYPE_ERRORS: Record<string, string> = {
+  closed: 'QR sifariş hal-hazırda aktiv deyil.',
+  bad_type: 'Bu QR artıq aktiv deyil.',
+  pick_table: 'Bu QR masaya bağlıdır. Masanın üstündəki QR-ı oxudun.',
+};
+
+async function fetchLinkType(companyId: string, typeId: string | undefined, tableId: number | null): Promise<LinkType | { error: string }> {
+  const q = new URLSearchParams({ companyId });
+  if (typeId) q.set('type', typeId);
+  if (tableId) q.set('table', String(tableId));
+  try {
+    const r = await fetch(`/api/guest-order?${q}`, { signal: AbortSignal.timeout(20000) });
+    const body = await r.json();
+    if (body?.ok && body.type) return body.type as LinkType;
+    return { error: TYPE_ERRORS[body?.error] ?? 'Menyu yüklənmədi. Səhifəni yeniləyin.' };
+  } catch {
+    return { error: 'Menyu yüklənmədi. Səhifəni yeniləyin.' };
+  }
+}
 
 interface CartItem {
   menuItem: MenuItem;
@@ -21,10 +46,10 @@ export default function CustomerMenuPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ table?: string }>;
+  searchParams: Promise<{ table?: string; type?: string }>;
 }) {
   const { slug } = use(params);
-  const { table: tableParam } = use(searchParams);
+  const { table: tableParam, type: typeParam } = use(searchParams);
   const tableId = tableParam ? parseInt(tableParam) : null;
 
   const [screen, setScreen] = useState<Screen>('menu');
@@ -48,6 +73,7 @@ export default function CustomerMenuPage({
   const [menuOnly, setMenuOnly] = useState(false);
   const [companyId, setCompanyId] = useState('');
   const [serviceCharge, setServiceCharge] = useState<ServiceCharge>(NO_SERVICE_CHARGE);
+  const [linkType, setLinkType] = useState<LinkType | null>(null);
   // One id per order, so pressing again after a lost reply sends the same one.
   const [orderId, setOrderId] = useState(() => crypto.randomUUID());
 
@@ -64,7 +90,7 @@ export default function CustomerMenuPage({
       applyBrand(company.brandColor);
       setCompanyContext(company.id);
       setCompanyId(company.id);
-      const [menuRes, catRes, tableRes, tablesEnabled, qrEnabled, menuOnlyVal, sc] = await Promise.all([
+      const [menuRes, catRes, tableRes, tablesEnabled, qrEnabled, menuOnlyVal, sc, lt] = await Promise.all([
         supabase.rpc('get_public_menu_items', { p_company_id: company.id }),
         supabase.rpc('get_public_categories', { p_company_id: company.id }),
         tableId ? supabase.rpc('get_public_table', { p_company_id: company.id, p_table_id: tableId }) : Promise.resolve({ data: [], error: null }),
@@ -72,6 +98,7 @@ export default function CustomerMenuPage({
         fetchQrEnabled(),
         fetchMenuOnly(),
         fetchGuestServiceCharge(),
+        fetchLinkType(company.id, typeParam, tableId),
       ]);
 
       if (!qrEnabled && !menuOnlyVal || (tableId && !tablesEnabled)) {
@@ -80,14 +107,18 @@ export default function CustomerMenuPage({
         return;
       }
 
+      if ('error' in lt) { setError(lt.error); setLoading(false); return; }
+      // Every price the guest sees is already the type's, through the same
+      // typedPrice the server charges with.
+      const typed = (p: unknown) => typedPrice(Number(p), lt.change);
       const m = (menuRes.data ?? []).map((r: Record<string, unknown>) => ({
         id: r.id as string,
         name: r.name as string,
-        price: Number(r.price),
+        price: typed(r.price),
         category: r.category as string,
         available: r.available as boolean,
         qrVisible: (r.qr_visible as boolean) ?? true,
-        variants: (r.variants as MenuItem['variants']) ?? undefined,
+        variants: (r.variants as MenuItem['variants'])?.map(v => ({ ...v, price: typed(v.price) })) ?? undefined,
         image: (r.image as string) ?? undefined,
       }));
       // Two independent switches, both of which must be on for a customer to see it:
@@ -120,11 +151,12 @@ export default function CustomerMenuPage({
       if (firstCat) setActiveCategory(firstCat.name);
       setMenuOnly(menuOnlyVal);
       setServiceCharge(sc);
+      setLinkType(lt);
       setLoading(false);
     }
     load();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug, tableId]);
+  }, [slug, tableId, typeParam]);
 
   function handleTapItem(item: MenuItem) {
     if ((item.variants?.length ?? 0) > 0) {
@@ -170,7 +202,7 @@ export default function CustomerMenuPage({
   const dishesSum = cart.reduce((s, c) => s + c.menuItem.price * c.quantity, 0);
   // Xidmət haqqı as /api/guest-order will put it on the order, so the guest
   // sees the total the bill will say.
-  const servicePercent = chargeFor(serviceCharge, orderTypeId({ tableNumber: table?.id ?? 0 }));
+  const servicePercent = chargeFor(serviceCharge, linkType?.id ?? '');
   const serviceSum = serviceAmount(dishesSum, servicePercent);
   const cartTotal = dishesSum + serviceSum;
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
@@ -198,6 +230,7 @@ export default function CustomerMenuPage({
         id: orderId,
         companyId,
         tableId: table?.id ?? null,
+        type: typeParam ?? null,
         note: note || undefined,
         lines: cart.map(c => ({ menuItemId: c.menuItem.id, variantId: c.variantId ?? null, quantity: c.quantity })),
       }),
@@ -271,7 +304,11 @@ export default function CustomerMenuPage({
           )}
           <div className="min-w-0">
             <p className="font-semibold text-gray-800 text-sm truncate">{companyName}</p>
-            {table && <p className="text-xs text-gray-400 truncate">{table.name}</p>}
+            {(table || linkType?.builtIn === null) && (
+              <p className="text-xs text-gray-400 truncate">
+                {[linkType?.builtIn === null && linkType.name, table?.name].filter(Boolean).join(' · ')}
+              </p>
+            )}
           </div>
         </div>
         {!menuOnly && (

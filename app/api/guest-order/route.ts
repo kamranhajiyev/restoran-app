@@ -3,14 +3,42 @@
 
 import { NextRequest } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { priceGuestLines, type GuestLine, type MenuRow } from '@/lib/guest-order';
-import { chargeFor, cleanServiceCharge, orderTypeId, serviceChargeColumn } from '@/lib/service-charge';
+import { guestOrderType, priceGuestLines, type GuestLine, type MenuRow } from '@/lib/guest-order';
+import { cleanOrderTypes, orderTypeColumns, orderTypeFields } from '@/lib/order-types';
+import { chargeFor, cleanServiceCharge, serviceChargeColumn } from '@/lib/service-charge';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const COMPANY_COLUMNS = 'id, qr_enabled, menu_only, tables_enabled, delivery_enabled, service_charge, order_types';
+
+type CompanyRow = { tables_enabled: boolean | null; delivery_enabled: boolean | null; order_types: unknown };
+
+function typeFor(company: CompanyRow, typeId: unknown, hasTable: boolean) {
+  return guestOrderType(cleanOrderTypes(company.order_types), typeof typeId === 'string' ? typeId : null, hasTable, {
+    tablesOn: company.tables_enabled !== false, deliveryOn: company.delivery_enabled !== false,
+  });
+}
+
+// The QR menu asks which type its link is for, to show that type's prices.
+// Only the one type goes back: its name and its price change, which the menu
+// shows anyway.
+export async function GET(req: NextRequest) {
+  const q = req.nextUrl.searchParams;
+  const companyId = q.get('companyId');
+  if (!companyId || !UUID.test(companyId)) return Response.json({ ok: false, error: 'bad_request' }, { status: 400 });
+  const { data: company, error } = await createServerClient().from('companies')
+    .select(COMPANY_COLUMNS)
+    .eq('id', companyId).eq('active', true).is('trashed_at', null).maybeSingle();
+  if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
+  if (!company) return Response.json({ ok: false, error: 'closed' }, { status: 403 });
+  const t = typeFor(company, q.get('type'), !!q.get('table'));
+  if ('error' in t) return Response.json({ ok: false, error: t.error }, { status: 400 });
+  return Response.json({ ok: true, type: { id: t.id, name: t.name, builtIn: t.builtIn ?? null, change: t.change } });
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null) as {
-    id?: string; companyId?: string; tableId?: number | null; note?: string; lines?: GuestLine[];
+    id?: string; companyId?: string; tableId?: number | null; type?: string | null; note?: string; lines?: GuestLine[];
   } | null;
   if (!body?.id || !UUID.test(body.id) || !body.companyId || !UUID.test(body.companyId)) {
     return Response.json({ ok: false, error: 'bad_request' }, { status: 400 });
@@ -18,7 +46,7 @@ export async function POST(req: NextRequest) {
   const db = createServerClient();
 
   const { data: company, error: companyError } = await db.from('companies')
-    .select('id, qr_enabled, menu_only, tables_enabled, service_charge')
+    .select(COMPANY_COLUMNS)
     .eq('id', body.companyId).eq('active', true).is('trashed_at', null).maybeSingle();
   if (companyError) return Response.json({ ok: false, error: companyError.message }, { status: 500 });
   // Same rule as the menu page: a menu-only shop takes no orders.
@@ -31,13 +59,15 @@ export async function POST(req: NextRequest) {
       .eq('company_id', company.id).eq('id', tableId).maybeSingle();
     if (!table) return Response.json({ ok: false, error: 'bad_table' }, { status: 400 });
   }
+  const orderType = typeFor(company, body.type, !!tableId);
+  if ('error' in orderType) return Response.json({ ok: false, error: orderType.error }, { status: 400 });
 
   const ids = [...new Set((body.lines ?? []).map(l => String(l?.menuItemId)))].filter(id => UUID.test(id));
   const { data: menu, error: menuError } = await db.from('menu_items')
     .select('id, name, price, available, qr_visible, variants')
     .eq('company_id', company.id).in('id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']);
   if (menuError) return Response.json({ ok: false, error: menuError.message }, { status: 500 });
-  const lines = priceGuestLines(body.lines ?? [], (menu ?? []) as MenuRow[]);
+  const lines = priceGuestLines(body.lines ?? [], (menu ?? []) as MenuRow[], orderType.change);
   if ('error' in lines) return Response.json({ ok: false, error: lines.error }, { status: 400 });
 
   const { error: orderError } = await db.from('orders').insert({
@@ -49,8 +79,11 @@ export async function POST(req: NextRequest) {
     status: 'gözləyir',
     note: String(body.note ?? '').slice(0, 500) || null,
     created_at: new Date().toISOString(),
-    // Xidmət haqqı like any order of its kind: at a table it is a Masa order.
-    ...serviceChargeColumn({ serviceChargePercent: chargeFor(cleanServiceCharge(company.service_charge), orderTypeId({ tableNumber: tableId ?? 0 })) }),
+    // Saved under its type like a till order, so the kitchen ticket and the
+    // reports name it.
+    ...orderTypeColumns(orderTypeFields(orderType)),
+    // Xidmət haqqı like any order of its kind.
+    ...serviceChargeColumn({ serviceChargePercent: chargeFor(cleanServiceCharge(company.service_charge), orderType.id) }),
   });
   if (orderError) {
     // Sent twice — the first one landed.
