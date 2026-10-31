@@ -4844,6 +4844,9 @@ function AdminPageContent() {
             <OrderTypesPanel
               tablesOn={tablesOn}
               deliveryOn={deliveryOn}
+              slug={companySlug}
+              tables={tables}
+              halls={halls}
               onTablesOn={async next => {
                 setTablesToggleBusy(true);
                 setTablesOn(next);

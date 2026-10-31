@@ -3,12 +3,14 @@
 // Sifariş növləri: which order types the till offers and how each one moves
 // the menu prices (lib/order-types), saved in companies.order_types.
 import { useEffect, useState } from 'react';
-import { Pencil, Plus, Trash2, Armchair, ShoppingBag, Bike, Tag } from 'lucide-react';
+import { Pencil, Plus, Trash2, Armchair, ShoppingBag, Bike, Tag, QrCode } from 'lucide-react';
 import { fetchOrderTypes, saveOrderTypes } from '@/lib/store';
 import {
   asksForTable, changeLabel, NO_CHANGE, orderTypeProblem, typedPrice, withSwitches,
   type OrderType, type PriceChange,
 } from '@/lib/order-types';
+import type { Hall, RestaurantTable } from '@/types';
+import OrderTypeQr from './OrderTypeQr';
 
 const ICONS: Record<string, React.ElementType> = { masa: Armchair, takeaway: ShoppingBag, delivery: Bike };
 
@@ -30,9 +32,13 @@ function sampleText(change: PriceChange) {
   return <>{SAMPLE_PRICE.toFixed(2)} ₼ → <span className="font-semibold text-stone-700">{typedPrice(SAMPLE_PRICE, change).toFixed(2)} ₼</span></>;
 }
 
-export default function OrderTypesPanel({ tablesOn, deliveryOn, onTablesOn, onDeliveryOn }: {
+export default function OrderTypesPanel({ tablesOn, deliveryOn, onTablesOn, onDeliveryOn, slug, tables, halls }: {
   tablesOn: boolean;
   deliveryOn: boolean;
+  /** For the QR links; no QR button until it is known. */
+  slug: string | null;
+  tables: RestaurantTable[];
+  halls: Hall[];
   /** The Masalar and Kuryerlər switches: Masa and Çatdırılma have no switch of their own. */
   onTablesOn: (on: boolean) => void;
   onDeliveryOn: (on: boolean) => void;
@@ -44,6 +50,7 @@ export default function OrderTypesPanel({ tablesOn, deliveryOn, onTablesOn, onDe
   const [error, setError] = useState('');
   const [saveError, setSaveError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [qrFor, setQrFor] = useState<OrderType | null>(null);
 
   // A failed read stays "not loaded": every save writes the whole list, so
   // editing on top of a failure would wipe the owner's real types.
@@ -133,6 +140,9 @@ export default function OrderTypesPanel({ tablesOn, deliveryOn, onTablesOn, onDe
                     {label && <> · {sampleText(t.change)}</>}
                   </p>
                 </div>
+                {slug && t.on && (
+                  <button onClick={() => setQrFor(t)} title="QR kod — bu növün qiymətləri ilə menyu" className="p-1.5 text-stone-400 hover:text-stone-700"><QrCode className="w-4 h-4" /></button>
+                )}
                 <button onClick={() => edit(t)} title="Düzəliş" className="p-1.5 text-stone-400 hover:text-stone-700"><Pencil className="w-4 h-4" /></button>
                 {!t.builtIn && (
                   confirmDelete === t.id ? (
@@ -155,6 +165,10 @@ export default function OrderTypesPanel({ tablesOn, deliveryOn, onTablesOn, onDe
           })}
         </div>
       </div>
+
+      {qrFor && slug && (
+        <OrderTypeQr type={qrFor} slug={slug} tables={tables} halls={halls} tablesOn={tablesOn} onClose={() => setQrFor(null)} />
+      )}
 
       {form && (
         <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4" onClick={() => setForm(null)}>
