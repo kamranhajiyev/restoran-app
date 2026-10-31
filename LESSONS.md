@@ -30,7 +30,7 @@ How to write one:
 **Fixed or built one side? Check the other side.**
 Nağd and Kart, kassa and admin, exe and browser, screen and paper, first and second, before and after.
 Latte Art, 2026-10-06: Kart filled itself from Nağd, but Kart first left Nağd empty.
-Guard: `tests/pay-split.test.ts`, `tests/same-numbers-every-screen.test.ts`, `tests/add-again.test.ts`
+Guard: `tests/pay-split.test.ts`, `tests/same-numbers-every-screen.test.ts`, `tests/add-again.test.ts`, `tests/qr-order-types.test.ts`
 
 **Can what a person types be longer than you planned for?**
 Test Restoran, 2026-10-06: a note with no spaces pushed the order list off the screen.

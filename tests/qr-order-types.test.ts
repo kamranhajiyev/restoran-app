@@ -37,6 +37,15 @@ describe('the order type of a QR link', () => {
     expect(id(guestOrderType(types, 'delivery', false, { tablesOn: true, deliveryOn: false }))).toBe('bad_type');
   });
 
+  // 2026-10-31: ?type=takeaway typed onto a table's link took the order at
+  // takeaway prices, without Masa's price change or Xidmət haqqı.
+  it('refuses a type without a table on a table link', () => {
+    expect(id(guestOrderType(types, 'takeaway', true, on))).toBe('bad_type');
+    expect(id(guestOrderType(types, 'delivery', true, on))).toBe('bad_type');
+    expect(id(guestOrderType(types, 'banket', true, on))).toBe('bad_type');
+    expect(id(guestOrderType(types, 'masa', true, on))).toBe('masa');
+  });
+
   it('needs a table when the type opens on one, unless Masalar is off', () => {
     expect(id(guestOrderType(types, 'xarici', false, on))).toBe('pick_table');
     expect(id(guestOrderType(types, 'xarici', false, { tablesOn: false, deliveryOn: true }))).toBe('xarici');
