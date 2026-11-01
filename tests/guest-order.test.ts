@@ -45,7 +45,7 @@ describe('a guest order', () => {
   it('shows the guest the same charge the order will get', () => {
     const page = readFileSync('app/[slug]/menu/page.tsx', 'utf8');
     expect(page).toContain("chargeFor(serviceCharge, linkType?.id ?? '')");
-    expect(page).toContain('const cartTotal = dishesSum + serviceSum;');
+    expect(page).toContain('const cartTotal = cartToPay(dishesSum, serviceSum);');
   });
 
   it('never carries a status or money from the guest', () => {

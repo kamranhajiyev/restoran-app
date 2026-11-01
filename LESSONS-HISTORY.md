@@ -308,6 +308,19 @@ review after it found admin's payment edit comparing an unrounded cash + card:
 
 ## 4. Database
 
+**Courier debts from one read of 1000 rows** (İXLAS CAFE, 2026-11-01, caught
+before it hit). A courier's Borcu is every delivery closed on him less every
+payment, all-time. lib/store and /api/public-couriers each read those orders
+in a single request, and the server answers at most 1000 rows. İXLAS had 819
+paid courier orders after its first month; on the testing copy one read of its
+orders returned 1000 of 4325. Past 1000, deliveries would have dropped out and
+every rider's debt read too low, with no error. The shift-sales reads had the
+same limit (183 orders in Ixlas's biggest shift). All of them now page through
+`readAll` (`lib/read-all`), and the balance is one rule, `courierBalances`,
+checked equal to the database's `courier_outstanding` for Ixlas's couriers.
+The shift's Nağd / Kart, summed in three places, became `lib/shift-sales`; all
+47 closed Ixlas shifts match what they saved.
+
 **Has this been run on "restoran testing" first?**
 Production only when the owner says so, each time.
 

@@ -13,6 +13,8 @@ import type {
   RestaurantTable, Staff, Station,
 } from '../../types';
 import { db, docs, transact } from './db';
+import { shiftSales, type ShiftSaleRow } from '../shift-sales';
+import type { ShiftSales } from '../courier-pending';
 
 export interface StationReady {
   orderId: string;
@@ -375,49 +377,30 @@ export function putShift(companyId: string, shift: CashShift): void {
     .run(shift.id, companyId, shift.openedAt, shift.closedAt ?? null, JSON.stringify(shift));
 }
 
-/** Cash and card taken since the shift opened. Mirrors /api/public-shift-sales. */
-export function getShiftSales(
-  companyId: string, openedAt: string,
-): { cash: number; card: number; courierCard: number; courierSales: number; courier: number } {
-  const row = db()
+/** Cash and card taken since the shift opened, counted by lib/shift-sales as
+ *  /api/public-shift-sales counts the server's. */
+export function getShiftSales(companyId: string, openedAt: string): ShiftSales {
+  // The courier amounts live in the doc.
+  const paid = db()
     .prepare(
-      `select coalesce(sum(cash_amount), 0) as cash, coalesce(sum(card_amount), 0) as card
+      `select cash_amount, card_amount,
+         json_extract(doc, '$.courierDebt') as courier_debt,
+         json_extract(doc, '$.courierCash') as courier_cash,
+         json_extract(doc, '$.courierCard') as courier_card
        from orders
        where company_id = ? and status = 'ödənilib' and paid_at >= ?`,
     )
-    .get(companyId, openedAt);
+    .all(companyId, openedAt) as ShiftSaleRow[];
 
   // A courier settling by card puts the money on the bank terminal, so it is
   // part of the Terminal figure. Method lives in doc — see getCourierCollections.
-  const courier = db()
+  const courierCard = db()
     .prepare(
-      `select coalesce(sum(amount), 0) as card
+      `select amount
        from courier_payments
        where company_id = ? and json_extract(doc, '$.method') = 'kart' and created_at >= ?`,
     )
-    .get(companyId, openedAt);
+    .all(companyId, openedAt) as { amount: number }[];
 
-  // What the riders still hold for this shift's sales — sold, but in neither
-  // the drawer nor the terminal yet. Same rule as courierOwed in
-  // lib/courier-pending.ts; the amounts live in the doc.
-  const owed = db()
-    .prepare(
-      `select coalesce(sum(max(0,
-          coalesce(json_extract(doc, '$.courierDebt'), 0)
-        - coalesce(json_extract(doc, '$.courierCash'), 0)
-        - coalesce(json_extract(doc, '$.courierCard'), 0))), 0) as owed,
-        coalesce(sum(coalesce(json_extract(doc, '$.courierDebt'), 0)), 0) as sold
-       from orders
-       where company_id = ? and status = 'ödənilib' and paid_at >= ?`,
-    )
-    .get(companyId, openedAt);
-
-  const r2 = (n: unknown) => Math.round(Number(n ?? 0) * 100) / 100;
-  return {
-    cash: Number(row?.cash ?? 0),
-    card: Number(row?.card ?? 0) + Number(courier?.card ?? 0),
-    courierCard: r2(courier?.card),
-    courierSales: r2(owed?.sold),
-    courier: r2(owed?.owed),
-  };
+  return shiftSales(paid, courierCard);
 }

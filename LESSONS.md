@@ -225,6 +225,10 @@ Guard: `cardOverBill`, `tests/pay-split.test.ts`
 
 ## 4. Database
 
+**Does this sum read every row, or only the first 1000 the server sends?**
+İXLAS CAFE, 2026-11-01: 819 courier orders in a month; courier debts read in one go would soon miss deliveries.
+Guard: `lib/read-all`, `tests/courier-balances.test.ts`, `tests/supplier-debt.test.ts`
+
 **Has this been run on "restoran testing" first?**
 Production only when the owner says so, each time.
 Guard: none (a rule, see `AGENTS.md`)

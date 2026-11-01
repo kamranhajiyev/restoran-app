@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { refuseTillRead } from '@/lib/till-read-auth';
-import { courierPending } from '@/lib/courier-pending';
+import { courierBalances, courierPending } from '@/lib/courier-pending';
+import { readAll } from '@/lib/read-all';
 
 // Public: the courier list plus what each one is holding, for the seller
 // terminal, which has no Supabase auth session of its own.
@@ -21,23 +22,20 @@ export async function GET(req: NextRequest) {
     db.from('couriers').select('id, name, phone, active, staff_id, created_at, deleted_at')
       .eq('company_id', companyId).order('created_at'),
     // 'ödənilib' only: a returned order stops owing the moment it is cancelled.
-    db.from('orders').select('id, order_number, created_at, courier_id, courier_debt, courier_cash, courier_card')
-      .eq('company_id', companyId).eq('status', 'ödənilib').not('courier_id', 'is', null),
-    db.from('courier_payments').select('courier_id, amount').eq('company_id', companyId),
+    readAll(async (a, b) => db.from('orders').select('id, order_number, created_at, courier_id, courier_debt, courier_cash, courier_card')
+      .eq('company_id', companyId).eq('status', 'ödənilib').not('courier_id', 'is', null).order('id').range(a, b)),
+    readAll(async (a, b) => db.from('courier_payments').select('courier_id, amount')
+      .eq('company_id', companyId).order('id').range(a, b)),
   ]);
 
   if (couriers.error) return Response.json({ couriers: [] });
+  // A 500, not half the money: deliveries without payments (or the other way)
+  // would show every rider's debt wrong, and the exe would keep it as its
+  // snapshot. On an error the till keeps the list it has (lib/keep-on-fail).
+  if (!orders || !payments) return Response.json({ error: 'read failed' }, { status: 500 });
 
-  const balance: Record<string, number> = {};
-  for (const o of orders.data ?? []) {
-    if (!o.courier_id) continue;
-    balance[o.courier_id] = (balance[o.courier_id] ?? 0) + Number(o.courier_debt ?? 0);
-  }
-  for (const p of payments.data ?? []) {
-    if (!p.courier_id) continue;
-    balance[p.courier_id] = (balance[p.courier_id] ?? 0) - Number(p.amount ?? 0);
-  }
-  const pending = courierPending(orders.data ?? []);
+  const balance = courierBalances(orders, payments);
+  const pending = courierPending(orders);
 
   return Response.json({
     couriers: (couriers.data ?? []).map(c => ({

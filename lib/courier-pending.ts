@@ -1,4 +1,4 @@
-import type { CourierPendingOrder } from '@/types';
+import type { CourierPendingOrder } from '../types';
 
 type Row = {
   id: string;
@@ -31,6 +31,24 @@ export function courierPending(rows: Row[]): Record<string, CourierPendingOrder[
     });
   }
   for (const list of Object.values(out)) list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return out;
+}
+
+/**
+ * Each courier's all-time balance: deliveries closed on him less what he has
+ * handed over. Negative means the restaurant owes him (he paid, then the order
+ * came back). The same rule as courier_outstanding in the database; shared by
+ * lib/store and /api/public-couriers. Rows must be every 'ödənilib' order on a
+ * courier and every payment — read with lib/read-all, not one read of 1000.
+ */
+export function courierBalances(
+  orders: { courier_id: string | null; courier_debt?: unknown }[],
+  payments: { courier_id: string | null; amount?: unknown }[],
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const o of orders) if (o.courier_id) out[o.courier_id] = (out[o.courier_id] ?? 0) + Number(o.courier_debt ?? 0);
+  for (const p of payments) if (p.courier_id) out[p.courier_id] = (out[p.courier_id] ?? 0) - Number(p.amount ?? 0);
+  for (const id of Object.keys(out)) out[id] = Math.round(out[id] * 100) / 100 || 0; // never −0
   return out;
 }
 

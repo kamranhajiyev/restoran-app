@@ -9,7 +9,8 @@ import { mergeLines } from './add-again';
 import { isValidIp } from './station-printer';
 import { installAndroidBridge } from './android-bridge';
 import { formatDateTime } from './dates';
-import { orderServiceCharge } from './service-charge';
+import { dishesTotal, orderServiceCharge } from './service-charge';
+import { orderTotal } from '@/components/seller/order-format';
 import { tillDialogs } from './dialog-queue';
 
 installAndroidBridge();
@@ -296,7 +297,7 @@ async function send(lines: Line[], logo?: Logo | null): Promise<boolean> {
 // treating it as proof of payment. The thank-you is on it too: this is the
 // paper the guest actually reads (customer request, 2026-10-28).
 export function billLines(order: Order, companyName: string, table?: string): Line[] {
-  const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
+  const gross = dishesTotal(order.items);
   const service = orderServiceCharge(order);
   const discount = order.discountAmount ?? 0;
 
@@ -308,7 +309,8 @@ export function billLines(order: Order, companyName: string, table?: string): Li
   if (service > 0 || discount > 0) lines.push({ text: row('Cəmi:', money(gross)) });
   if (service > 0) lines.push(serviceLine(order, service));
   if (discount > 0) lines.push({ text: row('Endirim:', `-${money(discount)}`) });
-  lines.push({ text: row('ÖDƏNİLƏCƏK:', money(gross + service - discount)), big: true });
+  // orderTotal, as the payment sheet will ask for
+  lines.push({ text: row('ÖDƏNİLƏCƏK:', money(orderTotal(order))), big: true });
   lines.push({ text: '-'.repeat(WIDTH), center: true });
   lines.push({ text: 'Təşəkkürlər!', center: true });
   return lines;
@@ -345,7 +347,7 @@ export function receiptLines(order: Order, companyName: string, table?: string):
   const discount = order.discountAmount ?? 0;
   const service = orderServiceCharge(order);
   if (service > 0) {
-    lines.push({ text: row('Cəmi:', money(order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0))) });
+    lines.push({ text: row('Cəmi:', money(dishesTotal(order.items))) });
     lines.push(serviceLine(order, service));
   } else if (discount > 0) {
     lines.push({ text: row('Cəmi:', money(total)) });

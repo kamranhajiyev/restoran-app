@@ -2,7 +2,10 @@ import { guardQuery, refusal } from './order-rules';
 import { CashShift, Category, Courier, CourierLedger, CourierPayMethod, CourierPayment, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RestaurantTable, ShiftEdit, ShiftMovement, Staff, StaffRole, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
-import { courierPending, courierSold, courierStillOut, sumCollections, type Collections, type ShiftSales } from './courier-pending';
+import { courierBalances, courierPending, sumCollections, type Collections, type ShiftSales } from './courier-pending';
+import { shiftSales } from './shift-sales';
+import { readAll } from './read-all';
+import { receiptDebts, supplierLedger, supplierPaid } from './supplier-debt';
 import { courierDeleteBlock } from './couriers';
 import { printedStationColumn, printedStationsColumn } from './stations';
 import { menuRowBatches } from './set-items';
@@ -1799,18 +1802,23 @@ export async function addSupplierPayment(supplierId: string, amount: number, not
   return null;
 }
 
-// Per-supplier total of standalone payments (the Ödəniş box), summed by supplier.
-// Used to net these payments against individual receipts in the Bazarlıqlar view.
-export async function fetchSupplierPayments(): Promise<Record<string, number>> {
-  const out: Record<string, number> = {};
+// What is still owed on each receipt, for the Bazarlıqlar view: the Ödəniş-box
+// payments clear a supplier's receipts oldest first (lib/supplier-debt), so it
+// needs every receipt, not the 200 the list shows — past 200 the payments
+// would have been spread over the wrong ones. Null when a read failed.
+export async function fetchReceiptDebts(): Promise<Record<string, number> | null> {
   try {
-    const { data } = await supabase.from('supplier_payments').select('supplier_id, amount');
-    for (const p of data ?? []) {
-      if (!p.supplier_id) continue;
-      out[p.supplier_id] = (out[p.supplier_id] ?? 0) + Number(p.amount ?? 0);
-    }
-  } catch { /* ignore */ }
-  return out;
+    const [receipts, payments] = await Promise.all([
+      readAll(async (a, b) => supabase.from('stock_receipts')
+        .select('id, supplier_id, total, paid_amount, created_at, voided_at').order('id').range(a, b)),
+      readAll(async (a, b) => supabase.from('supplier_payments').select('supplier_id, amount').order('id').range(a, b)),
+    ]);
+    if (!receipts || !payments) return null;
+    return receiptDebts(receipts.map(r => ({
+      id: r.id, supplierId: r.supplier_id ?? undefined, total: Number(r.total), paidAmount: Number(r.paid_amount ?? 0),
+      createdAt: r.created_at, voidedAt: r.voided_at ?? undefined,
+    })), supplierPaid(payments));
+  } catch { return null; }
 }
 
 // Full dated log of standalone supplier payments (Ödənişlər view). Newest first.
@@ -1836,27 +1844,16 @@ export async function fetchSupplierPaymentLog(): Promise<SupplierPayment[]> {
 }
 
 // Per-supplier money summary: total purchased (non-voided), paid, and outstanding debt.
-export async function fetchSupplierLedger(): Promise<Record<string, SupplierLedger>> {
-  const out: Record<string, SupplierLedger> = {};
-  const ensure = (id: string) => (out[id] ??= { total: 0, paid: 0, debt: 0 });
+export async function fetchSupplierLedger(): Promise<Record<string, SupplierLedger> | null> {
   try {
     const [receipts, payments] = await Promise.all([
-      supabase.from('stock_receipts').select('supplier_id, total, paid_amount, voided_at'),
-      supabase.from('supplier_payments').select('supplier_id, amount'),
+      readAll(async (a, b) => supabase.from('stock_receipts').select('supplier_id, total, paid_amount, voided_at').order('id').range(a, b)),
+      readAll(async (a, b) => supabase.from('supplier_payments').select('supplier_id, amount').order('id').range(a, b)),
     ]);
-    for (const r of receipts.data ?? []) {
-      if (!r.supplier_id || r.voided_at) continue;
-      const l = ensure(r.supplier_id);
-      l.total += Number(r.total ?? 0);
-      l.paid += Number(r.paid_amount ?? 0);
-    }
-    for (const p of payments.data ?? []) {
-      if (!p.supplier_id) continue;
-      ensure(p.supplier_id).paid += Number(p.amount ?? 0);
-    }
-    for (const id of Object.keys(out)) out[id].debt = out[id].total - out[id].paid;
-    return out;
-  } catch { return out; }
+    // Half the rows would be a wrong debt on screen; null keeps what is there.
+    if (!receipts || !payments) return null;
+    return supplierLedger(receipts, payments);
+  } catch { return null; }
 }
 
 // ─── Kuryerlər ────────────────────────────────────────────────────────────────
@@ -1924,32 +1921,36 @@ export async function deleteCourier(id: string): Promise<string | null> {
 // they want. `outstanding` is always the all-time balance, because that is what
 // a seller standing in front of the courier needs to know regardless of the
 // range on screen.
-export async function fetchCourierLedger(range?: { from: string; to: string }): Promise<Record<string, CourierLedger>> {
+export async function fetchCourierLedger(range?: { from: string; to: string }): Promise<Record<string, CourierLedger> | null> {
   const out: Record<string, CourierLedger> = {};
   const ensure = (id: string) => (out[id] ??= { delivered: 0, paid: 0, outstanding: 0, orders: 0 });
   try {
-    let ordersQ = supabase.from('orders')
-      .select('courier_id, courier_debt, paid_at')
-      .not('courier_id', 'is', null)
-      .eq('status', COURIER_DEBT_STATUS);
-    let paymentsQ = supabase.from('courier_payments').select('courier_id, amount, created_at');
-    if (range) {
-      ordersQ = ordersQ.gte('paid_at', range.from).lt('paid_at', range.to);
-      paymentsQ = paymentsQ.gte('created_at', range.from).lt('created_at', range.to);
-    }
+    const ordersQ = () => {
+      const q = supabase.from('orders')
+        .select('courier_id, courier_debt, paid_at')
+        .not('courier_id', 'is', null)
+        .eq('status', COURIER_DEBT_STATUS);
+      return range ? q.gte('paid_at', range.from).lt('paid_at', range.to) : q;
+    };
+    const paymentsQ = () => {
+      const q = supabase.from('courier_payments').select('courier_id, amount, created_at');
+      return range ? q.gte('created_at', range.from).lt('created_at', range.to) : q;
+    };
     const [orders, payments, allTime] = await Promise.all([
-      ordersQ,
-      paymentsQ,
+      readAll(async (a, b) => ordersQ().order('id').range(a, b)),
+      readAll(async (a, b) => paymentsQ().order('id').range(a, b)),
       range ? fetchCourierOutstanding() : Promise.resolve(null),
     ]);
+    // Half a ledger would be wrong numbers on screen; null keeps what is there.
+    if (!orders || !payments || (range && !allTime)) return null;
 
-    for (const o of orders.data ?? []) {
+    for (const o of orders) {
       if (!o.courier_id) continue;
       const l = ensure(o.courier_id);
       l.orders += 1;
       l.delivered += Number(o.courier_debt ?? 0);
     }
-    for (const p of payments.data ?? []) {
+    for (const p of payments) {
       if (!p.courier_id) continue;
       ensure(p.courier_id).paid += Number(p.amount ?? 0);
     }
@@ -1960,39 +1961,35 @@ export async function fetchCourierLedger(range?: { from: string; to: string }): 
       for (const id of Object.keys(allTime)) ensure(id);
       for (const id of Object.keys(out)) out[id].outstanding = allTime[id] ?? 0;
     } else {
-      // No range: the two sums above already span everything.
-      for (const id of Object.keys(out)) out[id].outstanding = out[id].delivered - out[id].paid;
+      // No range: the two reads above already span everything.
+      const balance = courierBalances(orders, payments);
+      for (const id of Object.keys(out)) out[id].outstanding = balance[id] ?? 0;
     }
     return out;
-  } catch { return out; }
+  } catch { return null; }
 }
 
 // All-time balance per courier — what the seller screen shows. Negative means
 // the restaurant owes the courier (they paid, then the order came back).
-export async function fetchCourierOutstanding(): Promise<Record<string, number>> {
-  const out: Record<string, number> = {};
+// Null when either read failed: deliveries without the payments, or payments
+// without the deliveries, would show every rider's debt wrong.
+export async function fetchCourierOutstanding(): Promise<Record<string, number> | null> {
   try {
     const [orders, payments] = await Promise.all([
-      supabase.from('orders').select('courier_id, courier_debt')
-        .not('courier_id', 'is', null).eq('status', COURIER_DEBT_STATUS),
-      supabase.from('courier_payments').select('courier_id, amount'),
+      readAll(async (a, b) => supabase.from('orders').select('courier_id, courier_debt')
+        .not('courier_id', 'is', null).eq('status', COURIER_DEBT_STATUS).order('id').range(a, b)),
+      readAll(async (a, b) => supabase.from('courier_payments').select('courier_id, amount').order('id').range(a, b)),
     ]);
-    for (const o of orders.data ?? []) {
-      if (!o.courier_id) continue;
-      out[o.courier_id] = (out[o.courier_id] ?? 0) + Number(o.courier_debt ?? 0);
-    }
-    for (const p of payments.data ?? []) {
-      if (!p.courier_id) continue;
-      out[p.courier_id] = (out[p.courier_id] ?? 0) - Number(p.amount ?? 0);
-    }
-  } catch { /* ignore */ }
-  return out;
+    if (!orders || !payments) return null;
+    return courierBalances(orders, payments);
+  } catch { return null; }
 }
 
 // Couriers with their balance already attached — the shape the seller screen
 // works in, and what /api/public-couriers returns on the terminal path. Kept as
-// one function so an authed till and a token till cannot drift apart.
-export async function fetchCouriersWithBalance(opts?: ReadOpts): Promise<Courier[]> {
+// one function so an authed till and a token till cannot drift apart. Null
+// when the money could not be read, so the till keeps the list it has.
+export async function fetchCouriersWithBalance(opts?: ReadOpts): Promise<Courier[] | null> {
   const local = await fromLocal(opts, async (till, companyId) =>
     ((await till.couriers(companyId)) as { couriers: Courier[] }).couriers);
   if (local) return local;
@@ -2000,10 +1997,11 @@ export async function fetchCouriersWithBalance(opts?: ReadOpts): Promise<Courier
   const [list, balance, pendingRows] = await Promise.all([
     fetchCouriers(opts),
     fetchCourierOutstanding(),
-    supabase.from('orders').select('id, order_number, created_at, courier_id, courier_debt, courier_cash, courier_card')
-      .not('courier_id', 'is', null).eq('status', COURIER_DEBT_STATUS)
-      .then(r => r.data ?? [], () => []),
+    readAll(async (a, b) => supabase.from('orders').select('id, order_number, created_at, courier_id, courier_debt, courier_cash, courier_card')
+      .not('courier_id', 'is', null).eq('status', COURIER_DEBT_STATUS).order('id').range(a, b))
+      .catch(() => null),
   ]);
+  if (!balance || !pendingRows) return null;
   const pending = courierPending(pendingRows);
   return list.map(c => ({ ...c, outstanding: balance[c.id] ?? 0, pending: pending[c.id] ?? [] }));
 }
@@ -3163,32 +3161,27 @@ export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promis
   if (local) return local;
 
   try {
-    const [{ data, error }, { data: courierCard, error: courierError }] = await Promise.all([
-      supabase
+    const [data, courierCard] = await Promise.all([
+      readAll(async (a, b) => supabase
         .from('orders')
         .select('cash_amount, card_amount, courier_debt, courier_cash, courier_card')
         .eq('status', 'ödənilib')
-        .gte('paid_at', openedAt),
+        .gte('paid_at', openedAt)
+        .order('id').range(a, b)),
       // Courier settlements by card land on the bank terminal — see
       // app/api/public-shift-sales.
-      supabase
+      readAll(async (a, b) => supabase
         .from('courier_payments')
         .select('amount')
         .eq('method', 'kart')
-        .gte('created_at', openedAt),
+        .gte('created_at', openedAt)
+        .order('id').range(a, b)),
     ]);
-    if (error || !data) return null;
+    if (!data) return null;
     // As app/api/public-shift-sales: without the courier card part the Terminal
     // figure is short by all of it, and closing the shift saved it (2026-10-09).
-    if (courierError || !courierCard) return null;
-    const settledByCard = courierCard.reduce((s, p) => s + Number(p.amount ?? 0), 0);
-    return {
-      cash: data.reduce((s, o) => s + Number(o.cash_amount ?? 0), 0),
-      card: data.reduce((s, o) => s + Number(o.card_amount ?? 0), 0) + settledByCard,
-      courierCard: settledByCard,
-      courierSales: courierSold(data),
-      courier: courierStillOut(data),
-    };
+    if (!courierCard) return null;
+    return shiftSales(data, courierCard);
   } catch { return null; }
 }
 
@@ -3205,19 +3198,6 @@ export interface FinanceData {
   shifts: CashShift[];
   /** The newest closed month. Lines and shifts are read from its end on only. */
   closing?: FinanceClosing;
-}
-
-// A balance is a sum over every row, and one read returns at most 1000: a
-// short list would be a wrong balance with nothing to say so.
-async function readAll<T>(page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[] | null> {
-  const size = 1000;
-  const out: T[] = [];
-  for (let from = 0; ; from += size) {
-    const { data, error } = await page(from, from + size - 1);
-    if (error || !data) return null;
-    out.push(...data);
-    if (data.length < size) return out;
-  }
 }
 
 /** Everything Maliyyə counts with, or null when any part could not be read — a

@@ -52,6 +52,13 @@ export function dishesTotal(items: { menuItem: { price: number }; quantity: numb
   return round(items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0));
 }
 
+/** What a cart comes to before any discount: the dishes (dishesTotal) and their
+ *  charge, to the qəpik — what orderTotal will say once it is an order. Shared
+ *  by the till's cart, the QR menu's cart and the printed bill. */
+export function cartToPay(dishes: number, charge: number): number {
+  return round(dishes + charge);
+}
+
 /** The charge on an order: its percent of the dishes on it now, so dishes
  *  added or taken off later move it too. 0 on an order taken without one. */
 export function orderServiceCharge(o: { items: { menuItem: { price: number }; quantity: number }[]; serviceChargePercent?: number }): number {

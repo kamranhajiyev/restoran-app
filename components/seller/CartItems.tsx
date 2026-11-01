@@ -3,6 +3,7 @@ import { Fragment } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import type { MenuItem, OrderItem } from '@/types';
 import { mergeLines, rowToGiveBack, rowToTakeFrom } from '@/lib/add-again';
+import { dishesTotal } from '@/lib/service-charge';
 
 // ── CartItems — shared between desktop sidebar and mobile sheet ───────────
 
@@ -29,8 +30,7 @@ export function CartItems({ cart, existingItems, removedItems, addToCart, remove
   const stagedFor = (oi: OrderItem) => (oi.id ? staged[oi.id] ?? 0 : 0);
   // Active items only — removed lines cost the guest nothing. Staged units are already
   // discounted here so the total on screen is what the guest will actually pay.
-  const existingTotal = (existingItems ?? [])
-    .reduce((s, oi) => s + oi.menuItem.price * (oi.quantity - stagedFor(oi)), 0);
+  const existingTotal = dishesTotal((existingItems ?? []).map(oi => ({ ...oi, quantity: oi.quantity - stagedFor(oi) })));
   // Adding to an order: a dish already on it shows once, with the new units on
   // the same line; only dishes not on it yet are listed below as new.
   const merged = existingItems ? mergeLines(existingItems, cart, staged) : null;
@@ -160,7 +160,7 @@ export function CartItems({ cart, existingItems, removedItems, addToCart, remove
       {existingItems && existingItems.length > 0 && newLines.length > 0 && (
         <div className="flex items-center justify-between">
           <p className="text-sm font-semibold text-green-700 tracking-wide">YENİ</p>
-          <p className="text-sm font-semibold text-green-700">{newLines.reduce((s, ci) => s + ci.menuItem.price * ci.quantity, 0).toFixed(2)} ₼</p>
+          <p className="text-sm font-semibold text-green-700">{dishesTotal(newLines).toFixed(2)} ₼</p>
         </div>
       )}
     <ul className="space-y-3">

@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Pencil, Trash2, Warehouse, Boxes, Truck, ShoppingCart, X, Eraser, ChevronDown, Wallet, ArrowLeftRight } from 'lucide-react';
 import {
   fetchWarehouses, createWarehouse, updateWarehouse, deleteWarehouse,
-  fetchSuppliers, createSupplier, updateSupplier, deleteSupplier, fetchSupplierLedger, fetchSupplierPayments, addSupplierPayment, fetchSupplierPaymentLog,
+  fetchSuppliers, createSupplier, updateSupplier, deleteSupplier, fetchSupplierLedger, fetchReceiptDebts, addSupplierPayment, fetchSupplierPaymentLog,
   fetchStockItems, createStockItem, updateStockItem, trashStockItem,
   fetchBalances, fetchReceipts, recordReceipt, updateReceipt, voidReceipt, recordWriteoff,
   fetchReceiptLines, fetchWriteoffs,
@@ -291,7 +291,7 @@ function SuppliersTab({ suppliers, reload, flash, fail, setDialog }: {
   const [ledger, setLedger] = useState<Record<string, SupplierLedger>>({});
   const [paying, setPaying] = useState<Supplier | null>(null);
 
-  async function reloadLedger() { setLedger(await fetchSupplierLedger()); }
+  async function reloadLedger() { const l = await fetchSupplierLedger(); if (l) setLedger(l); }
   useEffect(() => { reloadLedger(); }, []);
 
   function open(s: Supplier | 'new') {
@@ -625,37 +625,22 @@ function ReceiptsTab({ warehouses, suppliers, items, flash, fail, setDialog }: {
 }) {
   const activeWh = useMemo(() => warehouses.filter(w => w.active), [warehouses]);
   const [receipts, setReceipts] = useState<StockReceipt[]>([]);
-  const [supPayments, setSupPayments] = useState<Record<string, number>>({});
+  const [effectiveDebt, setEffectiveDebt] = useState<Record<string, number>>({});
   const [editingReceipt, setEditingReceipt] = useState<StockReceipt | 'new' | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [lineCache, setLineCache] = useState<Record<string, ReceiptLineDetail[]>>({});
 
   async function reload() {
-    const [rs, pays] = await Promise.all([fetchReceipts(), fetchSupplierPayments()]);
-    setReceipts(rs); setSupPayments(pays);
+    const [rs, debts] = await Promise.all([fetchReceipts(), fetchReceiptDebts()]);
+    setReceipts(rs);
+    if (debts) setEffectiveDebt(debts);
   }
   useEffect(() => { reload(); }, []);
 
-  // Standalone supplier payments (the Ödəniş box) aren't tied to a receipt. Allocate each
-  // supplier's payment pool across their non-voided receipts oldest-first, so paying a supplier
-  // clears the debt shown on their purchases too — matching the Tədarükçülər ledger.
-  const effectiveDebt = useMemo(() => {
-    const pool = { ...supPayments };
-    const map: Record<string, number> = {};
-    const ordered = [...receipts]
-      .filter(r => !r.voidedAt)
-      .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
-    for (const r of ordered) {
-      let d = r.total - r.paidAmount;
-      const sid = r.supplierId;
-      if (sid && (pool[sid] ?? 0) > 0 && d > 0) {
-        const applied = Math.min(pool[sid], d);
-        d -= applied; pool[sid] -= applied;
-      }
-      map[r.id] = d;
-    }
-    return map;
-  }, [receipts, supPayments]);
+  // Standalone supplier payments (the Ödəniş box) aren't tied to a receipt: they clear a
+  // supplier's receipts oldest-first (fetchReceiptDebts, over every receipt, not just the
+  // ones listed), so paying a supplier clears the debt shown on their purchases too —
+  // matching the Tədarükçülər ledger.
 
   const whName = (id: string) => warehouses.find(w => w.id === id)?.name ?? '—';
   const supName = (id?: string) => suppliers.find(s => s.id === id)?.name ?? '—';

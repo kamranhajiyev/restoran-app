@@ -107,7 +107,7 @@ function CouriersTab({ couriers, reload, flash, fail, setDialog }: {
   const [busy, setBusy] = useState(false);
   const [balance, setBalance] = useState<Record<string, number>>({});
 
-  useEffect(() => { fetchCourierOutstanding().then(setBalance); }, [couriers]);
+  useEffect(() => { fetchCourierOutstanding().then(b => { if (b) setBalance(b); }); }, [couriers]);
   // Deleted couriers stay in the list the panel loads, for the names in
   // Ödənişlər and Hesabat, but not here.
   const shown = listedCouriers(couriers);
@@ -377,7 +377,7 @@ function ReportTab({ couriers, bizSettings }: { couriers: Courier[]; bizSettings
     fetchCourierLedger({
       from: businessDayStartUtc(from, bizSettings).toISOString(),
       to: businessDayStartUtc(addDays(to, 1), bizSettings).toISOString(),
-    }).then(l => { setLedger(l); setLoading(false); });
+    }).then(l => { if (l) setLedger(l); setLoading(false); });
   }, [from, to, bizSettings]);
 
   const names = useMemo(

@@ -66,7 +66,7 @@ import {
   changeFor, changeLabel, cleanOrderTypes, DEFAULT_ORDER_TYPES, NO_CHANGE, orderTypeFields, pricedLine, shownTypes,
   typedPrice, typeFlow, type OrderType as SaleType,
 } from '@/lib/order-types';
-import { addedCharge, chargeFor, cleanServiceCharge, newOrderTypeId, NO_SERVICE_CHARGE, orderServiceCharge, serviceAmount, type ServiceCharge } from '@/lib/service-charge';
+import { addedCharge, cartToPay, chargeFor, cleanServiceCharge, dishesTotal, newOrderTypeId, NO_SERVICE_CHARGE, orderServiceCharge, serviceAmount, type ServiceCharge } from '@/lib/service-charge';
 import { fitPlan, tableBox, tableRadius } from '@/lib/floor-plan';
 import { movedToTable, orderPlace as placeOf, tableTitle, withHall } from '@/lib/order-place';
 import { flushQueue, pendingOrderIds, ADD_ORDER, sendOrderByLink } from '@/lib/sync';
@@ -239,7 +239,7 @@ function CartTotal({ dishes, percent, charge, big }: { dishes: number; percent: 
       )}
       <div className="flex justify-between items-center">
         <span className="text-sm text-stone-600">Cəmi:</span>
-        <span className={`font-bold text-primary-700 ${big ? 'text-xl' : 'text-lg'}`}>{(dishes + charge).toFixed(2)} ₼</span>
+        <span className={`font-bold text-primary-700 ${big ? 'text-xl' : 'text-lg'}`}>{cartToPay(dishes, charge).toFixed(2)} ₼</span>
       </div>
     </div>
   );
@@ -920,7 +920,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         if (c) setAvailableCategories(c.filter(cat => cat.available));
         if (st) { setPinStaffList(st.staff); if (st.rules !== undefined) setTillRules(st.rules); }
         if (mg) setModifierGroups(mg);
-        setCouriers(kr);
+        if (kr) setCouriers(kr);
       }
     } catch { /* ignore */ } finally {
       if (!silent) setPullRefreshing(false);
@@ -1935,6 +1935,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         return d.couriers as Courier[];
       }
       const list = await fetchCouriersWithBalance();
+      if (!list) return null;
       setCouriers(list);
       return list;
     } catch {
@@ -3074,7 +3075,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     }
   }
 
-  const cartTotal   = cart.reduce((s, ci) => s + ci.menuItem.price * ci.quantity, 0);
+  const cartTotal   = dishesTotal(cart);
   const cartCount   = cart.reduce((s, ci) => s + ci.quantity, 0);
   const appendOrder = appendOrderId ? orders.find(o => o.id === appendOrderId) ?? null : null;
   // The type this cart is priced under: the open order's when adding to one,
@@ -4582,7 +4583,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   >
                     {(() => {
                       const barCount = cartCount > 0 ? cartCount : appendOrder ? appendOrder.items.reduce((s, oi) => s + oi.quantity, 0) : 0;
-                      const barTotal = cartCount > 0 ? cartTotal + cartCharge : appendOrder ? appendOrder.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0) + orderServiceCharge(appendOrder) : 0;
+                      const barTotal = cartCount > 0 ? cartToPay(cartTotal, cartCharge) : appendOrder ? cartToPay(dishesTotal(appendOrder.items), orderServiceCharge(appendOrder)) : 0;
                       return (
                         <>
                           <span className="bg-white/20 text-white text-xs font-bold px-2 py-0.5 rounded-full min-w-[1.5rem] text-center">{barCount}</span>

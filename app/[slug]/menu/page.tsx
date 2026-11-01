@@ -2,7 +2,7 @@
 import { use, useEffect, useState } from 'react';
 import { ShoppingCart, X, Plus, Minus, Coffee } from 'lucide-react';
 import { fetchCompanyBySlug, setCompanyContext, fetchTablesEnabled, fetchQrEnabled, fetchMenuOnly, fetchGuestServiceCharge } from '@/lib/store';
-import { chargeFor, NO_SERVICE_CHARGE, serviceAmount, type ServiceCharge } from '@/lib/service-charge';
+import { cartToPay, chargeFor, dishesTotal, NO_SERVICE_CHARGE, serviceAmount, type ServiceCharge } from '@/lib/service-charge';
 import { typedPrice, type PriceChange } from '@/lib/order-types';
 import { applyBrand } from '@/lib/branding';
 import { supabase } from '@/lib/supabase';
@@ -199,12 +199,12 @@ export default function CustomerMenuPage({
     });
   }
 
-  const dishesSum = cart.reduce((s, c) => s + c.menuItem.price * c.quantity, 0);
+  const dishesSum = dishesTotal(cart);
   // Xidmət haqqı as /api/guest-order will put it on the order, so the guest
   // sees the total the bill will say.
   const servicePercent = chargeFor(serviceCharge, linkType?.id ?? '');
   const serviceSum = serviceAmount(dishesSum, servicePercent);
-  const cartTotal = dishesSum + serviceSum;
+  const cartTotal = cartToPay(dishesSum, serviceSum);
   const cartCount = cart.reduce((s, c) => s + c.quantity, 0);
   const visibleItems = menu.filter(i => i.category === activeCategory);
 

@@ -40,6 +40,7 @@ describe('shift sales in the exe', () => {
 
 describe('the server', () => {
   it('fails the read when the courier card part fails', () => {
-    expect(readFileSync('app/api/public-shift-sales/route.ts', 'utf8')).toMatch(/if \(courierError \|\| !courierCard\)/);
+    // readAll answers null when any page fails
+    expect(readFileSync('app/api/public-shift-sales/route.ts', 'utf8')).toMatch(/if \(!courierCard\) return Response\.json\(\{ error/);
   });
 });
