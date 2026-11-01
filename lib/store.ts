@@ -2682,11 +2682,11 @@ export async function runHealthReport(): Promise<{ report: HealthReport | null; 
 
 // ─── Superadmin: Companies ────────────────────────────────────────────────────
 
-export async function fetchCompanies(): Promise<{ id: string; name: string; slug: string; active: boolean; createdAt: string; expiresAt: string | null; ownerName: string | null; address: string | null; phone: string | null; timezone: string }[]> {
+export async function fetchCompanies(): Promise<{ id: string; name: string; slug: string; active: boolean; createdAt: string; expiresAt: string | null; ownerName: string | null; address: string | null; phone: string | null; timezone: string; parentId: string | null }[]> {
   try {
-    const { data, error } = await supabase.from('companies').select('id, name, slug, active, created_at, expires_at, owner_name, address, phone, timezone, trashed_at').is('trashed_at', null).order('created_at');
+    const { data, error } = await supabase.from('companies').select('id, name, slug, active, created_at, expires_at, owner_name, address, phone, timezone, trashed_at, parent_id').is('trashed_at', null).order('created_at');
     if (error || !data) return [];
-    return data.map(c => ({ id: c.id, name: c.name, slug: c.slug, active: c.active, createdAt: c.created_at, expiresAt: c.expires_at ?? null, ownerName: c.owner_name ?? null, address: c.address ?? null, phone: c.phone ?? null, timezone: c.timezone || DEFAULT_TZ }));
+    return data.map(c => ({ id: c.id, name: c.name, slug: c.slug, active: c.active, createdAt: c.created_at, expiresAt: c.expires_at ?? null, ownerName: c.owner_name ?? null, address: c.address ?? null, phone: c.phone ?? null, timezone: c.timezone || DEFAULT_TZ, parentId: c.parent_id ?? null }));
   } catch { return []; }
 }
 
@@ -2796,6 +2796,13 @@ export async function updateCompanyHours(workOpen: string, workClose: string): P
 export async function updateCompanyTimezone(id: string, timezone: string): Promise<string | null> {
   const { error } = await supabase.from('companies').update({ timezone }).eq('id', id);
   if (error) { console.error('[updateCompanyTimezone]', error); return error.message; }
+  return null;
+}
+
+// Superadmin: which main məkan this company sits inside (lib/switch-company).
+export async function updateCompanyParent(id: string, parentId: string | null): Promise<string | null> {
+  const { error } = await supabase.from('companies').update({ parent_id: parentId }).eq('id', id);
+  if (error) { console.error('[updateCompanyParent]', error); return error.message; }
   return null;
 }
 

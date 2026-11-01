@@ -4,7 +4,7 @@
 // admin page: admin, seller and station each log out when the signed-in user
 // changes under them, and would race the restore.
 import { supabase } from './supabase';
-import { VIEW_AS_KEY, forgetTill, forgetViewAs, getSession, logout, putSession, sessionFor, unlockAdmin, type Session } from './auth';
+import { VIEW_AS_KEY, forgetHome, forgetTill, forgetViewAs, getSession, logout, putSession, sessionFor, unlockAdmin, type Session } from './auth';
 
 interface Saved {
   accessToken: string;
@@ -84,5 +84,7 @@ export async function backToSuperadmin(): Promise<boolean> {
   unlockAdmin();
   forgetTill();
   forgetViewAs();
+  // A məkan switch made during the visit belongs to the owner, not the superadmin.
+  forgetHome();
   return true;
 }

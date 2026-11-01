@@ -172,8 +172,9 @@ export function logout() {
   unlockAdmin();
   forgetTill();
   // Çıxış in the middle of "Bax" ends the visit too; the saved superadmin login
-  // must not linger for whoever signs in next.
+  // must not linger for whoever signs in next. So does the main məkan's.
   forgetViewAs();
+  forgetHome();
 }
 
 // Use inside onAuthStateChange callbacks instead of logout().
@@ -183,6 +184,7 @@ export function clearLocalSession() {
   unlockAdmin();
   forgetTill();
   forgetViewAs();
+  forgetHome();
 }
 
 // The superadmin's own logins, kept while they look at a restaurant as its
@@ -195,6 +197,14 @@ export function putSession(session: Session) {
 
 export function forgetViewAs() {
   try { localStorage.removeItem(VIEW_AS_KEY); } catch { /* private mode */ }
+}
+
+// The main məkan's login, kept while its owner looks at another of their
+// məkans (lib/switch-company-session). Here so logging out can drop it.
+export const HOME_KEY = 'restoran_home';
+
+export function forgetHome() {
+  try { localStorage.removeItem(HOME_KEY); } catch { /* private mode */ }
 }
 
 export async function validateSession(session: Session): Promise<boolean> {

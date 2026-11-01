@@ -9,7 +9,7 @@ import { backToSuperadmin, startViewAs } from '@/lib/view-as-session';
 import {
   fetchCompanies, createCompany, trashCompany, toggleCompanyActive, updateCompanyName, updateCompanyExpiry,
   fetchAllUsers, createUser, deleteUser, toggleUserActive, updateCompanyProfile, updateOwnerAccount,
-  fetchCompanyTrash, restoreCompany, permanentlyDeleteCompany, verifyPassword, updateUser, updateCompanyTimezone,
+  fetchCompanyTrash, restoreCompany, permanentlyDeleteCompany, verifyPassword, updateUser, updateCompanyTimezone, updateCompanyParent,
 } from '@/lib/store';
 import { DEFAULT_TZ } from '@/lib/business-day';
 import { TrashItem } from '@/types';
@@ -18,6 +18,7 @@ import PasswordField from '@/components/PasswordField';
 import HealthReportPanel from '@/components/HealthReportPanel';
 import { validatePassword } from '@/lib/password';
 import { formatDate } from '@/lib/dates';
+import { withBranches } from '@/lib/company-tree';
 
 // Each company's clock for statistics — superadmin picks it per company
 const TIMEZONES: { value: string; label: string }[] = [
@@ -50,12 +51,13 @@ interface Company {
   address: string | null;
   phone: string | null;
   timezone: string;
+  parentId: string | null;
   ownerUser?: SAUser;
 }
 
 interface ModalSnapshot {
   owner: string; address: string; phone: string;
-  timezone: string; expiry: string | null;
+  timezone: string; expiry: string | null; parentId: string | null;
   accName: string; accUsername: string;
 }
 
@@ -78,6 +80,7 @@ export default function SuperadminPage() {
   const [profPhone, setProfPhone] = useState('');
   const [profExpiry, setProfExpiry] = useState<string | null>(null);
   const [profTimezone, setProfTimezone] = useState(DEFAULT_TZ);
+  const [profParent, setProfParent] = useState<string | null>(null);
   const [showCustomDate, setShowCustomDate] = useState(false);
   const [profMsg, setProfMsg] = useState('');
 
@@ -172,6 +175,7 @@ export default function SuperadminPage() {
     setProfPhone(c.phone ?? '');
     setProfExpiry(c.expiresAt ?? null);
     setProfTimezone(c.timezone || DEFAULT_TZ);
+    setProfParent(c.parentId);
     setModalOwnerUser(c.ownerUser ?? null);
     setOwnerName(c.ownerUser?.name ?? '');
     setOwnerUsername(c.ownerUser?.username ?? '');
@@ -181,6 +185,7 @@ export default function SuperadminPage() {
       phone: c.phone ?? '',
       timezone: c.timezone || DEFAULT_TZ,
       expiry: c.expiresAt ?? null,
+      parentId: c.parentId,
       accName: c.ownerUser?.name ?? '',
       accUsername: c.ownerUser?.username ?? '',
     });
@@ -194,6 +199,7 @@ export default function SuperadminPage() {
       || profPhone !== snapshot.phone
       || profTimezone !== snapshot.timezone
       || profExpiry !== snapshot.expiry
+      || profParent !== snapshot.parentId
       || ownerName !== snapshot.accName
       || ownerUsername !== snapshot.accUsername;
   }
@@ -240,6 +246,7 @@ export default function SuperadminPage() {
       updateCompanyProfile(profileCompany.id, owner, address, phone),
       updateCompanyExpiry(profileCompany.id, profExpiry),
       updateCompanyTimezone(profileCompany.id, profTimezone),
+      profParent !== profileCompany.parentId ? updateCompanyParent(profileCompany.id, profParent) : Promise.resolve(null),
     ]);
     const profErr = errs.find(Boolean);
     if (profErr) {
@@ -265,7 +272,7 @@ export default function SuperadminPage() {
     if (accErr) {
       // Keep whatever was typed into the account fields so it can be corrected —
       // only mark the company details as saved.
-      setSnapshot(s => s && { ...s, owner, address, phone, timezone: profTimezone, expiry: profExpiry });
+      setSnapshot(s => s && { ...s, owner, address, phone, timezone: profTimezone, expiry: profExpiry, parentId: profParent });
       setOwnerMsg('Xəta: ' + accErr);
       return;
     }
@@ -527,8 +534,9 @@ export default function SuperadminPage() {
               </div>
             ) : (
               <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                {companies.map((c, i) => (
-                  <div key={c.id} className={`flex items-center gap-4 px-4 py-3 hover:bg-gray-50 transition-colors ${i < companies.length - 1 ? 'border-b border-gray-50' : ''}`}>
+                {withBranches(companies).map(({ company: c, branch }, i) => (
+                  <div key={c.id} className={`flex items-center gap-4 py-3 pr-4 hover:bg-gray-50 transition-colors ${branch ? 'pl-10 sm:pl-14 bg-gray-50/40' : 'pl-4'} ${i < companies.length - 1 ? 'border-b border-gray-50' : ''}`}>
+                    {branch && <span className="text-gray-300 -mr-2 shrink-0">↳</span>}
                     <div className="w-9 h-9 rounded-lg bg-[#49c5b6]/15 flex items-center justify-center shrink-0">
                       <Building2 className="w-4 h-4 text-[#49c5b6]" />
                     </div>
@@ -563,6 +571,7 @@ export default function SuperadminPage() {
                       )}
                       <p className="text-xs text-gray-400">
                         {c.ownerUser ? `@${c.ownerUser.username}` : 'Hesab yoxdur'}
+                        {branch && ' · filial'}
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -825,6 +834,22 @@ export default function SuperadminPage() {
                   {TIMEZONES.map(tz => <option key={tz.value} value={tz.value}>{tz.label}</option>)}
                 </select>
                 <p className="text-xs text-gray-400 mt-1">Statistika və hesabatlar bu saat qurşağı ilə hesablanır</p>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><Building2 className="w-3.5 h-3.5" />Əsas məkan</label>
+                {companies.some(c => c.parentId === profileCompany.id) ? (
+                  <p className="text-sm text-gray-600">Əsas məkandır: {companies.filter(c => c.parentId === profileCompany.id).map(c => c.name).join(', ')}</p>
+                ) : (
+                  <select
+                    value={profParent ?? ''}
+                    onChange={e => setProfParent(e.target.value || null)}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#2779a7] bg-white"
+                  >
+                    <option value="">Yoxdur — ayrıca məkan</option>
+                    {companies.filter(c => c.id !== profileCompany.id && !c.parentId).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                )}
+                <p className="text-xs text-gray-400 mt-1">Əsas məkanın admini bir girişlə bu məkana da keçə bilər</p>
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><Calendar className="w-3.5 h-3.5" />Abunəlik müddəti</label>

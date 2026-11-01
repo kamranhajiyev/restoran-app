@@ -97,6 +97,8 @@ import { changedOrderId, gatherOrderIds, patchOrders } from '@/lib/order-patch';
 import { onCompanyChange } from '@/lib/company-changes';
 import { DATA_TABLES, gatherParts, type Part } from '@/lib/data-refresh';
 import OrderNote from '@/components/OrderNote';
+import VenueSwitcher from '@/components/VenueSwitcher';
+import { isSwitching } from '@/lib/switch-company-session';
 import { formatDayMonth, formatDayMonthTime, formatTime } from '@/lib/dates';
 
 // RPC raise messages are machine codes — translated here for display
@@ -654,6 +656,7 @@ function AdminPageContent() {
 
   // shared confirm/notice dialog
   const [dialog, setDialog] = useState<DialogState | null>(null);
+  const [myCompanyId, setMyCompanyId] = useState<string | null>(null);
 
   // Collapsed category sections — persisted so the layout survives reloads.
   // Stores the collapsed ones: new categories default to open.
@@ -1012,9 +1015,12 @@ function AdminPageContent() {
     // no longer matches the shared auth token — force re-login instead of
     // firing doomed cross-company requests.
     const { data: authSub } = supabase.auth.onAuthStateChange((_event, s) => {
+      // A məkan switch from the header changes the login on purpose and reloads.
+      if (isSwitching()) return;
       if (!s || s.user.id !== session.id) { clearLocalSession(); router.replace('/login'); }
     });
     setCompanyContext(session.companyId);
+    setMyCompanyId(session.companyId);
     setAdminName(session.name);
     setCompanyName(session.companyName ?? '');
     setUserId(session.id);
@@ -3092,6 +3098,8 @@ function AdminPageContent() {
         </div>
 
         <div className="flex-1" />
+
+        <VenueSwitcher currentId={myCompanyId} onError={msg => setDialog({ title: 'Məkan açılmadı', message: msg })} />
 
         {companySlug && sellerToken && (
           <a
