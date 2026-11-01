@@ -116,10 +116,12 @@ const auth = {
   setSession: vi.fn(),
   verifyOtp: vi.fn(),
   signOut: vi.fn(),
+  signInWithPassword: vi.fn(),
 };
 const profiles: Record<string, { name: string; role: string; company_id: string; active: boolean; station_id: null }> = {
   boss: { name: 'Kamran', role: 'owner', company_id: 'main', active: true, station_id: null },
   'own-b': { name: 'B admin', role: 'owner', company_id: 'b', active: true, station_id: null },
+  stranger: { name: 'Başqa', role: 'owner', company_id: 'other', active: true, station_id: null },
 };
 vi.mock('@/lib/supabase', () => ({
   supabase: {
@@ -128,6 +130,7 @@ vi.mock('@/lib/supabase', () => ({
       setSession: (...a: unknown[]) => auth.setSession(...a),
       verifyOtp: (...a: unknown[]) => auth.verifyOtp(...a),
       signOut: (...a: unknown[]) => auth.signOut(...a),
+      signInWithPassword: (...a: unknown[]) => auth.signInWithPassword(...a),
     },
     from: (table: string) => {
       let id = '';
@@ -194,6 +197,10 @@ describe('the browser switch', () => {
     expect(getSession()?.companyId).toBe('main');
     expect(store.has(HOME_KEY)).toBe(false);
     expect(isSwitching()).toBe(false);
+    // ...and another tab's logout clears the login as usual.
+    const { clearLocalSession } = await import('@/lib/auth');
+    clearLocalSession();
+    expect(getSession()).toBeNull();
   });
 
   it('the exe and the Android app show no switch', async () => {
@@ -201,6 +208,55 @@ describe('the browser switch', () => {
     const { loadVenues } = await import('@/lib/switch-company-session');
     expect(await loadVenues()).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // 2026-11-01 review: the kept main login outlived a new login on the same
+  // device, and its məkan menu let the next account sign in as the main owner.
+  it('a new login on the device drops the kept main login', async () => {
+    const { login, HOME_KEY } = await import('@/lib/auth');
+    store.set(HOME_KEY, JSON.stringify({ accessToken: 'main-at', refreshToken: 'main-rt', session: {}, venues }));
+    auth.signInWithPassword.mockResolvedValue({ data: { user: { id: 'stranger' }, session: null }, error: null });
+    expect('session' in await login('baska', 'pw')).toBe(true);
+    expect(store.has(HOME_KEY)).toBe(false);
+  });
+
+  it("a kept main login that is not this məkan's group is never used", async () => {
+    const { putSession, HOME_KEY } = await import('@/lib/auth');
+    const { loadVenues, switchVenue } = await import('@/lib/switch-company-session');
+    putSession({ id: 'stranger', name: 'Başqa', role: 'owner', companyId: 'other', companyName: 'Başqa', expiresAt: null, stationId: null });
+    store.set(HOME_KEY, JSON.stringify({ accessToken: 'main-at', refreshToken: 'main-rt', session: { companyId: 'main' }, venues }));
+    auth.getSession.mockResolvedValue({ data: { session: { access_token: 'x-at', refresh_token: 'x-rt' } } });
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ venues: [] }) });
+
+    expect(await loadVenues()).toEqual([]);
+    expect(store.has(HOME_KEY)).toBe(false);
+
+    store.set(HOME_KEY, JSON.stringify({ accessToken: 'main-at', refreshToken: 'main-rt', session: { companyId: 'main' }, venues }));
+    fetchMock.mockResolvedValue({ ok: false, json: async () => ({ error: 'Keçid yalnız əsas məkanın hesabından olur' }) });
+    expect((await switchVenue('main', venues)).moved).toBe(false);
+    expect(auth.setSession).not.toHaveBeenCalled();
+  });
+
+  // A till open in another tab sees the login change and logs itself out; it
+  // used to wipe the shared saved login too, and the switching tab landed on
+  // /login as well.
+  it("another tab's logout during a switch leaves the new login in place", async () => {
+    const { switchVenue } = await import('@/lib/switch-company-session');
+    const { clearLocalSession, getSession, HOME_KEY } = await import('@/lib/auth');
+    auth.getSession.mockResolvedValue({ data: { session: { access_token: 'main-at', refresh_token: 'main-rt' } } });
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ tokenHash: 'h', companyName: 'B' }) });
+    auth.verifyOtp.mockResolvedValue({ data: { user: { id: 'own-b' }, session: { access_token: 'b-at' } }, error: null });
+    await switchVenue('b', venues);
+
+    clearLocalSession();
+    expect(getSession()?.companyId).toBe('b');
+    expect(store.has(HOME_KEY)).toBe(true);
+  });
+
+  it('with no switch, a logout in another tab still clears the saved login', async () => {
+    const { clearLocalSession, getSession } = await import('@/lib/auth');
+    clearLocalSession();
+    expect(getSession()).toBeNull();
   });
 
   it('logging out drops the kept main login', async () => {
@@ -219,6 +275,11 @@ describe('wiring', () => {
     const admin = readFileSync('app/admin/page.tsx', 'utf8');
     expect(admin).toMatch(/if \(isSwitching\(\)\) return;\s*if \(!s \|\| s\.user\.id !== session\.id\)/);
     expect(admin).toMatch(/<VenueSwitcher /);
+    // On a phone the header already shows the name; the switch is an icon there.
+    const sw = readFileSync('components/VenueSwitcher.tsx', 'utf8');
+    expect(sw).toMatch(/className="hidden sm:inline[^"]*">\{current\?\.name/);
+    // ...and its list spans the screen there instead of running off the left.
+    expect(sw).toMatch(/className="fixed left-4 right-4 top-16 sm:absolute/);
     const sql = readFileSync('supabase/migrations/20261104_company_groups.sql', 'utf8');
     expect(sql).toMatch(/parent_id uuid references public\.companies\(id\) on delete set null/);
     expect(sql).toMatch(/Bu şirkət özü başqa şirkətin içindədir/);

@@ -3,7 +3,7 @@
 // məkan's owner, and picking the main one again puts it back. This device only:
 // the tills of every məkan stay signed in as they were.
 import { supabase } from './supabase';
-import { HOME_KEY, forgetHome, forgetTill, getSession, logout, putSession, sessionFor, type Session } from './auth';
+import { HOME_KEY, forgetHome, forgetTill, getSession, logout, markSwitch, putSession, unmarkSwitch, sessionFor, type Session } from './auth';
 import type { Venue } from './switch-company';
 
 interface Home {
@@ -15,11 +15,18 @@ interface Home {
 
 export type SwitchResult = { error: string | null; moved: boolean };
 
-function readHome(): Home | null {
+// The kept main login, only while this device is still on one of its məkans.
+// Anything else is left over from someone else's visit and is dropped.
+function readHome(self: Session): Home | null {
+  let home: Home | null = null;
   try {
     const raw = localStorage.getItem(HOME_KEY);
-    return raw ? JSON.parse(raw) as Home : null;
-  } catch { return null; }
+    home = raw ? JSON.parse(raw) as Home : null;
+  } catch { /* unreadable: treated as none */ }
+  if (!home) return null;
+  if (self.role === 'owner' && Array.isArray(home.venues) && home.venues.some(v => v.id === self.companyId)) return home;
+  forgetHome();
+  return null;
 }
 
 // The admin page logs out when the signed-in user changes under it; a switch
@@ -35,7 +42,7 @@ export function isSwitching(): boolean { return switching; }
 export async function loadVenues(): Promise<Venue[]> {
   const self = getSession();
   if (!self || self.role !== 'owner' || typeof window === 'undefined' || window.posNative) return [];
-  const home = readHome();
+  const home = readHome(self);
   if (home) return home.venues;
   const { data: { session: auth } } = await supabase.auth.getSession();
   if (!auth) return [];
@@ -65,9 +72,11 @@ async function goHome(home: Home): Promise<boolean> {
  */
 export async function switchVenue(targetId: string, venues: Venue[]): Promise<SwitchResult> {
   switching = true;
+  markSwitch();
   const r = await doSwitch(targetId, venues);
   // A moved login is followed by a reload; until then the page stays quiet.
-  if (!r.moved) switching = false;
+  // A switch that never moved must not keep other tabs from logging out.
+  if (!r.moved) { switching = false; unmarkSwitch(); }
   return r;
 }
 
@@ -76,7 +85,7 @@ async function doSwitch(targetId: string, venues: Venue[]): Promise<SwitchResult
   if (!self) return { error: 'Yenidən daxil olun', moved: false };
   if (self.companyId === targetId) return { error: null, moved: false };
 
-  let home = readHome();
+  let home = readHome(self);
   let moved = false;
 
   if (home && home.session.companyId === targetId) {

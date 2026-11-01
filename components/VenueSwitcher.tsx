@@ -44,14 +44,18 @@ export default function VenueSwitcher({ currentId, onError }: { currentId: strin
       <button
         onClick={() => setOpen(o => !o)}
         title="Məkanı dəyiş"
-        className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl hover:border-primary-300 hover:bg-primary-50 transition-colors"
+        className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl hover:border-primary-300 hover:bg-primary-50 transition-colors"
       >
         <Building2 className="w-4 h-4 text-primary-700 shrink-0" />
-        <span className="text-xs font-semibold text-primary-800 truncate max-w-[110px] sm:max-w-[180px]">{current?.name ?? 'Məkan'}</span>
-        <ChevronDown className="w-3.5 h-3.5 text-stone-500 shrink-0" />
+        {/* A phone's header already shows the name on the left; repeated here it
+            pushed the header off the screen. */}
+        <span className="hidden sm:inline text-xs font-semibold text-primary-800 truncate max-w-[180px]">{current?.name ?? 'Məkan'}</span>
+        <ChevronDown className="hidden sm:block w-3.5 h-3.5 text-stone-500 shrink-0" />
       </button>
       {open && (
-        <div className="absolute right-0 mt-1 w-64 max-w-[calc(100vw-2rem)] bg-white border border-stone-100 rounded-xl shadow-lg py-1 z-50">
+        // A phone's button sits mid-header, so a list hung from it ran off the
+        // left edge; there it spans the screen under the header instead.
+        <div className="fixed left-4 right-4 top-16 sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-1 sm:w-64 bg-white border border-stone-100 rounded-xl shadow-lg py-1 z-50">
           {venues.map(v => (
             <button
               key={v.id}

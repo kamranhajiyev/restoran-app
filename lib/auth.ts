@@ -77,6 +77,10 @@ export async function login(username: string, password: string): Promise<LoginRe
 
     if (error || !data.user) return { error: 'invalid' };
 
+    // A typed login starts this device afresh: a main məkan's login kept from an
+    // earlier switch must not hand its məkans to whoever signs in next.
+    forgetHome();
+
     const result = await sessionFor(data.user.id);
     if ('error' in result) return result;
 
@@ -180,6 +184,10 @@ export function logout() {
 // Use inside onAuthStateChange callbacks instead of logout().
 // logout() calls signOut() which fires SIGNED_OUT which retriggers the callback → infinite loop.
 export function clearLocalSession() {
+  // Another tab of this browser just switched məkan: the saved login is already
+  // the new one, and wiping it would throw that tab out too. This tab still
+  // leaves for /login, as its caller does.
+  if (switchedJustNow()) return;
   localStorage.removeItem(AUTH_KEY);
   unlockAdmin();
   forgetTill();
@@ -205,6 +213,26 @@ export const HOME_KEY = 'restoran_home';
 
 export function forgetHome() {
   try { localStorage.removeItem(HOME_KEY); } catch { /* private mode */ }
+}
+
+// Set by a məkan switch before the login changes, so the other tabs of this
+// browser, which see the login change too, know it was on purpose.
+const SWITCH_MARK_KEY = 'restoran_switching';
+const SWITCH_MARK_MS = 30_000;
+
+export function markSwitch() {
+  try { localStorage.setItem(SWITCH_MARK_KEY, String(Date.now())); } catch { /* private mode */ }
+}
+
+export function unmarkSwitch() {
+  try { localStorage.removeItem(SWITCH_MARK_KEY); } catch { /* private mode */ }
+}
+
+export function switchedJustNow(): boolean {
+  try {
+    const at = Number(localStorage.getItem(SWITCH_MARK_KEY));
+    return at > 0 && Date.now() - at < SWITCH_MARK_MS;
+  } catch { return false; }
 }
 
 export async function validateSession(session: Session): Promise<boolean> {
