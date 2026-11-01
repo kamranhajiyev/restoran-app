@@ -12,3 +12,12 @@ export function otherPart(typed: string, billTotal: number): string {
   // Nothing typed, or the whole bill (or more — change is due) in one box.
   return t > 0 && t < billTotal ? round2(billTotal - t).toFixed(2) : '';
 }
+
+/**
+ * Kart above the bill. Extra cash comes back as change, but a card gives no
+ * change, so the extra was booked as card income. İXLAS CAFE, October 2026:
+ * three 6.00 bills paid 6.01 by card, and Kart was over by a qəpik each time.
+ */
+export function cardOverBill(card: number, billTotal: number): boolean {
+  return round2(card) > round2(billTotal);
+}

@@ -53,7 +53,7 @@ import { addAgainLine, submitButton, takeBackOne } from '@/lib/add-again';
 import { OrderRow } from '@/components/seller/OrderRow';
 import { PrintKitchenToggle } from '@/components/seller/PrintKitchenToggle';
 import { STATUS_COLORS, STATUS_LABELS, orderTotal, round2 } from '@/components/seller/order-format';
-import { otherPart } from '@/lib/pay-split';
+import { cardOverBill, otherPart } from '@/lib/pay-split';
 import { canLink, checkLink, clearLink, readLink, saveLink, type Terminal } from '@/lib/terminal-link';
 import { tillImage } from '@/lib/till-image';
 import { TILL_ACTIONS, addAction, approveWith, approvedBy, cleanRules, managerByCardOffline, managerByPinOffline, removalAction, ruleFor, rulesApply, strictest, type TillAction, type TillRules } from '@/lib/till-rules';
@@ -75,6 +75,7 @@ import { queueSize, enqueue, onEnqueue } from '@/lib/offline-queue';
 import { onLocalWrite, pendingWrites, tillPost } from '@/lib/till-write';
 import OrderNote from '@/components/OrderNote';
 import { moneyDiff } from '@/lib/shift-check';
+import { cardSalesToSave, expectedCash as drawerCash, movementsIn, movementsOut, movementsTotal } from '@/lib/shift-cash';
 import { REFRESH_GATHER_MS } from '@/lib/coalesce';
 import { changedOrderId, gatherOrderIds, patchOrders, patchReady } from '@/lib/order-patch';
 import { onCompanyChange } from '@/lib/company-changes';
@@ -2539,6 +2540,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     const onDebt = !!order.courierId && courierMode === 'debt';
     const cash = onDebt ? 0 : round2(parseFloat(cashInput) || 0);
     const card = onDebt ? 0 : round2(parseFloat(cardInput) || 0);
+    if (cardOverBill(card, total)) return;
     const overpay = round2(Math.max(0, cash + card - total));
     const change = Math.min(overpay, cash);
     const cashKept = round2(cash - change);
@@ -2829,8 +2831,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
 
   // ── kassa (cash shift) ────────────────────────────────────────────────────
 
-  const movementsTotal = (s: CashShift) => s.movements.reduce((t, m) => t + m.amount, 0);
-  const expectedCash = shift ? shift.openingCash + shiftSales.cash + movementsTotal(shift) : 0;
+  const expectedCash = shift ? drawerCash(shift, shiftSales.cash) : 0;
 
   useEffect(() => {
     if (view === 'kassa' && shift) {
@@ -3030,15 +3031,15 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       showAlert('Satışlar oxunmadı — internet bağlantısını yoxlayıb yenidən cəhd edin.');
       return;
     }
-    const expected = fresh.openingCash + sales.cash + movementsTotal(fresh);
+    const expected = drawerCash(fresh, sales.cash);
     if (overrideCompanyId) {
-      const closeBody = { shiftId: fresh.id, expectedCash: expected, countedCash: counted, closedBy: effectiveSeller, cardSales: sales.card, countedCard, closedAt: new Date().toISOString(), companyId: overrideCompanyId, token: overrideToken };
+      const closeBody = { shiftId: fresh.id, expectedCash: expected, countedCash: counted, closedBy: effectiveSeller, cardSales: cardSalesToSave(sales.card), countedCard, closedAt: new Date().toISOString(), companyId: overrideCompanyId, token: overrideToken };
       // Local-first on the desktop, so the till's own shift closes with the same
       // figures it just sent rather than reading open until the next pull. The
       // guard above already proved the line is up and the outbox empty.
       await postOrQueue(`close:${fresh.id}`, '/api/close-shift', closeBody, overrideCompanyId);
     } else {
-      await closeShift(fresh.id, expected, counted, effectiveSeller, sales.card, countedCard);
+      await closeShift(fresh.id, expected, counted, effectiveSeller, cardSalesToSave(sales.card), countedCard);
     }
     setShiftBusy(false);
     setShift(null); setCountedInput(''); setTerminalInput(''); setView('orders');
@@ -4134,8 +4135,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                           </li>
                         ))}
                         <li className="flex justify-between text-sm font-semibold border-t pt-2 mt-1">
-                          <span className="text-green-600">Mədaxil: +{shift.movements.filter(m => m.amount > 0).reduce((t, m) => t + m.amount, 0).toFixed(2)} ₼</span>
-                          <span className="text-red-500">Məxaric: {shift.movements.filter(m => m.amount < 0).reduce((t, m) => t + m.amount, 0).toFixed(2)} ₼</span>
+                          <span className="text-green-600">Mədaxil: +{movementsIn(shift).toFixed(2)} ₼</span>
+                          <span className="text-red-500">Məxaric: {movementsOut(shift).toFixed(2)} ₼</span>
                         </li>
                       </ul>
                     )}
@@ -5104,7 +5105,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         // The cash/card gate is what stops an order closing for nothing, so it
         // is bypassed here and nowhere else: on the debt path there is genuinely
         // nothing to tender, and the total goes on the rider's balance instead.
-        const canPay = onDebt ? total > 0 : paid >= total;
+        const cardTooMuch = !onDebt && cardOverBill(card, total);
+        const canPay = onDebt ? total > 0 : paid >= total && !cardTooMuch;
         return (
           <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
             <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
@@ -5255,7 +5257,13 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   <span>{missing.toFixed(2)} ₼</span>
                 </div>
               )}
-              {!onDebt && paid > 0 && change > 0 && (
+              {cardTooMuch && (
+                <div className="flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base mb-4 bg-red-50 text-red-600">
+                  <span>Kart hesabdan çox ola bilməz</span>
+                  <span>{total.toFixed(2)} ₼</span>
+                </div>
+              )}
+              {!onDebt && paid > 0 && change > 0 && !cardTooMuch && (
                 <div className="flex justify-between items-center px-4 py-3 rounded-xl font-semibold text-base mb-4 bg-green-50 text-green-700">
                   <span>💸 Qaytarılacaq</span>
                   <span>{change.toFixed(2)} ₼</span>

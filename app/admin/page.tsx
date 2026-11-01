@@ -51,7 +51,7 @@ import { type Collections, type ShiftSales } from '@/lib/courier-pending';
 import { orderTotal as saleTotal } from '@/components/seller/order-format';
 import {
   CompanySettings, DEFAULT_SETTINGS, businessDay, businessToday, businessDayStartUtc,
-  addDays, dayDiff, dayOfWeek, dayToDate, tzHour, tzTime, cutoffMinutes,
+  addDays, dayDiff, dayOfWeek, dayToDate, tzTime, cutoffMinutes,
 } from '@/lib/business-day';
 import { supabase } from '@/lib/supabase';
 import { PICTURE_CACHE, shrinkPicture } from '@/lib/shrink-picture';
@@ -69,6 +69,10 @@ import OrderTypesPanel from '@/components/OrderTypesPanel';
 import ServiceChargePanel from '@/components/ServiceChargePanel';
 import { orderServiceCharge } from '@/lib/service-charge';
 import { itemSales } from '@/lib/item-sales';
+import {
+  categoryReport, costMap, ordersInDays, revenue, revenueByHour, revenueByWeekday, sellerStats as sellerStatsOf, statsSummary,
+} from '@/lib/statistics';
+import { cardSalesToSave, expectedCash, movementsIn, movementsOut, movementsTotal, paymentTooMuch } from '@/lib/shift-cash';
 import { ROLE_NAMES } from '@/lib/till-rules';
 import { cardNumber } from '@/lib/card-reader';
 import type { StaffRole } from '@/types';
@@ -1219,9 +1223,9 @@ function AdminPageContent() {
       const sales = await fetchShiftSales(fresh.openedAt);
       // Closing on unread sales would save 0 ₼ as the shift's takings.
       if (!sales) { alert('Satışlar oxunmadı — internet bağlantısını yoxlayıb yenidən cəhd edin.'); return; }
-      const expected = fresh.openingCash + sales.cash + fresh.movements.reduce((t, m) => t + m.amount, 0);
+      const expected = expectedCash(fresh, sales.cash);
       const countedCard = adminTerminalInput === '' ? undefined : parseFloat(adminTerminalInput) || 0;
-      await closeShift(fresh.id, expected, parseFloat(adminCountedInput) || 0, adminName, sales.card, countedCard);
+      await closeShift(fresh.id, expected, parseFloat(adminCountedInput) || 0, adminName, cardSalesToSave(sales.card), countedCard);
       setAdminCountedInput(''); setAdminTerminalInput('');
       setShifts(await fetchShifts());
     } finally { setClosingShift(false); }
@@ -1424,8 +1428,8 @@ function AdminPageContent() {
           );
         })}
         <li className="flex justify-between text-xs font-semibold border-t pt-1.5 mt-1">
-          <span className="text-green-600">Mədaxil: +{shift.movements.filter(m => m.amount > 0).reduce((t, m) => t + m.amount, 0).toFixed(2)} ₼</span>
-          <span className="text-red-500">Məxaric: {shift.movements.filter(m => m.amount < 0).reduce((t, m) => t + m.amount, 0).toFixed(2)} ₼</span>
+          <span className="text-green-600">Mədaxil: +{movementsIn(shift).toFixed(2)} ₼</span>
+          <span className="text-red-500">Məxaric: {movementsOut(shift).toFixed(2)} ₼</span>
         </li>
       </ul>
     );
@@ -2658,24 +2662,13 @@ function AdminPageContent() {
         : (o.cardAmount ?? 0) + (o.courierCard ?? 0)), 0) * 100) / 100
     : 0;
 
-  const menuCostMap: Record<string, number> = {};
-  menu.forEach(m => {
-    if (m.costPrice) {
-      menuCostMap[m.id] = m.costPrice;
-    } else if (m.variants?.length) {
-      const varCosts = m.variants.filter(v => v.costPrice).map(v => v.costPrice!);
-      if (varCosts.length > 0) menuCostMap[m.id] = varCosts.reduce((s, c) => s + c, 0) / varCosts.length;
-    }
-    m.variants?.forEach(v => { if (v.costPrice) menuCostMap[v.id] = v.costPrice; });
-  });
+  const menuCostMap = costMap(menu);
 
   const isValidRange = !!(customFrom && customTo && customFrom <= customTo);
   const [rangeFrom, rangeTo] = isValidRange ? [customFrom, customTo] : presetRange('bugün', businessToday(bizSettings));
 
   // Orders are grouped by the company's business day ('YYYY-MM-DD'), not the
   // device's calendar day — night-shift sales stay on the day the shift started
-  const orderBizDay = (o: Order) => businessDay(o.createdAt, bizSettings);
-
   const chartData: { label: string; fullLabel: string; rev: number }[] = (() => {
     const dayFull = (d: Date) => `${d.getDate()} ${AZ_MON_LONG[d.getMonth()]} ${d.getFullYear()}`;
     const weekFull = (wS: Date, wE: Date) => {
@@ -2686,11 +2679,11 @@ function AdminPageContent() {
 
     const dayCount = dayDiff(rangeTo, rangeFrom) + 1;
     if (dayCount === 1) {
-      const dayOrders = paidOrders.filter(o => orderBizDay(o) === rangeFrom);
-      return Array.from({ length: 24 }, (_, h) => ({
+      const byHour = revenueByHour(ordersInDays(paidOrders, bizSettings, rangeFrom, rangeFrom), bizSettings.timezone);
+      return byHour.map((rev, h) => ({
         label: `${String(h).padStart(2, '0')}:00`,
         fullLabel: `${dayFull(dayToDate(rangeFrom))}, ${String(h).padStart(2, '0')}:00–${String(h + 1).padStart(2, '0')}:00`,
-        rev: dayOrders.filter(o => tzHour(o.createdAt, bizSettings.timezone) === h).reduce((s, o) => s + orderTotal(o), 0),
+        rev,
       }));
     }
     if (dayCount <= 60) {
@@ -2700,7 +2693,7 @@ function AdminPageContent() {
         return {
           label: i === 0 || d.getDate() === 1 ? `${d.getDate()} ${AZ_MON_SHORT[d.getMonth()]}` : String(d.getDate()),
           fullLabel: dayFull(d),
-          rev: paidOrders.filter(o => orderBizDay(o) === ds).reduce((s, o) => s + orderTotal(o), 0),
+          rev: revenue(ordersInDays(paidOrders, bizSettings, ds, ds)),
         };
       });
     }
@@ -2712,7 +2705,7 @@ function AdminPageContent() {
         return {
           label: `${dayToDate(wS).getDate()} ${AZ_MON_SHORT[dayToDate(wS).getMonth()]}`,
           fullLabel: weekFull(dayToDate(wS), dayToDate(wE)),
-          rev: paidOrders.filter(o => { const d = orderBizDay(o); return d >= wS && d < wE; }).reduce((s, o) => s + orderTotal(o), 0),
+          rev: revenue(ordersInDays(paidOrders, bizSettings, wS, addDays(wE, -1))),
         };
       });
     }
@@ -2728,25 +2721,17 @@ function AdminPageContent() {
       return {
         label: AZ_MON_SHORT[month],
         fullLabel: monthFull(new Date(year, month, 1)),
-        rev: paidOrders.filter(o => { const d = orderBizDay(o); return d >= mS && d < mE; }).reduce((s, o) => s + orderTotal(o), 0),
+        rev: revenue(ordersInDays(paidOrders, bizSettings, mS, addDays(mE, -1))),
       };
     });
   })();
 
-  const chartPaid = paidOrders.filter(o => {
-    const d = orderBizDay(o);
-    return d >= rangeFrom && d <= rangeTo;
-  });
+  const chartPaid = ordersInDays(paidOrders, bizSettings, rangeFrom, rangeTo);
   const allClosedOrders = (dataLoading || statsFailed ? [] : statsOrders).filter(o => o.status === 'ödənilib' || o.status === 'ləğv edildi');
-  const chartAllOrders = allClosedOrders.filter(o => {
-    const d = orderBizDay(o);
-    return d >= rangeFrom && d <= rangeTo;
-  });
-  const chartRevenue = chartPaid.reduce((s, o) => s + orderTotal(o), 0);
-  const chartCost = chartPaid.reduce((s, o) => s + o.items.reduce((os, oi) => os + (menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity, 0), 0);
-  const chartProfit = chartRevenue - chartCost;
-  const chartMarginPct = chartRevenue > 0 ? (chartProfit / chartRevenue) * 100 : 0;
-  const chartAvg = chartPaid.length > 0 ? chartRevenue / chartPaid.length : 0;
+  const chartAllOrders = ordersInDays(allClosedOrders, bizSettings, rangeFrom, rangeTo);
+  const {
+    revenue: chartRevenue, cost: chartCost, profit: chartProfit, marginPct: chartMarginPct, avg: chartAvg,
+  } = statsSummary(chartPaid, menuCostMap);
 
   // Counted like Tarixçə (lib/history-shifts): only the range's own sales. A
   // delivery the rider paid back inside the range is Nağd or Kart, otherwise
@@ -2760,32 +2745,9 @@ function AdminPageContent() {
   const cardRev = payTotals.kart;
   const courierRev = payTotals.kuryer;
   const totalPayRev = cashRev + cardRev + courierRev;
-  const sellerRevMap: Record<string, { orders: number; rev: number }> = {};
-  chartPaid.forEach(o => {
-    const name = o.sellerName || 'Naməlum';
-    if (!sellerRevMap[name]) sellerRevMap[name] = { orders: 0, rev: 0 };
-    sellerRevMap[name].orders += 1;
-    sellerRevMap[name].rev += orderTotal(o);
-  });
-  const sellerStats = Object.entries(sellerRevMap)
-    .map(([name, s]) => ({ name, ...s }))
-    .sort((a, b) => b.rev - a.rev);
+  const sellerStats = sellerStatsOf(chartPaid);
 
-  const repCatMap: Record<string, { rev: number; cost: number }> = {};
-  chartPaid.forEach(o => {
-    const gross = o.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
-    const ratio = gross > 0 ? (orderTotal(o) - orderServiceCharge(o)) / gross : 1;
-    o.items.forEach(oi => {
-      const menuItem = menu.find(m => m.id === oi.menuItem.id);
-      const cat = menuItem?.category || oi.menuItem.category || 'Digər';
-      if (!repCatMap[cat]) repCatMap[cat] = { rev: 0, cost: 0 };
-      repCatMap[cat].rev += oi.menuItem.price * oi.quantity * ratio;
-      repCatMap[cat].cost += (menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity;
-    });
-  });
-  const repCategories = Object.entries(repCatMap)
-    .map(([cat, { rev, cost }]) => ({ cat, rev, cost, profit: rev - cost }))
-    .sort((a, b) => b.profit - a.profit);
+  const repCategories = categoryReport(chartPaid, menu, menuCostMap);
   const maxRepCatProfit = Math.max(...repCategories.map(c => Math.abs(c.profit)), 0.01);
 
   // Counted by lib/item-sales, the same function Tarixçə's Məhsullar list uses.
@@ -2874,17 +2836,12 @@ function AdminPageContent() {
     pushAnaliz(id, s.name, s.cat, [], false, true);
   });
 
-  const hourlyData = Array.from({ length: 24 }, (_, h) => ({
-    label: String(h),
-    rev: chartPaid.filter(o => tzHour(o.createdAt, bizSettings.timezone) === h).reduce((s, o) => s + orderTotal(o), 0),
-  }));
+  const hourlyData = revenueByHour(chartPaid, bizSettings.timezone).map((rev, h) => ({ label: String(h), rev }));
   const maxHourly = Math.max(...hourlyData.map(h => h.rev), 0.01);
 
   const WEEKDAYS = ['Be', 'Ça', 'Çə', 'Ca', 'Cü', 'Şə', 'Ba'];
-  const weeklyData = WEEKDAYS.map((label, i) => {
-    const jsDay = i === 6 ? 0 : i + 1;
-    return { label, rev: chartPaid.filter(o => dayOfWeek(orderBizDay(o)) === jsDay).reduce((s, o) => s + orderTotal(o), 0) };
-  });
+  const byWeekday = revenueByWeekday(chartPaid, bizSettings);
+  const weeklyData = WEEKDAYS.map((label, i) => ({ label, rev: byWeekday[i] }));
   const maxWeekly = Math.max(...weeklyData.map(w => w.rev), 0.01);
 
   // ── sidebar ────────────────────────────────────────────────────────────────
@@ -4062,8 +4019,7 @@ function AdminPageContent() {
                 </div>
               ) : (() => {
                 const open = shifts.find(s => !s.closedAt);
-                const movTotal = (s: CashShift) => s.movements.reduce((t, m) => t + m.amount, 0);
-                const expected = open ? open.openingCash + openShiftSales.cash + movTotal(open) : 0;
+                const expected = open ? expectedCash(open, openShiftSales.cash) : 0;
                 const closed = shifts.filter(s => s.closedAt);
                 // The same boxes as Tarixçə, open shift or closed — Nağd + Kart +
                 // Kuryer = Ümumi.
@@ -4118,11 +4074,11 @@ function AdminPageContent() {
                         <div className="flex justify-between text-sm text-stone-600">
                           <span>Nağd satış</span><span className="font-semibold">{openShiftSales.cash.toFixed(2)} ₼</span>
                         </div>
-                        {movTotal(open) !== 0 && (
+                        {movementsTotal(open) !== 0 && (
                           <div className="flex justify-between text-sm text-stone-600">
                             <span>Mədaxil / məxaric</span>
-                            <span className={`font-semibold ${movTotal(open) < 0 ? 'text-red-500' : 'text-green-600'}`}>
-                              {movTotal(open) > 0 ? '+' : ''}{movTotal(open).toFixed(2)} ₼
+                            <span className={`font-semibold ${movementsTotal(open) < 0 ? 'text-red-500' : 'text-green-600'}`}>
+                              {movementsTotal(open) > 0 ? '+' : ''}{movementsTotal(open).toFixed(2)} ₼
                             </span>
                           </div>
                         )}
@@ -5469,7 +5425,7 @@ function AdminPageContent() {
                     setEditPaymentBusy(false);
                     return;
                   }
-                  if (cash + card > total) {
+                  if (paymentTooMuch(cash, card, total)) {
                     setEditPaymentError(`Nəğd + kart (${(cash + card).toFixed(2)} ₼) sifarişin məbləğindən (${total.toFixed(2)} ₼) çox ola bilməz.`);
                     return;
                   }

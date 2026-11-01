@@ -185,7 +185,7 @@ Guard: none yet
 
 **Are amounts rounded to 0.01 before comparing?**
 6.40 + 1.20 could not be paid at its own total.
-Guard: `tests/order-format.test.ts`, `tests/pay-split.test.ts`
+Guard: `tests/order-format.test.ts`, `tests/pay-split.test.ts`, `tests/statistics.test.ts`
 
 **Does every way money moves show up in the shift and day totals?**
 Cash, card, courier cash, courier card, courier debt, deletes, refunds. Courier money once never reached the day's cash.
@@ -197,7 +197,7 @@ Guard: `tests/shift-sales-source.test.ts`
 
 **Is this number counted by the one shared function, or worked out again here?**
 Test Restoran, 2026-10-06: a delivery paid back in cash was Nağd in Tarixçə but Kuryer in Kassa.
-Guard: `lib/history-shifts`, `tests/history-shifts.test.ts`, `tests/same-numbers-every-screen.test.ts`, `tests/one-order-total.test.ts`
+Guard: `lib/history-shifts`, `tests/history-shifts.test.ts`, `tests/same-numbers-every-screen.test.ts`, `tests/one-order-total.test.ts`, `lib/statistics`, `lib/shift-cash`, `tests/statistics.test.ts`
 
 **Does the export add up to the same money as the screen?**
 Code review, 2026-10-08: Excel's total counted deleted orders.
@@ -217,7 +217,11 @@ Guard: `tests/shift-close-money.test.ts`, `tests/shift-owner-lock.test.ts`
 
 **Which day does this belong to?**
 A business day ends at the company's `work_close` in its own timezone, not at midnight or in UTC.
-Guard: `lib/business-day`, `tests/keep-settings.test.ts`
+Guard: `lib/business-day`, `tests/keep-settings.test.ts`, `tests/statistics.test.ts`
+
+**Can this box take more than the bill, and where does the extra go?**
+İXLAS CAFE, 2026-11-01: 6.01 by card on a 6.00 bill was booked as card income; cash gives change, a card does not.
+Guard: `cardOverBill`, `tests/pay-split.test.ts`
 
 ## 4. Database
 

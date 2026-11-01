@@ -293,6 +293,19 @@ the first. Write only while it is still open, and answer the late one "done".
 A business day ends at the company's `work_close` in its own timezone, not at
 midnight or in UTC.
 
+**Can this box take more than the bill, and where does the extra go?**
+İXLAS CAFE, 2026-11-01, found while checking a month of their numbers against
+the database: orders #477, #2756 and #2874 were paid 6.01, 2.61 and 6.51 by card
+on bills of 6.00, 2.60 and 6.50. The sheet takes extra cash back as change
+(Qaytarılacaq), but change comes only out of cash, so extra on the card was
+saved as card income and Kart in Statistika and Kassa was over by a qəpik each
+time. The sheet now refuses Kart above the bill ("Kart hesabdan çox ola
+bilməz"). The same check found the drawer saved as 0.09999999999999432 instead
+of 0.10; `expectedCash` (`lib/shift-cash`) now rounds to the qəpik, and so do
+the card sales a shift saves (`cardSalesToSave`, was 215.79999999999995). The
+review after it found admin's payment edit comparing an unrounded cash + card:
+6.40 + 1.20 on a 7.60 order was refused as too much (`paymentTooMuch`).
+
 ## 4. Database
 
 **Has this been run on "restoran testing" first?**
