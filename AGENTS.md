@@ -14,6 +14,18 @@ An earlier go-ahead does not carry over to the next one: ask every time.
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+# Tests
+
+Two kinds. `npm test` (`tests/`, seconds, no internet) checks the code and runs after every change. `npm run test:db` (`tests-db/`, about two minutes) logs in and really writes on "restoran testing" — never production; `lib/testing-db.ts` refuses any other database.
+
+- Every change: `npm test`.
+- Working on something a database test covers (money, orders, PINs, manager cards, printing, couriers, tables, stock, sets, trash, QR orders, Maliyyə, shift lock, photos, superadmin, switched-off restaurants, məkan switch) or changing the database: run that one file, e.g. `npx vitest run --config vitest.db.config.ts tests-db/money.test.ts`. A migration also runs `tests-db/strangers.test.ts`.
+- Before a merge to main, or when the user asks: all of `npm run test:db`.
+- Not for screen-only changes.
+- A new table, till route, or rule about who may do what gets a `tests-db/` test too: through the real route, rows named "Autotest", cleaning up only its own rows, never a whole company's.
+
+The database tests run on Kamran test ucun (autotest-b for printing) and change it while they run; say so before running them.
+
 # Lessons from customer bugs
 
 Every new feature or bug fix comes with a test in `tests/` that fails without the change, and `npm test` must pass before the work is called done. Prefer fast Vitest tests of the logic over browser tests.
