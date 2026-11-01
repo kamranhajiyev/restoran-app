@@ -9,7 +9,10 @@ add the story of each new customer bug at the end of its section.
 Nağd and Kart, kassa and admin, exe and browser, first and second, before and
 after. Latte Art, 2026-10-06: Tarixçə was fixed but admin still counted shifts
 its own way; Kart filled itself from Nağd, but clicking Kart first left Nağd
-empty ("Çatışmır 8.00").
+empty ("Çatışmır 8.00"). Code review, 2026-10-31: the order-type QR refused a
+table type on a link without a table ("pick_table"), but not the other way:
+?type=takeaway typed onto a table's link took the order at takeaway prices,
+without Masa's +% or Xidmət haqqı (`lib/guest-order.ts`).
 
 **Can what a person types be longer than you planned for?**
 Notes, names, addresses: no spaces, hundreds of characters. Test Restoran,

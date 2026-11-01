@@ -44,6 +44,9 @@ export function guestOrderType(
   // A type the waiter opens on a table gets one QR per table: without the
   // table nobody would know where to bring the food.
   if (asksForTable(t, s.tablesOn) && !hasTable) return { error: 'pick_table' };
+  // And the other way: a table's link never makes one of these, so a guest
+  // who typed ?type=takeaway onto it would skip Masa's price and Xidmət haqqı.
+  if (hasTable && s.tablesOn && !t.needsTable) return { error: 'bad_type' };
   return t;
 }
 

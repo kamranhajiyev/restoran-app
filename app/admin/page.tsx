@@ -68,6 +68,7 @@ import TillRulesPanel from '@/components/TillRulesPanel';
 import OrderTypesPanel from '@/components/OrderTypesPanel';
 import ServiceChargePanel from '@/components/ServiceChargePanel';
 import { orderServiceCharge } from '@/lib/service-charge';
+import { itemSales } from '@/lib/item-sales';
 import { ROLE_NAMES } from '@/lib/till-rules';
 import type { StaffRole } from '@/types';
 import PasswordField from '@/components/PasswordField';
@@ -2775,18 +2776,11 @@ function AdminPageContent() {
     .sort((a, b) => b.profit - a.profit);
   const maxRepCatProfit = Math.max(...repCategories.map(c => Math.abs(c.profit)), 0.01);
 
-  const itemMap: Record<string, { name: string; cat: string; qty: number; rev: number; cost: number }> = {};
-  chartPaid.forEach(o => {
-    const gross = o.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
-    const ratio = gross > 0 ? (orderTotal(o) - orderServiceCharge(o)) / gross : 1;
-    o.items.forEach(oi => {
-      const k = oi.menuItem.id;
-      if (!itemMap[k]) itemMap[k] = { name: oi.menuItem.name, cat: oi.menuItem.category || 'Digər', qty: 0, rev: 0, cost: 0 };
-      itemMap[k].qty += oi.quantity;
-      itemMap[k].rev += oi.menuItem.price * oi.quantity * ratio;
-      itemMap[k].cost += (menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity;
-    });
-  });
+  // Counted by lib/item-sales, the same function Tarixçə's Məhsullar list uses.
+  // A unit's cost is fixed per item and per size, so cost is qty × unit cost.
+  const soldItems = itemSales(chartPaid).items;
+  const itemMap: Record<string, { name: string; cat: string; qty: number; rev: number; cost: number }> =
+    Object.fromEntries(soldItems.map(s => [s.id, { name: s.name, cat: s.category, qty: s.qty, rev: s.rev, cost: (menuCostMap[s.id] ?? 0) * s.qty }]));
   const topItemsSorted = Object.values(itemMap).sort((a, b) => {
     if (topSort === 'profit') return (b.rev - b.cost) - (a.rev - a.cost);
     if (topSort === 'qty') return b.qty - a.qty;
@@ -2808,18 +2802,9 @@ function AdminPageContent() {
   // Sizes: itemMap lumps every variant into one product, so the same sales are also
   // tallied per variant here. A variant's own costPrice beats the item's averaged one.
   // '' = a line with no variantId (orders written before the item had sizes).
-  const sizeMap: Record<string, Record<string, { qty: number; rev: number; cost: number }>> = {};
-  chartPaid.forEach(o => {
-    const gross = o.items.reduce((s, i) => s + i.menuItem.price * i.quantity, 0);
-    const ratio = gross > 0 ? (orderTotal(o) - orderServiceCharge(o)) / gross : 1;
-    o.items.forEach(oi => {
-      const byVar = (sizeMap[oi.menuItem.id] ??= {});
-      const v = (byVar[oi.variantId ?? ''] ??= { qty: 0, rev: 0, cost: 0 });
-      v.qty += oi.quantity;
-      v.rev += oi.menuItem.price * oi.quantity * ratio;
-      v.cost += ((oi.variantId ? menuCostMap[oi.variantId] : undefined) ?? menuCostMap[oi.menuItem.id] ?? 0) * oi.quantity;
-    });
-  });
+  const sizeMap: Record<string, Record<string, { qty: number; rev: number; cost: number }>> =
+    Object.fromEntries(soldItems.map(s => [s.id, Object.fromEntries(Object.entries(s.sizes).map(([vid, z]) =>
+      [vid, { ...z, cost: ((vid ? menuCostMap[vid] : undefined) ?? menuCostMap[s.id] ?? 0) * z.qty }]))]));
   const analizRow = (name: string, category: string, s: { qty: number; rev: number; cost: number } | undefined,
     hidden: boolean, noCost: boolean, orphan: boolean, inSets = 0): AnalizRow => {
     const rev = s?.rev ?? 0;
