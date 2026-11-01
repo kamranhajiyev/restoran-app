@@ -153,3 +153,18 @@ describe('the admin staff form', () => {
       .toMatch(/const clear = sCardClear \|\| \(sRole !== 'manager' && editingStaff\.role === 'manager'\);/);
   });
 });
+
+// A card tapped on the PIN login screen typed ten digits into the PIN pad:
+// the first four were a wrong PIN, and a few taps locked the till.
+describe('the PIN login screen', () => {
+  it('tells a card from a PIN and does not count it as a wrong one', () => {
+    expect(seller).toMatch(/const c = cardCatcher\(\s+\(\) => \{ setPinInput\(''\); setPinMsg\('Kart yalnız menecer təsdiqi üçündür — PIN daxil edin'\); \},\s+keys => \{ void pressPinRef\.current\(keys\); \},/);
+    expect(seller).toMatch(/if \(k && typeof k === 'object'\) lockCatcher\.current\?\.key\(k\.digit\);/);
+  });
+
+  it('takes digits that came together without losing one', () => {
+    expect(seller).toMatch(/const next = \(pinInput \+ digit\)\.slice\(0, 4\);/);
+    expect(seller).toMatch(/const next = \(approvalPin \+ digit\)\.slice\(0, 4\);/);
+    expect(pad).toMatch(/if \(digits\) latest\.current\.onDigit\(digits\);/);
+  });
+});

@@ -39,6 +39,7 @@ public class MainActivity extends Activity {
     private WebView web;
     private PrinterBridge printers;
     private Updater updater;
+    private NfcCards nfc;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -60,6 +61,8 @@ public class MainActivity extends Activity {
 
         printers = new PrinterBridge(web, bundled ? new TillDb(this) : null, files);
         web.addJavascriptInterface(printers, "PosAndroid");
+        nfc = new NfcCards(this, web);
+        printers.setNfc(nfc);
         // Only a release replaces itself; the debug build is Android Studio's,
         // and the Google Play app is updated by Play (null).
         if (!BuildConfig.DEBUG) updater = Updater.create(this, web);
@@ -172,6 +175,18 @@ public class MainActivity extends Activity {
         boolean secure = "https".equals(url.getScheme()) || (BuildConfig.DEBUG && "http".equals(url.getScheme()));
         return secure && host != null
             && (host.equals(site) || host.equals("www." + site) || ("www." + host).equals(site));
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        nfc.resume();
+    }
+
+    @Override
+    protected void onPause() {
+        nfc.pause();
+        super.onPause();
     }
 
     @Override

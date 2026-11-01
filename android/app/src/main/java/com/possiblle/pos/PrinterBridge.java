@@ -74,6 +74,26 @@ public class PrinterBridge {
         this.updater = updater;
     }
 
+    // ── A manager's card on the phone's NFC (NfcCards) ─────────────────────
+
+    private volatile NfcCards nfc;
+
+    void setNfc(NfcCards nfc) {
+        this.nfc = nfc;
+    }
+
+    @JavascriptInterface
+    public boolean hasNfc() {
+        NfcCards n = nfc;
+        return trusted && n != null && n.available();
+    }
+
+    @JavascriptInterface
+    public void nfcListen(boolean on) {
+        NfcCards n = nfc;
+        if (n != null) n.listen(trusted && on);
+    }
+
     // ── A new version (Updater) ────────────────────────────────────────────
     // The page's posNative.update, as the exe's (components/DesktopUpdate.tsx).
 
@@ -97,6 +117,10 @@ public class PrinterBridge {
     void setTrusted(boolean trusted, boolean tillPage) {
         this.trusted = trusted;
         this.tillPage = trusted && tillPage && till != null;
+        // A page that left mid-approval never said stop: the new one starts
+        // with NFC off, or it would stay on, swallowing every tag, for good.
+        NfcCards n = nfc;
+        if (n != null) n.listen(false);
     }
 
     void shutdown() {

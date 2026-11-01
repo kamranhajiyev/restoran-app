@@ -9,7 +9,8 @@
 import { useEffect, useRef } from 'react';
 import { CreditCard, Delete, ShieldCheck, X } from 'lucide-react';
 import { pinKey } from '@/lib/pin-keys';
-import { cardCatcher } from '@/lib/card-reader';
+import { cardCatcher, cardNumber } from '@/lib/card-reader';
+import { listenNfc } from '@/lib/android-nfc';
 import type { ApproveWith } from '@/lib/till-rules';
 
 export function ApprovalPad({ action, mode = 'pin', pin, msg, busy, onDigit, onBack, onCancel, onCard }: {
@@ -35,12 +36,24 @@ export function ApprovalPad({ action, mode = 'pin', pin, msg, busy, onDigit, onB
       // Too short for a card: a person typing a PIN, where a PIN is taken.
       keys => {
         if (latest.current.busy || !latest.current.pins) return;
-        for (const d of keys) if (/\d/.test(d)) latest.current.onDigit(d);
+        // Together, in one call: one at a time, the second would land on a PIN
+        // the page has not updated yet, and a digit would be lost.
+        const digits = keys.replace(/\D/g, '');
+        if (digits) latest.current.onDigit(digits);
       },
     );
     catcher.current = c;
     return () => { c.stop(); catcher.current = null; };
   }, []);
+
+  // In the Android app, the phone's NFC reads cards too, only while this waits.
+  useEffect(() => {
+    if (!cards) return;
+    return listenNfc(hex => {
+      const card = cardNumber(hex);
+      if (card && !latest.current.busy) latest.current.onCard(card);
+    });
+  }, [cards]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {

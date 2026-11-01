@@ -19,9 +19,41 @@ export const CARD_MIN_KEYS = 6;
 /** Longer than this between two keys and it was not a reader. */
 export const CARD_GAP_MS = 50;
 
+// A 13.56 MHz card read by a phone's NFC (android/…/NfcCards.java), or by an
+// app like NFC Tools for the owner to copy into admin, is its id in hex:
+// "04:A2:3B:1C" (some apps write "04 A2 3B 1C", "04-A2-3B-1C" or
+// "04A23B1C"). It becomes a decimal number here, so both land on the same
+// number, and the rules below apply to it as to any other. Run together with
+// no letter in it, it cannot be told from a decimal number and is one.
+const HEX_ID = /^[0-9a-f]{2}(?:[:\s-][0-9a-f]{2}){3,9}$/i;
+const HEX_RUN = /^(?=.*[a-f])(?:[0-9a-f]{2}){4,10}$/i;
+
+function hexBytes(t: string): string | null {
+  if (HEX_ID.test(t)) return t.split(/[:\s-]/).join(':');
+  if (HEX_RUN.test(t)) return t.match(/../g)!.join(':');
+  return null;
+}
+
+/** Hex bytes as one decimal number, without BigInt (old Android Chrome). */
+function hexToDecimal(hex: string): string {
+  const digits = [0]; // least significant first
+  for (const pair of hex.split(':')) {
+    let carry = parseInt(pair, 16);
+    for (let i = 0; i < digits.length; i++) {
+      const v = digits[i] * 256 + carry;
+      digits[i] = v % 10;
+      carry = Math.floor(v / 10);
+    }
+    while (carry > 0) { digits.push(carry % 10); carry = Math.floor(carry / 10); }
+  }
+  return digits.reverse().join('');
+}
+
 /** The card's number as it is saved and checked, or null when it is not one. */
 export function cardNumber(raw: string): string | null {
-  const s = raw.trim();
+  const t = raw.trim();
+  const hex = hexBytes(t);
+  const s = hex ? hexToDecimal(hex) : t;
   const pair = /^(\d{1,3})[,.](\d{1,5})$/.exec(s);
   if (pair) {
     const facility = Number(pair[1]);

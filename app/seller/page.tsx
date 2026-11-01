@@ -58,6 +58,7 @@ import { canLink, checkLink, clearLink, readLink, saveLink, type Terminal } from
 import { tillImage } from '@/lib/till-image';
 import { TILL_ACTIONS, addAction, approveWith, approvedBy, cleanRules, managerByCardOffline, managerByPinOffline, removalAction, ruleFor, rulesApply, strictest, type TillAction, type TillRules } from '@/lib/till-rules';
 import { ApprovalPad } from '@/components/seller/ApprovalPad';
+import { cardCatcher } from '@/lib/card-reader';
 import DialogHost from '@/components/DialogHost';
 import { askConfirm, showAlert } from '@/lib/dialog-queue';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
@@ -486,9 +487,10 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const pinLocked  = pinEnabled && !activeStaff;
   const effectiveSeller = activeStaff?.name ?? sellerName;
 
+  /** One digit, or several that came in one go from the keyboard. */
   async function pressPin(digit: string) {
     if (pinBusy || pinInput.length >= 4) return;
-    const next = pinInput + digit;
+    const next = (pinInput + digit).slice(0, 4);
     setPinInput(next);
     setPinMsg('');
     if (next.length < 4) return;
@@ -597,10 +599,11 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
 
   // The server checks the PIN when there is a line (with the same lockout as
   // the PIN screen); without one, the managers' hashes this till holds do.
+  /** One digit, or several that came in one go from the keyboard. */
   async function pressApprovalPin(digit: string) {
     if (approvalMode === 'card') return;
     if (approvalBusy || approvalPin.length >= 4) return;
-    const next = approvalPin + digit;
+    const next = (approvalPin + digit).slice(0, 4);
     setApprovalPin(next);
     setApprovalMsg('');
     if (next.length < 4) return;
@@ -679,17 +682,34 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // In the exe a click into Kart could fail to take the cursor (lib/exe-focus).
   useEffect(() => { installExeFocusFix(); }, []);
 
+  // A card on the till's reader types its number here too. Taken as a PIN, its
+  // first four digits were a wrong PIN, and a few taps locked the till; a card
+  // is told apart (lib/card-reader) and only gets a word. Typed digits come in
+  // a moment later, together, so the latest PIN is read through a ref.
+  const pressPinRef = useRef(pressPin);
+  useEffect(() => { pressPinRef.current = pressPin; });
+  const lockCatcher = useRef<ReturnType<typeof cardCatcher> | null>(null);
+  useEffect(() => {
+    if (!pinLocked) return;
+    const c = cardCatcher(
+      () => { setPinInput(''); setPinMsg('Kart yalnız menecer təsdiqi üçündür — PIN daxil edin'); },
+      keys => { void pressPinRef.current(keys); },
+    );
+    lockCatcher.current = c;
+    return () => { c.stop(); lockCatcher.current = null; };
+  }, [pinLocked]);
   useEffect(() => {
     if (!pinLocked) return;
     const h = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === 'Tab') { if (lockCatcher.current?.enter()) e.preventDefault(); return; }
+      if (e.key === ',' || e.key === '.') { lockCatcher.current?.key(e.key); return; }
       const k = pinKey(e);
-      if (k && typeof k === 'object') pressPin(k.digit);
+      if (k && typeof k === 'object') lockCatcher.current?.key(k.digit);
       else if (k === 'back') setPinInput(p => p.slice(0, -1));
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pinLocked, pinInput, pinBusy]);
+  }, [pinLocked]);
 
   // Always start PIN screen with a clean slate
   useEffect(() => {

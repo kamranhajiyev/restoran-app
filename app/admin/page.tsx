@@ -5895,15 +5895,16 @@ function AdminPageContent() {
                   ) : (
                     <input
                       value={sCard}
-                      onChange={e => { setSCard(e.target.value.replace(/[^\d,.]/g, '').slice(0, 24)); setSError(''); }}
+                      onChange={e => { setSCard(e.target.value.replace(/[^\da-fA-F,.: -]/g, '').slice(0, 32)); setSError(''); }}
                       // The reader ends a tap with Enter: that must not send the form half-filled.
                       onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }}
-                      inputMode="numeric"
+                      autoCapitalize="characters"
+                      autoCorrect="off"
                       className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
                       placeholder="Kartı oxuyucuya toxundurun və ya nömrəni yazın"
                     />
                   )}
-                  <p className="text-xs text-stone-400 mt-1">İcazələrdə “Kart” seçilibsə, menecer kartı ilə təsdiqləyir. Kartın üzərindəki nömrə də olar, məsələn 0012677920.</p>
+                  <p className="text-xs text-stone-400 mt-1">İcazələrdə “Kart” seçilibsə, menecer kartı ilə təsdiqləyir. Kartın üzərindəki nömrə də olar, məsələn 0012677920. NFC kartın nömrəsi də olar, məsələn 04:A2:3B:1C.</p>
                 </div>
               )}
               {sError && <p className="text-red-500 text-sm">{sError}</p>}

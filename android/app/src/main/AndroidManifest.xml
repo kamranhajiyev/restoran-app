@@ -3,6 +3,10 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- A manager's card on the phone's NFC (NfcCards). Not required: a phone
+         without NFC still installs the till and approves with a PIN. -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
     <!-- The updater's permission and receiver are in src/direct/: the Google Play app has neither. -->
 
     <application
