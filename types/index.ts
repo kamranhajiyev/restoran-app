@@ -180,6 +180,7 @@ export interface Staff {
   createdAt: string;
   role?: StaffRole;        // absent on a till that pulled before roles existed = seller
   approveHash?: string;    // managers only: lets the till check their PIN offline (lib/till-rules)
+  cardHash?: string;       // managers only: their approval card, checked offline the same way
 }
 
 // ─── Anbar (warehouse / inventory) ────────────────────────────────────────────

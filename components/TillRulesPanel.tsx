@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { KeyRound, Lock, ShieldCheck } from 'lucide-react';
 import { fetchTillRules, saveTillRules } from '@/lib/store';
-import { ROLE_NAMES, TILL_ACTIONS, TILL_RULES_NEW, fixedRule, ruleFor, type Rule, type RuledRole, type TillAction, type TillRules } from '@/lib/till-rules';
+import { APPROVE_WITH, ROLE_NAMES, TILL_ACTIONS, TILL_RULES_NEW, approveWith, fixedRule, ruleFor, type ApproveWith, type Rule, type RuledRole, type TillAction, type TillRules } from '@/lib/till-rules';
 import type { Staff } from '@/types';
 
 const ROLES: RuledRole[] = ['seller', 'waiter'];
@@ -49,7 +49,12 @@ export default function TillRulesPanel({ staff }: { staff: Staff[] }) {
     void save({ ...current, [role]: { ...current[role], [action]: rule } });
   }
 
+  function setApproveWith(w: ApproveWith) {
+    void save({ ...(rules ?? {}), approve_with: w });
+  }
+
   const managers = staff.filter(s => s.active && s.role === 'manager');
+  const using = approveWith(rules);
 
   return (
     <div className="space-y-4">
@@ -63,6 +68,29 @@ export default function TillRulesPanel({ staff }: { staff: Staff[] }) {
           Qaydalar yalnız kassada PIN ilə daxil olan əməkdaşlara aiddir.
         </div>
       )}
+
+      {loaded && using !== 'pin' && managers.length > 0 && managers.every(m => !m.cardHash) && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs text-amber-800">
+          Heç bir menecerin kartı yoxdur. Əməkdaşlar siyahısında menecerə “Təsdiq kartı” əlavə edin.
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border border-stone-100 p-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-semibold text-stone-700">Menecer necə təsdiqləyir</p>
+            <p className="text-xs text-stone-500">Kart üçün kassada RFID oxuyucu lazımdır.</p>
+          </div>
+          <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5">
+            {APPROVE_WITH.map(w => (
+              <button key={w.id} disabled={saving || !loaded} onClick={() => using !== w.id && setApproveWith(w.id)}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors disabled:opacity-60 ${using === w.id ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-700'}`}>
+                {w.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
 
       <div className="bg-white rounded-xl border border-stone-100 p-4 space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -116,7 +144,7 @@ export default function TillRulesPanel({ staff }: { staff: Staff[] }) {
           <p className="text-xs text-stone-400">
             “Admin PIN” seçiləndə kassada PIN pəncərəsi açılır; istənilən menecerin PIN-i keçir və adı sifarişdə yazılır.
           </p>
-          <button disabled={saving || !loaded} onClick={() => void save(TILL_RULES_NEW)}
+          <button disabled={saving || !loaded} onClick={() => void save({ ...TILL_RULES_NEW, ...(rules?.approve_with ? { approve_with: rules.approve_with } : {}) })}
             className="text-xs font-semibold text-primary-700 hover:text-primary-900 disabled:opacity-50 shrink-0">
             Tövsiyə olunanı tətbiq et
           </button>

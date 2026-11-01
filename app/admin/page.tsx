@@ -10,7 +10,7 @@ import {
   Coffee, BarChart2, Package, Bike, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
   GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link, Printer, Check, ArrowUp, ArrowDown, ChefHat,
-  Building2, AtSign, Landmark, ChevronLeft, ChevronRight, Settings,
+  Building2, AtSign, Landmark, ChevronLeft, ChevronRight, Settings, CreditCard,
 } from 'lucide-react';
 import { hallsMoved, nextHallPosition } from '@/lib/hall-order';
 import {
@@ -37,7 +37,7 @@ import {
   fetchCompanyProfile, updateMyCompanyProfile, fetchMyUsername, updateOwnerAccount, verifyPassword,
   fetchCompanySettings, updateCompanyHours,
   fetchLoginEvents, LoginEvent,
-  fetchStaff, createStaff, updateStaff, setStaffPin, deleteStaff,
+  fetchStaff, createStaff, updateStaff, setStaffPin, setStaffCard, deleteStaff,
   fetchSellerToken, linkProductStock, fetchRecipeForm, saveRecipe, fetchProductStockLeft, settleProductStock, restoreStockItem,
   fetchBranding, setLogoUrl as saveLogoUrl, setBrandColor as saveBrandColor,
   fetchStations, fetchModifierGroupsOrNull,
@@ -70,6 +70,7 @@ import ServiceChargePanel from '@/components/ServiceChargePanel';
 import { orderServiceCharge } from '@/lib/service-charge';
 import { itemSales } from '@/lib/item-sales';
 import { ROLE_NAMES } from '@/lib/till-rules';
+import { cardNumber } from '@/lib/card-reader';
 import type { StaffRole } from '@/types';
 import PasswordField from '@/components/PasswordField';
 import { validatePassword } from '@/lib/password';
@@ -107,6 +108,8 @@ const STAFF_ERRORS: Record<string, string> = {
   bad_pin: 'PIN 4 rəqəmdən ibarət olmalıdır',
   bad_name: 'Ad boş ola bilməz',
   bad_role: 'Vəzifə seçilməyib',
+  bad_card: 'Kart nömrəsi düzgün deyil',
+  card_taken: 'Bu kart artıq başqa əməkdaşa verilib',
   not_owner: 'Bu əməliyyat üçün icazəniz yoxdur',
 };
 function staffErrorText(err: string): string {
@@ -853,6 +856,9 @@ function AdminPageContent() {
   const [sName, setSName] = useState('');
   const [sPin, setSPin] = useState('');
   const [sRole, setSRole] = useState<StaffRole>('seller');
+  // A manager's approval card (lib/card-reader): '' = leave it as it is.
+  const [sCard, setSCard] = useState('');
+  const [sCardClear, setSCardClear] = useState(false);
   const [sSaving, setSSaving] = useState(false);
   const [sError, setSError] = useState('');
 
@@ -4642,7 +4648,7 @@ function AdminPageContent() {
                     <p className="text-xs text-stone-400 mt-0.5">Satıcılar yuxarıdakı linkdən daxil olur, özlərini 4 rəqəmli PIN ilə tanıdır</p>
                   </div>
                   <button
-                    onClick={() => { setEditingStaff(null); setSName(''); setSPin(''); setSRole('seller'); setSError(''); setShowStaffForm(true); }}
+                    onClick={() => { setEditingStaff(null); setSName(''); setSPin(''); setSRole('seller'); setSCard(''); setSCardClear(false); setSError(''); setShowStaffForm(true); }}
                     className="flex items-center gap-2 bg-primary-800 hover:bg-primary-900 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors shrink-0"
                   >
                     <Plus className="w-4 h-4" /> PIN əməkdaşı
@@ -4666,6 +4672,7 @@ function AdminPageContent() {
                       <p className="text-sm font-semibold text-stone-800">{s.name}</p>
                       <p className="text-xs text-stone-500">
                         {ROLE_NAMES[s.role ?? 'seller']} · PIN: ••••
+                        {s.role === 'manager' && s.cardHash && ' · Kart'}
                         {/* Staff made before roles: their PIN is unknown until they type it online once. */}
                         {s.role === 'manager' && !s.approveHash && <span className="text-amber-600"> · oflayn təsdiq üçün bir dəfə onlayn daxil olsun</span>}
                       </p>
@@ -4675,7 +4682,7 @@ function AdminPageContent() {
                     </span>
                     <div className="flex items-center gap-1 shrink-0">
                       <button
-                        onClick={() => { setEditingStaff(s); setSName(s.name); setSPin(''); setSRole(s.role ?? 'seller'); setSError(''); setShowStaffForm(true); }}
+                        onClick={() => { setEditingStaff(s); setSName(s.name); setSPin(''); setSRole(s.role ?? 'seller'); setSCard(''); setSCardClear(false); setSError(''); setShowStaffForm(true); }}
                         title="Düzəlt"
                         className="w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100 hover:text-primary-700 transition-colors"
                       >
@@ -5809,13 +5816,28 @@ function AdminPageContent() {
                 // edit with empty PIN = keep the old one
                 if ((sPin || !editingStaff) && !/^\d{4}$/.test(sPin)) { setSError(STAFF_ERRORS.bad_pin); return; }
                 if (sPin && WEAK_PINS.has(sPin)) { setSError('Bu PIN çox sadədir, başqa PIN seçin'); return; }
+                const card = sRole === 'manager' && sCard.trim() ? cardNumber(sCard) : null;
+                if (sRole === 'manager' && sCard.trim() && !card) { setSError(STAFF_ERRORS.bad_card); return; }
                 setSSaving(true);
                 let err: string | null;
                 if (editingStaff) {
                   err = await updateStaff(editingStaff.id, name, editingStaff.active, sRole);
                   if (!err && sPin) err = await setStaffPin(editingStaff.id, sPin);
+                  // A card is a manager's: one who stops being a manager loses it.
+                  // (Not by cardHash: an inactive manager's is not read, but still saved.)
+                  const clear = sCardClear || (sRole !== 'manager' && editingStaff.role === 'manager');
+                  if (!err && (card || clear)) err = await setStaffCard(editingStaff.id, card);
                 } else {
-                  err = await createStaff(name, sPin, sRole);
+                  const made = await createStaff(name, sPin, sRole, card ?? undefined);
+                  err = made.error;
+                  // Made, but the card was refused: keep the form on that person,
+                  // so pressing save again fixes the card instead of making them twice.
+                  if (err && made.id) {
+                    const fresh = await fetchStaff();
+                    setPinStaff(fresh);
+                    setEditingStaff(fresh.find(x => x.id === made.id) ?? null);
+                    setSPin('');
+                  }
                 }
                 setSSaving(false);
                 if (err) { setSError(staffErrorText(err)); return; }
@@ -5862,6 +5884,28 @@ function AdminPageContent() {
                 </div>
                 <p className="text-xs text-stone-400 mt-1">Menecer icazə tələb olunan işləri öz PIN-i ilə təsdiqləyir (İcazələr)</p>
               </div>
+              {sRole === 'manager' && (
+                <div>
+                  <label className="text-xs font-medium text-stone-600 block mb-1">Təsdiq kartı</label>
+                  {editingStaff?.cardHash && !sCardClear && !sCard ? (
+                    <div className="flex items-center justify-between gap-2 border border-stone-200 rounded-xl px-3 py-2.5 text-sm">
+                      <span className="flex items-center gap-2 text-stone-700"><CreditCard className="w-4 h-4 text-stone-400" /> Kart saxlanılıb</span>
+                      <button type="button" onClick={() => setSCardClear(true)} className="text-xs font-semibold text-red-600 hover:text-red-700">Sil</button>
+                    </div>
+                  ) : (
+                    <input
+                      value={sCard}
+                      onChange={e => { setSCard(e.target.value.replace(/[^\d,.]/g, '').slice(0, 24)); setSError(''); }}
+                      // The reader ends a tap with Enter: that must not send the form half-filled.
+                      onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }}
+                      inputMode="numeric"
+                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      placeholder="Kartı oxuyucuya toxundurun və ya nömrəni yazın"
+                    />
+                  )}
+                  <p className="text-xs text-stone-400 mt-1">İcazələrdə “Kart” seçilibsə, menecer kartı ilə təsdiqləyir. Kartın üzərindəki nömrə də olar, məsələn 0012677920.</p>
+                </div>
+              )}
               {sError && <p className="text-red-500 text-sm">{sError}</p>}
               <button
                 type="submit"

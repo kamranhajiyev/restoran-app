@@ -16,7 +16,9 @@ export type TillAction = 'remove_item' | 'remove_after_bill' | 'add_after_bill' 
 export type Rule = 'free' | 'pin' | 'deny';
 /** The roles the owner sets rules for. A manager needs none. */
 export type RuledRole = Exclude<StaffRole, 'manager'>;
-export type TillRules = Partial<Record<RuledRole, Partial<Record<TillAction, Rule>>>>;
+/** How a manager approves: the PIN, a tap of their card, or either (2026-11-01). */
+export type ApproveWith = 'pin' | 'card' | 'both';
+export type TillRules = Partial<Record<RuledRole, Partial<Record<TillAction, Rule>>>> & { approve_with?: ApproveWith };
 
 export const TILL_ACTIONS: { id: TillAction; label: string; hint: string }[] = [
   { id: 'remove_item',       label: 'Məhsulu silmək',             hint: 'Mətbəxə göndərilmiş məhsulu sifarişdən çıxarmaq' },
@@ -49,7 +51,7 @@ export const ROLE_NAMES: Record<StaffRole, string> = {
 };
 
 /** What a new restaurant starts with — the same as the column default in the migration. */
-export const TILL_RULES_NEW: Required<TillRules> = {
+export const TILL_RULES_NEW: Required<Pick<TillRules, RuledRole>> = {
   seller: { remove_item: 'free', remove_after_bill: 'pin', add_after_bill: 'pin', cancel: 'pin', discount: 'pin', view_history: 'pin' },
   waiter: { remove_item: 'free', remove_after_bill: 'pin', add_after_bill: 'pin', cancel: 'deny', discount: 'pin', view_history: 'pin' },
 };
@@ -114,6 +116,31 @@ export async function managerByPinOffline(pin: string, staff: Staff[]): Promise<
   return null;
 }
 
+export const APPROVE_WITH: { id: ApproveWith; label: string }[] = [
+  { id: 'pin',  label: 'Yalnız PIN' },
+  { id: 'card', label: 'Yalnız kart' },
+  { id: 'both', label: 'Kart və ya PIN' },
+];
+
+/** No choice saved = the PIN, as before cards. */
+export function approveWith(rules: TillRules | null | undefined): ApproveWith {
+  const w = rules?.approve_with;
+  return w === 'card' || w === 'both' ? w : 'pin';
+}
+
+/** A manager's card (lib/card-reader cardNumber), checked against the hashes this till holds. */
+export async function managerByCardOffline(card: string, staff: Staff[]): Promise<Staff | null> {
+  for (const s of staff) {
+    if (!s.active || s.role !== 'manager' || !s.cardHash) continue;
+    try {
+      if (await bcrypt.compare(card, s.cardHash)) return s;
+    } catch {
+      // A damaged hash is just not a match.
+    }
+  }
+  return null;
+}
+
 /** A rules object from the database or the till's copy, with anything unknown dropped. */
 export function cleanRules(raw: unknown): TillRules | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -128,5 +155,7 @@ export function cleanRules(raw: unknown): TillRules | null {
     }
     out[role] = row;
   }
+  const w = (raw as Record<string, unknown>).approve_with;
+  if (w === 'pin' || w === 'card' || w === 'both') out.approve_with = w;
   return out;
 }

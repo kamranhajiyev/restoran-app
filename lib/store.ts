@@ -1298,20 +1298,21 @@ export async function fetchStaffAndRulesOrNull(opts?: ReadOpts): Promise<{ staff
   if (local) return { staff: local, rules: await fetchTillRules() };
 
   try {
-    type Extras = { approvers: { id: string; approve_hash: string }[]; rules: unknown };
+    type Extras = { approvers: { id: string; approve_hash: string | null; card_hash?: string | null }[]; rules: unknown };
     const [{ data, error }, extras] = await Promise.all([
       supabase.from('staff').select('id, name, active, role, created_at').order('created_at'),
-      // Managers' approval hashes (for a PIN checked offline) and the rules.
+      // Managers' approval and card hashes (for a PIN or card checked offline) and the rules.
       // A failure loses only these, not the list.
       supabase.rpc('till_staff_extras').then(r => (r.error ? null : r.data as Extras | null), () => null),
     ]);
     if (error || !data) return null;
-    const hashes = new Map((extras?.approvers ?? []).map(a => [a.id, a.approve_hash]));
+    const hashes = new Map((extras?.approvers ?? []).map(a => [a.id, a]));
     return {
       staff: data.map(s => ({
         id: s.id, name: s.name, active: s.active, createdAt: s.created_at,
         role: (s.role as StaffRole) ?? 'seller',
-        approveHash: hashes.get(s.id),
+        approveHash: hashes.get(s.id)?.approve_hash ?? undefined,
+        cardHash: hashes.get(s.id)?.card_hash ?? undefined,
       })),
       rules: extras ? cleanRules(extras.rules) : undefined,
     };
@@ -1333,9 +1334,16 @@ function staffError(error: { message: string } | null): string | null {
   return error ? error.message : null;
 }
 
-export async function createStaff(name: string, pin: string, role: StaffRole = 'seller'): Promise<string | null> {
-  const { error } = await supabase.rpc('create_staff', { p_name: name, p_pin: pin, p_role: role });
-  return staffError(error);
+/**
+ * A card (a manager's) is saved right after, on the new row. `id` is set
+ * whenever the person was made, even when their card was then refused, so
+ * the form can go on editing them rather than make them twice.
+ */
+export async function createStaff(name: string, pin: string, role: StaffRole = 'seller', card?: string): Promise<{ error: string | null; id: string | null }> {
+  const { data, error } = await supabase.rpc('create_staff', { p_name: name, p_pin: pin, p_role: role });
+  const id = error || !data ? null : (data as string);
+  if (!id || !card) return { error: staffError(error), id };
+  return { error: await setStaffCard(id, card), id };
 }
 
 /** No role = leave it as it is. */
@@ -1424,6 +1432,12 @@ export async function setStaffPin(id: string, pin: string): Promise<string | nul
   return staffError(error);
 }
 
+/** A manager's approval card (lib/card-reader cardNumber); null clears it. */
+export async function setStaffCard(id: string, card: string | null): Promise<string | null> {
+  const { error } = await supabase.rpc('set_staff_card', { p_id: id, p_card: card ?? '' });
+  return staffError(error);
+}
+
 export async function deleteStaff(id: string): Promise<string | null> {
   const { error } = await supabase.rpc('delete_staff', { p_id: id });
   return staffError(error);
@@ -1449,6 +1463,18 @@ export function getDeviceId(): string {
 export async function verifyStaffPin(pin: string, deviceId: string): Promise<PinResult> {
   try {
     const { data, error } = await supabase.rpc('verify_staff_pin', { p_pin: pin, p_device_id: deviceId });
+    if (error || !data) return { ok: false, error: 'network' };
+    if (data.ok) return { ok: true, id: data.id, name: data.name, role: data.role ?? undefined };
+    if (data.error === 'locked') return { ok: false, error: 'locked', lockedUntil: data.locked_until };
+    if (data.error === 'wrong') return { ok: false, error: 'wrong', attemptsLeft: data.attempts_left ?? 0 };
+    return { ok: false, error: 'no_company' };
+  } catch { return { ok: false, error: 'network' }; }
+}
+
+/** A tapped card, checked by the server like a PIN (same lockout). */
+export async function verifyStaffCard(card: string, deviceId: string): Promise<PinResult> {
+  try {
+    const { data, error } = await supabase.rpc('verify_staff_card', { p_card: card, p_device_id: deviceId });
     if (error || !data) return { ok: false, error: 'network' };
     if (data.ok) return { ok: true, id: data.id, name: data.name, role: data.role ?? undefined };
     if (data.error === 'locked') return { ok: false, error: 'locked', lockedUntil: data.locked_until };

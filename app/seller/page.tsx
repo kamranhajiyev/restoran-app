@@ -14,7 +14,7 @@ import { pinKey } from '@/lib/pin-keys';
 import {
   addOrder, addItemsToOrder, removeOrderItems, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, setCompanyContext,
   fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchOpenShift, fetchShifts, openShift, closeShift, addShiftMovement, fetchShiftSales,
-  fetchCompanySettings, verifyStaffPin, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
+  fetchCompanySettings, verifyStaffPin, verifyStaffCard, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
   fetchStations, fetchStationReady, fetchStationReadyOrNull, type StationReady,
   fetchCouriersWithBalance, addCourierPayment, fetchCourierCollections, changeOrderCourier,
@@ -56,7 +56,7 @@ import { STATUS_COLORS, STATUS_LABELS, orderTotal, round2 } from '@/components/s
 import { otherPart } from '@/lib/pay-split';
 import { canLink, checkLink, clearLink, readLink, saveLink, type Terminal } from '@/lib/terminal-link';
 import { tillImage } from '@/lib/till-image';
-import { TILL_ACTIONS, addAction, approvedBy, cleanRules, managerByPinOffline, removalAction, ruleFor, rulesApply, strictest, type TillAction, type TillRules } from '@/lib/till-rules';
+import { TILL_ACTIONS, addAction, approveWith, approvedBy, cleanRules, managerByCardOffline, managerByPinOffline, removalAction, ruleFor, rulesApply, strictest, type TillAction, type TillRules } from '@/lib/till-rules';
 import { ApprovalPad } from '@/components/seller/ApprovalPad';
 import DialogHost from '@/components/DialogHost';
 import { askConfirm, showAlert } from '@/lib/dialog-queue';
@@ -552,6 +552,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const [approvalPin, setApprovalPin] = useState('');
   const [approvalMsg, setApprovalMsg] = useState('');
   const [approvalBusy, setApprovalBusy] = useState(false);
+  // PIN, card or either, as the owner chose in İcazələr.
+  const approvalMode = approveWith(tillRules);
 
   const myRole = pinStaffList.find(s => s.id === activeStaff?.id)?.role ?? 'seller';
   const rulesOn = rulesApply(pinStaffList) && !!activeStaff;
@@ -596,6 +598,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // The server checks the PIN when there is a line (with the same lockout as
   // the PIN screen); without one, the managers' hashes this till holds do.
   async function pressApprovalPin(digit: string) {
+    if (approvalMode === 'card') return;
     if (approvalBusy || approvalPin.length >= 4) return;
     const next = approvalPin + digit;
     setApprovalPin(next);
@@ -624,6 +627,42 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       const m = await managerByPinOffline(next, pinStaffList);
       if (m) manager = m.name;
       else msg = isOnline() ? 'Yanlış PIN' : 'Oflayn — PIN tanınmadı';
+    }
+    setApprovalBusy(false);
+    if (manager) { closeApproval(manager); return; }
+    setApprovalPin('');
+    setApprovalMsg(msg);
+  }
+
+  // A manager's card (Kart in İcazələr): checked the same way as the PIN —
+  // the server with a line, the till's own copy of the managers' card hashes
+  // without one.
+  async function tapApprovalCard(card: string) {
+    if (approvalBusy || approvalMode === 'pin') return;
+    setApprovalBusy(true);
+    setApprovalMsg('');
+    let manager: string | null = null;
+    let msg = '';
+    if (isOnline()) {
+      type CardReply = { ok: boolean; id?: string; name?: string; role?: string; error?: string };
+      const res = (overrideCompanyId
+        ? await tillPost<CardReply>('/api/verify-pin', { companyId: overrideCompanyId, card, token: overrideToken, deviceId: getDeviceId() })
+        : await verifyStaffCard(card, getDeviceId())) as CardReply;
+      if (res.ok && res.id && res.name) {
+        const role = res.role ?? pinStaffList.find(s => s.id === res.id)?.role;
+        if (role === 'manager') manager = res.name;
+        else msg = 'Bu kart menecerə aid deyil';
+      } else if (res.error === 'wrong') {
+        msg = 'Kart tanınmadı';
+      } else if (res.error === 'locked') {
+        msg = 'Çox sayda yanlış cəhd — bir az gözləyin';
+      }
+      // Anything else is the line failing: the till's own copy answers below.
+    }
+    if (!manager && !msg) {
+      const m = await managerByCardOffline(card, pinStaffList);
+      if (m) manager = m.name;
+      else msg = isOnline() ? 'Kart tanınmadı' : 'Oflayn — kart tanınmadı';
     }
     setApprovalBusy(false);
     if (manager) { closeApproval(manager); return; }
@@ -3353,10 +3392,12 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         {approval && (
           <ApprovalPad
             action={approval.label}
+            mode={approvalMode}
             pin={approvalPin}
             msg={approvalMsg}
             busy={approvalBusy}
             onDigit={d => void pressApprovalPin(d)}
+            onCard={c => void tapApprovalCard(c)}
             onBack={() => setApprovalPin(p => p.slice(0, -1))}
             onCancel={() => closeApproval(null)}
           />
@@ -4638,10 +4679,12 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       {approval && (
         <ApprovalPad
           action={approval.label}
+          mode={approvalMode}
           pin={approvalPin}
           msg={approvalMsg}
           busy={approvalBusy}
           onDigit={d => void pressApprovalPin(d)}
+          onCard={c => void tapApprovalCard(c)}
           onBack={() => setApprovalPin(p => p.slice(0, -1))}
           onCancel={() => closeApproval(null)}
         />

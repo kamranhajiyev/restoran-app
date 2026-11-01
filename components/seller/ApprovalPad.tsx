@@ -1,36 +1,74 @@
 'use client';
 
-// The box a manager types their PIN into when an action needs approval
-// (lib/till-rules). Only the keypad: checking the PIN is the seller page's job.
-// A laptop keyboard types into it too (2026-10-25, Natiq); Esc closes it.
+// The box a manager types their PIN into, or taps their card on, when an
+// action needs approval (lib/till-rules). Only the keypad and the reader:
+// checking the PIN or the card is the seller page's job. A laptop keyboard
+// types into it too (2026-10-25, Natiq); Esc closes it. The card reader is a
+// keyboard as well, told apart from typing by lib/card-reader.
 
-import { useEffect } from 'react';
-import { Delete, ShieldCheck, X } from 'lucide-react';
+import { useEffect, useRef } from 'react';
+import { CreditCard, Delete, ShieldCheck, X } from 'lucide-react';
 import { pinKey } from '@/lib/pin-keys';
+import { cardCatcher } from '@/lib/card-reader';
+import type { ApproveWith } from '@/lib/till-rules';
 
-export function ApprovalPad({ action, pin, msg, busy, onDigit, onBack, onCancel }: {
+export function ApprovalPad({ action, mode = 'pin', pin, msg, busy, onDigit, onBack, onCancel, onCard }: {
   action: string;
+  mode?: ApproveWith;
   pin: string;
   msg: string;
   busy: boolean;
   onDigit: (d: string) => void;
   onBack: () => void;
   onCancel: () => void;
+  onCard: (card: string) => void;
 }) {
+  const cards = mode !== 'pin';
+  const pins = mode !== 'card';
+  // The catcher outlives renders; it reaches the latest props through this.
+  const latest = useRef({ busy, pins, onDigit, onCard });
+  useEffect(() => { latest.current = { busy, pins, onDigit, onCard }; });
+  const catcher = useRef<ReturnType<typeof cardCatcher> | null>(null);
+  useEffect(() => {
+    const c = cardCatcher(
+      card => { if (!latest.current.busy) latest.current.onCard(card); },
+      // Too short for a card: a person typing a PIN, where a PIN is taken.
+      keys => {
+        if (latest.current.busy || !latest.current.pins) return;
+        for (const d of keys) if (/\d/.test(d)) latest.current.onDigit(d);
+      },
+    );
+    catcher.current = c;
+    return () => { c.stop(); catcher.current = null; };
+  }, []);
+
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      if (cards && (e.key === 'Enter' || e.key === 'Tab')) {
+        e.preventDefault();
+        catcher.current?.enter();
+        return;
+      }
+      if (cards && (e.key === ',' || e.key === '.')) {
+        e.preventDefault();
+        catcher.current?.key(e.key);
+        return;
+      }
       const k = pinKey(e);
       if (!k) return;
       // The box sits above everything: a digit must not also land in a field behind it.
       e.preventDefault();
       if (busy) return;
-      if (typeof k === 'object') onDigit(k.digit);
-      else if (k === 'back') { if (pin.length > 0) onBack(); }
+      if (typeof k === 'object') {
+        if (cards) catcher.current?.key(k.digit);
+        else onDigit(k.digit);
+      }
+      else if (k === 'back') { if (pins && pin.length > 0) onBack(); }
       else onCancel();
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [busy, pin, onDigit, onBack, onCancel]);
+  }, [busy, pin, cards, pins, onDigit, onBack, onCancel]);
 
   const key = 'w-16 h-16 rounded-2xl bg-white border border-stone-200 text-2xl font-semibold text-stone-700 hover:bg-stone-50 active:scale-95 transition-all disabled:opacity-50';
   return (
@@ -44,8 +82,21 @@ export function ApprovalPad({ action, pin, msg, busy, onDigit, onBack, onCancel 
           <ShieldCheck className="w-6 h-6 text-amber-700" />
         </div>
         <p className="font-bold text-stone-800">Menecer təsdiqi</p>
-        <p className="text-sm text-stone-500 mt-0.5 mb-4 text-center">{action} — menecerin PIN kodu</p>
+        <p className="text-sm text-stone-500 mt-0.5 mb-4 text-center">
+          {action} — {mode === 'card' ? 'menecerin kartı' : mode === 'both' ? 'menecerin kartı və ya PIN kodu' : 'menecerin PIN kodu'}
+        </p>
 
+        {cards && (
+          <div className={`w-full flex items-center gap-3 rounded-xl border border-dashed border-amber-300 bg-amber-50 px-4 py-3 ${pins ? 'mb-4' : 'mb-2'}`}>
+            {busy && !pins
+              ? <span className="w-6 h-6 border-2 border-amber-200 border-t-amber-700 rounded-full animate-spin shrink-0" />
+              : <CreditCard className="w-6 h-6 text-amber-700 shrink-0" />}
+            <p className="text-sm font-medium text-amber-800">Kartı oxuyucuya yaxınlaşdırın</p>
+          </div>
+        )}
+        {!pins && <p className={`text-sm min-h-5 text-center ${msg ? 'text-red-500' : 'text-transparent'}`}>{msg || '·'}</p>}
+
+        {pins && <>
         <div className="flex gap-3 mb-2 h-4 items-center">
           {[0, 1, 2, 3].map(i => (
             <span key={i} className={`rounded-full transition-all ${i < pin.length ? 'w-3.5 h-3.5 bg-primary-800' : 'w-3 h-3 bg-stone-300'}`} />
@@ -66,6 +117,7 @@ export function ApprovalPad({ action, pin, msg, busy, onDigit, onBack, onCancel 
               : <Delete className="w-6 h-6" />}
           </button>
         </div>
+        </>}
       </div>
     </div>
   );
