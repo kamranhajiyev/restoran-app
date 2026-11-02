@@ -284,7 +284,27 @@ sizes and without, Məhsul and Yemək?**
 Owner question, 2026-10-17: "Fanta 0.5L" inside a set took no stock.
 Guard: `tests/set-variants.test.ts`, `tests/set-stock.test.ts`, `tests/set-items.test.ts`
 
-## 5. Before shipping, try it like a restaurant would
+## 5. Screens
+
+**Does anything open inside a box that cuts off what sticks out (a card, a list
+that scrolls, rounded corners)?**
+Kamran, Test Restoran, 2026-11-02: the "⋯" menu on an order row was cut off at the edge of the list's new white card.
+Guard: `tests/order-row-menu.test.ts`
+
+**Did you see the change on the screen, or only in the code?**
+Kamran, Test Restoran, 2026-11-02: a new background colour passed every test and never reached the page.
+Guard: none yet
+
+**Is the same look (colours, labels) kept in two places that can drift apart?**
+Kamran, Test Restoran, 2026-11-02: admin kept its own copy of the status colours; "gözləyir" took the brand colour and vanished on a dark brand.
+Guard: `tests/status-colours.test.ts`
+
+**Does a style with no value of its own (`border-b`) fall back to something
+sensible?**
+Kamran, Test Restoran, 2026-11-02: plain borders drew black across the order list after Tailwind 4.
+Guard: `tests/border-colour.test.ts`
+
+## 6. Before shipping, try it like a restaurant would
 
 - Turn the internet off in the middle of the action, then back on.
 - Press the button twice quickly.

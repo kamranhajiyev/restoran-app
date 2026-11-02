@@ -29,19 +29,28 @@ const open = {
 } as unknown as Order;
 
 describe('the order row', () => {
-  it('shows print, edit, pay and then free close, without opening the order', () => {
+  it('shows print, edit, pay and the "⋯" menu, without opening the order', () => {
     const row = desktopRow(open);
     const at = (s: string) => row.indexOf(s);
     expect(at('aria-label="Çap et"')).toBeGreaterThan(-1);
     expect(at('Düzəliş<')).toBeGreaterThan(at('aria-label="Çap et"'));
     expect(at('Ödəniş<')).toBeGreaterThan(at('Düzəliş<'));
-    expect(at('Ödənişsiz bağla')).toBeGreaterThan(at('Ödəniş<'));
+    expect(at('aria-label="Digər"')).toBeGreaterThan(at('Ödəniş<'));
   });
 
-  it('keeps free close apart from the other buttons', () => {
+  // 2026-11-02: free close moved from the row into the "⋯" menu, so no rushed
+  // tap on the row can close an order unpaid.
+  it('keeps free close off the row itself', () => {
+    expect(desktopRow(open)).not.toContain('Ödənişsiz bağla');
+  });
+
+  it('gives every row button a finger-sized 44px target', () => {
     const row = desktopRow(open);
-    const cancel = row.slice(row.lastIndexOf('<button', row.indexOf('Ödənişsiz bağla')));
-    expect(cancel).toMatch(/class="ml-\d/);
+    for (const label of ['aria-label="Çap et"', 'Düzəliş<', 'Ödəniş<', 'aria-label="Digər"']) {
+      const start = row.lastIndexOf('<button', row.indexOf(label));
+      const button = row.slice(start, row.indexOf('>', start));
+      expect(button, label).toMatch(/\bh-11\b/);
+    }
   });
 
   it('offers none of them on a paid order', () => {

@@ -444,11 +444,11 @@ export default function StationPage() {
   }, [lastDone]);
 
   if (!ready) {
-    return <div className="min-h-screen grid place-items-center bg-[#f7f3ed] text-stone-500">Yüklənir…</div>;
+    return <div className="min-h-screen grid place-items-center bg-white text-stone-500">Yüklənir…</div>;
   }
 
   return (
-    <div className="min-h-screen bg-[#f7f3ed] text-stone-800 flex flex-col">
+    <div className="min-h-screen bg-white text-stone-800 flex flex-col">
       <header className="flex items-center justify-between gap-3 px-4 py-3 bg-white border-b border-stone-100 sticky top-0 z-10">
         <div className="min-w-0">
           <h1 className="text-xl font-bold truncate">{station?.name ?? 'Sex'}</h1>

@@ -19,6 +19,15 @@
   --color-primary-950: #042f2e;
 }
 
+/* A plain `border-b` with no colour of its own. Tailwind 4 draws it in the text
+   colour — a black line across the order list — where the pages were written
+   for the old light grey. */
+@layer base {
+  *, ::after, ::before, ::backdrop, ::file-selector-button {
+    border-color: var(--color-stone-200, currentColor);
+  }
+}
+
 /* ── Brand presets ─────────────────────────────────────────────────────────
    Each preset overrides the accent scale. Balanced so the 700–900 shades used
    for fills/active states stay dark enough for white text yet readable — no

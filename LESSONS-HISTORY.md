@@ -425,3 +425,34 @@ line takes nothing and says nothing. Owner question, 2026-10-17: a set could
 only name "Fanta", not "Fanta 0.5L", so a product with sizes inside a set took
 no stock; and a Yemək with sizes (Plov qulyaj) took nothing even sold alone,
 because its one recipe is saved with no size (`20261028_set_variants.sql`).
+
+## 5. Screens
+
+**Does anything open inside a box that cuts off what sticks out?**
+Kamran, Test Restoran, 2026-11-02: the order list was put in a white card with
+rounded corners, which needs `overflow: hidden`. The "⋯" menu on each row was
+drawn inside it (`absolute`), so it opened and was cut off at the card's edge;
+the last row's menu could not be reached at all. The menu is now `fixed` to the
+window, placed from the button's position, and opens upward when there is no
+room below (`components/seller/OrderRow.tsx`). A box that hides overflow, or
+scrolls, is a box nothing inside may open out of.
+
+**Did you see the change on the screen, or only in the code?**
+Kamran, Test Restoran, 2026-11-02: a new background colour was added as a
+Tailwind theme name (`bg-canvas`). Type check and tests passed, but the class
+never reached the compiled CSS and the page stayed white; the owner found it
+from a screenshot. Written as a plain value (`bg-[#…]`) it worked. Tests prove
+code, not pixels: open the page and look before calling a screen change done.
+
+**Is the same look kept in two places that can drift apart?**
+Kamran, Test Restoran, 2026-11-02: the till and admin each had a
+`STATUS_COLORS`, and both coloured "gözləyir" with the brand. On a dark brand
+it turned the same grey-black as everything else. One fixed set now lives in
+`components/seller/order-format.ts`, used by both, and the admin floor-plan
+dots read the same set.
+
+**Does a style with no value of its own fall back to something sensible?**
+Kamran, Test Restoran, 2026-11-02: Tailwind 4 draws a `border-b` with no colour
+in the text colour, where Tailwind 3 used light grey; every such line on the
+order list came out black. A base rule in `app/globals.css` puts the grey back
+everywhere.

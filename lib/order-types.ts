@@ -79,6 +79,12 @@ export function typeFlow(t: OrderType, tablesOn: boolean): 'masa' | 'kuryer' | '
   return asksForTable(t, tablesOn) ? 'masa' : 'takeaway';
 }
 
+/** The type "Yeni sifariş" opens on: Masa, with the table map showing, when the
+ *  till offers it; otherwise none, and the tiles ask. */
+export function openingType(offered: OrderType[], tablesOn: boolean): OrderType | null {
+  return offered.find(t => t.builtIn === 'masa' && typeFlow(t, tablesOn) === 'masa') ?? null;
+}
+
 /**
  * What an order remembers about its type. Only when the type matters beyond
  * what the order already says (a table, a courier): one the owner added, or a

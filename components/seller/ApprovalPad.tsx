@@ -86,7 +86,7 @@ export function ApprovalPad({ action, mode = 'pin', pin, msg, busy, onDigit, onB
   const key = 'w-16 h-16 rounded-2xl bg-white border border-stone-200 text-2xl font-semibold text-stone-700 hover:bg-stone-50 active:scale-95 transition-all disabled:opacity-50';
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 px-4">
-      <div className="bg-[#f7f3ed] rounded-2xl shadow-xl p-6 w-full max-w-xs flex flex-col items-center relative">
+      <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-xs flex flex-col items-center relative">
         <button onClick={onCancel} disabled={busy} aria-label="Bağla"
           className="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-lg text-stone-500 hover:bg-stone-200/60">
           <X className="w-4 h-4" />

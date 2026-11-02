@@ -48,7 +48,7 @@ final class WebViewCheck {
         String store = "market://details?id=" + p.packageName;
         return "<!doctype html><html lang=az><head><meta charset=utf-8>"
             + "<meta name=viewport content='width=device-width,initial-scale=1'>"
-            + "<style>body{font-family:sans-serif;background:#f7f3ed;color:#292524;margin:0;padding:32px 24px;}"
+            + "<style>body{font-family:sans-serif;background:#ffffff;color:#292524;margin:0;padding:32px 24px;}"
             + "div{max-width:420px;margin:12vh auto 0;}h1{font-size:20px;margin:0 0 12px;}"
             + "p{font-size:15px;line-height:1.5;color:#57534e;margin:0 0 16px;}"
             + "a{display:block;text-align:center;background:#0f3d34;color:#fff;text-decoration:none;"

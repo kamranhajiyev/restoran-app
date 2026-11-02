@@ -6,13 +6,13 @@ import {
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
   ShoppingCart, ChevronLeft, ChevronRight, ChevronDown, Wallet,
   History, Search, Delete, KeyRound, Trash2, Check, Bell, BellOff, Printer, CloudOff,
-  Bike, Tag, List,
+  Bike, Tag, List, RefreshCw,
 } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { pinKey } from '@/lib/pin-keys';
 import {
-  addOrder, addItemsToOrder, removeOrderItems, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, setCompanyContext,
+  addOrder, addItemsToOrder, removeOrderItems, splitOrder, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, setCompanyContext,
   fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchOpenShift, fetchShifts, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, verifyStaffPin, verifyStaffCard, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
@@ -51,6 +51,8 @@ import TillLink from '@/components/TillLink';
 import { CartItems } from '@/components/seller/CartItems';
 import { addAgainLine, submitButton, takeBackOne } from '@/lib/add-again';
 import { OrderRow } from '@/components/seller/OrderRow';
+import SplitBill from '@/components/seller/SplitBill';
+import { splitRequest, type SplitPart } from '@/lib/split-bill';
 import { PrintKitchenToggle } from '@/components/seller/PrintKitchenToggle';
 import { STATUS_COLORS, STATUS_LABELS, orderTotal, round2 } from '@/components/seller/order-format';
 import { cardOverBill, otherPart } from '@/lib/pay-split';
@@ -63,7 +65,7 @@ import DialogHost from '@/components/DialogHost';
 import { askConfirm, showAlert } from '@/lib/dialog-queue';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
 import {
-  changeFor, changeLabel, cleanOrderTypes, DEFAULT_ORDER_TYPES, NO_CHANGE, orderTypeFields, pricedLine, shownTypes,
+  changeFor, changeLabel, cleanOrderTypes, DEFAULT_ORDER_TYPES, NO_CHANGE, openingType, orderTypeFields, pricedLine, shownTypes,
   typedPrice, typeFlow, type OrderType as SaleType,
 } from '@/lib/order-types';
 import { addedCharge, cartToPay, chargeFor, cleanServiceCharge, dishesTotal, newOrderTypeId, NO_SERVICE_CHARGE, orderServiceCharge, serviceAmount, type ServiceCharge } from '@/lib/service-charge';
@@ -246,11 +248,24 @@ function CartTotal({ dishes, percent, charge, big }: { dishes: number; percent: 
 }
 
 // The picture on a "Yeni sifariş" card. A type the owner added gets a plain tag.
+// One line-icon family for every type — the takeaway emoji drew in its own
+// colours and size next to the others.
 function SaleTypeIcon({ t, small }: { t: SaleType; small?: boolean }) {
-  if (t.builtIn === 'takeaway') return <span className={small ? '' : 'text-4xl'}>🥡</span>;
-  const Icon = t.builtIn === 'masa' ? UtensilsCrossed : t.builtIn === 'delivery' ? Bike : Tag;
-  return <Icon className={small ? 'w-4 h-4' : 'w-8 h-8 text-stone-500'} />;
+  const Icon = t.builtIn === 'masa' ? UtensilsCrossed : t.builtIn === 'delivery' ? Bike : t.builtIn === 'takeaway' ? ShoppingBag : Tag;
+  if (small) return <Icon className="w-4 h-4" />;
+  return (
+    <span className="w-12 h-12 rounded-xl bg-primary-50 text-primary-700 flex items-center justify-center">
+      <Icon className="w-6 h-6" />
+    </span>
+  );
 }
+
+// What happens after the tap, under the type's name.
+const SALE_TYPE_HINT: Record<string, string> = {
+  masa: 'Masa seçin',
+  takeaway: 'Özü aparır',
+  delivery: 'Kuryer seçin',
+};
 
 function tableHasActive(n: number, orders: Order[]): boolean {
   return orders.some(o => o.tableNumber === n && isOrderOpen(o));
@@ -801,6 +816,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const [movingOrder, setMovingOrder]   = useState<Order | null>(null);
   const [moveTarget, setMoveTarget]     = useState<number | null>(null);
   const [moveBusy, setMoveBusy]         = useState(false);
+  // "Hesabı böl" sheet
+  const [splittingOrder, setSplittingOrder] = useState<Order | null>(null);
+  const [splitBusy, setSplitBusy] = useState(false);
   // Reassigning a delivery — the same modal shape as the move above, because it
   // is the same question asked about the other column.
   const [reassigningOrder, setReassigningOrder] = useState<Order | null>(null);
@@ -864,6 +882,22 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
 
   const catScrollRef = useRef<HTMLDivElement>(null);
+  // Whether the category strip has more to show on each side. The arrows only
+  // appear then — a "‹" always on screen next to the back button read as a
+  // second back button.
+  const [catMore, setCatMore] = useState({ left: false, right: false });
+  const updateCatMore = useCallback(() => {
+    const el = catScrollRef.current;
+    if (!el) return;
+    const left = el.scrollLeft > 4;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 4;
+    setCatMore(m => (m.left === left && m.right === right ? m : { left, right }));
+  }, []);
+  useEffect(() => {
+    updateCatMore();
+    window.addEventListener('resize', updateCatMore);
+    return () => window.removeEventListener('resize', updateCatMore);
+  }, [view, menu, updateCatMore]);
   const touchStartY = useRef<number | null>(null);
   const [pullDistance, setPullDistance] = useState(0);
   const [pullRefreshing, setPullRefreshing] = useState(false);
@@ -1962,9 +1996,46 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         void pickSaleType(offeredTypes[0]);
         return;
       }
-      setOrderType(null); setSaleTypeId(null); setCart([]); setSelectedCourier(null);
+      openOnMasa(); setCart([]); setSelectedCourier(null);
     }
     setView(id);
+  }
+
+  // "Yeni sifariş" opens with Masa already picked and the table map showing —
+  // most orders are a table's — and the type row above to change it. Without a
+  // Masa type (no tables, or the owner turned it off) the tiles ask first.
+  function openOnMasa() {
+    const masa = openingType(offeredTypes, tablesOn);
+    setSaleTypeId(masa ? masa.id : null);
+    setOrderType(masa ? 'masa' : null);
+  }
+
+  // "Hesabı böl": guests 2, 3, … become new orders on the same table. One write,
+  // in the database or on this machine's own copy (lib/split-bill), and nothing
+  // goes to the kitchen again. A link till goes through /api/split-order.
+  async function confirmSplit(order: Order, parts: SplitPart[]) {
+    if (splitBusy) return;
+    const request = splitRequest(parts);
+    if (request.length === 0) return;
+    // The new bills' ids are in the key: pressing Böl again after a failure
+    // without changing anything sends the same split, never a second one.
+    const key = `split:${order.id}:${request.map(p => p.orderId).join(',')}`;
+    setSplitBusy(true);
+    const error = overrideCompanyId
+      ? await postOrQueue(key, '/api/split-order',
+          { orderId: order.id, parts: request, companyId: overrideCompanyId, token: overrideToken },
+          overrideCompanyId,
+        ).then(r => (r.ok ? null : 'failed'))
+      : await splitOrder(order.id, request, key);
+    setSplitBusy(false);
+    if (error) {
+      showAlert(error === 'closed'
+        ? 'Hesab bölünmədi.\n\nBu sifariş artıq bağlanıb.'
+        : `Hesab bölünmədi.\n\nSəbəb: ${error}\n\nYenidən cəhd edin.`);
+      return;
+    }
+    setSplittingOrder(null);
+    refreshOrders();
   }
 
   // A card on "Yeni sifariş": remember which one (its prices), then run the
@@ -3290,7 +3361,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // a seller can see is the open-shift form.
   if (pinLocked) {
     return (
-      <div className="min-h-screen bg-[#f7f3ed] flex flex-col items-center justify-center p-6">
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6">
         <div className="w-12 h-12 rounded-2xl bg-primary-800 flex items-center justify-center mb-4">
           <Coffee className="w-6 h-6 text-white" />
         </div>
@@ -3347,7 +3418,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
 
   if (!shiftChecked) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f7f3ed]">
+      <div className="min-h-screen flex items-center justify-center bg-white">
         <span className="w-8 h-8 border-2 border-stone-200 border-t-primary-800 rounded-full animate-spin" />
       </div>
     );
@@ -3355,7 +3426,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
 
   if (!shift && kassaOn && !kassaShown) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f7f3ed] px-4">
+      <div className="min-h-screen flex items-center justify-center bg-white px-4">
         <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm text-center">
           <div className="w-12 h-12 rounded-2xl bg-stone-200 flex items-center justify-center mx-auto mb-3">
             <Wallet className="w-6 h-6 text-stone-500" />
@@ -3375,7 +3446,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
 
   if (!shift && kassaOn) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f7f3ed] px-4">
+      <div className="min-h-screen flex items-center justify-center bg-white px-4">
         <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-sm">
           <div className="text-center mb-6">
             <div className="w-12 h-12 rounded-2xl bg-primary-800 flex items-center justify-center mx-auto mb-3">
@@ -3445,7 +3516,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
 
   return (
     <div
-      className="min-h-screen bg-[#f7f3ed]"
+      className="min-h-screen bg-white"
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
@@ -3608,14 +3679,49 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         </aside>
 
         {/* Main — pb-16 reserves space for mobile bottom nav */}
-        <main className="flex-1 min-w-0 bg-[#f7f3ed] md:rounded-tl-2xl md:border-l md:border-t border-stone-100/60 overflow-hidden flex flex-col pb-16 lg:pb-0">
+        <main className="flex-1 min-w-0 bg-white md:rounded-tl-2xl md:border-l md:border-t border-stone-200 overflow-hidden flex flex-col pb-16 lg:pb-0">
 
           {/* ── ORDERS ── */}
           {view === 'orders' && (
             <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="px-4 md:px-6 pt-5 pb-2">
-                <h1 className="text-lg font-semibold text-stone-900">Sifarişlər</h1>
-                <p className="text-sm text-stone-600 mt-0.5">Aktiv sifarişlər</p>
+              {/* One line: the title, the counts, and the two controls — the sound
+                  bell and Yenilə. */}
+              <div className="px-4 md:px-6 pt-5 pb-3 flex items-center gap-2 flex-wrap">
+                <h1 className="text-lg font-semibold text-stone-900 mr-1">Sifarişlər</h1>
+                <span className="px-2.5 py-0.5 rounded-full bg-stone-200/70 text-xs text-stone-700">Cəmi <span className="font-semibold text-stone-900">{active.length}</span></span>
+                <span className="px-2.5 py-0.5 rounded-full bg-white ring-1 ring-inset ring-stone-300 text-xs text-stone-700">Gözləyir <span className="font-semibold">{orders.filter(o => o.status === 'gözləyir').length}</span></span>
+                <span className="px-2.5 py-0.5 rounded-full bg-green-50 border border-green-200 text-xs text-green-800">Hazır <span className="font-semibold">{orders.filter(o => o.status === 'hazırdır').length}</span></span>
+                <div className="flex-1" />
+                {soundOn && soundReady && !deviceMuted && (
+                  <button
+                    onClick={muteDevice}
+                    title="Səs açıqdır — bu cihazda söndür"
+                    aria-label="Səs açıqdır — bu cihazda söndür"
+                    className="w-9 h-9 flex items-center justify-center rounded-lg border border-stone-200 bg-white text-stone-700 hover:text-stone-900 transition-colors"
+                  >
+                    <Bell className="w-4 h-4" />
+                  </button>
+                )}
+                {soundOn && deviceMuted && (
+                  <button
+                    onClick={enableSound}
+                    title="Səs söndürülüb — aç"
+                    aria-label="Səs söndürülüb — aç"
+                    className="w-9 h-9 flex items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+                  >
+                    <BellOff className="w-4 h-4" />
+                  </button>
+                )}
+                <button
+                  onClick={() => refreshOrders()}
+                  disabled={refreshing}
+                  className="h-9 flex items-center gap-1.5 text-sm text-stone-700 hover:text-stone-900 border border-stone-200 rounded-lg px-3 hover:bg-white transition-colors bg-white disabled:opacity-60"
+                >
+                  {refreshing
+                    ? <span className="w-3.5 h-3.5 border-2 border-stone-200 border-t-primary-800 rounded-full animate-spin" />
+                    : <RefreshCw className="w-3.5 h-3.5" />}
+                  Yenilə
+                </button>
               </div>
 
               {/* Last resort only. The waiter's own tapping normally arms the sound
@@ -3637,7 +3743,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   </button>
                   {/* A device with no working output would otherwise show this banner all
                       shift with no way to put it down. Muting is the existing escape and
-                      the "Səs söndürülüb — aç" link below is the way back. */}
+                      the red bell above ("Səs söndürülüb — aç") is the way back. */}
                   <button
                     onClick={muteDevice}
                     title="Bağla — bu cihazda səsi söndür"
@@ -3648,48 +3754,11 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 </div>
               )}
 
-              {soundOn && soundReady && !deviceMuted && (
-                <div className="px-4 md:px-6 -mt-1 mb-1">
-                  <button
-                    onClick={muteDevice}
-                    className="flex items-center gap-1.5 text-xs text-stone-400 hover:text-stone-600 transition-colors"
-                  >
-                    <Bell className="w-3.5 h-3.5" /> Səs açıqdır — bu cihazda söndür
-                  </button>
-                </div>
-              )}
-
-              {soundOn && deviceMuted && (
-                <div className="px-4 md:px-6 -mt-1 mb-1">
-                  <button
-                    onClick={enableSound}
-                    className="flex items-center gap-1.5 text-xs text-stone-400 hover:text-stone-600 transition-colors"
-                  >
-                    <BellOff className="w-3.5 h-3.5" /> Səs söndürülüb — aç
-                  </button>
-                </div>
-              )}
-
-              <div className="px-4 md:px-6 py-2 flex items-center gap-3 flex-wrap">
-                <button
-                  onClick={() => refreshOrders()}
-                  disabled={refreshing}
-                  className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
-                >
-                  {refreshing
-                    ? <span className="w-3.5 h-3.5 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
-                    : <span>↻</span>}
-                  Yenilə
-                </button>
-                <div className="flex gap-3 text-sm flex-wrap">
-                  <span className="text-stone-600">Cəmi <span className="font-semibold text-stone-800">{active.length}</span></span>
-                  <span className="text-stone-600">Gözləyir <span className="font-semibold text-primary-700">{orders.filter(o => o.status === 'gözləyir').length}</span></span>
-                  <span className="text-stone-600">Hazır <span className="font-semibold text-green-600">{orders.filter(o => o.status === 'hazırdır').length}</span></span>
-                </div>
-              </div>
-
+              {/* The list is one white card on the grey page (desktop); on a phone
+                  each order is a card of its own already. */}
+              <div className="flex-1 md:flex-initial min-h-0 flex flex-col md:mx-6 md:mb-4 md:bg-white md:rounded-xl md:border md:border-stone-200 md:overflow-hidden">
               {/* Desktop table header */}
-              <div className="hidden md:grid grid-cols-[120px_1fr_140px_420px_110px] gap-4 px-6 py-2 text-xs font-medium text-stone-500 uppercase tracking-wide border-b border-t bg-white">
+              <div className="hidden md:grid grid-cols-[90px_minmax(0,1fr)_130px_310px_110px] gap-4 px-6 py-2.5 text-xs font-semibold text-stone-600 uppercase tracking-wide border-b border-stone-200 bg-stone-50">
                 <span>Vaxt</span><span>Sifariş</span><span>Durum</span><span></span><span className="text-right">Ümumi</span>
               </div>
 
@@ -3702,16 +3771,17 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 )}
                 {prevOrders.length > 0 && (
                   <div>
-                    <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
-                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    <div className="px-4 md:px-6 py-2 bg-stone-50 md:border-b md:border-stone-200 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
+                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onSplit={() => setSplittingOrder(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
-                    <div className="px-4 md:px-6 py-2 bg-stone-100 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
-                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    <div className="px-4 md:px-6 py-2 bg-stone-50 md:border-b md:border-stone-200 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
+                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onSplit={() => setSplittingOrder(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
+              </div>
               </div>
             </div>
           )}
@@ -3730,7 +3800,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 <button
                   onClick={() => setItemsOpen(true)}
                   disabled={historyLoading || !historyWindow}
-                  className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
+                  className="flex items-center gap-1.5 text-sm text-stone-700 hover:text-stone-900 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
                 >
                   <List className="w-3.5 h-3.5" />
                   Məhsullar
@@ -3738,7 +3808,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 <button
                   onClick={handlePrintReport}
                   disabled={historyLoading || reportBusy || !historyWindow}
-                  className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
+                  className="flex items-center gap-1.5 text-sm text-stone-700 hover:text-stone-900 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
                 >
                   <Printer className="w-3.5 h-3.5" />
                   {reportBusy ? 'Çap olunur...' : 'Hesabat çap et'}
@@ -3746,11 +3816,11 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 <button
                   onClick={loadHistory}
                   disabled={historyLoading}
-                  className="flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
+                  className="flex items-center gap-1.5 text-sm text-stone-700 hover:text-stone-900 border border-stone-200 rounded-lg px-3 py-1.5 hover:bg-white transition-colors bg-white disabled:opacity-60"
                 >
                   {historyLoading
-                    ? <span className="w-3.5 h-3.5 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
-                    : <span>↻</span>}
+                    ? <span className="w-3.5 h-3.5 border-2 border-stone-200 border-t-primary-800 rounded-full animate-spin" />
+                    : <RefreshCw className="w-3.5 h-3.5" />}
                   Yenilə
                 </button>
                 </div>
@@ -4227,18 +4297,27 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   })}
                 </div>
               ) : (
-              <div className={`grid ${offeredTypes.length >= 3 ? 'grid-cols-2 sm:grid-cols-3 max-w-md' : 'grid-cols-2 max-w-xs'} gap-4 mb-8`}>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 mb-8 max-w-4xl">
                 {offeredTypes.map(t => {
                   const label = changeLabel(t.change);
+                  const hint = t.builtIn ? SALE_TYPE_HINT[t.builtIn] : undefined;
                   return (
                     <button
                       key={t.id}
                       onClick={() => void pickSaleType(t)}
-                      className="flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all active:scale-95 border-stone-200 bg-white hover:border-primary-300"
+                      className="relative flex flex-col items-start gap-3 p-5 min-h-36 rounded-2xl border border-stone-200 bg-white text-left shadow-sm transition-all hover:border-primary-400 hover:shadow active:scale-[0.98]"
                     >
                       <SaleTypeIcon t={t} />
-                      <span className="font-semibold text-sm text-stone-600 text-center break-words">{t.name}</span>
-                      {label && <span className="-mt-2 text-xs font-semibold text-stone-500">{label}</span>}
+                      <span className="mt-auto">
+                        <span className="block font-semibold text-base text-stone-900 break-words">{t.name}</span>
+                        {hint && <span className="block text-sm text-stone-500 mt-0.5">{hint}</span>}
+                      </span>
+                      {/* The price change, for the waiter: small, in the corner. */}
+                      {label && (
+                        <span className="absolute top-4 right-4 px-2 py-0.5 rounded-full bg-amber-50 ring-1 ring-inset ring-amber-200 text-xs font-semibold text-amber-800 tabular-nums">
+                          {label}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -4425,10 +4504,10 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 {/* Menu toolbar */}
                 <div className="px-3 py-2.5 border-b bg-white flex items-center gap-2 shrink-0">
                   <button
-                    onClick={() => { if (appendOrderId) { cancelAppend(); return; } setView(tablesOn ? 'new-order' : 'orders'); setOrderType(tablesOn ? 'masa' : null); setCart([]); setMenuSearch(''); }}
-                    className="w-9 h-9 flex items-center justify-center rounded-xl text-primary-700 hover:bg-primary-50 active:scale-95 transition-all"
+                    onClick={() => { if (appendOrderId) { cancelAppend(); return; } setView(tablesOn ? 'new-order' : 'orders'); openOnMasa(); setCart([]); setMenuSearch(''); }}
+                    className="h-10 shrink-0 flex items-center gap-1 pl-2 pr-3 rounded-xl border border-stone-200 text-sm font-semibold text-stone-700 hover:bg-stone-50 active:scale-95 transition-all"
                   >
-                    <ChevronLeft className="w-5 h-5" />
+                    <ChevronLeft className="w-5 h-5" /> Geri
                   </button>
                   <div className="relative flex-1">
                     <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -4457,14 +4536,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 </div>
 
                 {/* Category tabs */}
-                <div className="bg-white border-b py-2 flex items-center gap-1 shrink-0 px-1">
-                  <button
-                    onClick={() => catScrollRef.current?.scrollBy({ left: -160, behavior: 'smooth' })}
-                    className="shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-stone-400 hover:bg-stone-100 hover:text-stone-700 transition-colors"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <div ref={catScrollRef} className="flex gap-2 overflow-x-auto scrollbar-none flex-1">
+                <div className="relative bg-white border-b py-2 shrink-0">
+                  <div ref={catScrollRef} onScroll={updateCatMore} className="flex gap-2 overflow-x-auto scrollbar-none px-3">
                     {categories.map(cat => {
                       const count = menu.filter(m => m.category === cat && m.available).length;
                       return (
@@ -4479,12 +4552,30 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                       );
                     })}
                   </div>
-                  <button
-                    onClick={() => catScrollRef.current?.scrollBy({ left: 160, behavior: 'smooth' })}
-                    className="shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-stone-400 hover:bg-stone-100 hover:text-stone-700 transition-colors"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
+                  {/* "More this way" — round buttons over the strip's edge,
+                      only while there is more to scroll to. */}
+                  {catMore.left && (
+                    <div className="absolute inset-y-0 left-0 flex items-center pl-1 pr-1.5 bg-white">
+                      <button
+                        onClick={() => catScrollRef.current?.scrollBy({ left: -200, behavior: 'smooth' })}
+                        aria-label="Əvvəlki kateqoriyalar"
+                        className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-stone-200 shadow-sm text-stone-700 hover:bg-stone-50"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                  {catMore.right && (
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-1 pl-1.5 bg-white">
+                      <button
+                        onClick={() => catScrollRef.current?.scrollBy({ left: 200, behavior: 'smooth' })}
+                        aria-label="Növbəti kateqoriyalar"
+                        className="w-8 h-8 flex items-center justify-center rounded-full bg-white border border-stone-200 shadow-sm text-stone-700 hover:bg-stone-50"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Menu grid */}
@@ -4872,6 +4963,16 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
           </div>
         );
       })()}
+
+      {splittingOrder && (
+        <SplitBill
+          order={splittingOrder}
+          tableLabel={tableName(splittingOrder.tableNumber)}
+          onCancel={() => setSplittingOrder(null)}
+          busy={splitBusy}
+          onConfirm={parts => void confirmSplit(splittingOrder, parts)}
+        />
+      )}
 
       {/* Reassign-courier modal. Deliberately the same sheet as the move above:
           the seller is answering the same kind of question, and the two orders
