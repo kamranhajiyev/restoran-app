@@ -20,6 +20,7 @@ import { cleanRules, type TillRules } from './till-rules';
 import { cleanOrderTypes, menuPriceColumn, orderTypeColumns, type OrderType } from './order-types';
 import { cleanServiceCharge, serviceChargeColumn, type ServiceCharge } from './service-charge';
 import type { HealthProblem, HealthReport } from './health-report';
+import type { SplitRequestPart } from './split-bill';
 import type { AccountEdit, AccountKind, FinanceAccount, FinanceClosing, FinanceEntry, FinanceSource, FinanceTransaction, SourceKind } from './finance';
 
 async function authHeaders(): Promise<HeadersInit> {
@@ -1263,6 +1264,19 @@ export async function removeOrderItems(orderId: string, lines: RemovalLine[], re
   });
   if (error) { console.error('[removeOrderItems]', error.message); return false; }
   return true;
+}
+
+// "Hesabı böl" (authed seller, or the exe's own copy): guests 2, 3, … become new
+// orders on the same table, in one transaction that prints nothing at the
+// kitchen. The work is split_order() (20261107_split_order.sql). `key` makes a
+// retry of the same split one write.
+export async function splitOrder(orderId: string, parts: SplitRequestPart[], key: string): Promise<string | null> {
+  const local = await toLocal(undefined, key, '/api/split-order', { orderId, parts });
+  if (local) return local.ok ? null : local.error ?? 'failed';
+
+  const { error } = await supabase.rpc('split_order', { p_order_id: orderId, p_parts: parts });
+  if (error) { console.error('[splitOrder]', error.message); return error.message; }
+  return null;
 }
 
 export async function editOrderPayment(orderId: string, cashAmount: number, cardAmount: number): Promise<boolean> {

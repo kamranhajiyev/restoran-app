@@ -28,6 +28,7 @@
 import type { CashShift, Order, OrderItem, ShiftMovement } from '../../types';
 import { refusal, type OrderAction } from '../order-rules';
 import { movedToTable } from '../order-place';
+import { applySplit, cleanSplitParts } from '../split-bill';
 import { db, getMeta, setMeta, transact } from './db';
 import { announce, heardMax } from './peers';
 import {
@@ -418,6 +419,32 @@ function applyMove(id: string, body: Record<string, unknown>, companyId: string)
   return { ok: true };
 }
 
+// Mirrors app/api/split-order/route.ts and split_order() (20261107_split_order.sql):
+// "Hesabı böl". The rules are lib/split-bill applySplit, the same ones the tests
+// hold the database function to. Each new bill takes this machine's next number
+// here, as applyAddOrder does, and the replay carries it so the server keeps it.
+function applySplitOrder(id: string, body: Record<string, unknown>, companyId: string): WriteResult {
+  const orderId = str(body.orderId);
+  const parts = cleanSplitParts(body.parts);
+  if (!orderId || !parts) return { ok: false, error: 'bad_request' };
+
+  const found = openOrder(orderId, companyId);
+  if ('error' in found) return { ok: false, error: found.error };
+
+  const till = thisTillNumber();
+  let next = nextOrderNumber(companyId);
+  const numbered = parts.map(p => (p.orderNumber ? p : { ...p, orderNumber: next++, tillNumber: till }));
+
+  const split = applySplit(found, numbered);
+  if (!split) return { ok: false, error: 'bad_request' };
+
+  putOrder(companyId, split.original);
+  for (const o of split.created) putOrder(companyId, o);
+  enqueue(id, '/api/split-order', { ...body, parts: numbered, companyId }, companyId);
+  announce();
+  return { ok: true };
+}
+
 // Mirrors app/api/bill-printed/route.ts.
 function applyBillPrinted(id: string, body: Record<string, unknown>, companyId: string): WriteResult {
   const orderId = str(body.orderId);
@@ -651,6 +678,7 @@ export function applyWrite(
       case '/api/update-order-status':      return applyStatus(id, body, companyId);
       case '/api/cancel-order':             return applyCancel(id, body, companyId);
       case '/api/move-table':               return applyMove(id, body, companyId);
+      case '/api/split-order':              return applySplitOrder(id, body, companyId);
       case '/api/bill-printed':             return applyBillPrinted(id, body, companyId);
       case '/api/change-courier':           return applyChangeCourier(id, body, companyId);
       case '/api/open-shift':               return applyOpenShift(id, body, companyId);
