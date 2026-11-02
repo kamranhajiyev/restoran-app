@@ -101,7 +101,7 @@ export default function OrderTypesPanel({ tablesOn, deliveryOn, onTablesOn, onDe
 
   return (
     <div className="max-w-3xl space-y-4">
-      <div className="bg-white rounded-xl border border-stone-100">
+      <div className="bg-white rounded-lg border border-stone-200">
         <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-stone-100 flex-wrap">
           <div>
             <p className="text-sm font-semibold text-stone-700">Sifariş növləri</p>
@@ -172,7 +172,7 @@ export default function OrderTypesPanel({ tablesOn, deliveryOn, onTablesOn, onDe
 
       {form && (
         <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4" onClick={() => setForm(null)}>
-          <div className="bg-white rounded-2xl w-full max-w-md p-5 space-y-4" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-xl w-full max-w-md p-5 space-y-4" onClick={e => e.stopPropagation()}>
             <p className="text-base font-semibold text-stone-800">{types.some(t => t.id === form.id) ? 'Sifariş növünə düzəliş' : 'Yeni sifariş növü'}</p>
 
             <label className="block space-y-1">

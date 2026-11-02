@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import SellerSWRegister from '@/app/seller/SellerSWRegister';
+import AppFont from '@/components/AppFont';
 
 export async function generateMetadata(
   { params }: { params: Promise<{ slug: string; token: string }> }
@@ -14,9 +15,9 @@ export default function SellerTokenLayout({ children }: { children: React.ReactN
   // This is the screen the desktop till actually runs, so this is where the
   // offline worker has to be registered — /seller's does not reach it.
   return (
-    <>
+    <AppFont>
       <SellerSWRegister scope="/s/" />
       {children}
-    </>
+    </AppFont>
   );
 }

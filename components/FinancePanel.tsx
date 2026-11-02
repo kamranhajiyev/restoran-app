@@ -36,7 +36,7 @@ const SOURCE_LABEL: Record<SourceKind, string> = { cash: 'Nağd pul', card: 'Kar
 const SOURCE_TAG: Record<SourceKind, string> = { cash: 'Növbənin nağd pulu', card: 'Növbənin kart pulu', inkassasiya: 'Kassadan inkassasiya' };
 
 const money = (n: number) => `${n.toFixed(2)} ₼`;
-const card = 'bg-white rounded-xl border border-stone-100';
+const card = 'bg-white rounded-lg border border-stone-200';
 const btnColor = 'inline-flex items-center gap-1.5 px-3.5 py-2 text-sm rounded-lg text-white font-medium transition-colors';
 const KIND_LOOK: Record<AccountKind, { icon: React.ElementType; badge: string }> = {
   cash: { icon: Wallet, badge: 'bg-green-100 text-green-700' },
@@ -176,7 +176,7 @@ export default function FinancePanel({ setDialog, bizSettings }: {
   return (
     <div className="space-y-4">
       {failed && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-4 py-2.5 flex items-center justify-between gap-3">
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-2.5 flex items-center justify-between gap-3">
           <span>Yenilənmədi — ekrandakı rəqəmlər köhnə ola bilər.</span>
           <button className="font-semibold underline shrink-0" onClick={reload}>Yenilə</button>
         </div>
@@ -194,7 +194,7 @@ export default function FinancePanel({ setDialog, bizSettings }: {
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div className="min-w-0">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">Cəmi pul</p>
-              <p className={`text-3xl font-bold tabular-nums break-words ${total < 0 ? 'text-red-600' : 'text-stone-900'}`}>{money(total)}</p>
+              <p className={`text-2xl font-semibold tabular-nums break-words ${total < 0 ? 'text-red-600' : 'text-stone-900'}`}>{money(total)}</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <button className={btnGhost} onClick={() => setSettingsOpen(true)}><Settings className="w-4 h-4" />Ayarlar</button>
@@ -213,9 +213,9 @@ export default function FinancePanel({ setDialog, bizSettings }: {
                   className={`${card} p-4 min-w-0 cursor-pointer transition-shadow hover:shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-300 ${
                     on ? 'ring-2 ring-primary-700 border-transparent' : ''} ${a.active ? '' : 'opacity-60'}`}>
                   <div className="flex items-center gap-3">
-                    <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${look.badge}`}><look.icon className="w-5 h-5" strokeWidth={2.25} /></span>
+                    <span className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${look.badge}`}><look.icon className="w-5 h-5" strokeWidth={2.25} /></span>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-stone-800 break-words leading-tight">{a.name}</p>
+                      <p className="text-sm font-semibold text-stone-800 truncate leading-tight" title={a.name}>{a.name}</p>
                       <p className="text-[11px] text-stone-400">{ACCOUNT_KIND_LABEL[a.kind]}{a.active ? '' : ' · söndürülüb'}</p>
                     </div>
                     <button className="p-1.5 rounded-lg text-stone-400 hover:bg-stone-50 hover:text-stone-700 shrink-0 self-start"
@@ -223,7 +223,7 @@ export default function FinancePanel({ setDialog, bizSettings }: {
                       <Pencil className="w-4 h-4" />
                     </button>
                   </div>
-                  <p className={`text-xl font-bold tabular-nums mt-3 break-words ${balance[a.id] < 0 ? 'text-red-600' : 'text-stone-900'}`}>
+                  <p className={`text-lg font-semibold tabular-nums mt-3 break-words ${balance[a.id] < 0 ? 'text-red-600' : 'text-stone-900'}`}>
                     {money(balance[a.id] ?? 0)}
                   </p>
                   {SOURCE_KINDS.some(k => source[k] === a.id) && (

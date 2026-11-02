@@ -72,7 +72,7 @@ export default function ServiceChargePanel({ tablesOn, deliveryOn }: { tablesOn:
 
   return (
     <div className="max-w-3xl space-y-4">
-      <div className="bg-white rounded-xl border border-stone-100">
+      <div className="bg-white rounded-lg border border-stone-200">
         <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-stone-100">
           <div>
             <p className="text-sm font-semibold text-stone-700">Xidmət haqqı</p>

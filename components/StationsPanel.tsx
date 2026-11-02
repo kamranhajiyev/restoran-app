@@ -139,7 +139,7 @@ export default function StationsPanel({
         qəbz yalnız həmin sexin printerindən çıxacaq.
       </p>
 
-      <div className="bg-white rounded-xl border border-stone-100 card p-4 mb-5 flex items-center gap-3">
+      <div className="bg-white rounded-lg border border-stone-200 card p-4 mb-5 flex items-center gap-3">
         <Bell className="w-4 h-4 text-stone-400 shrink-0" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-stone-700">Səs bildirişləri</p>
@@ -158,7 +158,7 @@ export default function StationsPanel({
       </div>
 
       {/* The trigger in 20261103_table_move_slip.sql reads this; the tills don't. */}
-      <div className="bg-white rounded-xl border border-stone-100 card p-4 mb-5 flex items-center gap-3">
+      <div className="bg-white rounded-lg border border-stone-200 card p-4 mb-5 flex items-center gap-3">
         <ArrowRightLeft className="w-4 h-4 text-stone-400 shrink-0" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-stone-700">Masa dəyişəndə sexlərə bildiriş çap et</p>
@@ -186,7 +186,7 @@ export default function StationsPanel({
           const count = countByStation.get(s.id) ?? 0;
           const isEditing = editingId === s.id;
           return (
-            <div key={s.id} className="bg-white rounded-xl border border-stone-100 card p-4">
+            <div key={s.id} className="bg-white rounded-lg border border-stone-200 card p-4">
               {isEditing ? (
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                   <input
@@ -251,7 +251,7 @@ export default function StationsPanel({
         })}
 
         {stations.length === 0 && (
-          <div className="bg-white rounded-xl border border-stone-100 card p-16 text-center">
+          <div className="bg-white rounded-lg border border-stone-200 card p-16 text-center">
             <ChefHat className="w-10 h-10 mx-auto mb-3 text-stone-200" />
             <p className="text-sm text-stone-500">Sex yoxdur</p>
           </div>
@@ -264,7 +264,7 @@ export default function StationsPanel({
           onChange={e => setNewName(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && addStation()}
           placeholder="Yeni sexin adı — məs: Mətbəx, Bar, Kabab"
-          className="flex-1 bg-white border border-stone-200 rounded-xl px-3.5 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
+          className="flex-1 bg-white border border-stone-200 rounded-lg px-3.5 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
         />
         <button
           onClick={addStation}
@@ -312,7 +312,7 @@ function AssignDialog({
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-md max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-xl w-full max-w-md max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between p-5 pb-3 shrink-0">
           <div>
             <h3 className="font-semibold text-stone-800">{station.name}</h3>
@@ -328,7 +328,7 @@ function AssignDialog({
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="Məhsul adı ilə axtar"
-            className="w-full bg-white border border-stone-200 rounded-xl px-3.5 py-2 text-sm placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
+            className="w-full bg-white border border-stone-200 rounded-lg px-3.5 py-2 text-sm placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
           />
         </div>
 

@@ -59,23 +59,23 @@ export default function TillRulesPanel({ staff }: { staff: Staff[] }) {
   return (
     <div className="space-y-4">
       {managers.length === 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs text-amber-800">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-xs text-amber-800">
           Menecer yoxdur. “Admin PIN” işləməsi üçün Əməkdaşlar siyahısında bir nəfərin vəzifəsini “Menecer” edin.
         </div>
       )}
       {staff.every(s => !s.active) && (
-        <div className="bg-stone-50 border border-stone-200 rounded-xl px-4 py-2.5 text-xs text-stone-600">
+        <div className="bg-stone-50 border border-stone-200 rounded-lg px-4 py-2.5 text-xs text-stone-600">
           Qaydalar yalnız kassada PIN ilə daxil olan əməkdaşlara aiddir.
         </div>
       )}
 
       {loaded && using !== 'pin' && managers.length > 0 && managers.every(m => !m.cardHash) && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs text-amber-800">
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-xs text-amber-800">
           Heç bir menecerin kartı yoxdur. Əməkdaşlar siyahısında menecerə “Təsdiq kartı” əlavə edin.
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-stone-100 p-4">
+      <div className="bg-white rounded-lg border border-stone-200 p-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <p className="text-sm font-semibold text-stone-700">Menecer necə təsdiqləyir</p>
@@ -92,7 +92,7 @@ export default function TillRulesPanel({ staff }: { staff: Staff[] }) {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-stone-100 p-4 space-y-4">
+      <div className="bg-white rounded-lg border border-stone-200 p-4 space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <p className="text-sm font-semibold text-stone-700">Kassada icazələr</p>

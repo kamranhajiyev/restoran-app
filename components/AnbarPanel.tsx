@@ -150,7 +150,7 @@ function StockFailures({ flash, fail }: { flash: (m: string) => void; fail: (m: 
 
   if (list.length === 0) return null;
   return (
-    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
       <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between gap-2 font-medium">
         <span>{list.length} satışın anbarı çıxılmayıb — qalıqlar düz deyil</span>
         <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -230,7 +230,7 @@ function WarehousesTab({ warehouses, reload, flash, fail, setDialog }: {
   return (
     <div className="space-y-3">
       {/* sales warehouse: where sold ingredients are deducted from (Phase 2) */}
-      <div className="bg-white rounded-2xl border border-stone-100 p-4 flex flex-wrap items-center justify-between gap-2">
+      <div className="bg-white rounded-xl border border-stone-200 p-4 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-sm font-medium text-stone-800">Satış anbarı</div>
           <div className="text-xs text-stone-400">Satış zamanı resept məhsulları bu anbardan çıxılır</div>
@@ -244,7 +244,7 @@ function WarehousesTab({ warehouses, reload, flash, fail, setDialog }: {
       <div className="flex justify-end">
         <button className={btnPrimary} onClick={() => open('new')}><Plus className="w-4 h-4" /> Yeni anbar</button>
       </div>
-      <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
+      <div className="bg-white rounded-xl border border-stone-200 divide-y divide-stone-100">
         {warehouses.length === 0 && <p className="text-sm text-stone-400 p-6 text-center">Anbar yoxdur</p>}
         {warehouses.map(w => (
           <div key={w.id} className="flex items-center justify-between px-4 py-3">
@@ -324,7 +324,7 @@ function SuppliersTab({ suppliers, reload, flash, fail, setDialog }: {
       <div className="flex justify-end">
         <button className={btnPrimary} onClick={() => open('new')}><Plus className="w-4 h-4" /> Yeni tədarükçü</button>
       </div>
-      <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
+      <div className="bg-white rounded-xl border border-stone-200 divide-y divide-stone-100">
         {suppliers.length === 0 && <p className="text-sm text-stone-400 p-6 text-center">Tədarükçü yoxdur</p>}
         {suppliers.map(s => {
           const l = ledger[s.id];
@@ -501,7 +501,7 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
         />
       </div>
 
-      <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
+      <div className="bg-white rounded-xl border border-stone-200 divide-y divide-stone-100">
         {loadingBal ? <p className="text-sm text-stone-400 p-6 text-center">Yüklənir…</p>
           : shownBalances.length === 0 ? <p className="text-sm text-stone-400 p-6 text-center">{whId === 'ALL' ? 'Qalıq yoxdur' : 'Bu anbarda qalıq yoxdur'}</p>
           : shownBalances.map(b => (
@@ -521,7 +521,7 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
       </div>
 
       {/* full item catalog management */}
-      <details className="bg-white rounded-2xl border border-stone-100 p-4">
+      <details className="bg-white rounded-xl border border-stone-200 p-4">
         <summary className="text-sm font-medium text-stone-600 cursor-pointer">Bütün məhsullar ({shownItems.length})</summary>
         <div className="mt-3 divide-y divide-stone-100">
           {shownItems.map(it => (
@@ -672,7 +672,7 @@ function ReceiptsTab({ warehouses, suppliers, items, flash, fail, setDialog }: {
       <div className="flex justify-end">
         <button className={btnPrimary} onClick={() => setEditingReceipt('new')}><Plus className="w-4 h-4" /> Yeni bazarlıq</button>
       </div>
-      <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
+      <div className="bg-white rounded-xl border border-stone-200 divide-y divide-stone-100">
         {receipts.length === 0 && <p className="text-sm text-stone-400 p-6 text-center">Bazarlıq yoxdur</p>}
         {receipts.map(r => {
           const voided = !!r.voidedAt;
@@ -931,7 +931,7 @@ function TransfersTab({ warehouses, items, flash, fail, setDialog }: {
         <p className="text-xs text-stone-400">Anbarlar arası köçürmə — nə bazarlığa, nə də silinməyə yazılır.</p>
         <button className={btnPrimary} onClick={() => setCreating(true)}><Plus className="w-4 h-4" /> Yeni transfer</button>
       </div>
-      <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
+      <div className="bg-white rounded-xl border border-stone-200 divide-y divide-stone-100">
         {transfers.length === 0 && <p className="text-sm text-stone-400 p-6 text-center">Transfer yoxdur</p>}
         {transfers.map(t => {
           const voided = !!t.voidedAt;
@@ -1107,7 +1107,7 @@ function WriteoffsTab() {
   return (
     <div className="space-y-3">
       <p className="text-xs text-stone-400">Qalıqlar bölməsində edilən bütün silinmələr — tarix, miqdar və səbəb.</p>
-      <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
+      <div className="bg-white rounded-xl border border-stone-200 divide-y divide-stone-100">
         {rows.length === 0 && <p className="text-sm text-stone-400 p-6 text-center">Silinmə yoxdur</p>}
         {rows.map(w => (
           <div key={w.id} className="flex items-start justify-between px-4 py-3 gap-3">
@@ -1156,7 +1156,7 @@ function PaymentsTab({ suppliers }: { suppliers: Supplier[] }) {
           <span className="text-sm text-stone-500">Cəmi: <b className="tabular-nums text-emerald-600">{total.toFixed(2)} ₼</b></span>
         </div>
       </div>
-      <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
+      <div className="bg-white rounded-xl border border-stone-200 divide-y divide-stone-100">
         {visible.length === 0 && <p className="text-sm text-stone-400 p-6 text-center">Ödəniş yoxdur</p>}
         {visible.map(p => (
           <div key={p.id} className="flex items-start justify-between px-4 py-3 gap-3">

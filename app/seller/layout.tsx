@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import AppFont from '@/components/AppFont';
 import SellerSWRegister from './SellerSWRegister';
 
 export const metadata: Metadata = {
@@ -7,9 +8,9 @@ export const metadata: Metadata = {
 
 export default function SellerLayout({ children }: { children: React.ReactNode }) {
   return (
-    <>
+    <AppFont>
       <SellerSWRegister />
       {children}
-    </>
+    </AppFont>
   );
 }

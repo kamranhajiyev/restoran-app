@@ -10,7 +10,7 @@ import {
   Coffee, BarChart2, Package, Bike, Wallet, ImageIcon, Trash2, RotateCcw,
   Users, EyeOff, Eye, Plus, Pencil, QrCode, UserCircle, Lock, MapPin, Phone, User, Search, Download, Upload, Clock,
   GripVertical, Globe, KeyRound, Tablet, Copy, RefreshCw, Link, Printer, Check, ArrowUp, ArrowDown, ChefHat,
-  Building2, AtSign, Landmark, ChevronLeft, ChevronRight, Settings, CreditCard,
+  Building2, AtSign, Landmark, ChevronLeft, ChevronRight, Settings, CreditCard, ShieldAlert, LayoutGrid,
 } from 'lucide-react';
 import { hallsMoved, nextHallPosition } from '@/lib/hall-order';
 import {
@@ -105,6 +105,9 @@ import OrderNote from '@/components/OrderNote';
 import VenueSwitcher from '@/components/VenueSwitcher';
 import { isSwitching } from '@/lib/switch-company-session';
 import { formatDayMonth, formatDayMonthTime, formatTime } from '@/lib/dates';
+import { STATUS_COLORS, STATUS_DOTS } from '@/components/seller/order-format';
+import { card as cardCls, Tag, Segmented, FilterSelect, DateRange, SearchBox, toolBtn } from '@/components/panel-ui';
+import { groupByDay, dayHeading } from '@/lib/group-by-day';
 
 // RPC raise messages are machine codes — translated here for display
 const STAFF_ERRORS: Record<string, string> = {
@@ -130,14 +133,6 @@ const WEAK_PINS = new Set([
 
 const CANCEL_REASONS = ['Müştəri imtina etdi', 'Səhv sifariş', 'Məhsul yoxdur', 'Digər'];
 
-const STATUS_COLORS: Record<OrderStatus, string> = {
-  'gözləyir':  'bg-primary-100 text-primary-700',
-  'hazırlanır':'bg-blue-100 text-blue-700',
-  'hazırdır':  'bg-green-100 text-green-700',
-  'ödənilib':  'bg-stone-100 text-stone-600',
-  'ləğv edildi': 'bg-red-100 text-red-600',
-  'silinib':   'bg-red-100 text-red-600',
-};
 const STATUS_LABELS: Record<OrderStatus, string> = {
   'gözləyir':   'gözləyir',
   'hazırlanır': 'hazırlanır',
@@ -412,41 +407,20 @@ function AnalizPanel({ rows, from, to }: { rows: AnalizRow[]; from: string; to: 
   return (
     <div className="space-y-3">
       {/* controls */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[180px]">
-          <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Məhsul axtar…"
-            className="w-full bg-white border border-stone-200 rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:border-stone-300"
-          />
-        </div>
-        <select
-          value={cat}
-          onChange={e => setCat(e.target.value)}
-          className="bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-700 outline-none focus:border-stone-300"
-        >
+      <div className={`${cardCls} p-2 flex flex-wrap items-center gap-2`}>
+        <Segmented
+          options={chips.map(([c, label, n]) => ({ value: c, label, count: n }))}
+          value={chip}
+          onChange={setChip}
+        />
+        <SearchBox value={search} onChange={setSearch} placeholder="Məhsul axtar…" />
+        <FilterSelect icon={LayoutGrid} active={!!cat} value={cat} onChange={setCat}>
           <option value="">Bütün kateqoriyalar</option>
           {catList.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <button
-          onClick={() => exportAnalizExcel(visible, from, to)}
-          className="flex items-center gap-1.5 text-xs font-medium text-stone-500 hover:text-stone-700 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors whitespace-nowrap"
-        >
+        </FilterSelect>
+        <button onClick={() => exportAnalizExcel(visible, from, to)} className={toolBtn}>
           <Upload className="w-3.5 h-3.5" /> İxrac
         </button>
-      </div>
-
-      <div className="flex flex-wrap gap-1.5">
-        {chips.map(([c, label, n]) => (
-          <button key={c} onClick={() => setChip(c)}
-            className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs rounded-lg font-medium transition-colors ${
-              chip === c ? 'bg-stone-800 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}>
-            {label}
-            <span className={chip === c ? 'text-white/60' : 'text-stone-400'}>{n}</span>
-          </button>
-        ))}
       </div>
 
       {chip === 'mayasız' && (
@@ -455,7 +429,7 @@ function AnalizPanel({ rows, from, to }: { rows: AnalizRow[]; from: string; to: 
         </p>
       )}
 
-      <div className="bg-white rounded-xl border border-stone-100 overflow-hidden">
+      <div className="bg-white rounded-lg border border-stone-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -2891,7 +2865,7 @@ function AdminPageContent() {
                   }`}
                 >
                   <Icon className="w-5 h-5" />
-                  {badge && <span className="absolute -top-1 -right-1 w-4 h-4 bg-primary-800 text-white text-[9px] rounded-full flex items-center justify-center font-bold">{badge}</span>}
+                  {badge && <span className="absolute -top-1 -right-1 w-4 h-4 bg-primary-800 text-white text-[9px] rounded-full flex items-center justify-center font-semibold">{badge}</span>}
                 </button>
               );
             }
@@ -2925,7 +2899,7 @@ function AdminPageContent() {
               onClick={openProfile}
               className="flex items-center gap-2 mb-3 w-full hover:opacity-80 transition-opacity text-left"
             >
-              <div className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold shrink-0">
+              <div className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-semibold shrink-0">
                 {adminName[0]?.toUpperCase()}
               </div>
               <span className="text-sm font-medium text-stone-700 truncate">{adminName}</span>
@@ -2945,7 +2919,7 @@ function AdminPageContent() {
             <button
               onClick={openProfile}
               title="Profil"
-              className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold hover:opacity-80 transition-opacity"
+              className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-semibold hover:opacity-80 transition-opacity"
             >
               {adminName[0]?.toUpperCase()}
             </button>
@@ -2963,13 +2937,13 @@ function AdminPageContent() {
   // above still runs, so the panel is already loaded the moment it unlocks.
   if (locked) {
     return (
-      <div className="min-h-screen bg-[#f7f3ed] flex items-center justify-center p-4">
+      <div className="min-h-screen bg-white flex items-center justify-center p-4">
         <form
           onSubmit={handleUnlock}
-          className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-stone-100 p-6 space-y-4"
+          className="w-full max-w-sm bg-white rounded-xl shadow-sm border border-stone-100 p-6 space-y-4"
         >
           <div className="flex flex-col items-center text-center gap-2">
-            <div className="w-12 h-12 rounded-2xl bg-primary-100 flex items-center justify-center">
+            <div className="w-12 h-12 rounded-xl bg-primary-100 flex items-center justify-center">
               <Lock className="w-5 h-5 text-primary-800" />
             </div>
             <h1 className="text-base font-semibold text-stone-800">Admin paneli bağlıdır</h1>
@@ -2983,7 +2957,7 @@ function AdminPageContent() {
               onChange={e => { setUnlockPw(e.target.value); setUnlockErr(''); }}
               placeholder="Şifrə"
               autoFocus
-              className="w-full border border-stone-200 rounded-xl px-3 py-2.5 pr-11 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="w-full border border-stone-200 rounded-lg px-3 py-2.5 pr-11 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
             <button
               type="button"
@@ -3000,7 +2974,7 @@ function AdminPageContent() {
           <button
             type="submit"
             disabled={unlockBusy || !unlockPw}
-            className="w-full py-2.5 rounded-xl bg-primary-800 hover:bg-primary-900 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+            className="w-full py-2.5 rounded-lg bg-primary-800 hover:bg-primary-900 disabled:opacity-50 text-white text-sm font-medium transition-colors"
           >
             {unlockBusy ? 'Yoxlanılır…' : 'Aç'}
           </button>
@@ -3033,7 +3007,7 @@ function AdminPageContent() {
 
   return (
     <div
-      className="min-h-screen bg-[#f7f3ed]"
+      className="min-h-screen bg-white"
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
@@ -3086,7 +3060,7 @@ function AdminPageContent() {
               router.push(`/s/${companySlug}/${sellerToken}`);
             }}
             title="Satıcı terminalını aç"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl hover:border-primary-300 hover:bg-primary-50 transition-colors mr-2"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-lg hover:border-primary-300 hover:bg-primary-50 transition-colors mr-2"
           >
             <Tablet className="w-4 h-4 text-primary-700" />
             <span className="hidden sm:inline text-xs font-semibold text-primary-800">Satıcı terminalı</span>
@@ -3097,9 +3071,9 @@ function AdminPageContent() {
 
         <button
           onClick={openProfile}
-          className="flex items-center gap-2 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-xl hover:border-primary-300 hover:bg-primary-50 transition-colors"
+          className="flex items-center gap-2 px-3 py-1.5 bg-stone-50 border border-stone-100 rounded-lg hover:border-primary-300 hover:bg-primary-50 transition-colors"
         >
-          <div className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold">
+          <div className="w-7 h-7 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-semibold">
             {adminName[0]?.toUpperCase()}
           </div>
           <div className="hidden sm:flex flex-col leading-tight">
@@ -3156,7 +3130,7 @@ function AdminPageContent() {
               href="https://wa.me/994998989876"
               target="_blank"
               rel="noopener noreferrer"
-              className={`shrink-0 text-xs font-bold px-4 py-1.5 rounded-lg transition-colors ${expired ? 'bg-white text-red-600 hover:bg-red-50' : 'bg-white text-primary-600 hover:bg-primary-50'}`}
+              className={`shrink-0 text-xs font-semibold px-4 py-1.5 rounded-lg transition-colors ${expired ? 'bg-white text-red-600 hover:bg-red-50' : 'bg-white text-primary-600 hover:bg-primary-50'}`}
             >
               Ödəniş et
             </a>
@@ -3187,9 +3161,9 @@ function AdminPageContent() {
         </aside>
 
         {/* ── Main ── */}
-        <main className="flex-1 min-w-0 bg-[#f7f3ed] rounded-tl-2xl border-l border-t border-stone-100/60 p-4 md:p-6 lg:p-8 overflow-y-auto">
+        <main className="flex-1 min-w-0 bg-white rounded-tl-2xl border-l border-t border-stone-200 p-4 md:p-6 lg:p-8 overflow-y-auto">
           <div className="mb-6">
-            <h1 className="text-xl font-bold text-stone-900">{meta.title}</h1>
+            <h1 className="text-lg font-semibold text-stone-900">{meta.title}</h1>
             <p className="text-sm font-medium text-stone-600 mt-0.5">{meta.subtitle}</p>
           </div>
 
@@ -3204,7 +3178,7 @@ function AdminPageContent() {
             <div className={`relative space-y-5 max-w-5xl transition-opacity duration-300 ${dataLoading || statsFailed ? 'opacity-60' : ''}`}>
               {statsFailed && !dataLoading && (
                 <div className="absolute inset-x-0 top-32 z-10 flex justify-center">
-                  <div className="flex flex-col items-center gap-2 bg-white/95 rounded-xl px-8 py-5 shadow-lg border border-red-100">
+                  <div className="flex flex-col items-center gap-2 bg-white/95 rounded-lg px-8 py-5 shadow-lg border border-red-100">
                     <p className="text-sm text-red-600">Statistika yüklənmədi</p>
                     <button onClick={() => setStatsRefreshKey(k => k + 1)} className="text-sm font-medium text-primary-800 underline">Yenidən cəhd et</button>
                   </div>
@@ -3212,7 +3186,7 @@ function AdminPageContent() {
               )}
               {dataLoading && (
                 <div className="absolute inset-x-0 top-32 z-10 flex justify-center pointer-events-none">
-                  <div className="flex flex-col items-center gap-2 bg-white/95 rounded-xl px-8 py-5 shadow-lg border border-stone-100">
+                  <div className="flex flex-col items-center gap-2 bg-white/95 rounded-lg px-8 py-5 shadow-lg border border-stone-100">
                     <span className="w-7 h-7 border-2 border-stone-200 border-t-[#92400e] rounded-full animate-spin" />
                     <p className="text-sm text-stone-600">Yüklənir...</p>
                   </div>
@@ -3221,42 +3195,25 @@ function AdminPageContent() {
 
               {/* Sub-view switch + the date range, which drives both Ümumi and Analiz */}
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5">
-                  {(['ümumi', 'analiz'] as const).map(s => (
-                    <button key={s} onClick={() => setStatsSub(s)}
-                      className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${statsSub === s ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
-                      {s === 'ümumi' ? 'Ümumi' : 'Analiz'}
-                    </button>
-                  ))}
-                </div>
+                <Segmented
+                  options={[{ value: 'ümumi', label: 'Ümumi' }, { value: 'analiz', label: 'Analiz' }]}
+                  value={statsSub}
+                  onChange={setStatsSub}
+                />
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5 overflow-x-auto max-w-full">
-                    {([['bugün', 'Bu gün'], ['7g', '7 gün'], ['30g', '30 gün'], ['ay', 'Bu ay'], ['6ay', '6 ay'], ['1il', '1 il']] as [ChartPreset, string][]).map(([p, l]) => {
-                      const [f, t] = presetRange(p, businessToday(bizSettings));
-                      const active = customFrom === f && customTo === t;
-                      return (
-                        <button key={p} onClick={() => { setCustomFrom(f); setCustomTo(t); }}
-                          className={`px-3 py-1 rounded-md text-sm font-semibold transition-colors ${active ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
-                          {l}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="flex items-center gap-1.5 bg-stone-50 border border-stone-200 rounded-lg px-2 py-1">
-                    <input
-                      type="date"
-                      value={customFrom}
-                      onChange={e => setCustomFrom(e.target.value)}
-                      className="text-sm font-medium text-stone-700 bg-transparent border-none outline-none w-[124px]"
-                    />
-                    <span className="text-stone-500 text-xs">—</span>
-                    <input
-                      type="date"
-                      value={customTo}
-                      onChange={e => setCustomTo(e.target.value)}
-                      className="text-sm font-medium text-stone-700 bg-transparent border-none outline-none w-[124px]"
-                    />
-                  </div>
+                  {(() => {
+                    const presets = ([['bugün', 'Bu gün'], ['7g', '7 gün'], ['30g', '30 gün'], ['ay', 'Bu ay'], ['6ay', '6 ay'], ['1il', '1 il']] as [ChartPreset, string][]);
+                    const today = businessToday(bizSettings);
+                    const picked = presets.find(([p]) => { const [f, t] = presetRange(p, today); return customFrom === f && customTo === t; })?.[0] ?? null;
+                    return (
+                      <Segmented
+                        options={presets.map(([p, l]) => ({ value: p, label: l }))}
+                        value={picked}
+                        onChange={p => { const [f, t] = presetRange(p, today); setCustomFrom(f); setCustomTo(t); }}
+                      />
+                    );
+                  })()}
+                  <DateRange from={customFrom} to={customTo} onFrom={setCustomFrom} onTo={setCustomTo} />
                 </div>
               </div>
 
@@ -3266,7 +3223,7 @@ function AdminPageContent() {
 
               {statsSub === 'ümumi' && (<>
               {/* Main chart card */}
-              <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
+              <div className="bg-white rounded-lg border border-stone-200 card overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-5 pb-3">
                   <h3 className="font-semibold text-stone-800 flex items-center gap-2">
                     Gəlir
@@ -3293,7 +3250,7 @@ function AdminPageContent() {
                           <Icon className="w-3.5 h-3.5 text-stone-500" />
                           <p className="text-xs font-semibold text-stone-600 whitespace-nowrap">{kpi.label}</p>
                         </div>
-                        <p className={`font-bold text-base whitespace-nowrap ${kpi.color}`}>{kpi.value}</p>
+                        <p className={`font-semibold text-base whitespace-nowrap ${kpi.color}`}>{kpi.value}</p>
                       </div>
                     );
                   })}
@@ -3302,7 +3259,7 @@ function AdminPageContent() {
 
               {/* Payment + Category */}
               <div className="grid md:grid-cols-2 gap-5">
-                <div className="bg-white rounded-xl border border-stone-100 card p-5">
+                <div className="bg-white rounded-lg border border-stone-200 card p-5">
                   <h3 className="font-semibold text-stone-800 text-sm mb-4">Ödəniş üsulları</h3>
                   {totalPayRev === 0 ? (
                     <p className="text-sm text-stone-400 text-center py-4">Məlumat yoxdur</p>
@@ -3332,7 +3289,7 @@ function AdminPageContent() {
                   )}
                 </div>
 
-                <div className="bg-white rounded-xl border border-stone-100 card p-5">
+                <div className="bg-white rounded-lg border border-stone-200 card p-5">
                   <h3 className="font-semibold text-stone-800 text-sm mb-4">Kateqoriya mənfəəti</h3>
                   {repCategories.length === 0 ? (
                     <p className="text-sm text-stone-400 text-center py-4">Məlumat yoxdur</p>
@@ -3360,7 +3317,7 @@ function AdminPageContent() {
                   )}
                 </div>
 
-                <div className="bg-white rounded-xl border border-stone-100 card p-5">
+                <div className="bg-white rounded-lg border border-stone-200 card p-5">
                   <h3 className="font-semibold text-stone-800 text-sm mb-4">Satış tipləri</h3>
                   {chartRevenue === 0 ? (
                     <p className="text-sm text-stone-400 text-center py-4">Məlumat yoxdur</p>
@@ -3407,7 +3364,7 @@ function AdminPageContent() {
 
               {/* Hourly + Weekly */}
               <div className="grid md:grid-cols-2 gap-5">
-                <div className="bg-white rounded-xl border border-stone-100 card p-5">
+                <div className="bg-white rounded-lg border border-stone-200 card p-5">
                   <h3 className="font-semibold text-stone-800 text-sm mb-4">Gün saatlarına görə</h3>
                   <div className="flex items-end gap-0.5 h-36 pt-6">
                     {hourlyData.map((d, i) => {
@@ -3419,7 +3376,7 @@ function AdminPageContent() {
                           title={`${i}:00 — ${d.rev.toFixed(2)} ₼`}
                         >
                           {isPeak && (
-                            <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] text-primary-800 font-bold whitespace-nowrap">
+                            <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] text-primary-800 font-semibold whitespace-nowrap">
                               {d.rev >= 1000 ? `${(d.rev / 1000).toFixed(1)}k` : `${d.rev.toFixed(0)}₼`}
                             </span>
                           )}
@@ -3436,7 +3393,7 @@ function AdminPageContent() {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl border border-stone-100 card p-5">
+                <div className="bg-white rounded-lg border border-stone-200 card p-5">
                   <h3 className="font-semibold text-stone-800 text-sm mb-4">Həftənin günlərinə görə</h3>
                   <div className="flex items-end gap-2 h-36 pt-6">
                     {weeklyData.map(d => {
@@ -3448,7 +3405,7 @@ function AdminPageContent() {
                           title={`${d.label} — ${d.rev.toFixed(2)} ₼`}
                         >
                           {d.rev > 0 && (
-                            <span className={`absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] font-bold whitespace-nowrap ${isPeak ? 'text-primary-800' : 'text-stone-600'}`}>
+                            <span className={`absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] font-semibold whitespace-nowrap ${isPeak ? 'text-primary-800' : 'text-stone-600'}`}>
                               {d.rev >= 1000 ? `${(d.rev / 1000).toFixed(1)}k` : `${d.rev.toFixed(0)}₼`}
                             </span>
                           )}
@@ -3466,7 +3423,7 @@ function AdminPageContent() {
 
               {/* Top items */}
               {topItems.length > 0 && (
-                <div className="bg-white rounded-xl border border-stone-100 card p-5">
+                <div className="bg-white rounded-lg border border-stone-200 card p-5">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
                       <Star className="w-4 h-4 text-primary-700" />
@@ -3490,18 +3447,18 @@ function AdminPageContent() {
                         <div key={`${item.name}-${idx}`}>
                           <div className="flex justify-between items-center mb-1">
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[10px] font-bold text-stone-200 w-4 shrink-0">#{idx + 1}</span>
+                              <span className="text-[10px] font-semibold text-stone-200 w-4 shrink-0">#{idx + 1}</span>
                               <span className="text-sm text-stone-700 truncate">{item.name}</span>
                             </div>
                             <div className="flex items-center gap-2 shrink-0 ml-3">
                               {topSort === 'margin' && margin !== null && (
-                                <span className="text-sm font-bold text-green-500">{margin}%</span>
+                                <span className="text-sm font-semibold text-green-500">{margin}%</span>
                               )}
                               {topSort === 'profit' && (
-                                <span className="text-sm font-bold text-green-600">{profit.toFixed(2)} ₼</span>
+                                <span className="text-sm font-semibold text-green-600">{profit.toFixed(2)} ₼</span>
                               )}
                               {topSort === 'qty' && (
-                                <span className="text-sm font-bold text-primary-700">{item.qty} ədəd</span>
+                                <span className="text-sm font-semibold text-primary-700">{item.qty} ədəd</span>
                               )}
                               {topSort === 'rev' && (
                                 <span className="font-semibold text-stone-800 text-sm">{item.rev.toFixed(2)} ₼</span>
@@ -3524,7 +3481,7 @@ function AdminPageContent() {
 
               {/* Seller stats */}
               <div className="grid md:grid-cols-2 gap-5">
-                <div className="bg-white rounded-xl border border-stone-100 card p-5">
+                <div className="bg-white rounded-lg border border-stone-200 card p-5">
                   <h3 className="font-semibold text-stone-800 text-sm mb-4">Satıcı statistikası</h3>
                   {sellerStats.length === 0 ? (
                     <p className="text-sm text-stone-400 text-center py-4">Məlumat yoxdur</p>
@@ -3533,7 +3490,7 @@ function AdminPageContent() {
                       {sellerStats.map((s, i) => (
                         <div key={`${s.name}-${i}`} className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 min-w-0">
-                            <div className="w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold shrink-0">
+                            <div className="w-6 h-6 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-semibold shrink-0">
                               {s.name[0]?.toUpperCase()}
                             </div>
                             <span className="text-sm text-stone-700 truncate">{s.name}</span>
@@ -3562,18 +3519,25 @@ function AdminPageContent() {
 
           {/* ── ORDERS ─────────────────────────────────────────────────── */}
           {tab === 'orders' && (
-            <div className="max-w-3xl space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-stone-500">
-                  {rangeOrders
-                    ? `${rangeOrders.length} sifariş · seçilmiş tarix`
-                    : totalOrders > orders.length ? `${totalOrders} sifariş · son ${orders.length}` : `${orders.length} sifariş`} · {activeOrders.length} aktiv
-                </p>
+            <div className="max-w-5xl space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                {/* The seller page's count pills, same shades. */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-2.5 py-0.5 rounded-full bg-stone-200/70 text-xs text-stone-700">
+                    Cəmi <span className="font-semibold text-stone-900">{rangeOrders ? rangeOrders.length : totalOrders}</span>
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-full bg-white ring-1 ring-inset ring-stone-300 text-xs text-stone-700">
+                    Aktiv <span className="font-semibold">{activeOrders.length}</span>
+                  </span>
+                  <span className="text-xs text-stone-400">
+                    {rangeOrders ? 'seçilmiş tarix' : totalOrders > orders.length ? `son ${orders.length} göstərilir` : ''}
+                  </span>
+                </div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => exportOrdersExcel(visibleOrders, bizSettings.timezone, courierNames)}
                     title="Excel-ə ixrac et"
-                    className="flex items-center gap-1.5 text-xs font-medium text-stone-500 hover:text-stone-700 px-3 py-1.5 rounded-lg hover:bg-stone-100 transition-colors"
+                    className={toolBtn}
                   >
                     <Upload className="w-3.5 h-3.5" />
                     İxrac
@@ -3581,119 +3545,103 @@ function AdminPageContent() {
                   <button
                     onClick={refresh}
                     disabled={refreshing}
-                    className="flex items-center gap-1.5 text-xs font-medium text-primary-800 hover:text-primary-950 px-3 py-1.5 rounded-lg hover:bg-primary-50 transition-colors disabled:opacity-60"
+                    className={toolBtn}
                   >
-                    {refreshing && <span className="w-3 h-3 border-2 border-primary-200 border-t-primary-800 rounded-full animate-spin" />}
+                    {refreshing
+                      ? <span className="w-3.5 h-3.5 border-2 border-stone-200 border-t-primary-800 rounded-full animate-spin" />
+                      : <RefreshCw className="w-3.5 h-3.5" />}
                     Yenilə
                   </button>
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-1.5">
-                {(['all', 'bugün', 'bu həftə'] as const).map(p => (
-                  <button
-                    key={p}
-                    onClick={() => { setOrdersPreset(p); setOrdersFrom(''); setOrdersTo(''); }}
-                    className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${!rangeOrders && ordersPreset === p ? 'bg-primary-800 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}
-                  >
-                    {p === 'all' ? 'Hamısı' : p === 'bugün' ? 'Bugün' : 'Bu həftə'}
-                  </button>
-                ))}
+              {/* One toolbar: when on the left, which on the right. Loose
+                  buttons in two wrapping rows read as clutter. */}
+              <div className={`${cardCls} p-2 flex flex-wrap items-center gap-2`}>
+                <Segmented
+                  options={[
+                    { value: 'all', label: 'Hamısı' },
+                    { value: 'bugün', label: 'Bugün' },
+                    { value: 'bu həftə', label: 'Bu həftə' },
+                  ]}
+                  value={rangeOrders ? null : ordersPreset}
+                  onChange={p => { setOrdersPreset(p); setOrdersFrom(''); setOrdersTo(''); }}
+                />
 
-                <div className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 ${rangeOrders ? 'bg-primary-50 border-primary-300' : 'bg-white border-stone-200'}`}>
-                  <input
-                    type="date"
-                    value={ordersFrom}
-                    max={ordersTo || undefined}
-                    onChange={e => setOrdersFrom(e.target.value)}
-                    className="text-xs font-medium text-stone-700 bg-transparent border-none outline-none w-[118px]"
-                  />
-                  <span className="text-stone-400 text-xs">—</span>
-                  <input
-                    type="date"
-                    value={ordersTo}
-                    min={ordersFrom || undefined}
-                    onChange={e => setOrdersTo(e.target.value)}
-                    className="text-xs font-medium text-stone-700 bg-transparent border-none outline-none w-[118px]"
-                  />
-                </div>
+                <DateRange
+                  from={ordersFrom} to={ordersTo} onFrom={setOrdersFrom} onTo={setOrdersTo}
+                  active={!!rangeOrders} onClear={() => { setOrdersFrom(''); setOrdersTo(''); }}
+                />
 
-                {(ordersFrom || ordersTo) && (
-                  <button
-                    onClick={() => { setOrdersFrom(''); setOrdersTo(''); }}
-                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-white border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors"
-                  >
-                    Tarixi sıfırla
-                  </button>
-                )}
+                {rangeLoading && <span className="w-3.5 h-3.5 border-2 border-primary-200 border-t-primary-800 rounded-full animate-spin" />}
 
-                {/* Amber, not primary — this is an audit filter, not another period preset. */}
-                <button
-                  onClick={() => setOnlySuspicious(v => !v)}
-                  title="Silinmiş məhsulu olan, endirimli və ödənişsiz bağlanan qəbzlər"
-                  className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${onlySuspicious ? 'bg-amber-500 text-white' : 'bg-white border border-amber-200 text-amber-700 hover:bg-amber-50'}`}
-                >
-                  Şübhəli qəbzlər{ordersSuspicious.length > 0 ? ` (${ordersSuspicious.length})` : ''}
-                </button>
+                <div className="flex-1" />
 
                 {/* Offered only where the answer can differ. A company running
                     neither tables nor delivery has one kind of order and nothing
                     to choose between. */}
                 {(tablesOn || deliveryOn) && (
-                  <select
+                  <FilterSelect
+                    icon={MapPin}
+                    active={!!placeFilter}
                     value={placeFilter}
                     // Leaving Çatdırılma takes the courier list with it, so a
                     // rider left selected can never go on narrowing a list of
                     // masa orders he was never part of.
-                    onChange={e => {
-                      const next = e.target.value as PlaceKind | '';
+                    onChange={v => {
+                      const next = v as PlaceKind | '';
                       setPlaceFilter(next);
                       if (next !== 'delivery' && next !== 'online') setCourierFilter('');
                     }}
-                    className={`text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors focus:outline-none focus:border-primary-300 ${placeFilter ? 'bg-primary-50 border-primary-300 text-primary-900' : 'bg-white border-stone-200 text-stone-600'}`}
                   >
-                    <option value="">Hamısı</option>
+                    <option value="">Bütün yerlər</option>
                     {tablesOn && <option value="masa">Masa</option>}
                     {deliveryOn && <option value="delivery">Çatdırılma</option>}
                     {deliveryOn && <option value="online">Onlayn sifariş</option>}
                     <option value="takeaway">Takeaway</option>
-                  </select>
+                  </FilterSelect>
                 )}
 
                 {/* Only once the list is deliveries. Asking "which courier"
                     about masa and takeaway orders is asking about rows that by
                     definition have none. */}
                 {deliveryOn && (placeFilter === 'delivery' || placeFilter === 'online') && courierOptions.length > 0 && (
-                  <select
-                    value={courierFilter}
-                    onChange={e => setCourierFilter(e.target.value)}
-                    className={`text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors focus:outline-none focus:border-primary-300 ${courierFilter ? 'bg-primary-50 border-primary-300 text-primary-900' : 'bg-white border-stone-200 text-stone-600'}`}
-                  >
+                  <FilterSelect icon={Bike} active={!!courierFilter} value={courierFilter} onChange={setCourierFilter}>
                     <option value="">Bütün kuryerlər</option>
                     {courierOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  </FilterSelect>
                 )}
 
-                <select
-                  value={payFilter}
-                  onChange={e => setPayFilter(e.target.value as '' | 'cash' | 'card')}
-                  className={`text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors focus:outline-none focus:border-primary-300 ${payFilter ? 'bg-primary-50 border-primary-300 text-primary-900' : 'bg-white border-stone-200 text-stone-600'}`}
-                >
+                <FilterSelect icon={CreditCard} active={!!payFilter} value={payFilter} onChange={v => setPayFilter(v as '' | 'cash' | 'card')}>
                   <option value="">Nağd və kart</option>
                   <option value="cash">Nağd</option>
                   <option value="card">Kart</option>
-                </select>
+                </FilterSelect>
+
+                {/* Amber only in its count and when on — an audit filter, not
+                    another period preset. */}
+                <button
+                  onClick={() => setOnlySuspicious(v => !v)}
+                  title="Silinmiş məhsulu olan, endirimli və ödənişsiz bağlanan qəbzlər"
+                  className={`h-9 inline-flex items-center gap-2 px-3 rounded-lg border text-xs font-medium transition-colors ${onlySuspicious ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-white border-stone-200 text-stone-700 hover:border-stone-300'}`}
+                >
+                  <ShieldAlert className={`w-3.5 h-3.5 ${onlySuspicious ? 'text-amber-600' : 'text-stone-400'}`} />
+                  Şübhəli
+                  {ordersSuspicious.length > 0 && (
+                    <span className={`min-w-5 h-5 px-1.5 inline-flex items-center justify-center rounded-full text-[11px] font-semibold ${onlySuspicious ? 'bg-amber-500 text-white' : 'bg-amber-100 text-amber-800'}`}>
+                      {ordersSuspicious.length}
+                    </span>
+                  )}
+                </button>
 
                 {(placeFilter || courierFilter || payFilter) && (
                   <button
                     onClick={() => { setPlaceFilter(''); setCourierFilter(''); setPayFilter(''); }}
-                    className="text-xs font-medium px-3 py-1.5 rounded-lg bg-white border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors"
+                    className="h-9 px-2 text-xs font-medium text-stone-500 hover:text-stone-800"
                   >
-                    Filtri sıfırla
+                    Sıfırla
                   </button>
                 )}
-
-                {rangeLoading && <span className="w-3.5 h-3.5 border-2 border-primary-200 border-t-primary-800 rounded-full animate-spin" />}
               </div>
 
               <div className="relative">
@@ -3702,12 +3650,12 @@ function AdminPageContent() {
                   value={orderSearch}
                   onChange={e => setOrderSearch(e.target.value)}
                   placeholder="Sifariş № və ya satıcı adı ilə axtar"
-                  className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-3 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
+                  className="w-full bg-white border border-stone-200 rounded-lg pl-9 pr-3 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
                 />
               </div>
 
               {payFilter && visibleOrders.length > 0 && (
-                <div className="flex items-center justify-between bg-primary-50 border border-primary-200 rounded-xl px-4 py-2.5">
+                <div className="flex items-center justify-between bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5">
                   <span className="text-sm text-primary-900">
                     {payFilter === 'cash' ? '💵 Nağd' : '💳 Kart'} · {visibleOrders.length} sifariş
                   </span>
@@ -3716,7 +3664,7 @@ function AdminPageContent() {
               )}
 
               {ordersDateFiltered.length === 0 && (
-                <div className="bg-white rounded-xl border border-stone-100 card p-16 text-center">
+                <div className="bg-white rounded-lg border border-stone-200 card p-16 text-center">
                   <Coffee className="w-10 h-10 mx-auto mb-3 text-stone-200" />
                   <p className="text-sm text-stone-500">{rangeOrders ? 'Seçilmiş tarixdə sifariş yoxdur' : 'Sifariş yoxdur'}</p>
                 </div>
@@ -3725,7 +3673,7 @@ function AdminPageContent() {
               {/* Nothing suspicious is good news, so it gets its own message rather than
                   reading as a failed search. */}
               {ordersDateFiltered.length > 0 && ordersAudited.length === 0 && (
-                <div className="bg-white rounded-xl border border-stone-100 card p-10 text-center">
+                <div className="bg-white rounded-lg border border-stone-200 card p-10 text-center">
                   <p className="text-sm text-stone-500">Seçilmiş dövrdə şübhəli qəbz yoxdur ({ordersDateFiltered.length} sifariş yoxlanıldı)</p>
                 </div>
               )}
@@ -3734,19 +3682,30 @@ function AdminPageContent() {
                   which one it was — otherwise a stale place filter reads as an
                   empty day. */}
               {ordersAudited.length > 0 && ordersPlaced.length === 0 && (
-                <div className="bg-white rounded-xl border border-stone-100 card p-10 text-center">
+                <div className="bg-white rounded-lg border border-stone-200 card p-10 text-center">
                   <p className="text-sm text-stone-500">Seçilmiş filtrə uyğun sifariş yoxdur ({ordersAudited.length} sifariş arasında)</p>
                 </div>
               )}
 
               {ordersPlaced.length > 0 && visibleOrders.length === 0 && (
-                <div className="bg-white rounded-xl border border-stone-100 card p-10 text-center">
+                <div className="bg-white rounded-lg border border-stone-200 card p-10 text-center">
                   <p className="text-sm text-stone-500">Axtarışa uyğun sifariş tapılmadı ({ordersPlaced.length} sifariş arasında)</p>
                 </div>
               )}
 
-              <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
-                {visibleOrders.map((order, i) => {
+              {/* Laid out as the seller's list (app/seller/page.tsx): the same
+                  columns, header and day rows, so the owner reads one list twice. */}
+              {visibleOrders.length > 0 && (
+              <div className={`${cardCls} overflow-hidden`}>
+                <div className="hidden md:grid grid-cols-[96px_minmax(0,1fr)_150px_96px] gap-4 px-6 py-2.5 text-xs font-semibold text-stone-600 uppercase tracking-wide border-b border-stone-200 bg-stone-50">
+                  <span>Vaxt</span><span>Sifariş</span><span>Durum</span><span className="text-right">Ümumi</span>
+                </div>
+                {groupByDay(visibleOrders, o => businessDay(o.createdAt, bizSettings)).map(g => (
+                <div key={g.day}>
+                <div className="px-4 md:px-6 py-2 bg-stone-50 border-b border-stone-200 text-xs font-semibold text-stone-600 uppercase tracking-wide">
+                  {dayHeading(g.day, businessToday(bizSettings))} · {g.items.length}
+                </div>
+                {g.items.map(order => {
                   const isExpanded = expandedOrderId === order.id;
                   const closedAt = orderClosedAt(order);
                   // Yellow marks the one signal that is otherwise invisible from the list:
@@ -3763,62 +3722,51 @@ function AdminPageContent() {
                   const extra = typeExtra(order.items);
                   const service = orderServiceCharge(order);
                   return (
-                    <div key={order.id} className={`${flagged ? 'bg-amber-50 ' : ''}${i < visibleOrders.length - 1 ? 'border-b border-stone-50' : ''}`}>
+                    <div key={order.id} className={`border-b border-stone-200 last:border-b-0 ${flagged ? 'bg-amber-50' : ''}`}>
                       {/* Row */}
                       <button
                         onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
-                        className={`w-full flex items-center gap-3 px-4 py-3 transition-colors text-left ${flagged ? 'hover:bg-amber-100' : 'hover:bg-stone-50'}`}
+                        className={`w-full grid grid-cols-[minmax(0,1fr)_auto_auto] md:grid-cols-[96px_minmax(0,1fr)_150px_96px] items-center gap-4 px-4 md:px-6 py-3 transition-colors text-left ${flagged ? 'hover:bg-amber-100' : 'hover:bg-stone-50'}`}
                       >
-                        <ChevronDown className={`w-4 h-4 text-stone-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                        <span className="w-14 text-xs font-bold text-primary-900 flex-shrink-0">#{orderLabel(order)}</span>
-                        <span className="flex-1 min-w-0">
-                          <span className="block text-sm text-stone-700 truncate">{order.sellerName}</span>
-                          {place && (
-                            <span className={`block text-xs truncate ${order.online && !order.tableNumber ? 'text-sky-700 font-semibold' : 'text-stone-400'}`}>
-                              {place}{rider ? ` · ${rider}` : ''}
+                        <span className="hidden md:block tabular-nums">
+                          <span className="block text-sm text-stone-900">{formatTime(order.createdAt, bizSettings.timezone)}</span>
+                          <span className="block text-xs text-stone-400">→ {closedAt ? formatTime(closedAt, bizSettings.timezone) : '—'}</span>
+                        </span>
+                        <span className="min-w-0 flex items-start gap-2">
+                          <ChevronDown className={`w-4 h-4 mt-0.5 text-stone-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                          <span className="min-w-0">
+                          <span className="block text-sm font-medium text-stone-900 truncate">
+                            {place
+                              ? <span className={order.online && !order.tableNumber ? 'text-sky-700' : ''}>{place}{rider ? ` · ${rider}` : ''}</span>
+                              : order.sellerName}
+                          </span>
+                          {/* Number, seller and the money tags share the second
+                              line, so the columns stay put whatever a row carries.
+                              Grey except "silinib", the one warning here. */}
+                            <span className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                              <span className="text-xs text-stone-500 truncate">№{orderLabel(order)}{place ? ` · ${order.sellerName}` : ''}</span>
+                              <span className="hidden sm:contents">
+                                {(order.discountAmount ?? 0) > 0 && <Tag>Endirim −{order.discountAmount!.toFixed(2)} ₼</Tag>}
+                                {extra !== 0 && (
+                                  <Tag title={order.orderTypeName ? `${order.orderTypeName}: qiymət dəyişikliyi` : 'Qiymət dəyişikliyi'}>
+                                    {order.orderTypeName ?? 'Növ'} {extra > 0 ? '+' : '−'}{Math.abs(extra).toFixed(2)} ₼
+                                  </Tag>
+                                )}
+                                {service > 0 && <Tag title={`Xidmət haqqı ${order.serviceChargePercent}%`}>Xidmət +{service.toFixed(2)} ₼</Tag>}
+                                {removedCount > 0 && <Tag tone="warn">{removedCount} silinib</Tag>}
+                              </span>
                             </span>
+                          </span>
+                        </span>
+                        <span>
+                          <span className={`inline-block text-xs px-2.5 py-0.5 rounded-full font-medium whitespace-nowrap ${STATUS_COLORS[order.status]}`}>{STATUS_LABELS[order.status]}</span>
+                        </span>
+                        <span className="text-right tabular-nums">
+                          <span className="block text-sm font-semibold text-stone-900">{orderTotal(order).toFixed(2)} ₼</span>
+                          {(order.discountAmount ?? 0) > 0 && (
+                            <span className="block text-[11px] text-stone-400 line-through">{(orderTotal(order) + order.discountAmount!).toFixed(2)}</span>
                           )}
                         </span>
-                        <span className="text-xs text-stone-500 flex-shrink-0 hidden sm:block">
-                          {formatDayMonthTime(order.createdAt, bizSettings.timezone)}
-                          {' → '}
-                          {closedAt
-                            ? formatTime(closedAt, bizSettings.timezone)
-                            : '—'}
-                        </span>
-                        <span className="text-sm font-semibold text-stone-800 flex-shrink-0 text-right">
-                          {(order.discountAmount ?? 0) > 0
-                            ? <><span className="text-xs text-stone-400 line-through mr-1">{(orderTotal(order) + order.discountAmount!).toFixed(2)}</span>{orderTotal(order).toFixed(2)}</>
-                            : orderTotal(order).toFixed(2)
-                          } ₼
-                        </span>
-                        {(order.discountAmount ?? 0) > 0 && (
-                          <span className="text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg px-1.5 py-0.5 flex-shrink-0 hidden sm:inline">
-                            🏷️ -{order.discountAmount!.toFixed(2)} ₼
-                          </span>
-                        )}
-                        {extra !== 0 && (
-                          <span
-                            title={order.orderTypeName ? `${order.orderTypeName}: qiymət dəyişikliyi` : 'Qiymət dəyişikliyi'}
-                            className={`text-xs font-semibold rounded-lg px-1.5 py-0.5 flex-shrink-0 hidden sm:inline border ${extra > 0 ? 'text-amber-800 bg-amber-50 border-amber-300' : 'text-green-700 bg-green-50 border-green-200'}`}
-                          >
-                            {extra > 0 ? '+' : '−'}{Math.abs(extra).toFixed(2)} ₼
-                          </span>
-                        )}
-                        {service > 0 && (
-                          <span
-                            title={`Xidmət haqqı ${order.serviceChargePercent}%`}
-                            className="text-xs font-semibold text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-1.5 py-0.5 flex-shrink-0 hidden sm:inline"
-                          >
-                            Xidmət +{service.toFixed(2)} ₼
-                          </span>
-                        )}
-                        {removedCount > 0 && (
-                          <span className="text-xs font-semibold text-amber-700 bg-amber-100 border border-amber-300 rounded-lg px-1.5 py-0.5 flex-shrink-0 hidden sm:inline">
-                            🗑 {removedCount} silinib
-                          </span>
-                        )}
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 text-center ${STATUS_COLORS[order.status]}`}>{STATUS_LABELS[order.status]}</span>
                       </button>
 
                       {/* Expanded items */}
@@ -3950,14 +3898,17 @@ function AdminPageContent() {
                                 </span>
                               )}
                             </div>
-                            <span className="font-bold text-primary-900">{orderTotal(order).toFixed(2)} ₼</span>
+                            <span className="font-semibold text-primary-900">{orderTotal(order).toFixed(2)} ₼</span>
                           </div>
                         </div>
                       )}
                     </div>
                   );
                 })}
+                </div>
+                ))}
               </div>
+              )}
 
               {/* Paging while the audit filter is on would look like "these are all the
                   suspicious receipts" when it is only the loaded page — point at the date
@@ -3972,7 +3923,7 @@ function AdminPageContent() {
                 <button
                   onClick={loadMoreOrders}
                   disabled={loadingMore}
-                  className="w-full flex items-center justify-center gap-2 bg-white border border-stone-200 rounded-xl py-2.5 text-sm font-medium text-primary-800 hover:bg-primary-50 transition-colors disabled:opacity-60"
+                  className="w-full flex items-center justify-center gap-2 bg-white border border-stone-200 rounded-lg py-2.5 text-sm font-medium text-primary-800 hover:bg-primary-50 transition-colors disabled:opacity-60"
                 >
                   {loadingMore && <span className="w-3.5 h-3.5 border-2 border-primary-200 border-t-primary-800 rounded-full animate-spin" />}
                   Daha çox göstər ({totalOrders - orders.length} qalıb)
@@ -3985,7 +3936,7 @@ function AdminPageContent() {
           {tab === 'kassa' && (
             <div className="max-w-3xl space-y-4">
               {/* Kassa enable/disable toggle */}
-              <div className="bg-white rounded-xl border border-stone-100 card p-4 flex items-center justify-between gap-4">
+              <div className="bg-white rounded-lg border border-stone-200 card p-4 flex items-center justify-between gap-4">
                 <div>
                   <p className="text-sm font-semibold text-stone-800">Kassa</p>
                   <p className="text-xs text-stone-500 mt-0.5">
@@ -4036,7 +3987,7 @@ function AdminPageContent() {
                         {t.kuryer > 0.005 && (
                           <div className="flex justify-between"><span>Kuryer satışı</span><span>{t.kuryer.toFixed(2)} ₼</span></div>
                         )}
-                        <div className="flex justify-between font-bold text-stone-800">
+                        <div className="flex justify-between font-semibold text-stone-800">
                           <span>Ümumi satış</span><span>{t.total.toFixed(2)} ₼</span>
                         </div>
                       </>
@@ -4051,9 +4002,9 @@ function AdminPageContent() {
                   <>
                     {/* Current shift */}
                     {open ? (
-                      <div className="bg-white rounded-xl border border-green-200 card p-5 space-y-2.5">
+                      <div className="bg-white rounded-lg border border-green-200 card p-5 space-y-2.5">
                         <div className="flex items-center justify-between">
-                          <h3 className="font-bold text-stone-800 flex items-center gap-2">
+                          <h3 className="font-semibold text-stone-800 flex items-center gap-2">
                             <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Açıq növbə
                           </h3>
                           <div className="flex items-center gap-2">
@@ -4082,10 +4033,10 @@ function AdminPageContent() {
                             </span>
                           </div>
                         )}
-                        <div className="flex justify-between items-center border-t pt-2.5 font-bold">
+                        <div className="flex justify-between items-center border-t pt-2.5 font-semibold">
                           <span>Kassada olmalıdır</span><span className="text-primary-800 text-lg">{expected.toFixed(2)} ₼</span>
                         </div>
-                        <div className="flex justify-between items-center border-t pt-2.5 font-bold">
+                        <div className="flex justify-between items-center border-t pt-2.5 font-semibold">
                           <span>💳 Terminal (kart məbləği)</span><span className="text-primary-800">{openShiftSales.card.toFixed(2)} ₼</span>
                         </div>
                         <p className="text-xs text-stone-500 -mt-1.5">Kassaya daxil deyil — bank terminalından keçir</p>
@@ -4096,12 +4047,12 @@ function AdminPageContent() {
                             type="number" min="0" step="0.01" placeholder="İnkassasiya məbləği (₼)"
                             value={inkInput}
                             onChange={e => setInkInput(e.target.value)}
-                            className="flex-1 min-w-0 border border-stone-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
+                            className="flex-1 min-w-0 border border-stone-200 rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
                           />
                           <button
                             onClick={() => handleAdminInkassasiya(open)}
                             disabled={inkBusy || !(parseFloat(inkInput) > 0)}
-                            className="bg-primary-800 hover:bg-primary-900 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors flex items-center gap-2"
+                            className="bg-primary-800 hover:bg-primary-900 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
                           >
                             {inkBusy && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
                             İnkassasiya
@@ -4121,18 +4072,18 @@ function AdminPageContent() {
                             type="number" min="0" step="0.01" placeholder="Sayılan nağd (₼)"
                             value={adminCountedInput}
                             onChange={e => setAdminCountedInput(e.target.value)}
-                            className="flex-1 min-w-0 border border-stone-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
+                            className="flex-1 min-w-0 border border-stone-200 rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
                           />
                           <input
                             type="number" min="0" step="0.01" placeholder="Terminal (₼)"
                             value={adminTerminalInput}
                             onChange={e => setAdminTerminalInput(e.target.value)}
-                            className="flex-1 min-w-0 border border-stone-200 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
+                            className="flex-1 min-w-0 border border-stone-200 rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary-700"
                           />
                           <button
                             onClick={() => handleAdminCloseShift(open)}
                             disabled={closingShift || adminCountedInput === '' || activeOrders.length > 0}
-                            className="bg-stone-900 hover:bg-stone-800 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors flex items-center gap-2"
+                            className="bg-stone-900 hover:bg-stone-800 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
                           >
                             {closingShift && <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
                             Bağla
@@ -4154,7 +4105,7 @@ function AdminPageContent() {
                         )}
                       </div>
                     ) : (
-                      <div className="bg-white rounded-xl border border-stone-100 card p-8 text-center">
+                      <div className="bg-white rounded-lg border border-stone-200 card p-8 text-center">
                         <Wallet className="w-8 h-8 mx-auto mb-2 text-stone-200" />
                         <p className="text-sm text-stone-500">Hazırda açıq növbə yoxdur — satıcı işə başlayanda açır</p>
                       </div>
@@ -4162,7 +4113,7 @@ function AdminPageContent() {
 
                     {/* History */}
                     {closed.length > 0 && (
-                      <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
+                      <div className="bg-white rounded-lg border border-stone-200 card overflow-hidden">
                         <div className="px-4 py-3 border-b border-stone-50 text-xs font-semibold text-stone-500 uppercase tracking-wide">Bağlanmış növbələr</div>
                         {closed.map((s, i) => {
                           const check = shiftCheck(s);
@@ -4330,7 +4281,7 @@ function AdminPageContent() {
                   </button>
                   <button onClick={() => { setShowTrash(true); fetchTrash().then(setTrash); }} className="relative flex items-center gap-1.5 text-sm text-stone-500 hover:text-stone-600 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors">
                     <Trash2 className="w-4 h-4" />
-                    {trash.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-400 text-white text-[10px] rounded-full flex items-center justify-center font-bold">{trash.length}</span>}
+                    {trash.length > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-400 text-white text-[10px] rounded-full flex items-center justify-center font-semibold">{trash.length}</span>}
                   </button>
                   <button onClick={() => { setNewCat(''); setShowCatDialog(true); }} className="flex items-center gap-2 bg-primary-800 hover:bg-primary-900 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors shadow-sm">
                     <Plus className="w-4 h-4" /> Kateqoriya əlavə et
@@ -4356,7 +4307,7 @@ function AdminPageContent() {
                   value={menuSearch}
                   onChange={e => setMenuSearch(e.target.value)}
                   placeholder="Məhsul adı ilə axtar"
-                  className="w-full bg-white border border-stone-200 rounded-xl pl-9 pr-9 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
+                  className="w-full bg-white border border-stone-200 rounded-lg pl-9 pr-9 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
                 />
                 {menuSearch && (
                   <button onClick={() => setMenuSearch('')} title="Axtarışı təmizlə" className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-lg text-stone-400 hover:text-stone-600 hover:bg-stone-100 transition-colors">
@@ -4388,7 +4339,7 @@ function AdminPageContent() {
                       </button>
                       <button onClick={() => toggleCatCollapsed(cat)} className="flex items-center gap-2 min-w-0 group/toggle py-1">
                         <ChevronDown className={`w-4 h-4 text-stone-500 group-hover/toggle:text-stone-600 transition-transform shrink-0 ${isCollapsed ? '-rotate-90' : ''}`} />
-                        <p className="text-sm font-bold text-stone-700 group-hover/toggle:text-stone-900 uppercase tracking-wide truncate transition-colors">{cat}</p>
+                        <p className="text-sm font-semibold text-stone-700 group-hover/toggle:text-stone-900 uppercase tracking-wide truncate transition-colors">{cat}</p>
                         <span className="text-xs font-semibold text-stone-500 bg-stone-100 rounded-full px-1.5 py-0.5">{items.length}</span>
                       </button>
                       {!catAvailable && <span className="text-xs bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded font-medium">Gizli</span>}
@@ -4406,7 +4357,7 @@ function AdminPageContent() {
                     </div>
                     </CategoryDropTarget>
                     {!isCollapsed && (
-                    <div className="bg-white rounded-xl border border-stone-100 card overflow-hidden">
+                    <div className="bg-white rounded-lg border border-stone-200 card overflow-hidden">
                       {items.length === 0 && (
                         <p className="px-4 py-3 text-xs text-stone-400">Bu kateqoriyada məhsul yoxdur</p>
                       )}
@@ -4509,14 +4460,14 @@ function AdminPageContent() {
               </DndContext>
 
               {menuQuery !== '' && menuMatchCount === 0 && (
-                <div className="bg-white rounded-xl border border-stone-100 card p-16 text-center">
+                <div className="bg-white rounded-lg border border-stone-200 card p-16 text-center">
                   <Search className="w-10 h-10 mx-auto mb-3 text-stone-200" />
                   <p className="text-sm text-stone-500">&ldquo;{menuSearch.trim()}&rdquo; üzrə məhsul tapılmadı</p>
                 </div>
               )}
 
               {menu.length === 0 && categories.length === 0 && !showForm && (
-                <div className="bg-white rounded-xl border border-stone-100 card p-16 text-center">
+                <div className="bg-white rounded-lg border border-stone-200 card p-16 text-center">
                   <Coffee className="w-10 h-10 mx-auto mb-3 text-stone-200" />
                   <p className="text-sm text-stone-500">Məhsul yoxdur</p>
                 </div>
@@ -4547,7 +4498,7 @@ function AdminPageContent() {
               {companySlug && sellerToken && (() => {
                 const terminalUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/s/${companySlug}/${sellerToken}`;
                 return (
-                  <div className="bg-white rounded-xl border border-stone-100 p-4 space-y-3">
+                  <div className="bg-white rounded-lg border border-stone-200 p-4 space-y-3">
                     <div className="flex items-center gap-2">
                       <Link className="w-4 h-4 text-primary-700" />
                       <p className="text-sm font-semibold text-stone-700">Satıcı terminal linki</p>
@@ -4612,7 +4563,7 @@ function AdminPageContent() {
                 </div>
 
                 {pinStaff.length === 0 && (
-                  <div className="bg-white rounded-xl border border-stone-100 p-10 text-center">
+                  <div className="bg-white rounded-lg border border-stone-200 p-10 text-center">
                     <KeyRound className="w-8 h-8 mx-auto mb-3 text-stone-200" />
                     <p className="text-sm text-stone-500">PIN əməkdaşı yoxdur</p>
                     <p className="text-xs text-stone-400 mt-1">Əlavə etdikdən sonra satıcı səhifəsi PIN ekranı ilə açılacaq</p>
@@ -4620,7 +4571,7 @@ function AdminPageContent() {
                 )}
 
                 {pinStaff.map(s => (
-                  <div key={s.id} className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
+                  <div key={s.id} className="bg-white rounded-lg border border-stone-200 px-4 py-3 flex items-center gap-3">
                     <div className="w-9 h-9 rounded-full bg-stone-100 flex items-center justify-center text-stone-500 shrink-0">
                       <KeyRound className="w-4 h-4" />
                     </div>
@@ -4698,13 +4649,13 @@ function AdminPageContent() {
                 {stations.length === 0 ? (
                   // Nothing to attach an employee to. Say so rather than offering a
                   // form whose only dropdown would be empty.
-                  <div className="bg-white rounded-xl border border-stone-100 p-10 text-center">
+                  <div className="bg-white rounded-lg border border-stone-200 p-10 text-center">
                     <ChefHat className="w-8 h-8 mx-auto mb-3 text-stone-200" />
                     <p className="text-sm text-stone-500">Əvvəlcə sex yaradın</p>
                     <p className="text-xs text-stone-400 mt-1">Menyu → Sexlər bölməsindən Mətbəx, Bar və s. əlavə edin</p>
                   </div>
                 ) : employees.length === 0 ? (
-                  <div className="bg-white rounded-xl border border-stone-100 p-10 text-center">
+                  <div className="bg-white rounded-lg border border-stone-200 p-10 text-center">
                     <ChefHat className="w-8 h-8 mx-auto mb-3 text-stone-200" />
                     <p className="text-sm text-stone-500">Sex əməkdaşı yoxdur</p>
                     <p className="text-xs text-stone-400 mt-1">Əlavə etdikdən sonra öz hesabı ilə daxil olub hazırlanacaqları görəcək</p>
@@ -4712,7 +4663,7 @@ function AdminPageContent() {
                 ) : employees.map(e => {
                   const st = stations.find(s => s.id === e.stationId);
                   return (
-                    <div key={e.id} className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
+                    <div key={e.id} className="bg-white rounded-lg border border-stone-200 px-4 py-3 flex items-center gap-3">
                       <div className="w-9 h-9 rounded-full bg-stone-100 flex items-center justify-center text-stone-500 shrink-0">
                         <ChefHat className="w-4 h-4" />
                       </div>
@@ -4828,7 +4779,7 @@ function AdminPageContent() {
               {/* The module switch, same shape as Masa rejimi. Turning it off
                   takes çatdırılma off the seller's screens; the riders, their
                   debts and their history stay exactly where they are. */}
-              <div className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
+              <div className="bg-white rounded-lg border border-stone-200 px-4 py-3 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-stone-800">Çatdırılma</p>
                   <p className="text-xs text-stone-500">
@@ -4855,7 +4806,7 @@ function AdminPageContent() {
               {deliveryOn ? (
                 <CourierPanel setDialog={setDialog} bizSettings={bizSettings} />
               ) : (
-                <div className="bg-white rounded-xl border border-stone-100 p-12 text-center">
+                <div className="bg-white rounded-lg border border-stone-200 p-12 text-center">
                   <Bike className="w-10 h-10 mx-auto mb-3 text-stone-200" />
                   <p className="text-sm text-stone-500">Çatdırılma deaktivdir. Satıcı panelində kuryer sifarişi yaradıla bilmir.</p>
                 </div>
@@ -4867,13 +4818,13 @@ function AdminPageContent() {
           {tab === 'settings' && settingsSub === 'girişlər' && (
             <div className="max-w-3xl space-y-4">
               {!loginsLoaded && (
-                <div className="bg-white rounded-xl border border-stone-100 p-16 text-center">
+                <div className="bg-white rounded-lg border border-stone-200 p-16 text-center">
                   <p className="text-sm text-stone-500">Yüklənir…</p>
                 </div>
               )}
 
               {loginsLoaded && loginEvents.length === 0 && (
-                <div className="bg-white rounded-xl border border-stone-100 p-16 text-center">
+                <div className="bg-white rounded-lg border border-stone-200 p-16 text-center">
                   <Globe className="w-10 h-10 mx-auto mb-3 text-stone-200" />
                   <p className="text-sm text-stone-500">Hələ giriş qeydi yoxdur</p>
                   <p className="text-xs text-stone-400 mt-1">Növbəti girişlərdən etibarən burada görünəcək</p>
@@ -4881,7 +4832,7 @@ function AdminPageContent() {
               )}
 
               {loginsLoaded && loginEvents.length > 0 && (
-                <div className="bg-white rounded-xl border border-stone-100 overflow-hidden">
+                <div className="bg-white rounded-lg border border-stone-200 overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
@@ -4899,7 +4850,7 @@ function AdminPageContent() {
                             <tr key={e.id} className="border-b border-stone-50 last:border-0">
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2.5">
-                                  <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-bold shrink-0">
+                                  <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center text-primary-900 text-xs font-semibold shrink-0">
                                     {e.name[0]?.toUpperCase()}
                                   </div>
                                   <div className="min-w-0">
@@ -4932,12 +4883,12 @@ function AdminPageContent() {
           {tab === 'tables' && (
             <div className="max-w-3xl space-y-4">
               {/* ── Brendinq ── */}
-              <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider px-1">Brendinq</p>
+              <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider px-1">Brendinq</p>
 
-              <div className="bg-white rounded-xl border border-stone-100 p-4 space-y-4">
+              <div className="bg-white rounded-lg border border-stone-200 p-4 space-y-4">
                 {/* Logo */}
                 <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-xl border border-stone-200 bg-stone-50 flex items-center justify-center overflow-hidden shrink-0">
+                  <div className="w-14 h-14 rounded-lg border border-stone-200 bg-stone-50 flex items-center justify-center overflow-hidden shrink-0">
                     {logoUrl
                       ? <img src={logoUrl} alt="" className="w-full h-full object-cover" />
                       : <ImageIcon className="w-6 h-6 text-stone-300" />}
@@ -4988,10 +4939,12 @@ function AdminPageContent() {
               </div>
 
               {/* ── QR & Onlayn ── */}
-              <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider px-1 mt-2">QR &amp; Onlayn</p>
+              <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider px-1 pt-6">QR &amp; Onlayn</p>
 
+              {(companySlug || tablesOn) && (
+              <div className="bg-white rounded-lg border border-stone-200 divide-y divide-stone-100 overflow-hidden">
               {companySlug && (
-                <div className="bg-primary-50 border border-primary-100 rounded-xl px-4 py-3 flex items-center gap-3">
+                <div className="bg-primary-50 px-4 py-3 flex items-center gap-3">
                   <Globe className="w-4 h-4 text-primary-700 shrink-0" />
                   <p className="text-xs text-primary-800 font-medium truncate flex-1">{typeof window !== 'undefined' ? window.location.origin : ''}/{companySlug}/menu</p>
                   <button
@@ -5014,7 +4967,7 @@ function AdminPageContent() {
               )}
 
               {tablesOn && (
-                <div className="bg-white rounded-xl border border-stone-100 p-4 flex items-center justify-between gap-4">
+                <div className="p-4 flex items-center justify-between gap-4">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-stone-800">QR sifariş</p>
                     <p className="text-xs text-stone-500">
@@ -5044,7 +4997,7 @@ function AdminPageContent() {
               )}
 
               {tablesOn && (
-                <div className="bg-white rounded-xl border border-stone-100 p-4 flex items-center justify-between gap-4">
+                <div className="p-4 flex items-center justify-between gap-4">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-stone-800">Yalnız menyu baxışı</p>
                     <p className="text-xs text-stone-500">
@@ -5072,11 +5025,13 @@ function AdminPageContent() {
                   </button>
                 </div>
               )}
+              </div>
+              )}
 
               {/* ── Masalar ── */}
-              <p className="text-xs font-semibold text-stone-400 uppercase tracking-wider px-1 mt-2">Masalar</p>
+              <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider px-1 pt-6">Masalar</p>
 
-              <div className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
+              <div className="bg-white rounded-lg border border-stone-200 px-4 py-3 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-stone-800">Masa rejimi</p>
                   <p className="text-xs text-stone-500">
@@ -5101,7 +5056,7 @@ function AdminPageContent() {
               </div>
 
               {!tablesOn && (
-                <div className="bg-white rounded-xl border border-stone-100 p-12 text-center">
+                <div className="bg-white rounded-lg border border-stone-200 p-12 text-center">
                   <LayoutDashboard className="w-10 h-10 mx-auto mb-3 text-stone-200" />
                   <p className="text-sm text-stone-500">Masalar deaktivdir. Satıcı panelində sifarişlər masa seçilmədən yaradılır.</p>
                 </div>
@@ -5109,7 +5064,7 @@ function AdminPageContent() {
 
               {tablesOn && (<>
               {/* Zal seçici — hər zalın öz planı var */}
-              <div className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-2 flex-wrap">
+              <div className="bg-white rounded-lg border border-stone-200 px-4 py-3 flex items-center gap-2 flex-wrap">
                 <select
                   value={activeHallId ?? ''}
                   onChange={e => {
@@ -5161,7 +5116,7 @@ function AdminPageContent() {
               </div>
 
               {halls.length === 0 && (
-                <div className="bg-white rounded-xl border border-stone-100 p-16 text-center">
+                <div className="bg-white rounded-lg border border-stone-200 p-16 text-center">
                   <LayoutDashboard className="w-10 h-10 mx-auto mb-3 text-stone-200" />
                   <p className="text-sm text-stone-500 mb-4">Zal yoxdur — masaları yerləşdirmək üçün əvvəlcə zal əlavə edin</p>
                   <button
@@ -5203,7 +5158,7 @@ function AdminPageContent() {
               </div>
 
               {hallTables.length === 0 && (
-                <div className="bg-white rounded-xl border border-stone-100 p-16 text-center">
+                <div className="bg-white rounded-lg border border-stone-200 p-16 text-center">
                   <LayoutDashboard className="w-10 h-10 mx-auto mb-3 text-stone-200" />
                   <p className="text-sm text-stone-500">Bu zalda masa yoxdur</p>
                 </div>
@@ -5211,7 +5166,7 @@ function AdminPageContent() {
 
               {/* Floor plan / canvas view */}
               {tableView === 'floor' && hallTables.length > 0 && (
-                <div className="bg-white rounded-xl border border-stone-100 overflow-hidden">
+                <div className="bg-white rounded-lg border border-stone-200 overflow-hidden">
                   <div className="flex items-center gap-4 px-4 py-3 border-b border-stone-50 text-xs text-stone-500">
                     <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-green-400 inline-block" />Boş</span>
                     <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-red-400 inline-block" />Dolu</span>
@@ -5241,7 +5196,7 @@ function AdminPageContent() {
                       const isSelected = selectedTableId === t.id;
                       const { x, y, w, h } = tableBox(t, idx);
                       const activeStatus = activeOrder?.status;
-                      const statusColor = activeStatus === 'gözləyir' ? 'bg-primary-400' : activeStatus === 'hazırlanır' ? 'bg-blue-400' : activeStatus === 'hazırdır' ? 'bg-green-500' : '';
+                      const statusColor = (activeStatus && STATUS_DOTS[activeStatus]) || '';
                       return (
                         <div
                           key={t.id}
@@ -5274,11 +5229,11 @@ function AdminPageContent() {
                               <button onClick={e => { e.stopPropagation(); if (busy) { setDialog({ title: 'Silinmədi', message: 'Aktiv sifarişi olan masanı silmək olmaz.' }); return; } setDialog({ title: 'Masanı sil?', message: <><span className="font-medium text-stone-700">&ldquo;{t.name}&rdquo;</span> silinəcək.</>, onConfirm: () => deleteTable(t.id).then(err => { if (err) setDialog({ title: 'Silinmədi', message: err }); else setTables(prev => prev.filter(x => x.id !== t.id)); }) }); }} className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
                             </div>
                           )}
-                          <span className={`text-xs font-bold ${busy ? 'text-red-600' : 'text-stone-600'}`}>{t.name}</span>
+                          <span className={`text-xs font-semibold ${busy ? 'text-red-600' : 'text-stone-600'}`}>{t.name}</span>
                           {busy && activeOrder && (
                             <>
                               <span className={`text-[9px] font-semibold text-white px-1.5 py-0.5 rounded-full mt-0.5 ${statusColor}`}>{activeOrder.status}</span>
-                              <span className="text-[10px] font-bold text-red-500 mt-0.5">{orderTotal(activeOrder).toFixed(2)} ₼</span>
+                              <span className="text-[10px] font-semibold text-red-500 mt-0.5">{orderTotal(activeOrder).toFixed(2)} ₼</span>
                             </>
                           )}
                         </div>
@@ -5295,8 +5250,8 @@ function AdminPageContent() {
                   {hallTables.map(t => {
                     const busy = orders.some(o => o.tableNumber === t.id && isOrderOpen(o));
                     return (
-                      <div key={t.id} className="bg-white rounded-xl border border-stone-100 px-4 py-3 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-primary-50 flex items-center justify-center text-primary-800 font-bold text-sm shrink-0">
+                      <div key={t.id} className="bg-white rounded-lg border border-stone-200 px-4 py-3 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-primary-50 flex items-center justify-center text-primary-800 font-semibold text-sm shrink-0">
                           {t.id}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -5345,15 +5300,15 @@ function AdminPageContent() {
       {/* ── Edit payment modal ──────────────────────────────────────────── */}
       {editingPaymentOrder && (
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
-            <h3 className="font-bold text-lg text-stone-800 mb-1">Ödənişi düzəlt</h3>
+          <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl p-6 w-full sm:max-w-sm">
+            <h3 className="font-semibold text-lg text-stone-800 mb-1">Ödənişi düzəlt</h3>
             <p className="text-sm text-stone-600 mb-4">
               №{orderLabel(editingPaymentOrder)} · {editingPaymentOrder.sellerName} · {editableTotal(editingPaymentOrder).toFixed(2)} ₼
             </p>
             <div className="space-y-3 mb-5">
               <div>
                 <label className="text-xs font-semibold text-stone-600 uppercase tracking-wide block mb-1">Nağd ödəniş</label>
-                <div className="flex items-center border border-stone-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-primary-300">
+                <div className="flex items-center border border-stone-200 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-primary-300">
                   <input
                     type="number" min="0" step="0.01"
                     value={editPaymentCash}
@@ -5374,7 +5329,7 @@ function AdminPageContent() {
               </div>
               <div>
                 <label className="text-xs font-semibold text-stone-600 uppercase tracking-wide block mb-1">Kartla ödəniş</label>
-                <div className="flex items-center border border-stone-200 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-primary-300">
+                <div className="flex items-center border border-stone-200 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-primary-300">
                   <input
                     type="number" min="0" step="0.01"
                     value={editPaymentCard}
@@ -5397,7 +5352,7 @@ function AdminPageContent() {
               <p className="text-red-500 text-sm mb-4">{editPaymentError}</p>
             )}
             <div className="flex gap-2">
-              <button onClick={() => { setEditingPaymentOrder(null); setEditPaymentError(''); }} className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">Ləğv et</button>
+              <button onClick={() => { setEditingPaymentOrder(null); setEditPaymentError(''); }} className="flex-1 py-3 rounded-lg border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">Ləğv et</button>
               <button
                 disabled={editPaymentBusy}
                 onClick={async () => {
@@ -5439,7 +5394,7 @@ function AdminPageContent() {
                   }
                   setEditPaymentBusy(false);
                 }}
-                className="flex-1 py-3 rounded-xl bg-primary-800 hover:bg-primary-900 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2"
+                className="flex-1 py-3 rounded-lg bg-primary-800 hover:bg-primary-900 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2"
               >
                 {editPaymentBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
                 Tətbiq et
@@ -5452,8 +5407,8 @@ function AdminPageContent() {
       {/* ── Cancel order modal ──────────────────────────────────────────── */}
       {cancellingOrder && (
         <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 w-full sm:max-w-sm">
-            <h3 className="font-bold text-lg text-stone-800 mb-1">Sifarişi ödənişsiz bağla</h3>
+          <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl p-6 w-full sm:max-w-sm">
+            <h3 className="font-semibold text-lg text-stone-800 mb-1">Sifarişi ödənişsiz bağla</h3>
             <p className="text-sm text-stone-600 mb-4">
               №{orderLabel(cancellingOrder)} · {cancellingOrder.sellerName} · {orderTotal(cancellingOrder).toFixed(2)} ₼
             </p>
@@ -5463,7 +5418,7 @@ function AdminPageContent() {
                 <button
                   key={r}
                   onClick={() => setCancelReason(r)}
-                  className={`px-4 py-2 rounded-xl text-sm font-medium border-2 transition-colors active:scale-95 ${cancelReason === r ? 'border-red-400 bg-red-50 text-red-600' : 'border-stone-200 text-stone-600 hover:border-stone-300'}`}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium border-2 transition-colors active:scale-95 ${cancelReason === r ? 'border-red-400 bg-red-50 text-red-600' : 'border-stone-200 text-stone-600 hover:border-stone-300'}`}
                 >
                   {r}
                 </button>
@@ -5474,16 +5429,16 @@ function AdminPageContent() {
                 type="text" placeholder="Səbəbi yazın..."
                 value={cancelOtherText}
                 onChange={e => setCancelOtherText(e.target.value)}
-                className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 mb-4"
+                className="w-full border border-stone-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 mb-4"
                 autoFocus
               />
             )}
             <div className="flex gap-2">
-              <button onClick={() => setCancellingOrder(null)} className="flex-1 py-3 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">İmtina</button>
+              <button onClick={() => setCancellingOrder(null)} className="flex-1 py-3 rounded-lg border border-stone-200 text-sm text-stone-600 hover:bg-stone-50">İmtina</button>
               <button
                 onClick={confirmCancelOrder}
                 disabled={cancelBusy || !cancelReason || (cancelReason === 'Digər' && !cancelOtherText.trim())}
-                className="flex-1 py-3 rounded-xl bg-red-500 hover:bg-red-600 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2"
+                className="flex-1 py-3 rounded-lg bg-red-500 hover:bg-red-600 disabled:opacity-40 text-white font-semibold text-sm active:scale-95 transition-colors flex items-center justify-center gap-2"
               >
                 {cancelBusy && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
                 Ödənişsiz bağla
@@ -5496,9 +5451,9 @@ function AdminPageContent() {
       {/* ── Create / Edit table modal ───────────────────────────────────── */}
       {showTableForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm shadow-xl">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-stone-800">{editingTable ? 'Masanı düzəlt' : 'Yeni masa'}</h3>
+              <h3 className="font-semibold text-stone-800">{editingTable ? 'Masanı düzəlt' : 'Yeni masa'}</h3>
               <button onClick={() => setShowTableForm(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100">
                 <X className="w-4 h-4" />
               </button>
@@ -5539,7 +5494,7 @@ function AdminPageContent() {
                 <input
                   value={tName}
                   onChange={e => setTName(e.target.value)}
-                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full border border-stone-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                   placeholder="Masa 1"
                   required
                 />
@@ -5550,7 +5505,7 @@ function AdminPageContent() {
                   <select
                     value={tHallId}
                     onChange={e => setTHallId(e.target.value)}
-                    className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="w-full border border-stone-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                   >
                     {halls.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
                   </select>
@@ -5565,7 +5520,7 @@ function AdminPageContent() {
                     { value: 'round' as const,  label: 'Dairəvi', w: 'w-5', h: 'h-5', round: true },
                   ]).map(s => (
                     <button key={s.value} type="button" onClick={() => setTShape(s.value)}
-                      className={`flex-1 py-2 rounded-xl border-2 text-xs font-medium transition-colors flex flex-col items-center justify-center gap-1.5 ${tShape === s.value ? 'border-primary-600 bg-primary-50 text-primary-800' : 'border-stone-200 text-stone-500 hover:border-stone-300'}`}>
+                      className={`flex-1 py-2 rounded-lg border-2 text-xs font-medium transition-colors flex flex-col items-center justify-center gap-1.5 ${tShape === s.value ? 'border-primary-600 bg-primary-50 text-primary-800' : 'border-stone-200 text-stone-500 hover:border-stone-300'}`}>
                       <span className={`inline-block border-2 ${s.w} ${s.h} ${s.round ? 'rounded-full' : 'rounded-sm'} ${tShape === s.value ? 'border-primary-600' : 'border-stone-300'}`} />
                       {s.label}
                     </button>
@@ -5575,7 +5530,7 @@ function AdminPageContent() {
               <button
                 type="submit"
                 disabled={tSaving}
-                className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors mt-2"
+                className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors mt-2"
               >
                 {tSaving ? 'Saxlanır...' : editingTable ? 'Yadda saxla' : 'Yarat'}
               </button>
@@ -5587,9 +5542,9 @@ function AdminPageContent() {
       {/* ── Create / rename hall modal ──────────────────────────────────── */}
       {showHallForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm shadow-xl">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-stone-800">{showHallForm === 'rename' ? 'Zalın adı' : 'Yeni zal'}</h3>
+              <h3 className="font-semibold text-stone-800">{showHallForm === 'rename' ? 'Zalın adı' : 'Yeni zal'}</h3>
               <button onClick={() => setShowHallForm(null)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100">
                 <X className="w-4 h-4" />
               </button>
@@ -5600,7 +5555,7 @@ function AdminPageContent() {
                 <input
                   value={hallName}
                   onChange={e => setHallName(e.target.value)}
-                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full border border-stone-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                   placeholder="Əsas zal"
                   autoFocus
                   required
@@ -5609,7 +5564,7 @@ function AdminPageContent() {
               <button
                 type="submit"
                 disabled={hallSaving}
-                className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors mt-2"
+                className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors mt-2"
               >
                 {hallSaving ? 'Saxlanır...' : showHallForm === 'rename' ? 'Yadda saxla' : 'Əlavə et'}
               </button>
@@ -5621,29 +5576,29 @@ function AdminPageContent() {
       {/* ── Kassa correction password gate ─────────────────────────────── */}
       {kassaPwPrompt && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <form onSubmit={handleKassaUnlock} className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-xl">
+          <form onSubmit={handleKassaUnlock} className="bg-white rounded-xl p-6 w-full max-w-xs shadow-xl">
             <div className="flex items-center gap-2 mb-1">
               <Lock className="w-4 h-4 text-stone-400" />
-              <h3 className="font-bold text-stone-800">Kassa düzəlişi</h3>
+              <h3 className="font-semibold text-stone-800">Kassa düzəlişi</h3>
             </div>
             <p className="text-xs text-stone-500 mb-4">Kassa qeydlərinə düzəliş etmək üçün öz şifrənizi daxil edin. Hər düzəliş kim və nə vaxt etdiyi ilə birlikdə yazılır.</p>
             <input
               type="password" autoFocus placeholder="Şifrə"
               value={kassaPwInput}
               onChange={e => setKassaPwInput(e.target.value)}
-              className="w-full border border-stone-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700"
+              className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700"
             />
             {kassaPwError && <p className="text-xs font-semibold text-red-500 mt-2">{kassaPwError}</p>}
             <div className="flex gap-2 justify-end mt-4">
               <button
                 type="button"
                 onClick={() => { setKassaPwPrompt(null); setKassaPwInput(''); setKassaPwError(null); }}
-                className="text-sm font-semibold text-stone-500 px-3 py-2 rounded-xl hover:bg-stone-100 transition-colors"
+                className="text-sm font-semibold text-stone-500 px-3 py-2 rounded-lg hover:bg-stone-100 transition-colors"
               >Ləğv et</button>
               <button
                 type="submit"
                 disabled={kassaPwBusy || !kassaPwInput}
-                className="bg-stone-900 hover:bg-stone-800 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors"
+                className="bg-stone-900 hover:bg-stone-800 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
               >Təsdiqlə</button>
             </div>
           </form>
@@ -5653,9 +5608,9 @@ function AdminPageContent() {
       {/* ── QR code modal ──────────────────────────────────────────────── */}
       {qrTable && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-xl text-center">
+          <div className="bg-white rounded-xl p-6 w-full max-w-xs shadow-xl text-center">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-stone-800">{qrTable.name} — QR Kod</h3>
+              <h3 className="font-semibold text-stone-800">{qrTable.name} — QR Kod</h3>
               <div className="flex items-center gap-2">
                 <button onClick={handlePrintQr} title="Çap et" className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100 hover:bg-primary-100 hover:text-primary-800 transition-colors">
                   <Printer className="w-4 h-4" />
@@ -5665,7 +5620,7 @@ function AdminPageContent() {
                 </button>
               </div>
             </div>
-            <div ref={qrRef} className="flex justify-center p-4 bg-white rounded-xl border border-stone-100">
+            <div ref={qrRef} className="flex justify-center p-4 bg-white rounded-lg border border-stone-200">
               <QRCode value={`${typeof window !== 'undefined' ? window.location.origin : ''}/${companySlug}/menu?table=${qrTable.id}`} size={180} />
             </div>
             <p className="text-xs text-stone-500 mt-3">/{companySlug}/menu?table={qrTable.id}</p>
@@ -5676,9 +5631,9 @@ function AdminPageContent() {
       {/* ── Create / Edit user modal ────────────────────────────────────── */}
       {showEmpForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm shadow-xl">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-stone-800">{editingEmp ? 'Sex əməkdaşını düzəlt' : 'Yeni sex əməkdaşı'}</h3>
+              <h3 className="font-semibold text-stone-800">{editingEmp ? 'Sex əməkdaşını düzəlt' : 'Yeni sex əməkdaşı'}</h3>
               <button onClick={() => setShowEmpForm(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100">
                 <X className="w-4 h-4" />
               </button>
@@ -5757,9 +5712,9 @@ function AdminPageContent() {
 
       {showStaffForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm shadow-xl">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-stone-800">{editingStaff ? 'PIN əməkdaşını düzəlt' : 'Yeni PIN əməkdaşı'}</h3>
+              <h3 className="font-semibold text-stone-800">{editingStaff ? 'PIN əməkdaşını düzəlt' : 'Yeni PIN əməkdaşı'}</h3>
               <button onClick={() => setShowStaffForm(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100">
                 <X className="w-4 h-4" />
               </button>
@@ -5807,7 +5762,7 @@ function AdminPageContent() {
                 <input
                   value={sName}
                   onChange={e => setSName(e.target.value)}
-                  className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full border border-stone-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
                   placeholder="Tam ad"
                   required
                 />
@@ -5820,7 +5775,7 @@ function AdminPageContent() {
                   value={sPin}
                   onChange={e => setSPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                   inputMode="numeric"
-                  className={`w-full border rounded-xl px-3 py-2.5 text-sm tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 ${sPin.length === 4 && WEAK_PINS.has(sPin) ? 'border-red-400 bg-red-50' : 'border-stone-200'}`}
+                  className={`w-full border rounded-lg px-3 py-2.5 text-sm tracking-[0.5em] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 ${sPin.length === 4 && WEAK_PINS.has(sPin) ? 'border-red-400 bg-red-50' : 'border-stone-200'}`}
                   placeholder={editingStaff ? 'Dəyişmək üçün daxil edin' : '4 rəqəm'}
                   required={!editingStaff}
                 />
@@ -5830,7 +5785,7 @@ function AdminPageContent() {
               </div>
               <div>
                 <label className="text-xs font-medium text-stone-600 block mb-1">Vəzifə</label>
-                <div className="flex gap-0.5 bg-stone-100 rounded-xl p-0.5">
+                <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5">
                   {(['seller', 'waiter', 'manager'] as const).map(r => (
                     <button key={r} type="button" onClick={() => setSRole(r)}
                       className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${sRole === r ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
@@ -5844,7 +5799,7 @@ function AdminPageContent() {
                 <div>
                   <label className="text-xs font-medium text-stone-600 block mb-1">Təsdiq kartı</label>
                   {editingStaff?.cardHash && !sCardClear && !sCard ? (
-                    <div className="flex items-center justify-between gap-2 border border-stone-200 rounded-xl px-3 py-2.5 text-sm">
+                    <div className="flex items-center justify-between gap-2 border border-stone-200 rounded-lg px-3 py-2.5 text-sm">
                       <span className="flex items-center gap-2 text-stone-700"><CreditCard className="w-4 h-4 text-stone-400" /> Kart saxlanılıb</span>
                       <button type="button" onClick={() => setSCardClear(true)} className="text-xs font-semibold text-red-600 hover:text-red-700">Sil</button>
                     </div>
@@ -5856,7 +5811,7 @@ function AdminPageContent() {
                       onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }}
                       autoCapitalize="characters"
                       autoCorrect="off"
-                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      className="w-full border border-stone-200 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-500"
                       placeholder="Kartı oxuyucuya toxundurun və ya nömrəni yazın"
                     />
                   )}
@@ -5867,7 +5822,7 @@ function AdminPageContent() {
               <button
                 type="submit"
                 disabled={sSaving}
-                className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+                className="w-full bg-primary-800 hover:bg-primary-900 disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors flex items-center justify-center gap-2"
               >
                 {sSaving && <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />}
                 {editingStaff ? 'Yadda saxla' : 'Əlavə et'}
@@ -5882,7 +5837,7 @@ function AdminPageContent() {
         const dup = categories.some(c => c.name === newCat.trim());
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            <form onSubmit={addCategory} className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
+            <form onSubmit={addCategory} className="bg-white rounded-xl shadow-xl p-6 w-80 space-y-4">
               <h3 className="text-base font-semibold text-stone-800">Yeni kateqoriya</h3>
               <input
                 autoFocus
@@ -5908,23 +5863,23 @@ function AdminPageContent() {
         const validCount = newItems.length + updatedItems.length;
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md flex flex-col max-h-[85vh]">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md flex flex-col max-h-[85vh]">
               <div className="p-6 pb-4">
                 <h3 className="text-base font-semibold text-stone-800">Menyu idxalı</h3>
                 <p className="text-sm text-stone-600 mt-1">{totalRows} sətir oxundu</p>
               </div>
               <div className="px-6 space-y-2 overflow-y-auto flex-1">
                 <div className="grid grid-cols-3 gap-2 text-center">
-                  <div className="bg-green-50 rounded-xl py-3">
-                    <p className="text-xl font-bold text-green-700">{newItems.length}</p>
+                  <div className="bg-green-50 rounded-lg py-3">
+                    <p className="text-lg font-semibold text-green-700">{newItems.length}</p>
                     <p className="text-xs text-green-600">yeni məhsul</p>
                   </div>
-                  <div className="bg-primary-50 rounded-xl py-3">
-                    <p className="text-xl font-bold text-primary-700">{updatedItems.length}</p>
+                  <div className="bg-primary-50 rounded-lg py-3">
+                    <p className="text-lg font-semibold text-primary-700">{updatedItems.length}</p>
                     <p className="text-xs text-primary-600">yenilənəcək</p>
                   </div>
-                  <div className="bg-blue-50 rounded-xl py-3">
-                    <p className="text-xl font-bold text-blue-700">{newCategories.length}</p>
+                  <div className="bg-blue-50 rounded-lg py-3">
+                    <p className="text-lg font-semibold text-blue-700">{newCategories.length}</p>
                     <p className="text-xs text-blue-600">yeni kateqoriya</p>
                   </div>
                 </div>
@@ -5932,7 +5887,7 @@ function AdminPageContent() {
                   <p className="text-xs text-stone-600">Yeni kateqoriyalar: {newCategories.map(c => c.name).join(', ')}</p>
                 )}
                 {errors.length > 0 && (
-                  <div className="bg-red-50 border border-red-100 rounded-xl p-3 space-y-1">
+                  <div className="bg-red-50 border border-red-100 rounded-lg p-3 space-y-1">
                     <p className="text-xs font-semibold text-red-600">{errors.length} xəta — bu sətirlər ötürüləcək:</p>
                     {errors.map((e, i) => <p key={i} className="text-xs text-red-500">{e}</p>)}
                   </div>
@@ -5960,7 +5915,7 @@ function AdminPageContent() {
       {/* ── Trash modal ─────────────────────────────────────────────────── */}
       {showTrash && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[80vh] flex flex-col">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between p-5 border-b border-stone-100">
               <div className="flex items-center gap-2">
                 <Trash2 className="w-4 h-4 text-stone-500" />
@@ -5989,7 +5944,7 @@ function AdminPageContent() {
                 const sub = item.type === 'menu' ? String(d.category ?? '') : item.type === 'stock_item' ? 'İnqrediyent' : 'Kateqoriya';
                 const daysLeft = Math.max(0, 30 - Math.floor((Date.now() - new Date(item.deletedAt).getTime()) / 86400000));
                 return (
-                  <div key={item.id} className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-stone-100 hover:bg-stone-50">
+                  <div key={item.id} className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-stone-100 hover:bg-stone-50">
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-stone-800 truncate">{label}</p>
                       <p className="text-xs text-stone-500">{sub} · {daysLeft} gün qalıb</p>
@@ -6025,7 +5980,7 @@ function AdminPageContent() {
       {/* ── Rename category dialog ───────────────────────────────────────── */}
       {editCatTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-80 space-y-4">
             <h3 className="text-base font-semibold text-stone-800">Kateqoriyanı dəyiş</h3>
             <input
               autoFocus
@@ -6046,7 +6001,7 @@ function AdminPageContent() {
       {/* ── Empty trash confirmation dialog ─────────────────────────────── */}
       {confirmEmptyTrash && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl p-6 w-80 space-y-4">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-80 space-y-4">
             <h3 className="text-base font-semibold text-stone-800">Zibil qutusunu boşalt?</h3>
             <p className="text-sm text-stone-600">
               <span className="font-medium text-stone-700">{trash.length} element</span> həmişəlik silinəcək. Bu əməliyyat geri qaytarıla bilməz.
@@ -6069,11 +6024,11 @@ function AdminPageContent() {
       {/* ── Profile Modal ── */}
       {showProfile && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-y-auto max-h-[90vh]">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-xl overflow-y-auto max-h-[90vh]">
             <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-stone-100">
               <div className="flex items-center gap-2">
                 <UserCircle className="w-5 h-5 text-primary-800" />
-                <h3 className="font-bold text-stone-800">Profil</h3>
+                <h3 className="font-semibold text-stone-800">Profil</h3>
               </div>
               <button onClick={() => setShowProfile(false)} className="w-8 h-8 flex items-center justify-center rounded-lg bg-stone-100 hover:bg-stone-200 transition-colors">
                 <X className="w-4 h-4" />
@@ -6090,7 +6045,7 @@ function AdminPageContent() {
                     <input
                       value={profName}
                       onChange={e => setProfName(e.target.value)}
-                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
+                      className="w-full border border-stone-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                       placeholder="Məkanın adı"
                     />
                   </div>
@@ -6102,7 +6057,7 @@ function AdminPageContent() {
                       autoCapitalize="none"
                       autoCorrect="off"
                       spellCheck={false}
-                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-400"
+                      className="w-full border border-stone-200 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary-400"
                       placeholder="istifadeci"
                     />
                     <p className="text-xs text-stone-500 mt-1">Girişdə bu ad istifadə olunur — dəyişsəniz, növbəti dəfə yeni adla daxil olun</p>
@@ -6112,7 +6067,7 @@ function AdminPageContent() {
                     <input
                       value={profOwner}
                       onChange={e => setProfOwner(e.target.value)}
-                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
+                      className="w-full border border-stone-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                       placeholder="Ad Soyad"
                     />
                   </div>
@@ -6121,7 +6076,7 @@ function AdminPageContent() {
                     <input
                       value={profAddress}
                       onChange={e => setProfAddress(e.target.value)}
-                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
+                      className="w-full border border-stone-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                       placeholder="Şəhər, küçə, ev"
                     />
                   </div>
@@ -6130,7 +6085,7 @@ function AdminPageContent() {
                     <input
                       value={profPhone}
                       onChange={e => setProfPhone(e.target.value)}
-                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
+                      className="w-full border border-stone-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                       placeholder="+994 50 000 00 00"
                     />
                   </div>
@@ -6141,14 +6096,14 @@ function AdminPageContent() {
                         type="time"
                         value={profOpen}
                         onChange={e => setProfOpen(e.target.value)}
-                        className="flex-1 border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
+                        className="flex-1 border border-stone-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                       />
                       <span className="text-stone-400 text-sm">—</span>
                       <input
                         type="time"
                         value={profClose}
                         onChange={e => setProfClose(e.target.value)}
-                        className="flex-1 border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
+                        className="flex-1 border border-stone-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                       />
                     </div>
                     <p className="text-xs text-stone-500 mt-1">
@@ -6161,7 +6116,7 @@ function AdminPageContent() {
                     <button
                       onClick={handleSaveProfile}
                       disabled={profSaving}
-                      className="flex-1 bg-primary-800 hover:bg-primary-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors"
+                      className="flex-1 bg-primary-800 hover:bg-primary-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors"
                     >
                       {profSaving ? 'Saxlanır...' : 'Yadda saxla'}
                     </button>
@@ -6183,7 +6138,7 @@ function AdminPageContent() {
                         type={pwShowCurrent ? 'text' : 'password'}
                         value={pwCurrent}
                         onChange={e => setPwCurrent(e.target.value)}
-                        className="w-full border border-stone-200 rounded-xl px-3 py-2.5 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
+                        className="w-full border border-stone-200 rounded-lg px-3 py-2.5 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                         placeholder="••••••••"
                       />
                       <button type="button" onClick={() => setPwShowCurrent(v => !v)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-500">
@@ -6201,7 +6156,7 @@ function AdminPageContent() {
                       type="password"
                       value={pwConfirm}
                       onChange={e => setPwConfirm(e.target.value)}
-                      className="w-full border border-stone-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
+                      className="w-full border border-stone-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400"
                       placeholder="••••••••"
                     />
                   </div>
@@ -6209,7 +6164,7 @@ function AdminPageContent() {
                     <button
                       onClick={handleChangePassword}
                       disabled={pwSaving}
-                      className="flex-1 bg-stone-800 hover:bg-stone-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors"
+                      className="flex-1 bg-stone-800 hover:bg-stone-900 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors"
                     >
                       {pwSaving ? 'Dəyişdirilir...' : 'Şifrəni dəyiş'}
                     </button>
@@ -6235,7 +6190,7 @@ function AdminPageContent() {
                       setPrinterConnected(ok);
                       if (!ok) setPrinterError('Yazıcı seçilmədi və ya bağlantı alınmadı');
                     }}
-                    className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors"
+                    className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors"
                   >
                     Yazıcı seç
                   </button>

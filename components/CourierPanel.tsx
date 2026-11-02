@@ -20,7 +20,7 @@ import { getSession } from '@/lib/auth';
 import { listedCouriers } from '@/lib/couriers';
 import { Courier, CourierLedger, CourierPayMethod, CourierPayment } from '@/types';
 import { DialogState } from '@/components/AppDialog';
-import { inputCls, btnPrimary, btnGhost, Modal } from '@/components/panel-ui';
+import { inputCls, btnPrimary, btnGhost, Modal, card, Segmented, DateRange } from '@/components/panel-ui';
 import { CompanySettings, businessToday, businessDayStartUtc, addDays } from '@/lib/business-day';
 import { formatDateTime } from '@/lib/dates';
 
@@ -146,7 +146,7 @@ function CouriersTab({ couriers, reload, flash, fail, setDialog }: {
         <p className="text-xs text-stone-400">Kuryer pulu satıcıya təhvil verir — kassadan qeydə alınır.</p>
         <button className={btnPrimary} onClick={() => open('new')}><Plus className="w-4 h-4" /> Yeni kuryer</button>
       </div>
-      <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
+      <div className="bg-white rounded-xl border border-stone-200 divide-y divide-stone-100">
         {shown.length === 0 && <p className="text-sm text-stone-400 p-6 text-center">Kuryer yoxdur</p>}
         {shown.map(c => {
           const owed = balance[c.id] ?? 0;
@@ -287,7 +287,7 @@ function PaymentsTab({ couriers, flash, fail, setDialog }: {
           <span className="text-sm text-stone-500">Cəmi: <b className="tabular-nums text-emerald-600">{total.toFixed(2)} ₼</b></span>
         </div>
       </div>
-      <div className="bg-white rounded-2xl border border-stone-100 divide-y divide-stone-100">
+      <div className="bg-white rounded-xl border border-stone-200 divide-y divide-stone-100">
         {visible.length === 0 && <p className="text-sm text-stone-400 p-6 text-center">Ödəniş yoxdur</p>}
         {visible.map(p => (
           <div key={p.id} className="flex items-start justify-between px-4 py-3 gap-3">
@@ -397,24 +397,18 @@ function ReportTab({ couriers, bizSettings }: { couriers: Courier[]; bizSettings
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2 bg-stone-50 border border-stone-200 rounded-lg p-2">
-        {(['bugün', '7g', '30g', 'ay'] as ReportPreset[]).map(p => (
-          <button
-            key={p}
-            onClick={() => { setPreset(p); setCustomFrom(''); setCustomTo(''); }}
-            className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${
-              !valid && preset === p ? 'bg-stone-800 text-white' : 'text-stone-600 hover:bg-stone-100'
-            }`}
-          >
-            {p === 'bugün' ? 'Bugün' : p === 'ay' ? 'Bu ay' : p === '7g' ? '7 gün' : '30 gün'}
-          </button>
-        ))}
-        <span className="text-xs text-stone-400 px-1">və ya</span>
-        <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
-          className="px-2 py-1.5 text-xs rounded-lg border border-stone-200 focus:outline-none focus:ring-2 focus:ring-stone-300" />
-        <span className="text-xs text-stone-400">—</span>
-        <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
-          className="px-2 py-1.5 text-xs rounded-lg border border-stone-200 focus:outline-none focus:ring-2 focus:ring-stone-300" />
+      <div className={`${card} p-2 flex flex-wrap items-center gap-2`}>
+        <Segmented
+          options={(['bugün', '7g', '30g', 'ay'] as ReportPreset[]).map(p => ({
+            value: p, label: p === 'bugün' ? 'Bugün' : p === 'ay' ? 'Bu ay' : p === '7g' ? '7 gün' : '30 gün',
+          }))}
+          value={valid ? null : preset}
+          onChange={p => { setPreset(p); setCustomFrom(''); setCustomTo(''); }}
+        />
+        <DateRange
+          from={customFrom} to={customTo} onFrom={setCustomFrom} onTo={setCustomTo}
+          active={valid} onClear={() => { setCustomFrom(''); setCustomTo(''); }}
+        />
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -424,9 +418,9 @@ function ReportTab({ couriers, bizSettings }: { couriers: Courier[]; bizSettings
           { label: 'Ödənilib', value: `${totals.paid.toFixed(2)} ₼`, tone: 'text-emerald-600' },
           { label: 'Cari borc', value: `${totals.outstanding.toFixed(2)} ₼`, tone: 'text-red-600' },
         ].map(k => (
-          <div key={k.label} className="bg-white rounded-2xl border border-stone-100 p-4">
+          <div key={k.label} className="bg-white rounded-xl border border-stone-200 p-4">
             <p className="text-xs text-stone-400 mb-1">{k.label}</p>
-            <p className={`text-lg font-bold tabular-nums ${k.tone}`}>{k.value}</p>
+            <p className={`text-lg font-semibold tabular-nums ${k.tone}`}>{k.value}</p>
           </div>
         ))}
       </div>
@@ -441,7 +435,7 @@ function ReportTab({ couriers, bizSettings }: { couriers: Courier[]; bizSettings
       {loading ? (
         <div className="text-sm text-stone-400 py-10 text-center">Yüklənir…</div>
       ) : (
-        <div className="bg-white rounded-2xl border border-stone-100 overflow-x-auto">
+        <div className="bg-white rounded-xl border border-stone-200 overflow-x-auto">
           {rows.length === 0 ? (
             <p className="text-sm text-stone-400 p-6 text-center">Bu aralıqda kuryer sifarişi yoxdur</p>
           ) : (
