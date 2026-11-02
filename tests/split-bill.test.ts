@@ -1,6 +1,7 @@
 // "Hesabı böl": one table's bill becomes one per guest. The bills must add up
 // to the bill they came from, and a dish sold by weight is never cut.
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { applySplit, canSplit, cleanSplitParts, splitParts, splitPieces, splitRequest } from '@/lib/split-bill';
 import type { Order } from '@/types';
@@ -82,5 +83,18 @@ describe('split request', () => {
     expect(applySplit(order, [{ orderId: 'B', lines: [
       { id: 'cap', quantity: 4, newId: 'x' }, { id: 'cro', quantity: 2, newId: 'y' },
     ] }])).toBeNull();
+  });
+
+  // 2026-11-02: a guest whose dishes were all removed meanwhile got an empty
+  // bill on the table. Their bill is skipped instead, here and in split_order().
+  it('makes no bill for a guest with nothing still on the order', () => {
+    const order = { id: 'A', items: withIds } as unknown as Order;
+    const done = applySplit(order, [
+      { orderId: 'B', lines: [{ id: 'cap', quantity: 1, newId: 'x' }] },
+      { orderId: 'C', lines: [{ id: 'gone', quantity: 1, newId: 'y' }] },
+    ])!;
+    expect(done.created.map(o => o.id)).toEqual(['B']);
+    const sql = readFileSync('supabase/migrations/20261108_split_no_empty_bill.sql', 'utf8');
+    expect(sql).toMatch(/if not exists \(\s*select 1 from jsonb_to_recordset[\s\S]*?then continue; end if;/);
   });
 });

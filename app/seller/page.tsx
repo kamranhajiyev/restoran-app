@@ -85,7 +85,7 @@ import { onCompanyChange } from '@/lib/company-changes';
 import { DATA_TABLES, gatherParts, type Part } from '@/lib/data-refresh';
 import { azNormalize } from '@/lib/az-text';
 import { formatDayMonthTime, formatTime } from '@/lib/dates';
-import { dropTableDraft, loadTableDrafts, openTableDraft, putTableDraft, saveTableDrafts, tableDraftLabel, type TableDrafts } from '@/lib/table-drafts';
+import { dropOvertakenDrafts, dropTableDraft, loadTableDrafts, openTableDraft, putTableDraft, saveTableDrafts, tableDraftLabel, type TableDrafts } from '@/lib/table-drafts';
 
 // How many writes the server has not seen. Two stores answer that question — the
 // browser till's IndexedDB queue and the desktop till's SQLite outbox — but only
@@ -783,10 +783,15 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const updateTableDrafts = useCallback((change: (prev: TableDrafts) => TableDrafts) => {
     setTableDrafts(prev => {
       const next = change(prev);
-      if (draftCompany.current) saveTableDrafts(draftCompany.current, next);
+      if (next !== prev && draftCompany.current) saveTableDrafts(draftCompany.current, next);
       return next;
     });
   }, []);
+  // A table another device ordered on after its cart here was last touched
+  // drops that cart, or it would come back and send the same dishes again.
+  useEffect(() => {
+    updateTableDrafts(d => dropOvertakenDrafts(d, orders.filter(isOrderOpen)));
+  }, [orders, updateTableDrafts]);
   const draftTable = view === 'menu' && orderType === 'masa' && !appendOrderId ? selectedTable : null;
   useEffect(() => {
     if (draftTable == null) return;
@@ -2085,9 +2090,12 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     setSelectedTable(tableNum ?? null);
     setSelectedCourier(courierId ?? null);
     // A table left half-ordered opens with what was in its cart, under the
-    // order type it was started with while that type still exists.
-    const draft = type === 'masa' && tableNum != null ? openTableDraft(tableDrafts, tableNum, menu) : null;
-    if (draft?.saleTypeId && saleTypes.some(t => t.id === draft.saleTypeId)) setSaleTypeId(draft.saleTypeId);
+    // order type it was started with while that type still exists, at today's
+    // prices for that type.
+    const saved = type === 'masa' && tableNum != null ? tableDrafts[String(tableNum)] : undefined;
+    const typeId = saved?.saleTypeId && saleTypes.some(t => t.id === saved.saleTypeId) ? saved.saleTypeId : saleTypeId;
+    const draft = saved ? openTableDraft(tableDrafts, tableNum!, menu, changeFor(typeId ?? undefined, saleTypes)) : null;
+    if (draft) setSaleTypeId(typeId);
     setCart(draft?.items ?? []);
     setNote(draft?.note ?? '');
     setMenuSearch('');
@@ -4418,7 +4426,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   <div className="flex items-center gap-3 text-xs text-stone-600">
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-100 border border-green-300 inline-block" /> Boş</span>
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block" /> Dolu</span>
-                    {Object.keys(tableDrafts).length > 0 && (
+                    {Object.values(tableDrafts).some(d => tableDraftLabel(d)) && (
                       <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-100 border border-blue-300 inline-block" /> Göndərilməyib</span>
                     )}
                   </div>

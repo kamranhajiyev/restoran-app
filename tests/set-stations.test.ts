@@ -28,11 +28,16 @@ const line = (id: string, quantity: number, extra: Partial<OrderItem> = {}): Ord
   ({ id: `row-${id}`, menuItem: { ...byId.get(id)!, name: byId.get(id)!.name }, quantity, ...extra });
 
 describe('a set at the sexes', () => {
-  it('goes as its parts, each to its own sex, named with size and set', () => {
+  // A part is named with its size only; its set rides in inSet, so a ticket
+  // prints it under the set's name instead of repeating it on every part.
+  it('goes as its parts, each to its own sex, named with size, with its set beside', () => {
     const lines = prepLines(line('set2', 2, { modifiers: 'acısız' }), byId, stations);
     expect(lines.map(l => [l.stationId, l.item.menuItem.name, l.item.quantity, l.item.modifiers])).toEqual([
-      ['kitchen', 'Plov · qulyaj (Set 2)', 2, 'acısız'],
-      ['bar', 'Fanta (Set 2)', 4, 'acısız'],
+      ['kitchen', 'Plov · qulyaj', 2, 'acısız'],
+      ['bar', 'Fanta', 4, 'acısız'],
+    ]);
+    expect(lines.map(l => l.item.inSet)).toEqual([
+      { name: 'Set 2', qty: 2, key: 'row-set2' }, { name: 'Set 2', qty: 2, key: 'row-set2' },
     ]);
     expect(new Set(lines.map(l => l.item.id)).size).toBe(2);
   });
@@ -49,8 +54,8 @@ describe('a set at the sexes', () => {
 
   it('shows each sex screen only its part', () => {
     const order = { items: [line('set2', 1)], removedItems: [], createdAt: '2026-10-29T10:00:00Z' };
-    expect(sliceForStation(order, 'bar', byId, stations).items.map(i => i.menuItem.name)).toEqual(['Fanta (Set 2)']);
-    expect(sliceForStation(order, 'kitchen', byId, stations).items.map(i => i.menuItem.name)).toEqual(['Plov · qulyaj (Set 2)']);
+    expect(sliceForStation(order, 'bar', byId, stations).items.map(i => i.menuItem.name)).toEqual(['Fanta']);
+    expect(sliceForStation(order, 'kitchen', byId, stations).items.map(i => i.menuItem.name)).toEqual(['Plov · qulyaj']);
   });
 
   it('is ready for the seller only when every sex is', () => {

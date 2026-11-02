@@ -6,7 +6,8 @@ import { cartToPay, chargeFor, dishesTotal, NO_SERVICE_CHARGE, serviceAmount, ty
 import { typedPrice, type PriceChange } from '@/lib/order-types';
 import { applyBrand } from '@/lib/branding';
 import { supabase } from '@/lib/supabase';
-import { MenuItem, MenuItemVariant, RestaurantTable } from '@/types';
+import { guestSetLine } from '@/lib/set-items';
+import { MenuItem, MenuItemVariant, RestaurantTable, SetPart } from '@/types';
 
 type Screen = 'menu' | 'confirm';
 
@@ -20,14 +21,14 @@ const TYPE_ERRORS: Record<string, string> = {
   pick_table: 'Bu QR masaya bağlıdır. Masanın üstündəki QR-ı oxudun.',
 };
 
-async function fetchLinkType(companyId: string, typeId: string | undefined, tableId: number | null): Promise<LinkType | { error: string }> {
+async function fetchLinkType(companyId: string, typeId: string | undefined, tableId: number | null): Promise<(LinkType & { sets: Record<string, SetPart[]> }) | { error: string }> {
   const q = new URLSearchParams({ companyId });
   if (typeId) q.set('type', typeId);
   if (tableId) q.set('table', String(tableId));
   try {
     const r = await fetch(`/api/guest-order?${q}`, { signal: AbortSignal.timeout(20000) });
     const body = await r.json();
-    if (body?.ok && body.type) return body.type as LinkType;
+    if (body?.ok && body.type) return { ...(body.type as LinkType), sets: body.sets ?? {} };
     return { error: TYPE_ERRORS[body?.error] ?? 'Menyu yüklənmədi. Səhifəni yeniləyin.' };
   } catch {
     return { error: 'Menyu yüklənmədi. Səhifəni yeniləyin.' };
@@ -59,6 +60,8 @@ export default function CustomerMenuPage({
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [table, setTable] = useState<RestaurantTable | null>(null);
   const [menu, setMenu] = useState<MenuItem[]>([]);
+  // Every item, hidden ones too: a set can hold an ayran that is not on the QR menu.
+  const [menuAll, setMenuAll] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<{ name: string }[]>([]);
   const [activeCategory, setActiveCategory] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -120,6 +123,7 @@ export default function CustomerMenuPage({
         qrVisible: (r.qr_visible as boolean) ?? true,
         variants: (r.variants as MenuItem['variants'])?.map(v => ({ ...v, price: typed(v.price) })) ?? undefined,
         image: (r.image as string) ?? undefined,
+        setItems: lt.sets[r.id as string],
       }));
       // Two independent switches, both of which must be on for a customer to see it:
       // `available` (sold at all — shared with the POS) and `qr_visible` (shown on
@@ -146,6 +150,7 @@ export default function CustomerMenuPage({
       setTable(t);
       const visible = m.filter((item: MenuItem) => item.available && item.qrVisible !== false);
       setMenu(visible);
+      setMenuAll(m);
       setCategories(availableCats);
       const firstCat = availableCats.find((cat: { name: string }) => visible.some((i: MenuItem) => i.category === cat.name));
       if (firstCat) setActiveCategory(firstCat.name);
@@ -359,7 +364,9 @@ export default function CustomerMenuPage({
                   : <div className="w-full aspect-[4/3] bg-primary-50 flex items-center justify-center"><Coffee className="w-8 h-8 text-primary-200" /></div>
                 }
                 <div className="p-3 flex flex-col flex-1">
-                  <p className="text-sm font-semibold text-gray-800 flex-1">{item.name}</p>
+                  <p className="text-sm font-semibold text-gray-800">{item.name}</p>
+                  {item.setItems && <p className="text-xs text-gray-500 mt-1">{guestSetLine(item.setItems, menuAll)}</p>}
+                  <div className="flex-1" />
                   <p className="text-xs text-primary-800 font-bold mt-1">
                     {hasVariants
                       ? `${Math.min(...item.variants!.map(v => v.price)).toFixed(2)} ₼ →`

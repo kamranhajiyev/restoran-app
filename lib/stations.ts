@@ -37,8 +37,9 @@ export function stationForItem(
 }
 
 // What a line is to the sexes. A dish is itself, at its own sex. A set is what
-// is inside it, each part at the sex that makes it: "Plov (Set 1)" in the
-// kitchen and "Ayran (Set 1)" at the bar, with the set's count times the part's.
+// is inside it, each part at the sex that makes it: Plov in the kitchen and
+// Ayran at the bar, with the set's count times the part's, each carrying its
+// set in inSet so a ticket or screen shows it under the set's name.
 // A set whose parts were all deleted since goes whole to its own sex, so it is
 // never lost. public.prep_lines() is the same rule in SQL, for the server's
 // tickets; the two must name the same sexes.
@@ -61,8 +62,9 @@ export function prepLines(
       item: {
         ...item,
         id: item.id ? `${item.id}:${n}` : undefined,
-        menuItem: { ...inside, name: `${inside.name}${size ? ` · ${size.name}` : ''} (${item.menuItem.name})` },
+        menuItem: { ...inside, name: `${inside.name}${size ? ` · ${size.name}` : ''}` },
         quantity: item.quantity * Math.max(1, p.qty),
+        inSet: { name: item.menuItem.name, qty: item.quantity, key: item.id ?? `${item.menuItem.id}|${item.modifiers ?? ''}` },
       },
     }];
   });

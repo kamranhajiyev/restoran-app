@@ -122,6 +122,9 @@ export interface OrderItem {
   noPrint?: boolean;    // "Mətbəxə çap et" was unticked — no kitchen slip for this line
   printedStationId?: string; // the desktop till already printed this line's ticket there itself
   printedStationIds?: string[]; // every sex it printed at — a set goes to more than one
+  // Only on a set's part as lib/stations prepLines hands it to a ticket or a sex
+  // screen: the set it belongs to, how many of the set, and the order line.
+  inSet?: { name: string; qty: number; key: string };
   createdAt?: string;   // groups the item into a batch: the original order, or a later "Əlavə et"
   removedAt?: string;   // set = struck through on the order card, and excluded from every total
   removedBy?: string;

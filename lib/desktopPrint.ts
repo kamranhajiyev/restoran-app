@@ -502,7 +502,10 @@ export async function printKitchenNow(t: KitchenTicket): Promise<OrderItem[]> {
       note: t.note,
       at,
       items: lines
-        .map(({ line }) => ({ name: line.menuItem.name, qty: line.quantity, modifiers: line.modifiers ?? null }))
+        .map(({ line }) => ({
+          name: line.menuItem.name, qty: line.quantity, modifiers: line.modifiers ?? null,
+          ...(line.inSet ? { set: line.inSet.name, setQty: line.inSet.qty, setKey: line.inSet.key } : {}),
+        }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     };
     try {

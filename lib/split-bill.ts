@@ -140,6 +140,8 @@ export function applySplit(
         taken.push({ ...line, id: l.newId, quantity: l.quantity });
       }
     }
+    // Nothing of it is still on the bill: no empty bill, as split_order() skips it.
+    if (taken.length === 0) continue;
     created.push({
       ...order,
       id: part.orderId,

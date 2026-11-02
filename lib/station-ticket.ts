@@ -11,7 +11,7 @@
 // agent/ runs in Node with no DOM and keeps using the character path. Both
 // build the same layout, so a change to one belongs in the other.
 
-import { ESC, placeLines, WIDTH, itemRows, sizedNoteRows, stringToBytes, wrap, type TicketPayload } from './escpos';
+import { ESC, placeLines, WIDTH, itemRows, partRows, ruleText, sizedNoteRows, stringToBytes, ticketRows, wrap, type TicketPayload } from './escpos';
 import { rasterize, type Line } from './raster';
 import { ticketFontReady } from './ticket-font';
 import { formatDayMonthTime } from './dates';
@@ -75,13 +75,15 @@ export async function buildStationTicketRaster(p: TicketPayload, tableName?: (id
     for (const row of wrap(p.note ?? '', WIDTH)) lines.push({ text: row, big: true });
   }
 
-  for (const item of p.items) {
+  // Sets as blocks, then plain dishes (escpos ticketRows). The whole raster is
+  // bold already; a set stands out by its capitals and its parts' indent.
+  for (const r of ticketRows(p.items)) {
     // Quantity first and doubled in size: from arm's length that's the only
     // number a cook needs to read correctly.
-    for (const row of itemRows(`${item.qty}x`, item.name, ITEM_COLS)) {
-      lines.push({ text: row, scale: ITEM_SCALE });
-    }
-    if (item.modifiers) lines.push({ text: `    ${item.modifiers}` });
+    if (r.kind === 'rule') { lines.push({ text: ruleText(r.heavy) }); continue; }
+    const rows = r.kind === 'part' ? partRows(r.qty, r.name, ITEM_COLS) : itemRows(`${r.qty}x`, r.name, ITEM_COLS);
+    for (const row of rows) lines.push({ text: row, scale: ITEM_SCALE });
+    if (r.kind !== 'part' && r.modifiers) lines.push({ text: `    ${r.modifiers}` });
   }
 
   lines.push({ text: '='.repeat(WIDTH) });

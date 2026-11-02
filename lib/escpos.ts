@@ -113,6 +113,65 @@ export interface TicketItem {
   name: string;
   qty: number;
   modifiers?: string | null;
+  // A set's part: the set's name and count, and its order line, so the part
+  // prints under its set (ticketRows). Absent on a dish, and on any ticket
+  // queued before 20261109_set_block_tickets.sql.
+  set?: string | null;
+  setQty?: number | null;
+  setKey?: string | null;
+}
+
+/** One row of a ticket's dish list, before it is drawn. */
+export type TicketRow =
+  | { kind: 'set'; qty: number; name: string; modifiers?: string | null }
+  | { kind: 'part'; qty: number; name: string }
+  | { kind: 'dish'; qty: number; name: string; modifiers?: string | null }
+  | { kind: 'rule'; heavy: boolean };
+
+/**
+ * A ticket's dishes as the cook reads them: each set once, upper-case, with its
+ * parts at this sex under it and a dotted line between sets; then a double line
+ * and the plain dishes. A set's note is shown once, under its name.
+ *
+ *   2x ECO LAHMACUN SET
+ *     · 2x Fri · yarim
+ *   - - - - - - - - - -
+ *   1x AİLƏ SETİ
+ *     · 1x Plov
+ *   ===================
+ *   1x Çoban salatı
+ */
+export function ticketRows(items: TicketItem[]): TicketRow[] {
+  const sets = new Map<string, { name: string; qty: number; modifiers?: string | null; parts: TicketItem[] }>();
+  const dishes: TicketItem[] = [];
+  for (const item of items) {
+    if (!item.set) { dishes.push(item); continue; }
+    const key = item.setKey ?? `${item.set}|${item.setQty}|${item.modifiers ?? ''}`;
+    const block = sets.get(key) ?? { name: item.set, qty: item.setQty ?? 1, modifiers: item.modifiers, parts: [] };
+    block.parts.push(item);
+    sets.set(key, block);
+  }
+  const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, 'az');
+  const rows: TicketRow[] = [];
+  [...sets.values()].sort(byName).forEach((block, i) => {
+    if (i > 0) rows.push({ kind: 'rule', heavy: false });
+    rows.push({ kind: 'set', qty: block.qty, name: block.name.toLocaleUpperCase('az'), modifiers: block.modifiers });
+    for (const p of block.parts.sort(byName)) rows.push({ kind: 'part', qty: p.qty, name: p.name });
+  });
+  if (rows.length > 0 && dishes.length > 0) rows.push({ kind: 'rule', heavy: true });
+  for (const d of dishes.sort(byName)) rows.push({ kind: 'dish', qty: d.qty, name: d.name, modifiers: d.modifiers });
+  return rows;
+}
+
+/** A set's part, indented under its set: "  · 2x Fri · yarim", wrapped under its name. */
+export function partRows(qty: number, name: string, cols = WIDTH): string[] {
+  const lead = `  · ${qty}x `;
+  return wrap(name, cols - lead.length).map((r, i) => (i === 0 ? lead : ' '.repeat(lead.length)) + r);
+}
+
+/** The dotted line between sets, and the double one before the plain dishes. */
+export function ruleText(heavy: boolean, cols = WIDTH): string {
+  return heavy ? '='.repeat(cols) : '- '.repeat(Math.floor(cols / 2)).trimEnd();
 }
 
 export interface TicketPayload {
@@ -199,13 +258,20 @@ export function buildStationTicket(p: TicketPayload): Uint8Array {
     for (const row of wrap(p.note ?? '', WIDTH)) lines.push(ESC.BIG, `${row}\n`, ESC.NORMAL);
   }
 
-  for (const item of p.items) {
+  for (const r of ticketRows(p.items)) {
     // Quantity first and doubled in size: from arm's length that's the only
     // number a cook needs to read correctly.
-    for (const row of itemRows(`${item.qty}x`, item.name)) {
+    if (r.kind === 'rule') { lines.push(`${ruleText(r.heavy)}\n`); continue; }
+    if (r.kind === 'part') {
+      for (const row of partRows(r.qty, r.name)) lines.push(ESC.BIG, `${row}\n`, ESC.NORMAL);
+      continue;
+    }
+    if (r.kind === 'set') lines.push(ESC.BOLD_ON);
+    for (const row of itemRows(`${r.qty}x`, r.name)) {
       lines.push(ESC.BIG, `${row}\n`, ESC.NORMAL);
     }
-    if (item.modifiers) lines.push(`    ${item.modifiers}\n`);
+    if (r.kind === 'set') lines.push(ESC.BOLD_OFF);
+    if (r.modifiers) lines.push(`    ${r.modifiers}\n`);
   }
 
   lines.push('='.repeat(WIDTH) + '\n');

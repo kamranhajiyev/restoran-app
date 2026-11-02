@@ -7,7 +7,7 @@
 // nothing else. No totals, no payment, no menu.
 
 import { splitItemNote } from '@/lib/item-note';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Bell, CircleCheck, Check, Settings } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
@@ -664,7 +664,14 @@ function StationCard({
             )}
             <ul className="space-y-[0.375em]">
               {batch.items.map((item, j) => (
-                <li key={item.id ?? `${i}-${j}`} className="flex items-start gap-[0.6em] text-[0.875em]">
+                <Fragment key={item.id ?? `${i}-${j}`}>
+                {/* A set's parts under its name, as the ticket prints them. */}
+                {item.inSet && batch.items[j - 1]?.inSet?.key !== item.inSet.key && (
+                  <li className="text-[0.75em] font-bold uppercase tracking-wide text-stone-500 pt-[0.2em]">
+                    {item.inSet.qty}x {item.inSet.name}
+                  </li>
+                )}
+                <li className={`flex items-start gap-[0.6em] text-[0.875em] ${item.inSet ? 'pl-[1em]' : ''}`}>
                   {/* A filled badge, not "2×" in the same ink as the dish. How many is
                       the number a cook gets wrong from across the room, and a count
                       that reads as part of the name is the way that happens. */}
@@ -684,6 +691,7 @@ function StationCard({
                     )}
                   </span>
                 </li>
+                </Fragment>
               ))}
             </ul>
           </div>

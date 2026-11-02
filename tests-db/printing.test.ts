@@ -105,7 +105,8 @@ describe('kitchen tickets', () => {
     expect(ids).toHaveLength(1);
     const [job] = [...a, ...b];
     expect(job.kind).toBe('new');
-    expect(job.payload.items).toEqual([{ name: 'Autotest kabab', qty: 2, modifiers: null }]);
+    // A plain dish: no set (20261109_set_block_tickets.sql gives every line the keys).
+    expect(job.payload.items).toEqual([expect.objectContaining({ name: 'Autotest kabab', qty: 2, modifiers: null, set: null, setQty: null })]);
   });
 
   it('are not handed out again once printed', async () => {

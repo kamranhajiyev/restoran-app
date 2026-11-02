@@ -114,10 +114,11 @@ describe('a set', () => {
 
     const { data: jobs } = await admin.from('print_jobs').select('station_id, kind, payload').eq('order_id', orderId);
     const at = (station: string) => (jobs ?? []).filter(j => j.station_id === station)
-      .flatMap(j => (j.payload.items as { name: string; qty: number }[]).map(i => `${i.name} × ${i.qty}`));
+      .flatMap(j => (j.payload.items as { name: string; qty: number; set?: string; setQty?: number }[])
+        .map(i => `${i.name} × ${i.qty} [${i.set} × ${i.setQty}]`));
     expect(jobs!.map(j => j.kind)).toEqual(['new', 'new']);
-    expect(at(ids.kitchen)).toEqual(['Autotest set plov · qulyaj (Autotest set 1) × 2']);
-    expect(at(ids.bar)).toEqual(['Autotest set ayran (Autotest set 1) × 4']);
+    expect(at(ids.kitchen)).toEqual(['Autotest set plov · qulyaj × 2 [Autotest set 1 × 2]']);
+    expect(at(ids.bar)).toEqual(['Autotest set ayran × 4 [Autotest set 1 × 2]']);
   });
 
   it('takes nothing from stock before it is paid', async () => {

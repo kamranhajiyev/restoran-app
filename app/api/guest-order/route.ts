@@ -33,7 +33,14 @@ export async function GET(req: NextRequest) {
   if (!company) return Response.json({ ok: false, error: 'closed' }, { status: 403 });
   const t = typeFor(company, q.get('type'), !!q.get('table'));
   if ('error' in t) return Response.json({ ok: false, error: t.error }, { status: 400 });
-  return Response.json({ ok: true, type: { id: t.id, name: t.name, builtIn: t.builtIn ?? null, change: t.change } });
+  // What each set holds, for the menu to show under its name. The public menu
+  // function does not carry set_items, so it comes from here.
+  const { data: setRows } = await createServerClient().from('menu_items')
+    .select('id, set_items')
+    .eq('company_id', companyId).not('set_items', 'is', null);
+  const sets: Record<string, unknown> = {};
+  for (const r of setRows ?? []) if (Array.isArray(r.set_items) && r.set_items.length) sets[r.id] = r.set_items;
+  return Response.json({ ok: true, type: { id: t.id, name: t.name, builtIn: t.builtIn ?? null, change: t.change }, sets });
 }
 
 export async function POST(req: NextRequest) {

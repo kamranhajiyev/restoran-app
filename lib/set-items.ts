@@ -48,6 +48,18 @@ export function setLine(parts: SetPart[] | undefined, menu: Pick<MenuItem, 'id' 
 
 export const GONE_PART = 'Silinmiş məhsul';
 
+/** What a set holds, for the guest on the QR menu: like setLine, but a deleted
+ *  part is left out and a missing size goes unsaid, since only the owner can
+ *  fix those. */
+export function guestSetLine(parts: SetPart[] | undefined, menu: Pick<MenuItem, 'id' | 'name' | 'variants'>[]): string {
+  return (parts ?? []).flatMap(p => {
+    const item = menu.find(m => m.id === p.id);
+    if (!item) return [];
+    const size = partVariant(p, item);
+    return [`${p.qty > 1 ? `${p.qty}× ` : ''}${item.name}${size ? ` · ${size.name}` : ''}`];
+  }).join(', ');
+}
+
 /** A part the owner must fix before the set works: deleted since, or a product
  *  with sizes and none picked. The menu list shows such a set in red. */
 export function setNeedsFix(parts: SetPart[] | undefined, menu: Pick<MenuItem, 'id' | 'variants'>[]): boolean {
