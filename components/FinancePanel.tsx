@@ -191,10 +191,10 @@ export default function FinancePanel({ setDialog, bizSettings }: {
       ) : (
         <>
           {/* All the money, then where it is */}
-          <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className={`${card} p-5 flex flex-wrap items-center justify-between gap-3`}>
             <div className="min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-stone-400">Cəmi pul</p>
-              <p className={`text-2xl font-semibold tabular-nums break-words ${total < 0 ? 'text-red-600' : 'text-stone-900'}`}>{money(total)}</p>
+              <p className="text-sm font-medium text-stone-500">Cəmi pul</p>
+              <p className={`text-3xl font-bold tracking-tight tabular-nums break-words mt-1 ${total < 0 ? 'text-red-600' : 'text-stone-900'}`}>{money(total)}</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <button className={btnGhost} onClick={() => setSettingsOpen(true)}><Settings className="w-4 h-4" />Ayarlar</button>
