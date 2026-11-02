@@ -19,8 +19,10 @@
 create unique index if not exists orders_company_order_number_till_unique
   on public.orders (company_id, order_number, coalesce(till_number, 1));
 
-drop index if exists public.orders_company_order_number_unique;
+-- On production it is a constraint, whose index can only go with it: drop the
+-- constraint first (the plain drop index failed there, 2026-11-03).
 alter table public.orders drop constraint if exists orders_company_order_number_unique;
+drop index if exists public.orders_company_order_number_unique;
 
 create index if not exists cash_shifts_company_open_idx on public.cash_shifts (company_id) where closed_at is null;
 create unique index if not exists companies_seller_token_idx on public.companies (seller_token);
