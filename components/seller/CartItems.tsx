@@ -1,13 +1,91 @@
 'use client';
-import { Fragment } from 'react';
-import { Minus, Plus } from 'lucide-react';
+import { Fragment, useState, type ReactNode } from 'react';
+import { Check, MessageSquare, Minus, Plus, X } from 'lucide-react';
 import type { MenuItem, OrderItem } from '@/types';
 import { mergeLines, rowToGiveBack, rowToTakeFrom } from '@/lib/add-again';
 import { dishesTotal } from '@/lib/service-charge';
+import { ITEM_NOTE_MAX, splitItemNote } from '@/lib/item-note';
+
+// "Şərh" on a line not sent yet: a note for this dish alone, printed under it on
+// the kitchen ticket. A round button beside − and + opens a full-width box under
+// the line; a saved note shows there as a tag, and tapping it edits it.
+function NoteLine({ line, onSetNote, children }: {
+  line: OrderItem;
+  onSetNote?: (line: OrderItem, note: string) => void;
+  children: (noteButton: ReactNode) => ReactNode;
+}) {
+  const current = splitItemNote(line.modifiers).note ?? '';
+  const [draft, setDraft] = useState<string | null>(null);
+  if (!onSetNote) return <>{children(null)}</>;
+  const save = () => { onSetNote(line, draft ?? ''); setDraft(null); };
+  const button = (
+    <button
+      type="button"
+      onClick={() => setDraft(draft === null ? current : null)}
+      className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center active:scale-90 ${
+        current || draft !== null ? 'bg-note-100 text-note-700 hover:bg-note-200' : 'bg-stone-100 text-stone-500 hover:bg-stone-200'
+      }`}
+      title="Şərh"
+    >
+      <MessageSquare className="w-3.5 h-3.5" />
+    </button>
+  );
+  return (
+    <>
+      {children(button)}
+      {draft !== null ? (
+        <div className="mt-2 flex items-center gap-1.5 rounded-xl border border-note-300 bg-note-50 pl-3 pr-1 py-1 focus-within:border-note-500">
+          <MessageSquare className="w-4 h-4 shrink-0 text-note-600" />
+          <input
+            autoFocus
+            value={draft}
+            maxLength={ITEM_NOTE_MAX}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setDraft(null); }}
+            placeholder="Şərh, məs. şəkərsiz"
+            className="flex-1 min-w-0 h-8 bg-transparent text-sm text-stone-800 placeholder:text-stone-400 focus:outline-none"
+          />
+          <button type="button" onClick={() => setDraft(null)} title="Bağla"
+            className="shrink-0 w-8 h-8 rounded-lg text-stone-500 hover:bg-note-100 flex items-center justify-center">
+            <X className="w-4 h-4" />
+          </button>
+          <button type="button" onClick={save} title="Yadda saxla"
+            className="shrink-0 w-8 h-8 rounded-lg bg-note-500 text-white hover:bg-note-600 flex items-center justify-center">
+            <Check className="w-4 h-4" />
+          </button>
+        </div>
+      ) : current ? (
+        <button
+          type="button"
+          onClick={() => setDraft(current)}
+          className="mt-1.5 inline-flex max-w-full items-start gap-1.5 rounded-lg border border-note-200 bg-note-50 px-2 py-1 text-left text-sm text-note-800 hover:bg-note-100"
+        >
+          <MessageSquare className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <span className="wrap-anywhere">{current}</span>
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+// A saved note on a line already on the order: the same tag, but read-only.
+function NoteTag({ modifiers }: { modifiers?: string }) {
+  const note = splitItemNote(modifiers).note;
+  if (!note) return null;
+  return (
+    <p className="mt-1 inline-flex max-w-full items-start gap-1.5 rounded-lg border border-note-200 bg-note-50 px-2 py-0.5 text-sm text-note-800">
+      <MessageSquare className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+      <span className="wrap-anywhere">{note}</span>
+    </p>
+  );
+}
+
+// The picked options without the note, which shows as its own tag.
+const options = (oi: OrderItem) => splitItemNote(oi.modifiers).options;
 
 // ── CartItems — shared between desktop sidebar and mobile sheet ───────────
 
-export function CartItems({ cart, existingItems, removedItems, addToCart, removeFromCart, onDecrementExisting, addAgain, onTakeBackOne, pendingRemovals, removing }: {
+export function CartItems({ cart, existingItems, removedItems, addToCart, removeFromCart, onDecrementExisting, addAgain, onTakeBackOne, pendingRemovals, removing, onSetNote }: {
   cart: OrderItem[];
   existingItems?: OrderItem[];
   removedItems?: OrderItem[];
@@ -25,6 +103,8 @@ export function CartItems({ cart, existingItems, removedItems, addToCart, remove
   // Units staged for removal but not yet sent, keyed by order_items.id.
   pendingRemovals?: Record<string, number>;
   removing?: boolean;
+  // Sets the note on one line not sent yet (lib/item-note setCartLineNote).
+  onSetNote?: (line: OrderItem, note: string) => void;
 }) {
   const staged = pendingRemovals ?? {};
   const stagedFor = (oi: OrderItem) => (oi.id ? staged[oi.id] ?? 0 : 0);
@@ -73,9 +153,10 @@ export function CartItems({ cart, existingItems, removedItems, addToCart, remove
                     {more > 0 && <span className="text-sm font-semibold text-green-600 ml-1.5 whitespace-nowrap">+{more}</span>}
                   </p>
                   <p className="text-sm text-stone-500">
-                    {oi.modifiers && <span className="text-primary-600">{oi.modifiers} · </span>}
+                    {options(oi) && <span className="text-primary-600 wrap-anywhere">{options(oi)} · </span>}
                     {(oi.menuItem.price * left).toFixed(2)} ₼
                   </p>
+                  <NoteTag modifiers={oi.modifiers} />
                 </div>
                 {minus && (
                   <button
@@ -106,17 +187,20 @@ export function CartItems({ cart, existingItems, removedItems, addToCart, remove
               {/* The same product in a size not on the order yet: new, so green, and
                   right here rather than under YENİ, so every Fanta reads together. */}
               {line.newSizes.map(ci => (
-                <li key={'ns' + ci.menuItem.price + (ci.modifiers ?? '')} className="flex items-center justify-between gap-2 text-base text-green-700">
+                <li key={'ns' + ci.menuItem.price + (ci.modifiers ?? '')} className="text-base text-green-700">
+                  <NoteLine line={ci} onSetNote={onSetNote}>{noteButton => (
+                  <div className="flex items-center justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <p className="break-words leading-tight">
                       {ci.menuItem.name}
                       <span className="text-sm font-semibold ml-1.5 whitespace-nowrap">+{ci.quantity}</span>
                     </p>
                     <p className="text-sm text-green-600">
-                      {ci.modifiers && <span>{ci.modifiers} · </span>}
+                      {options(ci) && <span className="wrap-anywhere">{options(ci)} · </span>}
                       {(ci.menuItem.price * ci.quantity).toFixed(2)} ₼
                     </p>
                   </div>
+                  {noteButton}
                   <button
                     onClick={() => removeFromCart(ci.menuItem.id, ci.modifiers, ci.menuItem.price)}
                     className="shrink-0 w-7 h-7 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-600 flex items-center justify-center active:scale-90"
@@ -132,6 +216,8 @@ export function CartItems({ cart, existingItems, removedItems, addToCart, remove
                   >
                     <Plus className="w-4 h-4" />
                   </button>
+                  </div>
+                  )}</NoteLine>
                 </li>
               ))}
               </Fragment>
@@ -165,27 +251,32 @@ export function CartItems({ cart, existingItems, removedItems, addToCart, remove
       )}
     <ul className="space-y-3">
       {newLines.map(ci => (
-        <li key={ci.menuItem.id + (ci.modifiers ?? '') + ci.menuItem.price} className="flex items-center gap-3">
-          <div className="flex-1 min-w-0">
-            <p className="text-base font-medium text-stone-800 truncate">{ci.menuItem.name}</p>
-            {ci.modifiers && <p className="text-sm text-primary-600 truncate">{ci.modifiers}</p>}
-            <p className="text-sm text-stone-500">{ci.menuItem.price.toFixed(2)} ₼</p>
+        <li key={ci.menuItem.id + (ci.modifiers ?? '') + ci.menuItem.price}>
+          <NoteLine line={ci} onSetNote={onSetNote}>{noteButton => (
+          <div className="flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-base font-medium text-stone-800 truncate">{ci.menuItem.name}</p>
+              {options(ci) && <p className="text-sm text-primary-600 wrap-anywhere">{options(ci)}</p>}
+              <p className="text-sm text-stone-500">{ci.menuItem.price.toFixed(2)} ₼</p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {noteButton}
+              <button
+                onClick={() => removeFromCart(ci.menuItem.id, ci.modifiers, ci.menuItem.price)}
+                className="w-7 h-7 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-600 flex items-center justify-center active:scale-90"
+              >
+                <Minus className="w-3 h-3" />
+              </button>
+              <span className="w-6 text-center text-base font-semibold">{ci.quantity}</span>
+              <button
+                onClick={() => addToCart(ci.menuItem, ci.modifiers)}
+                className="w-7 h-7 rounded-full bg-primary-100 hover:bg-primary-200 text-primary-700 flex items-center justify-center active:scale-90"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={() => removeFromCart(ci.menuItem.id, ci.modifiers, ci.menuItem.price)}
-              className="w-7 h-7 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-600 flex items-center justify-center active:scale-90"
-            >
-              <Minus className="w-3 h-3" />
-            </button>
-            <span className="w-6 text-center text-base font-semibold">{ci.quantity}</span>
-            <button
-              onClick={() => addToCart(ci.menuItem, ci.modifiers)}
-              className="w-7 h-7 rounded-full bg-primary-100 hover:bg-primary-200 text-primary-700 flex items-center justify-center active:scale-90"
-            >
-              <Plus className="w-3 h-3" />
-            </button>
-          </div>
+          )}</NoteLine>
         </li>
       ))}
     </ul>

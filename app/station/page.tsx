@@ -6,6 +6,7 @@
 // on a card from two metres away — what, how many, which table, how long ago — and
 // nothing else. No totals, no payment, no menu.
 
+import { splitItemNote } from '@/lib/item-note';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Bell, CircleCheck, Check, Settings } from 'lucide-react';
@@ -674,9 +675,7 @@ function StationCard({
                   </span>
                   <span className={`leading-snug ${item.removedAt ? 'line-through text-stone-400' : 'font-semibold'}`}>
                     {item.menuItem.name}
-                    {item.modifiers && (
-                      <span className="block text-[0.857em] text-stone-500">{item.modifiers}</span>
-                    )}
+                    {item.modifiers && <ItemModifiers modifiers={item.modifiers} />}
                     {item.removedAt && (
                       // Struck through AND timestamped — never silently gone.
                       <span className="block text-[0.857em] text-red-600">
@@ -693,7 +692,7 @@ function StationCard({
         {/* The note is an instruction to the cook, not a footnote — same size as a
             dish line, never smaller. It was the smallest text on the card before. */}
         {order.note && (
-          <OrderNote note={order.note} className="text-[0.875em] font-medium bg-amber-50 rounded-lg px-[0.6em] py-[0.45em] text-amber-800" />
+          <OrderNote note={order.note} className="text-[0.875em] font-medium border border-note-200 bg-note-50 rounded-lg px-[0.6em] py-[0.45em] text-note-800" />
         )}
       </div>
 
@@ -709,5 +708,19 @@ function StationCard({
         {allRemoved ? 'Anladım' : 'Hazırdır'}
       </button>
     </div>
+  );
+}
+
+// The picked options in grey, and the seller's note for this dish (lib/item-note)
+// on its own line in the note colour, so the cook can't read it as an option.
+function ItemModifiers({ modifiers }: { modifiers: string }) {
+  const { options, note } = splitItemNote(modifiers);
+  return (
+    <>
+      {options && <span className="block text-[0.857em] text-stone-500">{options}</span>}
+      {note && (
+        <span className="mt-[0.2em] block w-fit rounded-md border border-note-200 bg-note-50 px-[0.4em] text-[0.857em] font-medium text-note-800 wrap-anywhere">{note}</span>
+      )}
+    </>
   );
 }

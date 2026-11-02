@@ -1,6 +1,6 @@
 import { Inter } from 'next/font/google';
 
-// The admin and the seller page read in Inter: plain and sharp for tables of
+// The admin, the seller page and the kitchen screen read in Inter: plain and sharp for tables of
 // numbers, where the app-wide Quicksand looked playful. latin-ext carries
 // ə, ğ, ş, ı. One file, so the two pages can never drift onto different fonts.
 const inter = Inter({ subsets: ['latin', 'latin-ext'] });

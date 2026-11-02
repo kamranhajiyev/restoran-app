@@ -49,6 +49,7 @@ import SyncStatus from '@/components/SyncStatus';
 import OrderSyncDot from '@/components/OrderSyncDot';
 import TillLink from '@/components/TillLink';
 import { CartItems } from '@/components/seller/CartItems';
+import { setCartLineNote } from '@/lib/item-note';
 import { addAgainLine, submitButton, takeBackOne } from '@/lib/add-again';
 import { OrderRow } from '@/components/seller/OrderRow';
 import SplitBill from '@/components/seller/SplitBill';
@@ -84,6 +85,7 @@ import { onCompanyChange } from '@/lib/company-changes';
 import { DATA_TABLES, gatherParts, type Part } from '@/lib/data-refresh';
 import { azNormalize } from '@/lib/az-text';
 import { formatDayMonthTime, formatTime } from '@/lib/dates';
+import { dropTableDraft, loadTableDrafts, openTableDraft, putTableDraft, saveTableDrafts, tableDraftLabel, type TableDrafts } from '@/lib/table-drafts';
 
 // How many writes the server has not seen. Two stores answer that question — the
 // browser till's IndexedDB queue and the desktop till's SQLite outbox — but only
@@ -767,6 +769,29 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   // when set, the menu view appends items to this existing order instead of creating a new one
   const [appendOrderId, setAppendOrderId]   = useState<string | null>(null);
+
+  // Each table's unsent cart (lib/table-drafts), kept on this device only. The
+  // cart on screen is copied into its table's draft while that table's new
+  // order is open; leaving keeps it, sending or emptying the cart drops it.
+  const [tableDrafts, setTableDrafts] = useState<TableDrafts>({});
+  const draftCompany = useRef<string | null>(null);
+  useEffect(() => {
+    const companyId = overrideCompanyId ?? getSession()?.companyId ?? null;
+    draftCompany.current = companyId;
+    setTableDrafts(companyId ? loadTableDrafts(companyId) : {});
+  }, [overrideCompanyId]);
+  const updateTableDrafts = useCallback((change: (prev: TableDrafts) => TableDrafts) => {
+    setTableDrafts(prev => {
+      const next = change(prev);
+      if (draftCompany.current) saveTableDrafts(draftCompany.current, next);
+      return next;
+    });
+  }, []);
+  const draftTable = view === 'menu' && orderType === 'masa' && !appendOrderId ? selectedTable : null;
+  useEffect(() => {
+    if (draftTable == null) return;
+    updateTableDrafts(d => putTableDraft(d, draftTable, { items: cart, note, saleTypeId }));
+  }, [draftTable, cart, note, saleTypeId, updateTableDrafts]);
   // Units staged for removal on the append screen, keyed by order_items.id. Taps of "−" only
   // land here; nothing reaches the server until "Silinməni əlavə et". Sending each tap on its
   // own is what turned one five-unit deletion into five separate struck-through lines on the
@@ -1763,6 +1788,11 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     ));
   }
 
+  // "Şərh" on a cart line: a note for that dish alone, carried in its modifiers.
+  function setLineNote(line: OrderItem, note: string) {
+    setCart(prev => setCartLineNote(prev, line, note));
+  }
+
   // The "+" beside a line already on the order: one more of it, into the new batch.
   function addAgainFor(oi: OrderItem): (() => void) | null {
     const line = addAgainLine(oi, menu);
@@ -2054,8 +2084,12 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     setOrderType(type);
     setSelectedTable(tableNum ?? null);
     setSelectedCourier(courierId ?? null);
-    setCart([]);
-    setNote('');
+    // A table left half-ordered opens with what was in its cart, under the
+    // order type it was started with while that type still exists.
+    const draft = type === 'masa' && tableNum != null ? openTableDraft(tableDrafts, tableNum, menu) : null;
+    if (draft?.saleTypeId && saleTypes.some(t => t.id === draft.saleTypeId)) setSaleTypeId(draft.saleTypeId);
+    setCart(draft?.items ?? []);
+    setNote(draft?.note ?? '');
     setMenuSearch('');
     const cats = availableCategories.filter(a => menu.some(i => i.category === a.name)).map(a => a.name);
     if (cats.length > 0) setActiveCategory(cats[0]);
@@ -2429,6 +2463,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       return;
     }
     mutateOrders(prev => [order, ...prev]);
+    if (order.tableNumber) updateTableDrafts(d => dropTableDraft(d, order.tableNumber));
     setCart([]); setNote(''); setPrintKitchen(true); setSelectedTable(null); setOrderType(null); setSaleTypeId(null); setSelectedCourier(null);
     setMobileCartOpen(false);
     setView('orders');
@@ -3973,7 +4008,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                                   <div key={j} className="flex justify-between text-sm text-stone-700 py-0.5">
                                     <span className="flex-1">
                                       {oi.menuItem.name}
-                                      {oi.modifiers && <span className="text-xs text-primary-600 ml-1">({oi.modifiers})</span>}
+                                      {oi.modifiers && <span className="text-xs text-primary-600 ml-1 wrap-anywhere">({oi.modifiers})</span>}
                                     </span>
                                     <span className="text-stone-500 mx-4">{oi.quantity} əd</span>
                                     <span className="font-medium">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
@@ -4383,6 +4418,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   <div className="flex items-center gap-3 text-xs text-stone-600">
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-100 border border-green-300 inline-block" /> Boş</span>
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block" /> Dolu</span>
+                    {Object.keys(tableDrafts).length > 0 && (
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-100 border border-blue-300 inline-block" /> Göndərilməyib</span>
+                    )}
                   </div>
                   </div>
                   <div
@@ -4400,6 +4438,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                       const busyTotal = orders
                         .filter(o => o.tableNumber === t.id && isOrderOpen(o))
                         .reduce((s, o) => s + orderTotal(o), 0);
+                      const draftLabel = tableDraftLabel(tableDrafts[String(t.id)]);
                       return (
                         <button
                           key={t.id}
@@ -4415,11 +4454,16 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                           className={`flex flex-col items-center justify-center border-2 shadow-sm transition-all active:scale-95 hover:shadow-md hover:scale-105 ${
                             busy
                               ? 'bg-red-50 border-red-300 text-red-800 hover:bg-red-100'
+                              : draftLabel
+                              ? 'bg-blue-50 border-blue-300 text-blue-800 hover:bg-blue-100'
                               : 'bg-green-50 border-green-300 text-green-800 hover:bg-green-100'
                           }`}
                         >
                           <span className="font-bold text-sm leading-tight truncate px-1 max-w-full">{t.name}</span>
                           {busy && busyTotal > 0 && <span className="text-[10px] opacity-80 font-semibold">{busyTotal.toFixed(0)} ₼</span>}
+                          {draftLabel && (
+                            <span className={`text-[10px] font-medium leading-tight truncate px-1 max-w-full ${busy ? 'text-blue-700' : 'opacity-80'}`}>{draftLabel}</span>
+                          )}
                         </button>
                       );
                     })}
@@ -4636,10 +4680,10 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                     last line; once the list reaches the bottom it scrolls and the footer stays put. */}
                 <div className="min-h-0 overflow-y-auto px-4 py-3">
                   {appendOrder
-                    ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} removing={removing} />
+                    ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onSetNote={setLineNote} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} removing={removing} />
                     : cart.length === 0
                     ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
-                    : <CartItems cart={cart} addToCart={addCartLineAgain} removeFromCart={removeFromCart} />
+                    : <CartItems cart={cart} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onSetNote={setLineNote} />
                   }
                 </div>
                 <div className="px-4 py-3 border-t space-y-3">
@@ -4759,10 +4803,10 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-3">
               {appendOrder
-                ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} removing={removing} />
+                ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onSetNote={setLineNote} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} removing={removing} />
                 : cart.length === 0
                 ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
-                : <CartItems cart={cart} addToCart={addCartLineAgain} removeFromCart={removeFromCart} />
+                : <CartItems cart={cart} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onSetNote={setLineNote} />
               }
             </div>
             <div className="px-4 py-4 border-t space-y-3 bg-white shrink-0">
@@ -5267,7 +5311,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   <li key={i} className="flex justify-between text-stone-700">
                     <div>
                       <span>{oi.menuItem.name} × {oi.quantity}</span>
-                      {oi.modifiers && <p className="text-xs text-primary-600">{oi.modifiers}</p>}
+                      {oi.modifiers && <p className="text-xs text-primary-600 wrap-anywhere">{oi.modifiers}</p>}
                     </div>
                     <span className="shrink-0 ml-2">{(oi.menuItem.price * oi.quantity).toFixed(2)} ₼</span>
                   </li>

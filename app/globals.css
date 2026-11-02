@@ -17,6 +17,17 @@
   --color-primary-800: #115e59;
   --color-primary-900: #134e4a;
   --color-primary-950: #042f2e;
+
+  /* Notes (an order's Qeyd, one dish's Şərh): a rich honey gold. Plain
+     amber leans orange and reads as a warning; this stays warm and clear. */
+  --color-note-50:  #fff8e1;
+  --color-note-100: #ffefc2;
+  --color-note-200: #fde3a0;
+  --color-note-300: #f5c451;
+  --color-note-500: #e3a312;
+  --color-note-600: #c4870a;
+  --color-note-700: #97660a;
+  --color-note-800: #7a520c;
 }
 
 /* A plain `border-b` with no colour of its own. Tailwind 4 draws it in the text
