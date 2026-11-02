@@ -1,4 +1,5 @@
 import { Inter } from 'next/font/google';
+import { BRAND_BOOT_SCRIPT } from '@/lib/branding';
 
 // The admin, the seller page and the kitchen screen read in Inter: plain and sharp for tables of
 // numbers, where the app-wide Quicksand looked playful. latin-ext carries
@@ -11,6 +12,8 @@ export default function AppFont({ children }: { children: React.ReactNode }) {
       {/* On body as well, so a pop-up portalled out of the wrapper keeps the
           font. A browser without :has() (old Android Chrome) skips this rule
           and only such a pop-up falls back to Quicksand. */}
+      {/* Before anything paints: the last brand, so a reload does not flash teal. */}
+      <script dangerouslySetInnerHTML={{ __html: BRAND_BOOT_SCRIPT }} />
       <style>{`body:has(.app-font){font-family:${inter.style.fontFamily};font-weight:400}`}</style>
       <div className={`${inter.className} app-font`}>{children}</div>
     </>

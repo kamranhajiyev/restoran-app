@@ -24,7 +24,7 @@ import {
 import { jsonOrNull, keepCategory, listOrNull, salesOrNull, shiftOrUnknown } from '@/lib/keep-on-fail';
 import { menuIndex, lineReady, readyStationIds } from '@/lib/stations';
 import { unlockSound, armSoundOnFirstGesture, playOrderReady } from '@/lib/sound';
-import { applyBrand } from '@/lib/branding';
+import { applyBrand, rememberLogo, rememberedLogo } from '@/lib/branding';
 import { orderClosedAt } from '@/lib/order-items';
 import { CompanySettings, DEFAULT_SETTINGS, keepSettings, businessDay, businessToday, businessDayStartUtc, tzTime } from '@/lib/business-day';
 import { courierOwed, type Collections, type ShiftSales } from '@/lib/courier-pending';
@@ -375,7 +375,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // Set before any effect runs, so the first read already proves which till
   // this is (lib/till-read-token.ts).
   setTillToken(overrideToken);
-  const [logoUrl, setLogoUrl] = useState<string | null>(overrideLogoUrl ?? null);
+  // undefined: not known yet — a blank box, not the cup, until it is.
+  const [logoUrl, setLogoUrl] = useState<string | null | undefined>(overrideCompanyId ? (overrideLogoUrl ?? null) : undefined);
   const [view, setView]             = useState<View>('orders');
   const [menu, setMenu]             = useState<MenuItem[]>([]);
   const [availableCategories, setAvailableCategories] = useState<Category[]>([]);
@@ -1551,7 +1552,12 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     setCompanyContext(session.companyId);
     setSellerName(session.name);
     fetchCompanySettings(session.companyId ?? '').then(next => setBizSettings(prev => keepSettings(prev, next)));
-    fetchBranding().then(({ logoUrl: l, brandColor: b }) => { setLogoUrl(l); applyBrand(b); });
+    const cachedLogo = rememberedLogo();
+    if (cachedLogo !== undefined) setLogoUrl(cachedLogo);
+    fetchBranding().then(br => {
+      if (!br) return;
+      setLogoUrl(br.logoUrl); rememberLogo(br.logoUrl); applyBrand(br.brandColor);
+    });
     // Runs again after every pull: a failed read keeps what the screen has.
     Promise.all([readOpenShift(), fetchStaffAndRulesOrNull()]).then(([s, st]) => {
       if (s !== undefined) setShift(s);
@@ -3595,12 +3601,14 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         <div className="flex items-center gap-2">
           {logoUrl ? (
             <img src={tillImage(logoUrl)} alt="" className="w-7 h-7 rounded-lg object-cover border border-stone-100" />
+          ) : logoUrl === undefined ? (
+            <div className="w-7 h-7 rounded-lg bg-stone-100" />
           ) : (
             <div className="w-7 h-7 rounded-lg bg-primary-800 flex items-center justify-center">
               <Coffee className="w-4 h-4 text-white" />
             </div>
           )}
-          <span className="font-semibold text-stone-800 text-sm md:hidden truncate max-w-[160px]">{overrideCompanyName || getSession()?.companyName || 'Kafe'}</span>
+          <span className="font-semibold text-stone-800 text-sm md:hidden truncate max-w-[160px]">{overrideCompanyName || getSession()?.companyName}</span>
         </div>
         <div className="flex-1" />
         {/* Whether the server has tonight's service. Green when it does, amber

@@ -2419,15 +2419,17 @@ export async function setQrEnabled(enabled: boolean): Promise<void> {
 
 // ─── Branding (logo + accent color) ───────────────────────────────────────────
 
-export async function fetchBranding(): Promise<{ logoUrl: string | null; brandColor: string | null }> {
+// null: the read failed, so the screen keeps the brand it opened with rather
+// than dropping to teal and the cup.
+export async function fetchBranding(): Promise<{ logoUrl: string | null; brandColor: string | null } | null> {
   const local = await fromSettings(s => ({ logoUrl: s.logoUrl, brandColor: s.brandColor }));
   if (local !== null) return local;
   try {
-    if (!_companyId) return { logoUrl: null, brandColor: null };
+    if (!_companyId) return null;
     const { data, error } = await supabase.from('companies').select('logo_url, brand_color').eq('id', _companyId).single();
-    if (error || !data) return { logoUrl: null, brandColor: null };
+    if (error || !data) return null;
     return { logoUrl: data.logo_url ?? null, brandColor: data.brand_color ?? null };
-  } catch { return { logoUrl: null, brandColor: null }; }
+  } catch { return null; }
 }
 
 export async function setLogoUrl(url: string | null): Promise<void> {

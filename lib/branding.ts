@@ -18,8 +18,32 @@ export function isBrandColor(v: unknown): v is BrandColor {
   return typeof v === 'string' && BRAND_PRESETS.some(p => p.key === v);
 }
 
+// The brand and logo arrive from the database a moment after the page opens.
+// Kept here so a reload starts in the last ones instead of flashing teal and a cup.
+export const BRAND_KEY = 'brand';
+export const LOGO_KEY = 'brand-logo';
+
 // Apply a brand to the whole document. Falls back to the default preset.
 export function applyBrand(color: string | null | undefined): void {
   if (typeof document === 'undefined') return;
-  document.documentElement.dataset.brand = isBrandColor(color) ? color : DEFAULT_BRAND;
+  const brand = isBrandColor(color) ? color : DEFAULT_BRAND;
+  document.documentElement.dataset.brand = brand;
+  try { localStorage.setItem(BRAND_KEY, brand); } catch { /* private mode */ }
+}
+
+// Runs in <head> before the first paint, so the remembered brand is on from the start.
+export const BRAND_BOOT_SCRIPT =
+  `try{var b=localStorage.getItem(${JSON.stringify(BRAND_KEY)});if(b)document.documentElement.dataset.brand=b}catch(e){}`;
+
+// '' stands for "this place has no logo", so the placeholder is remembered too.
+export function rememberLogo(url: string | null): void {
+  try { localStorage.setItem(LOGO_KEY, url ?? ''); } catch { /* private mode */ }
+}
+
+// undefined: nothing remembered yet, so the header shows a blank box until the real one comes.
+export function rememberedLogo(): string | null | undefined {
+  try {
+    const v = localStorage.getItem(LOGO_KEY);
+    return v === null ? undefined : v || null;
+  } catch { return undefined; }
 }

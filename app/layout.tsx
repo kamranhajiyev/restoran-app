@@ -40,7 +40,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="az">
+    <html lang="az" suppressHydrationWarning>
       <body className={`${quicksand.variable} font-sans antialiased min-h-screen bg-gray-50`}>
         {children}
         <DesktopUpdate />

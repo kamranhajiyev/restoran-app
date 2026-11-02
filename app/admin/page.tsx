@@ -44,7 +44,7 @@ import {
   fetchAllUsers, createEmployee, updateEmployee, deleteUser, toggleUserActive,
   fetchCouriers, fetchCourierCollections, fetchCourierCollectionsOrNull,
 } from '@/lib/store';
-import { applyBrand, BRAND_PRESETS, DEFAULT_BRAND } from '@/lib/branding';
+import { applyBrand, BRAND_PRESETS, DEFAULT_BRAND, rememberLogo, rememberedLogo } from '@/lib/branding';
 import { orderClosedAt, orderSuspicion, isSuspiciousOrder } from '@/lib/order-items';
 import { historyTotals, shiftLoadWindow, shiftTotals } from '@/lib/history-shifts';
 import { type Collections, type ShiftSales } from '@/lib/courier-pending';
@@ -791,7 +791,8 @@ function AdminPageContent() {
   const [kassaToggleBusy, setKassaToggleBusy] = useState(false);
   const [kassaToggleError, setKassaToggleError] = useState<string | null>(null);
   // branding
-  const [logoUrl, setLogoState] = useState<string | null>(null);
+  // undefined: not known yet — a blank box, not the cup, until it is.
+  const [logoUrl, setLogoState] = useState<string | null | undefined>(undefined);
   const [brandColor, setBrandColorState] = useState<string>(DEFAULT_BRAND);
   const [logoBusy, setLogoBusy] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -1024,7 +1025,13 @@ function AdminPageContent() {
     fetchHalls().then(setHalls);
     reloadEmployees();
     fetchSellerToken(session.companyId ?? '').then(setSellerToken);
-    fetchBranding().then(({ logoUrl: l, brandColor: b }) => { setLogoState(l); setBrandColorState(b ?? DEFAULT_BRAND); applyBrand(b); });
+    const cachedLogo = rememberedLogo();
+    if (cachedLogo !== undefined) setLogoState(cachedLogo);
+    fetchBranding().then(br => {
+      if (!br) return;
+      setLogoState(br.logoUrl); rememberLogo(br.logoUrl);
+      setBrandColorState(br.brandColor ?? DEFAULT_BRAND); applyBrand(br.brandColor);
+    });
     Promise.all([fetchMenu(), fetchOrders({ limit: 200 }), fetchCategories(), fetchTrash(), fetchTables(), fetchCompanySlug(session.companyId ?? ''), fetchTablesEnabled(), fetchQrEnabled(), fetchKassaEnabled(), fetchMenuOnly(), fetchDeliveryEnabled()]).then(([m, o, c, t, tb, slug, te, qre, ke, mo, de]) => {
       setMenu(m);
       setOrders(o);
@@ -1613,6 +1620,7 @@ function AdminPageContent() {
     if (error) { setLogoBusy(false); setDialog({ title: 'Xəta', message: 'Loqo yüklənmədi: ' + error.message }); return; }
     const { data } = supabase.storage.from('menu-images').getPublicUrl(path);
     setLogoState(data.publicUrl);
+    rememberLogo(data.publicUrl);
     await saveLogoUrl(data.publicUrl);
     setLogoBusy(false);
     if (logoInputRef.current) logoInputRef.current.value = '';
@@ -1620,6 +1628,7 @@ function AdminPageContent() {
 
   async function removeLogo() {
     setLogoState(null);
+    rememberLogo(null);
     await saveLogoUrl(null);
   }
 
@@ -2829,12 +2838,14 @@ function AdminPageContent() {
             <div className="flex items-center gap-2">
               {logoUrl ? (
                 <img src={logoUrl} alt="" className="w-7 h-7 rounded-lg object-cover border border-stone-100" />
+              ) : logoUrl === undefined ? (
+                <div className="w-7 h-7 rounded-lg bg-stone-100" />
               ) : (
                 <div className="w-7 h-7 rounded-lg bg-primary-800 flex items-center justify-center">
                   <Coffee className="w-4 h-4 text-white" />
                 </div>
               )}
-              <span className="font-semibold text-stone-800 text-sm truncate max-w-[140px]">{companyName || 'Admin Paneli'}</span>
+              <span className="font-semibold text-stone-800 text-sm truncate max-w-[140px]">{companyName}</span>
             </div>
           )}
           <button
@@ -3026,12 +3037,14 @@ function AdminPageContent() {
         <div className="flex items-center gap-2 md:hidden">
           {logoUrl ? (
             <img src={logoUrl} alt="" className="w-7 h-7 rounded-lg object-cover border border-stone-100" />
+          ) : logoUrl === undefined ? (
+            <div className="w-7 h-7 rounded-lg bg-stone-100" />
           ) : (
             <div className="w-7 h-7 rounded-lg bg-primary-800 flex items-center justify-center">
               <Coffee className="w-4 h-4 text-white" />
             </div>
           )}
-          <span className="font-semibold text-stone-800 text-sm truncate max-w-[160px]">{companyName || 'Kafe'}</span>
+          <span className="font-semibold text-stone-800 text-sm truncate max-w-[160px]">{companyName}</span>
         </div>
 
         <div className="flex-1" />
@@ -3742,11 +3755,12 @@ function AdminPageContent() {
                           </span>
                           {/* Number, seller and the money tags share the second
                               line, so the columns stay put whatever a row carries.
-                              Grey except "silinib", the one warning here. */}
+                              Grey except Endirim (green, as on the till) and
+                              "silinib", the one warning here. */}
                             <span className="flex items-center gap-1.5 mt-0.5 min-w-0">
                               <span className="text-xs text-stone-500 truncate">№{orderLabel(order)}{place ? ` · ${order.sellerName}` : ''}</span>
                               <span className="hidden sm:contents">
-                                {(order.discountAmount ?? 0) > 0 && <Tag>Endirim −{order.discountAmount!.toFixed(2)} ₼</Tag>}
+                                {(order.discountAmount ?? 0) > 0 && <Tag tone="good">Endirim −{order.discountAmount!.toFixed(2)} ₼</Tag>}
                                 {extra !== 0 && (
                                   <Tag title={order.orderTypeName ? `${order.orderTypeName}: qiymət dəyişikliyi` : 'Qiymət dəyişikliyi'}>
                                     {order.orderTypeName ?? 'Növ'} {extra > 0 ? '+' : '−'}{Math.abs(extra).toFixed(2)} ₼
