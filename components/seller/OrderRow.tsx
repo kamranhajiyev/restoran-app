@@ -1,6 +1,6 @@
 'use client';
 import { useState, type CSSProperties } from 'react';
-import { AlertTriangle, Bike, ChevronDown, MoreHorizontal, Printer } from 'lucide-react';
+import { AlertTriangle, Bike, ChevronDown, MoreHorizontal, Pencil, Printer } from 'lucide-react';
 import { isOrderOpen, type Order, type OrderItem, type OrderStatus } from '@/types';
 import OrderItemHistory from '@/components/OrderItemHistory';
 import OrderItemsMerged from '@/components/OrderItemsMerged';
@@ -13,6 +13,13 @@ import OrderNote from '@/components/OrderNote';
 import { formatTime } from '@/lib/dates';
 
 // ── OrderRow — mobile card + desktop table row ────────────────────────────
+
+// One column rule for the desktop header and every row, so they line up. Below
+// xl (a 1024px till with the side menu open) the fixed columns took all the
+// width and "Sifariş" shrank to nothing (customer screen, 2026-11-03): there
+// the status moves under the order and "Düzəliş" becomes an icon.
+export const ORDER_GRID =
+  'grid grid-cols-[64px_minmax(0,1fr)_260px_96px] gap-3 px-4 xl:grid-cols-[90px_minmax(0,1fr)_130px_310px_110px] xl:gap-4 xl:px-6';
 
 // How much of an order is on the counter. The count is what makes a green row
 // actionable: "hazır" alone doesn't say whether to pick up the whole tray or one
@@ -107,6 +114,19 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
   // over, so both states are marked; only the strength differs.
   const anyReady = progress.done > 0;
   const allReady = progress.total > 0 && progress.done === progress.total;
+  const statusBadges = (
+    <>
+      <span className={`text-sm font-semibold px-2.5 py-0.5 rounded-full ${STATUS_COLORS[order.status]}`}>
+        {STATUS_LABELS[order.status]}
+      </span>
+      {anyReady && <ReadyBadge progress={progress} allReady={allReady} />}
+      {printFailed && (
+        <span title="Sexə çıxmadı — printer cavab vermir" className="flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full">
+          <AlertTriangle className="w-3 h-3" /> Çap
+        </span>
+      )}
+    </>
+  );
 
   return (
     <div id={`order-${order.id}`}>
@@ -243,7 +263,7 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
           react under the cursor looks disabled. */}
       <div className={`hidden md:block border-b ${anyReady ? 'bg-green-50 hover:bg-green-100 border-l-4 border-l-green-500' : 'bg-white hover:bg-stone-50'}`}>
         <div
-          className="w-full grid grid-cols-[90px_minmax(0,1fr)_130px_310px_110px] gap-4 px-6 py-4 items-center cursor-pointer"
+          className={`w-full ${ORDER_GRID} py-4 items-center cursor-pointer`}
           onClick={() => setExpanded(e => !e)}
         >
           <div>
@@ -271,18 +291,9 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
               {tableFirst && !expanded && ' · '}
               {!expanded && itemsPreview}
             </p>
+            <div className="xl:hidden mt-1 pl-5 flex items-center gap-1.5 flex-wrap">{statusBadges}</div>
           </div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className={`text-sm font-semibold px-2.5 py-0.5 rounded-full ${STATUS_COLORS[order.status]}`}>
-              {STATUS_LABELS[order.status]}
-            </span>
-            {anyReady && <ReadyBadge progress={progress} allReady={allReady} />}
-            {printFailed && (
-              <span title="Sexə çıxmadı — printer cavab vermir" className="flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full">
-                <AlertTriangle className="w-3 h-3" /> Çap
-              </span>
-            )}
-          </div>
+          <div className="hidden xl:flex items-center gap-1.5 flex-wrap">{statusBadges}</div>
           <div className="flex items-center gap-2 flex-wrap" onClick={e => e.stopPropagation()}>
             {printFailed && (
               <button onClick={onReprint} className="h-11 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-4 rounded-lg transition-colors whitespace-nowrap">
@@ -304,10 +315,11 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
                 >
                   <Printer className="w-5 h-5" />
                 </button>
-                <button onClick={onAppend} className="h-11 border border-primary-300 text-primary-800 hover:bg-primary-50 text-sm font-semibold px-4 rounded-lg transition-colors whitespace-nowrap">
-                  Düzəliş
+                <button onClick={onAppend} title="Düzəliş" className="h-11 min-w-11 flex items-center justify-center border border-primary-300 text-primary-800 hover:bg-primary-50 text-sm font-semibold xl:px-4 rounded-lg transition-colors whitespace-nowrap">
+                  <Pencil className="w-5 h-5 xl:hidden" />
+                  <span className="hidden xl:inline">Düzəliş</span>
                 </button>
-                <button onClick={onPay} className="h-11 bg-primary-800 hover:bg-primary-900 text-white text-sm font-semibold px-5 rounded-lg transition-colors whitespace-nowrap">
+                <button onClick={onPay} className="h-11 bg-primary-800 hover:bg-primary-900 text-white text-sm font-semibold px-4 xl:px-5 rounded-lg transition-colors whitespace-nowrap">
                   Ödəniş
                 </button>
                 <div className="relative">
@@ -363,7 +375,7 @@ export function OrderRow({ order, tableLabel, tz, printFailed, unsent, progress,
         </div>
 
         {expanded && (
-          <div className={`px-6 pb-4 border-t border-stone-100 ${anyReady ? 'bg-green-50/70' : 'bg-stone-50'}`}>
+          <div className={`px-4 xl:px-6 pb-4 border-t border-stone-100 ${anyReady ? 'bg-green-50/70' : 'bg-stone-50'}`}>
             <div className="pt-3 mb-3">
               {items}
             </div>

@@ -51,7 +51,7 @@ import TillLink from '@/components/TillLink';
 import { CartItems } from '@/components/seller/CartItems';
 import { setCartLineNote } from '@/lib/item-note';
 import { addAgainLine, submitButton, takeBackOne } from '@/lib/add-again';
-import { OrderRow } from '@/components/seller/OrderRow';
+import { OrderRow, ORDER_GRID } from '@/components/seller/OrderRow';
 import SplitBill from '@/components/seller/SplitBill';
 import { splitRequest, type SplitPart } from '@/lib/split-bill';
 import { PrintKitchenToggle } from '@/components/seller/PrintKitchenToggle';
@@ -3730,7 +3730,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         </aside>
 
         {/* Main — pb-16 reserves space for mobile bottom nav */}
-        <main className="flex-1 min-w-0 bg-white md:rounded-tl-2xl md:border-l md:border-t border-stone-200 overflow-hidden flex flex-col pb-16 lg:pb-0">
+        <main className="flex-1 min-w-0 bg-white md:rounded-tl-2xl md:border-l md:border-t border-stone-200 overflow-hidden flex flex-col pb-16 md:pb-0">
 
           {/* ── ORDERS ── */}
           {view === 'orders' && (
@@ -3809,8 +3809,10 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   each order is a card of its own already. */}
               <div className="flex-1 md:flex-initial min-h-0 flex flex-col md:mx-6 md:mb-4 md:bg-white md:rounded-xl md:border md:border-stone-200 md:overflow-hidden">
               {/* Desktop table header */}
-              <div className="hidden md:grid grid-cols-[90px_minmax(0,1fr)_130px_310px_110px] gap-4 px-6 py-2.5 text-xs font-semibold text-stone-600 uppercase tracking-wide border-b border-stone-200 bg-stone-50">
-                <span>Vaxt</span><span>Sifariş</span><span>Durum</span><span></span><span className="text-right">Ümumi</span>
+              <div className="hidden md:block border-b border-stone-200 bg-stone-50">
+                <div className={`${ORDER_GRID} py-2.5 text-xs font-semibold text-stone-600 uppercase tracking-wide`}>
+                  <span>Vaxt</span><span>Sifariş</span><span className="hidden xl:block">Durum</span><span></span><span className="text-right">Ümumi</span>
+                </div>
               </div>
 
               <div className="flex-1 overflow-y-auto relative">
@@ -3822,13 +3824,13 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 )}
                 {prevOrders.length > 0 && (
                   <div>
-                    <div className="px-4 md:px-6 py-2 bg-stone-50 md:border-b md:border-stone-200 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
+                    <div className="px-4 xl:px-6 py-2 bg-stone-50 md:border-b md:border-stone-200 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
                     {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onSplit={() => setSplittingOrder(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
-                    <div className="px-4 md:px-6 py-2 bg-stone-50 md:border-b md:border-stone-200 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
+                    <div className="px-4 xl:px-6 py-2 bg-stone-50 md:border-b md:border-stone-200 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
                     {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onSplit={() => setSplittingOrder(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
@@ -4727,7 +4729,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   cart) so it's always the way into the panel; falls back to the existing order's
                   count/total until new items are added. */}
               {(cartCount > 0 || appendOrder) && (
-                <div className="lg:hidden fixed bottom-16 inset-x-0 z-30 px-4 pb-2 pointer-events-none">
+                <div className="lg:hidden fixed bottom-16 md:bottom-0 inset-x-0 z-30 px-4 pb-2 pointer-events-none">
                   <button
                     onClick={() => setMobileCartOpen(true)}
                     className="pointer-events-auto w-full bg-primary-800 text-white rounded-2xl py-3.5 flex items-center justify-between px-5 shadow-lg active:scale-95 transition-transform"
@@ -4751,8 +4753,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         </main>
       </div>
 
-      {/* Mobile bottom navigation */}
-      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-stone-200 flex safe-area-inset-bottom">
+      {/* Mobile bottom navigation. Hidden from md, where the side menu shows —
+          between md and lg both used to show, the same menu twice (2026-11-03). */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-stone-200 flex safe-area-inset-bottom">
         {[
           { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
           { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },

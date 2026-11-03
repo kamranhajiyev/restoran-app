@@ -304,6 +304,10 @@ sensible?**
 Kamran, Test Restoran, 2026-11-02: plain borders drew black across the order list after Tailwind 4.
 Guard: `tests/border-colour.test.ts`
 
+**Does the screen still fit on a small till monitor (1024px, side menu open)?**
+Customer till, 2026-11-03: fixed-width buttons took the order table's width; "Sifariş" shrank to nothing and its heading overlapped "Durum".
+Guard: `tests/order-row-narrow.test.ts`
+
 ## 6. Before shipping, try it like a restaurant would
 
 - Turn the internet off in the middle of the action, then back on.
