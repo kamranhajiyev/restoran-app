@@ -54,23 +54,121 @@ const decodeHtml = (s: string) => s
 /** Every product on a monyo.az menu page (monyo.az/v4/?r=<restaurant>). Each
  *  product is a plain HTML card; its picture path is relative to the site. */
 export function parseMonyoPage(html: string, pageUrl: string): PagePicture[] {
-  const origin = new URL(pageUrl).origin;
-  const seen = new Set<string>();
-  const out: PagePicture[] = [];
-  for (const card of html.split('class="product-card').slice(1)) {
-    const name = /class="product-name">([\s\S]*?)<\/h3>/.exec(card)?.[1];
-    if (!name) continue;
-    const clean = decodeHtml(name).replace(/\s+/g, ' ').trim();
-    const key = pictureKey(clean);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const src = /<img[^>]*?src="([^"]+)"[^>]*class="product-image"/.exec(card)?.[1];
-    out.push({ name: clean, imageUrl: src ? new URL(src.replace(/^\/?/, '/'), origin).href : null });
-  }
-  return out;
+  return monyoProducts(html, pageUrl).map(p => ({ name: p.name, imageUrl: p.photo }));
 }
 
 export type PsMeProduct = { name: string; category: string; price: number | null; photo: string | null };
+
+/** The same monyo.az page with categories and prices, for the converter. A
+ *  category is an <h2 class="category-title"> followed by its cards; the
+ *  price is the card's data-price. */
+export function monyoProducts(html: string, pageUrl: string): PsMeProduct[] {
+  const origin = new URL(pageUrl).origin;
+  const seen = new Set<string>();
+  const out: PsMeProduct[] = [];
+  html.split('<h2 class="category-title">').forEach((section, i) => {
+    const category = i === 0 ? '' : decodeHtml(section.slice(0, section.indexOf('</h2>'))).replace(/\s+/g, ' ').trim();
+    for (const card of section.split('class="product-card').slice(1)) {
+      const name = /class="product-name">([\s\S]*?)<\/h3>/.exec(card)?.[1];
+      if (!name) continue;
+      const clean = decodeHtml(name).replace(/\s+/g, ' ').trim();
+      const key = pictureKey(clean);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const src = /<img[^>]*?src="([^"]+)"[^>]*class="product-image"/.exec(card)?.[1];
+      const price = parseFloat(/data-price="([^"]*)"/.exec(card)?.[1] ?? '');
+      out.push({
+        name: clean,
+        category,
+        price: isNaN(price) || price < 0 ? null : Math.round(price * 100) / 100,
+        photo: src ? new URL(src.replace(/^\/?/, '/'), origin).href : null,
+      });
+    }
+  });
+  return out;
+}
+
+/** The JSON value right after `"key":` in a text, read to its closing bracket. */
+function jsonAfter(text: string, key: string): unknown {
+  const at = text.indexOf(`"${key}":`);
+  if (at === -1) return null;
+  const start = at + key.length + 3;
+  let depth = 0, inString = false;
+  for (let k = start; k < text.length; k++) {
+    const c = text[k];
+    if (inString) {
+      if (c === '\\') k++;
+      else if (c === '"') inString = false;
+    } else if (c === '"') inString = true;
+    else if (c === '{' || c === '[') depth++;
+    else if ((c === '}' || c === ']') && --depth === 0) {
+      try { return JSON.parse(text.slice(start, k + 1)); } catch { return null; }
+    }
+  }
+  return null;
+}
+
+type CloposCategory = { id: number; name: string; emenu_position: number | null };
+type CloposProduct = {
+  id: number; name: string; full_name?: string; price: number | null;
+  category_id: number | null; emenu_category_id: number | null; emenu_position: number | null;
+  media?: { urls?: Record<string, string> }[];
+};
+
+export type CloposMenu = {
+  products: PsMeProduct[];
+  /** In the POS but in no category, so the e-menu does not show them. Left out. */
+  noCategory: string[];
+  /** A second product with a name already read, left out (the import keeps one row per name). */
+  sameName: string[];
+};
+
+/** Every product on a Clopos e-menu (…clopos.menu/az/1/products) with its
+ *  category and price. The page carries the whole menu as escaped JSON under
+ *  "menuData"; a category hidden from the e-menu is not in its list, so its
+ *  products come in under "Digər". */
+export function cloposMenu(html: string): CloposMenu {
+  const text = html.replace(/\\\\/g, '\u0000').replace(/\\"/g, '"').replace(/\u0000/g, '\\');
+  const data = jsonAfter(text, 'menuData') as { categories?: CloposCategory[]; products?: CloposProduct[] } | null;
+  const result: CloposMenu = { products: [], noCategory: [], sameName: [] };
+  if (!data?.products) return result;
+
+  const cats = new Map((data.categories ?? []).map(c => [c.id, c]));
+  const catOf = (p: CloposProduct) => p.emenu_category_id ?? p.category_id;
+  const rank = (p: CloposProduct) => cats.get(catOf(p)!)?.emenu_position ?? Number.MAX_SAFE_INTEGER;
+  const sorted = data.products
+    .filter(p => {
+      if (catOf(p) !== null) return true;
+      result.noCategory.push(p.full_name ?? p.name);
+      return false;
+    })
+    .sort((a, b) => rank(a) - rank(b) || (a.emenu_position ?? 0) - (b.emenu_position ?? 0) || a.id - b.id);
+
+  const seen = new Set<string>();
+  for (const p of sorted) {
+    const name = (p.full_name || p.name || '').replace(/\s+/g, ' ').trim();
+    if (!name) continue;
+    if (seen.has(pictureKey(name))) { result.sameName.push(name); continue; }
+    seen.add(pictureKey(name));
+    const urls = p.media?.[0]?.urls ?? {};
+    result.products.push({
+      name,
+      category: cats.get(catOf(p)!)?.name.trim() || 'Digər',
+      price: typeof p.price === 'number' && p.price >= 0 ? Math.round(p.price * 100) / 100 : null,
+      photo: urls.extra_large ?? urls.original ?? null,
+    });
+  }
+  return result;
+}
+
+/** A Clopos e-menu link to any of its pages (…/az/1/home, …/categories) points
+ *  at …/products, the one page that carries the whole menu. Other links are kept. */
+export function menuPageUrl(url: string): string {
+  const u = new URL(url);
+  if (!u.hostname.endsWith('clopos.menu')) return url;
+  const m = /^\/([a-z]{2})\/(\d+)(?:\/|$)/.exec(u.pathname);
+  return m ? `${u.origin}/${m[1]}/${m[2]}/products` : url;
+}
 
 /** Every product on a Poster online menu (menu.ps.me/<id>), which carries the
  *  whole menu as JSON in a <script id="menu-data"> tag. Also feeds the converter. */
@@ -143,9 +241,13 @@ export function jsonLdProducts(html: string, pageUrl: string): PsMeProduct[] {
 }
 
 /** Products with their category and price, from a page that carries them:
- *  a Poster menu.ps.me page, or any site with schema.org data. Feeds the converter. */
+ *  a Clopos e-menu, a monyo.az page, a Poster menu.ps.me page, or any site
+ *  with schema.org data. Feeds the converter. */
 export function pageProducts(html: string, pageUrl: string): PsMeProduct[] {
-  return new URL(pageUrl).hostname === 'menu.ps.me' ? psMeProducts(html) : jsonLdProducts(html, pageUrl);
+  const host = new URL(pageUrl).hostname;
+  if (host.endsWith('clopos.menu')) return cloposMenu(html).products;
+  if (host.endsWith('monyo.az')) return monyoProducts(html, pageUrl);
+  return host === 'menu.ps.me' ? psMeProducts(html) : jsonLdProducts(html, pageUrl);
 }
 
 /** Reads whichever kind of online menu the link points at. */

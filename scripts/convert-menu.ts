@@ -7,7 +7,10 @@
  *   // Poster sometimes exports dishes and products as two separate files:
  *   npm run convert -- --company zarif --file /path/to/dishes.xlsx --products /path/to/products.xlsx
  *
- *   // A Poster online menu page instead of a file:
+ *   // An online menu page instead of a file (Clopos, monyo.az or Poster's menu.ps.me).
+ *   // No config is needed for a link; without one everything comes in as Yemək.
+ *   npm run convert -- --company ss-lounge --url https://sslounge.clopos.menu/az/1/home
+ *   npm run convert -- --company cinar --url "https://monyo.az/v4/?r=cinarrestoran"
  *   npm run convert -- --company cinar-lounge --url https://menu.ps.me/SWoDd4Ipp8E
  *
  *   // Or the restaurant's own site, when it carries schema.org Product data:
@@ -24,6 +27,7 @@ import path from 'node:path';
 import * as XLSX from 'xlsx';
 import { parseMenuFile } from '@/lib/excel';
 import { convertMenu, convertMenuPage, type ConvertConfig } from '@/lib/menu-convert';
+import { menuPageUrl } from '@/lib/menu-images';
 import { menuTextWorkbook } from '@/lib/menu-text';
 
 const args = process.argv.slice(2);
@@ -35,24 +39,31 @@ async function main() {
   const productsFile = arg('--products');
   const pageUrl = arg('--url');
   if (!company || (!file && !pageUrl)) {
-    console.error('Usage: npm run convert -- --company <name> (--file <path> [--products <path>] | --url <menu.ps.me link>)');
+    console.error('Usage: npm run convert -- --company <name> (--file <path> [--products <path>] | --url <Clopos, monyo.az or menu.ps.me link>)');
     process.exit(1);
   }
   for (const f of [file, productsFile]) {
     if (f && !fs.existsSync(f)) { console.error(`File not found: ${f}`); process.exit(1); }
   }
   const configPath = path.join(__dirname, 'configs', `${company}.json`);
-  if (!fs.existsSync(configPath)) {
+  let cfg: ConvertConfig;
+  if (fs.existsSync(configPath)) {
+    cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  } else if (pageUrl) {
+    // A link needs no config: everything comes in as Yemək, fixed in the file or with a config later.
+    cfg = { name: company };
+    console.log(`  No config at ${configPath}: every item comes in as Yemək.`);
+  } else {
     console.error(`Config not found: ${configPath}\nCopy sherwood-lounge.json (Clopos) or luna.json / zarif.json (Poster).`);
     process.exit(1);
   }
-  const cfg: ConvertConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 
   let result;
   if (pageUrl) {
-    const res = await fetch(pageUrl);
+    const url = menuPageUrl(pageUrl);
+    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
     if (!res.ok) { console.error(`Menu page answered ${res.status}.`); process.exit(1); }
-    result = convertMenuPage(await res.text(), pageUrl, cfg);
+    result = convertMenuPage(await res.text(), url, cfg);
   } else {
     result = convertMenu(XLSX.readFile(file!), cfg, productsFile ? XLSX.readFile(productsFile) : undefined);
   }

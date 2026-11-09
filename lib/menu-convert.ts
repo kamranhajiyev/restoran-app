@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { COL } from './excel';
-import { applyRenames, pageProducts } from './menu-images';
+import { applyRenames, cloposMenu, pageProducts } from './menu-images';
 import type { MenuTextResult } from './menu-text';
 
 // Another POS's menu export turned into the same file the admin import reads.
@@ -13,12 +13,12 @@ import type { MenuTextResult } from './menu-text';
 //             the company's config. Sometimes dishes and products are two files.
 //
 // An online menu page works too, with no export at all: convertMenuPage reads
-// names, categories and prices off a Poster menu.ps.me page or any site that
-// carries schema.org Product data (odessadoner.com/menu).
+// names, categories and prices off a Clopos e-menu, a monyo.az page, a Poster
+// menu.ps.me page, or any site that carries schema.org Product data (odessadoner.com/menu).
 //
 // One config per company in scripts/configs/<company>.json.
 
-export type Source = 'clopos' | 'poster' | 'psme' | 'jsonld';
+export type Source = 'clopos' | 'poster' | 'clopos-page' | 'monyo' | 'psme' | 'jsonld';
 type Kind = 'meal' | 'product' | 'set';
 
 interface PosterSheet {
@@ -160,16 +160,28 @@ export function convertMenu(wb: XLSX.WorkBook, cfg: ConvertConfig, products?: XL
   return toResult(items, cfg, source, notes);
 }
 
-/** An online menu page (menu.ps.me/<id>, or a site with schema.org data) as the import file. */
+/** An online menu page (a Clopos e-menu, monyo.az, menu.ps.me/<id>, or a site
+ *  with schema.org data) as the import file. */
 export function convertMenuPage(html: string, pageUrl: string, cfg: ConvertConfig): ConvertResult {
   const kindOf = kindRule(cfg);
-  const items: Item[] = pageProducts(html, pageUrl).map(p => {
+  const host = new URL(pageUrl).hostname;
+  const notes: string[] = [];
+  let products;
+  if (!host.endsWith('clopos.menu')) products = pageProducts(html, pageUrl);
+  else {
+    const menu = cloposMenu(html);
+    products = menu.products;
+    if (menu.noCategory.length) notes.push(`${menu.noCategory.length} products in no category (not on their e-menu) left out: ${menu.noCategory.join(', ')}`);
+    if (menu.sameName.length) notes.push(`Same name twice, the first kept: ${menu.sameName.join(', ')}`);
+  }
+  const items: Item[] = products.map(p => {
     const name = applyRenames(p.name, cfg.rename);
     const category = applyRenames(p.category, cfg.rename);
     return { category, name, price: p.price, cost: null, kind: kindOf(category, name), variants: [] };
   });
-  if (items.length === 0) throw new Error('No products found on the page. Is it a menu.ps.me/<id> link or a site with schema.org Product data?');
-  return toResult(items, cfg, new URL(pageUrl).hostname === 'menu.ps.me' ? 'psme' : 'jsonld', []);
+  if (items.length === 0) throw new Error('No products found on the page. Is it a Clopos, monyo.az or menu.ps.me link, or a site with schema.org Product data?');
+  const source: Source = host.endsWith('clopos.menu') ? 'clopos-page' : host.endsWith('monyo.az') ? 'monyo' : host === 'menu.ps.me' ? 'psme' : 'jsonld';
+  return toResult(items, cfg, source, notes);
 }
 
 function toResult(items: Item[], cfg: ConvertConfig, source: Source, notes: string[]): ConvertResult {

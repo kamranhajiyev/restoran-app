@@ -27,7 +27,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createClient } from '@supabase/supabase-js';
-import { applyRenames, matchPictures, parseMenuPage, pictureStoragePath } from '@/lib/menu-images';
+import { applyRenames, matchPictures, menuPageUrl, parseMenuPage, pictureStoragePath } from '@/lib/menu-images';
 import { PICTURE_CACHE } from '@/lib/shrink-picture';
 import { shrinkPictureBuffer } from '@/lib/shrink-picture-node';
 
@@ -63,13 +63,14 @@ async function main() {
     .from('menu_items').select('id, name, image').eq('company_id', company.id);
   if (pErr || !products) fail(`Menu read failed: ${pErr?.message}`);
 
-  const res = await fetch(pageUrl);
+  const menuUrl = menuPageUrl(pageUrl);
+  const res = await fetch(menuUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
   if (!res.ok) fail(`Menu page answered ${res.status}.`);
   const configPath = path.join(__dirname, 'configs', `${slug}.json`);
   const renames: [string, string][] = fs.existsSync(configPath)
     ? JSON.parse(fs.readFileSync(configPath, 'utf-8')).rename ?? []
     : [];
-  const page = parseMenuPage(await res.text(), pageUrl).map(p => ({ ...p, name: applyRenames(p.name, renames) }));
+  const page = parseMenuPage(await res.text(), menuUrl).map(p => ({ ...p, name: applyRenames(p.name, renames) }));
   if (page.length === 0) fail('No products found on the page. Is it a Clopos …/products or monyo.az/v4/?r=… page?');
 
   const m = matchPictures(products, page, { replace: has('--replace') });

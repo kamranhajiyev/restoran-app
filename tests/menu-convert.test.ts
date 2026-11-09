@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { parseMenuFile } from '@/lib/excel';
 import { convertMenu, convertMenuPage, detectSource, type ConvertConfig } from '@/lib/menu-convert';
 import { menuTextWorkbook } from '@/lib/menu-text';
+import { menuPageUrl } from '@/lib/menu-images';
 
 function book(sheets: Record<string, unknown[][]>): XLSX.WorkBook {
   const wb = XLSX.utils.book_new();
@@ -142,5 +143,77 @@ describe('convertMenuPage (a site with schema.org data)', () => {
     const preview = await parseMenuFile(new File([new Uint8Array(buf)], 'm.xlsx'), [], []);
     expect(preview.errors).toEqual([]);
     expect(preview.newItems.map(i => i.price)).toEqual([3.6, 2]);
+  });
+});
+
+// A Clopos e-menu carries the whole menu as escaped JSON inside a script string.
+const cloposPage = (data: unknown) =>
+  `<script>self.__next_f.push([1,"x:{\\"menuData\\":${JSON.stringify(data).replace(/\\/g, '\\\\').replace(/"/g, '\\"')},\\"venueId\\":\\"1\\"}"])</script>`;
+
+describe('convertMenuPage (a Clopos e-menu link)', () => {
+  const p = (id: number, name: string, price: number | null, cat: number | null, extra = {}) =>
+    ({ id, name, full_name: name, price, category_id: cat, emenu_category_id: cat, emenu_position: null, media: [], ...extra });
+  const page = cloposPage({
+    categories: [
+      { id: 7, name: 'Pizza', emenu_position: 1 },
+      { id: 13, name: 'Serin içkilər', emenu_position: 0 },
+    ],
+    products: [
+      p(1, 'Margaritta', 9.9, 7, { meta: { availability: { schedules: { itemVisibility: [] } } } }),
+      p(2, 'Coca "Cola" 1L', 3, 13),
+      p(3, 'Buz', 1, 22),               // a category hidden from the e-menu
+      p(4, 'fanta 1l', 3.5, null),       // in no category: not on their e-menu
+      p(5, 'margaritta ', 8, 7),         // the same name again
+    ],
+  });
+  const URL_ = 'https://sslounge.clopos.menu/az/1/products';
+
+  it('reads names, categories in e-menu order and prices, and the import takes it', async () => {
+    const result = convertMenuPage(page, URL_, { name: 'SS Lounge', productCategories: ['Serin içkilər'] });
+    expect(result.source).toBe('clopos-page');
+    expect(result.rows.map(r => [r['Kateqoriya'], r['Məhsul'], r['Qiymət (₼)'], r['Növ']])).toEqual([
+      ['Serin içkilər', 'Coca "Cola" 1L', 3, 'Məhsul'],
+      ['Pizza', 'Margaritta', 9.9, 'Yemək'],
+      ['Digər', 'Buz', 1, 'Yemək'],
+    ]);
+    expect(result.notes.join('\n')).toMatch(/fanta 1l/);
+    expect(result.notes.join('\n')).toMatch(/margaritta/);
+    const buf: Buffer = XLSX.write(menuTextWorkbook(result), { type: 'buffer', bookType: 'xlsx' });
+    const preview = await parseMenuFile(new File([new Uint8Array(buf)], 'm.xlsx'), [], []);
+    expect(preview.errors).toEqual([]);
+  });
+
+  it('refuses a Clopos page with no menu data on it', () => {
+    expect(() => convertMenuPage('<html></html>', URL_, { name: 'x' })).toThrow(/No products/);
+  });
+});
+
+describe('convertMenuPage (a monyo.az link)', () => {
+  const card = (name: string, price: string) => `
+    <div class="product-card " data-product-id="1">
+      <div class="product-content"><h3 class="product-name">${name}</h3>
+        <div class="product-footer "><div class="product-price" data-price="${price}" data-discount="0">${price} ₼</div></div>
+      </div>
+    </div>`;
+  const page = `<h2 class="category-title">Kabablar</h2>${card('Lülə Kabab', '9')}${card('Tikə &amp; Kartof', '10.5')}`
+    + `<h2 class="category-title">Sərin İçkilər</h2>${card('Kola', '2')}`;
+
+  it('takes each card under the heading above it, with its price', () => {
+    const result = convertMenuPage(page, 'https://monyo.az/v4/?r=cinarrestoran', { name: 'Çinar', productCategories: ['Sərin İçkilər'] });
+    expect(result.source).toBe('monyo');
+    expect(result.rows.map(r => [r['Kateqoriya'], r['Məhsul'], r['Qiymət (₼)'], r['Növ']])).toEqual([
+      ['Kabablar', 'Lülə Kabab', 9, 'Yemək'],
+      ['Kabablar', 'Tikə & Kartof', 10.5, 'Yemək'],
+      ['Sərin İçkilər', 'Kola', 2, 'Məhsul'],
+    ]);
+  });
+});
+
+describe('menuPageUrl', () => {
+  it('sends any Clopos e-menu page to the one that carries the menu, and leaves other links alone', () => {
+    expect(menuPageUrl('https://sslounge.clopos.menu/az/1/home')).toBe('https://sslounge.clopos.menu/az/1/products');
+    expect(menuPageUrl('https://sslounge.clopos.menu/az/1/categories')).toBe('https://sslounge.clopos.menu/az/1/products');
+    expect(menuPageUrl('https://sslounge.clopos.menu/az/1/products')).toBe('https://sslounge.clopos.menu/az/1/products');
+    expect(menuPageUrl('https://monyo.az/v4/?r=cinar')).toBe('https://monyo.az/v4/?r=cinar');
   });
 });
