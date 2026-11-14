@@ -1,5 +1,5 @@
 import { guardQuery, refusal } from './order-rules';
-import { CashShift, Category, Courier, CourierLedger, CourierPayMethod, CourierPayment, Hall, MenuItem, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RestaurantTable, ShiftEdit, ShiftMovement, Staff, StaffRole, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
+import { CashShift, Category, Courier, CourierLedger, CourierPayMethod, CourierPayment, Hall, MenuItem, MenuItemVariant, ModifierGroup, ModifierOption, Order, OrderItem, ReceiptLine, ReceiptLineDetail, RecipeIngredient, RestaurantTable, ShiftEdit, ShiftMovement, Staff, StaffRole, Station, StockBalance, StockItem, StockMovement, StockReceipt, StockTransfer, Supplier, SupplierLedger, SupplierPayment, TrashItem, TransferLine, TransferLineDetail, Warehouse, WriteoffEntry } from '@/types';
 import { CompanySettings, DEFAULT_SETTINGS, DEFAULT_TZ } from './business-day';
 import { splitOrderItems } from './order-items';
 import { courierBalances, courierPending, sumCollections, type Collections, type ShiftSales } from './courier-pending';
@@ -23,6 +23,7 @@ import type { HealthProblem, HealthReport } from './health-report';
 import type { SplitRequestPart } from './split-bill';
 import type { AccountEdit, AccountKind, FinanceAccount, FinanceClosing, FinanceEntry, FinanceSource, FinanceTransaction, SourceKind } from './finance';
 import { cleanKind, kindForInsert, type CompanyKind } from './company-kind';
+import { cleanBarcode } from './barcode';
 
 async function authHeaders(): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -164,6 +165,8 @@ export async function fetchMenuOrNull(opts?: ReadOpts): Promise<MenuItem[] | nul
       category: r.category,
       available: r.available,
       qrVisible: r.qr_visible ?? true,
+      // Undefined on a database without the column: saveMenu then leaves it out.
+      barcode: r.barcode === undefined ? undefined : (r.barcode ?? null),
       variants: r.variants ?? undefined,
       costPrice: r.cost_price ? Number(r.cost_price) : undefined,
       image: r.image ?? undefined,
@@ -230,6 +233,9 @@ export async function saveMenu(menu: MenuItem[]): Promise<string | null> {
         // Absent = this screen never loaded the set's contents: the key is left
         // out and menuRowBatches keeps the row away from those that have it.
         ...(m.setItems ? { set_items: m.setItems.length > 0 ? m.setItems : null } : {}),
+        // The same for the barcode (lib/barcode): undefined = not loaded or not
+        // given (an import without the column), so the database keeps its own.
+        ...(m.barcode !== undefined ? { barcode: cleanBarcode(m.barcode) || null } : {}),
       });
     }
     for (const batch of menuRowBatches(rows)) {
@@ -1569,6 +1575,44 @@ export async function deleteSupplier(id: string): Promise<string | null> {
   const { error } = await supabase.from('suppliers').delete().eq('id', id);
   if (error) { console.error('[deleteSupplier]', error); return error.message; }
   return null;
+}
+
+// Whether this database has menu_items.barcode (20261111_menu_barcode.sql).
+// Asked of the database, not read off the menu: a new shop's empty menu shows
+// no columns, and its first product's barcode must still be saved.
+export async function menuHasBarcode(): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('menu_items').select('barcode').limit(1);
+    return !error;
+  } catch { return false; }
+}
+
+// Bazarlıq takes a scan (SHOP-MODE.md): which Anbar item each barcode fills.
+// A Məhsul's own stock row is linked through recipe_lines — per size when it
+// has sizes. Empty on any failure: the form then just says "not found".
+export async function fetchBarcodeStock(): Promise<Record<string, string>> {
+  if (!_companyId) return {};
+  try {
+    const [{ data: items, error: e1 }, { data: lines, error: e2 }] = await Promise.all([
+      supabase.from('menu_items').select('*').eq('company_id', _companyId).eq('kind', 'product'),
+      supabase.from('recipe_lines').select('menu_item_id, stock_item_id, variant_id').eq('company_id', _companyId),
+    ]);
+    if (e1 || e2 || !items || !lines) return {};
+    const out: Record<string, string> = {};
+    for (const it of items as { id: string; barcode?: string | null; variants?: MenuItemVariant[] | null }[]) {
+      const mine = lines.filter(l => l.menu_item_id === it.id);
+      if (it.variants?.length) {
+        for (const v of it.variants) {
+          const line = mine.find(l => l.variant_id === v.id);
+          if (line && cleanBarcode(v.barcode)) out[cleanBarcode(v.barcode)] = line.stock_item_id;
+        }
+      } else {
+        const line = mine.find(l => !l.variant_id);
+        if (line && cleanBarcode(it.barcode)) out[cleanBarcode(it.barcode)] = line.stock_item_id;
+      }
+    }
+    return out;
+  } catch { return {}; }
 }
 
 export async function fetchStockItems(): Promise<StockItem[]> {

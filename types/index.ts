@@ -49,6 +49,8 @@ export interface MenuItemVariant {
   name: string;
   price: number;
   costPrice?: number;
+  /** This size's own barcode (lib/barcode). */
+  barcode?: string;
 }
 
 // A reusable set of options ("Şuruplar", "Ölçü"). Built once, attached to as many
@@ -93,6 +95,7 @@ export interface MenuItem {
   category: string;
   available: boolean;
   qrVisible?: boolean;         // absent = visible. QR menu only; the POS ignores it.
+  barcode?: string | null;     // lib/barcode. Undefined = not read (an older database): saves leave it alone.
   variants?: MenuItemVariant[];
   costPrice?: number;
   image?: string;

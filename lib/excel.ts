@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { cleanBarcode } from './barcode';
 import { orderTotal } from '@/components/seller/order-format';
 import { orderServiceCharge } from './service-charge';
 import { Category, MenuItem, MenuItemVariant, Order } from '@/types';
@@ -18,6 +19,7 @@ export const COL = {
   available: 'Mövcud',
   kind: 'Növ',
   variants: 'Variantlar',
+  barcode: 'Barkod',
 } as const;
 
 function serializeVariants(variants?: MenuItemVariant[]): string {
@@ -40,11 +42,13 @@ export function exportMenuExcel(menu: MenuItem[], categories: Category[]): void 
     [COL.available]: m.available ? 'Bəli' : 'Xeyr',
     [COL.kind]: KIND_LABEL[itemKind(m)],
     [COL.variants]: serializeVariants(m.variants),
+    // A size's barcode is not in the file (only in admin): this is the product's own.
+    [COL.barcode]: m.barcode ?? '',
   }));
   const catRows = categories.map(c => ({ 'Ad': c.name, 'Aktiv': c.available ? 'Bəli' : 'Xeyr' }));
 
   const wb = XLSX.utils.book_new();
-  const menuSheet = XLSX.utils.json_to_sheet(menuRows.length ? menuRows : [{ [COL.category]: '', [COL.name]: '', [COL.price]: '', [COL.cost]: '', [COL.available]: '', [COL.kind]: '', [COL.variants]: '' }]);
+  const menuSheet = XLSX.utils.json_to_sheet(menuRows.length ? menuRows : [{ [COL.category]: '', [COL.name]: '', [COL.price]: '', [COL.cost]: '', [COL.available]: '', [COL.kind]: '', [COL.variants]: '', [COL.barcode]: '' }]);
   menuSheet['!cols'] = [{ wch: 18 }, { wch: 30 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 30 }];
   XLSX.utils.book_append_sheet(wb, menuSheet, 'Menyu');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(catRows), 'Kateqoriyalar');
@@ -169,6 +173,7 @@ function headerKey(raw: string): keyof typeof COL | null {
   if (h.startsWith('mövcud') || h.startsWith('movcud') || h === 'available' || h === 'aktiv') return 'available';
   if (h.startsWith('növ') || h.startsWith('nov') || h === 'kind' || h === 'type') return 'kind';
   if (h.startsWith('variant')) return 'variants';
+  if (h.startsWith('barkod') || h.startsWith('barcode') || h === 'ean' || h === 'sku') return 'barcode';
   return null;
 }
 
@@ -279,6 +284,8 @@ export async function parseMenuFile(
     const cost = parsePrice(mapped.cost);
     const available = parseBool(mapped.available);
     const kind = parseKind(mapped.kind);
+    // Kept as written (letters, leading zeros): lib/barcode.
+    const barcode = cleanBarcode(mapped.barcode);
 
     if (!existingCatByLower.has(category.toLowerCase()) && !newCategories.some(c => c.name.toLowerCase() === category.toLowerCase())) {
       newCategories.push({ name: category, available: catAvailability.get(category.toLowerCase()) ?? true });
@@ -294,7 +301,8 @@ export async function parseMenuFile(
         const prev = existing.variants?.find(
           ev => ev.name.trim().toLowerCase() === v.name.trim().toLowerCase(),
         );
-        return prev ? { ...v, id: prev.id } : v;
+        // A size's barcode is set in admin, not in the file: it stays.
+        return prev ? { ...v, id: prev.id, ...(prev.barcode ? { barcode: prev.barcode } : {}) } : v;
       });
       updatedItems.push({
         ...existing,
@@ -303,6 +311,7 @@ export async function parseMenuFile(
         ...(present.has('available') ? { available } : {}),
         ...(present.has('cost') ? { costPrice: cost ?? undefined } : {}),
         ...(present.has('variants') ? { variants: reconciledVariants } : {}),
+        ...(present.has('barcode') ? { barcode: barcode || null } : {}),
         ...(kind ? { kind } : {}),
       });
     } else {
@@ -315,6 +324,7 @@ export async function parseMenuFile(
         costPrice: cost ?? undefined,
         variants,
         kind: kind ?? 'product',
+        ...(barcode ? { barcode } : {}),
       });
     }
   });

@@ -117,10 +117,20 @@ export function cleanSetItems(selfId: string, parts: { id: string; qty: number; 
   return out;
 }
 
+/** Columns a menu row may leave out: the screen did not load them (an older
+ *  database, a list read without them), so the database keeps what it has. */
+const OPTIONAL_MENU_COLUMNS = ['set_items', 'barcode'] as const;
+
 /** Menu rows for saving, in batches that each name the same columns. A dish
- *  whose set contents this screen never loaded has no `set_items` key, and must
- *  keep what the database has: sent in one upsert with rows that do name the
- *  column, it would be written as empty. */
+ *  whose set contents (or barcode) this screen never loaded has no such key,
+ *  and must keep what the database has: sent in one upsert with rows that do
+ *  name the column, it would be written as empty. */
 export function menuRowBatches<T extends Record<string, unknown>>(rows: T[]): T[][] {
-  return [rows.filter(r => 'set_items' in r), rows.filter(r => !('set_items' in r))].filter(b => b.length > 0);
+  const batches = new Map<string, T[]>();
+  for (const r of rows) {
+    const sig = OPTIONAL_MENU_COLUMNS.filter(c => c in r).join(',');
+    const b = batches.get(sig);
+    if (b) b.push(r); else batches.set(sig, [r]);
+  }
+  return [...batches.values()];
 }

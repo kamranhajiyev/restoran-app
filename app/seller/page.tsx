@@ -80,6 +80,7 @@ import OrderNote from '@/components/OrderNote';
 import { OPENING_TAB, sellerTabs, type SellerTab } from '@/lib/seller-nav';
 import { cleanKind, type CompanyKind } from '@/lib/company-kind';
 import { paysNow, shopDeliveryType, shopSaleType, tabLabel } from '@/lib/shop-mode';
+import { findByBarcode, scanCatcher } from '@/lib/barcode';
 
 const TAB_ICONS: Record<SellerTab, typeof Receipt> = {
   'new-order': ShoppingBag, orders: Receipt, kassa: Wallet, couriers: Bike, history: History,
@@ -1856,6 +1857,51 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       .filter((g): g is ModifierGroup => !!g && g.options.length > 0);
   }
 
+  // A barcode, scanned anywhere on the products or typed into the search box
+  // and Enter (lib/barcode). One more of the same product is the same line, +1.
+  // A product with option groups still asks for them; a size is already chosen.
+  function scanned(raw: string) {
+    const hit = findByBarcode(menu, raw);
+    if (!hit) {
+      // Typed text that names products is a search: Enter on exactly one adds
+      // it, on several does nothing. Only a code that matches nothing at all
+      // is a failed scan.
+      if (filtered.length === 1) { setMenuSearch(''); handleMenuItemTap(filtered[0]); return; }
+      if (filtered.length > 1) return;
+      showAlert(`Barkod tapılmadı: ${raw.trim()}`);
+      return;
+    }
+    setMenuSearch('');
+    if (!hit.item.available) { showAlert(`${hit.item.name} hazırda satışda deyil.`); return; }
+    if (!hit.variant) { handleMenuItemTap(hit.item); return; }
+    const v = hit.variant;
+    if (groupsForItem(hit.item).length > 0) {
+      setSelectedMods({});
+      setSelectedVariant({ id: v.id, name: v.name, price: v.price });
+      setModifierItem(hit.item);
+      return;
+    }
+    addToCart({ ...hit.item, price: v.price }, v.name, v.id);
+  }
+
+  // A scan with the cursor anywhere else on the products screen. The search
+  // box takes its own (onKeyDown above); a pop-up open over the products, or
+  // another box being typed in, is left alone.
+  const scannedRef = useRef(scanned);
+  scannedRef.current = scanned;
+  useEffect(() => {
+    if (view !== 'menu' || modifierItem || payingOrder) return;
+    const catcher = scanCatcher(code => scannedRef.current(code));
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if (e.key === 'Enter') { if (catcher.enter()) e.preventDefault(); return; }
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) catcher.key(e.key);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [view, modifierItem, payingOrder]);
+
   function handleMenuItemTap(item: MenuItem) {
     const groups = groupsForItem(item);
     const hasVariants = (item.variants?.length ?? 0) > 0;
@@ -3286,7 +3332,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const categories  = [...new Set(availableCategories.filter(a => menu.some(i => i.category === a.name)).map(a => a.name))];
   const menuQuery   = azNormalize(menuSearch.trim());
   const filtered    = menuQuery
-    ? menu.filter(m => m.available && azNormalize(m.name).includes(menuQuery))
+    ? menu.filter(m => m.available && (azNormalize(m.name).includes(menuQuery) || !!findByBarcode([m], menuSearch)))
     : menu.filter(m => m.category === activeCategory && m.available);
   const active      = orders.filter(isOrderOpen);
   const bizToday    = businessToday(bizSettings);
@@ -4622,7 +4668,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                     <input
                       value={menuSearch}
                       onChange={e => setMenuSearch(e.target.value)}
-                      placeholder="Məhsul axtar..."
+                      onKeyDown={e => { if (e.key === 'Enter' && menuSearch.trim()) { e.preventDefault(); scanned(menuSearch); } }}
+                      autoFocus={isShop}
+                      placeholder={isShop ? 'Barkod skan et və ya məhsul axtar...' : 'Məhsul axtar...'}
                       className="w-full bg-stone-50 border border-stone-200 rounded-xl pl-9 pr-8 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
                     />
                     {menuSearch && (

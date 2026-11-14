@@ -17,6 +17,11 @@ export async function GET(req: NextRequest) {
 
   if (error) return Response.json({ items: [] }, { status: 500 });
 
+  // Barcodes (lib/barcode), read on their own: a database without
+  // 20261111_menu_barcode.sql must still hand the till its menu.
+  const { data: codes } = await db.from('menu_items').select('id, barcode').eq('company_id', companyId);
+  const barcodeOf = new Map((codes ?? []).map((c: { id: string; barcode: string | null }) => [c.id, c.barcode]));
+
   // Which reusable modifier sets each item offers. Scoped through the group's
   // company_id so one company can never see another's links.
   const { data: links } = await db
@@ -37,6 +42,7 @@ export async function GET(req: NextRequest) {
     category: r.category,
     available: r.available,
     qrVisible: r.qr_visible ?? true,
+    barcode: barcodeOf.get(r.id as string) ?? undefined,
     variants: r.variants ?? undefined,
     costPrice: r.cost_price ? Number(r.cost_price) : undefined,
     image: r.image ?? undefined,

@@ -31,7 +31,7 @@ import {
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, moveTableToHall, fetchCompanySlug,
   fetchHalls, createHall, renameHall, deleteHall, saveHallOrder, adoptOrphanTables, fetchTablesOrNull, fetchHallsOrNull,
   fetchTablesEnabled, setTablesEnabled,
-  fetchDeliveryEnabled, setDeliveryEnabled,
+  fetchDeliveryEnabled, setDeliveryEnabled, fetchCompanyKind, menuHasBarcode,
   fetchQrEnabled, setQrEnabled, fetchMenuOnly, setMenuOnly,
   fetchKassaEnabled, setKassaEnabled,
   fetchCompanyProfile, updateMyCompanyProfile, fetchMyUsername, updateOwnerAccount, verifyPassword,
@@ -108,6 +108,8 @@ import { formatDayMonth, formatDayMonthTime, formatTime } from '@/lib/dates';
 import { STATUS_COLORS, STATUS_DOTS } from '@/components/seller/order-format';
 import { card as cardCls, Tag, Segmented, FilterSelect, DateRange, SearchBox, toolBtn } from '@/components/panel-ui';
 import { groupByDay, dayHeading } from '@/lib/group-by-day';
+import type { CompanyKind } from '@/lib/company-kind';
+import { barcodeOwner, cleanBarcode } from '@/lib/barcode';
 
 // RPC raise messages are machine codes — translated here for display
 const STAFF_ERRORS: Record<string, string> = {
@@ -146,10 +148,10 @@ const STATUS_OPTIONS: OrderStatus[] = ['gözləyir', 'hazırlanır', 'hazırdır
 type Tab = 'stats' | 'orders' | 'kassa' | 'maliyye' | 'menu' | 'users' | 'tables' | 'anbar' | 'couriers' | 'settings';
 
 type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
-type FormVariant = { id: string; name: string; price: string; costPrice: string };
+type FormVariant = { id: string; name: string; price: string; costPrice: string; barcode: string };
 
 function emptyForm(cat: string) {
-  return { name: '', price: '', costPrice: '', category: cat, image: '', stationId: '', kind: 'meal' as ItemKind, hasVariants: false, variants: [] as FormVariant[], modifierGroupIds: [] as string[], modifiersKnown: true, setItems: [] as { id: string; qty: string; variantId: string }[], setKnown: true };
+  return { name: '', price: '', costPrice: '', barcode: '', category: cat, image: '', stationId: '', kind: 'meal' as ItemKind, hasVariants: false, variants: [] as FormVariant[], modifierGroupIds: [] as string[], modifiersKnown: true, setItems: [] as { id: string; qty: string; variantId: string }[], setKnown: true };
 }
 
 const AZ_MON_SHORT = ['Yan','Fev','Mar','Apr','May','İyn','İyl','Avq','Sen','Okt','Noy','Dek'];
@@ -598,6 +600,12 @@ function AdminPageContent() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm(''));
+  // Restoran or Mağaza (lib/company-kind, lib/shop-mode).
+  const [kind, setKind] = useState<CompanyKind>('restaurant');
+  const isShop = kind === 'shop';
+  // False on a database without the barcode column: the form neither shows
+  // nor saves barcodes (lib/barcode).
+  const [barcodesLoaded, setBarcodesLoaded] = useState(false);
   // The recipe of the dish in the form, and the warehouse items to pick from.
   // 'failed': it did not load, so the form says so and saves nothing over it.
   const [recipe, setRecipe] = useState<{ state: 'loading' | 'ready' | 'failed'; rows: { stockItemId: string; qty: string }[]; items: StockItem[] }>({ state: 'loading', rows: [], items: [] });
@@ -1045,6 +1053,9 @@ function AdminPageContent() {
       setKassaOn(ke);
       setMenuOnlyState(mo as boolean);
       setDeliveryOn(de as boolean);
+      // Restoran or Mağaza (lib/company-kind): null = the read failed, keep it.
+      fetchCompanyKind().then(k => { if (k) setKind(k); });
+      menuHasBarcode().then(setBarcodesLoaded);
     });
     return () => authSub.subscription.unsubscribe();
   }, [router]);
@@ -1657,12 +1668,13 @@ function AdminPageContent() {
       name: item.name,
       price: item.variants?.length ? '' : String(item.price),
       costPrice: item.costPrice ? String(item.costPrice) : '',
+      barcode: item.barcode ?? '',
       category: item.category,
       image: item.image ?? '',
       stationId: item.stationId ?? '',
       kind: itemKind(item),
       hasVariants: !!item.variants?.length,
-      variants: item.variants?.map(v => ({ id: v.id, name: v.name, price: String(v.price), costPrice: v.costPrice ? String(v.costPrice) : '' })) ?? [],
+      variants: item.variants?.map(v => ({ id: v.id, name: v.name, price: String(v.price), costPrice: v.costPrice ? String(v.costPrice) : '', barcode: v.barcode ?? '' })) ?? [],
       modifierGroupIds: item.modifierGroupIds ?? [],
       // Undefined: this dish's links did not load, so the form must not save them.
       modifiersKnown: item.modifierGroupIds !== undefined,
@@ -1727,7 +1739,7 @@ function AdminPageContent() {
   /** `settle`: the owner's answer for the stock a Məhsul leaves behind. */
   async function saveForm(settle: { ids: string[]; keep: boolean } | null) {
     const variants: MenuItemVariant[] = form.hasVariants
-      ? form.variants.map(v => ({ id: v.id || Date.now().toString(), name: v.name, price: parseFloat(v.price) || 0, costPrice: v.costPrice ? parseFloat(v.costPrice) : undefined }))
+      ? form.variants.map(v => ({ id: v.id || Date.now().toString(), name: v.name, price: parseFloat(v.price) || 0, costPrice: v.costPrice ? parseFloat(v.costPrice) : undefined, ...(cleanBarcode(v.barcode) ? { barcode: cleanBarcode(v.barcode) } : {}) }))
       : [];
     const basePrice = form.hasVariants ? (variants[0]?.price ?? 0) : (parseFloat(form.price) || 0);
     const id = editingId ?? crypto.randomUUID();
@@ -1739,6 +1751,10 @@ function AdminPageContent() {
       available: editingId ? (menu.find(m => m.id === editingId)?.available ?? true) : true,
       qrVisible: editingId ? (menu.find(m => m.id === editingId)?.qrVisible ?? true) : true,
       variants: form.hasVariants ? variants : undefined,
+      // Undefined only when this database has no barcode column (the menu was
+      // read without it): saveMenu then leaves it alone. With sizes, each size
+      // carries its own and the product has none.
+      barcode: barcodesLoaded ? (form.hasVariants ? null : (cleanBarcode(form.barcode) || null)) : undefined,
       costPrice: form.costPrice ? parseFloat(form.costPrice) : undefined,
       image: form.image || undefined,
       stationId: form.stationId || null,
@@ -1816,7 +1832,7 @@ function AdminPageContent() {
   }
 
   function addVariant() {
-    setForm(f => ({ ...f, variants: [...f.variants, { id: Date.now().toString(), name: '', price: '', costPrice: '' }] }));
+    setForm(f => ({ ...f, variants: [...f.variants, { id: Date.now().toString(), name: '', price: '', costPrice: '', barcode: '' }] }));
   }
   function updateVariant(idx: number, field: keyof FormVariant, value: string) {
     setForm(f => ({ ...f, variants: f.variants.map((v, i) => i === idx ? { ...v, [field]: value } : v) }));
@@ -2396,6 +2412,22 @@ function AdminPageContent() {
           </div>
         </div>
 
+        {/* Barcode (lib/barcode): a shop's product, or each of its sizes below. */}
+        {isShop && barcodesLoaded && (
+          <div>
+            <label className="text-xs font-medium text-stone-600 mb-1.5 block">Barkod</label>
+            {form.hasVariants
+              ? <p className="text-sm text-stone-500 py-2">Hər ölçünün öz barkodu var — aşağıda</p>
+              : <input type="text" placeholder="Skan edin və ya yazın" value={form.barcode}
+                  onChange={e => setForm(f => ({ ...f, barcode: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }}
+                  className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white" />}
+            {!form.hasVariants && barcodeOwner(menu, form.barcode, { itemId: editingId }) && (
+              <p className="text-xs text-red-600 mt-1">Bu barkod artıq var: {barcodeOwner(menu, form.barcode, { itemId: editingId })}</p>
+            )}
+          </div>
+        )}
+
         <div>
           <label className="text-xs font-medium text-stone-600 mb-1.5 block">Şəkil</label>
           <div className="flex gap-3 items-center">
@@ -2415,7 +2447,7 @@ function AdminPageContent() {
 
         <label className="flex items-center gap-2 cursor-pointer select-none">
           <input type="checkbox" checked={form.hasVariants}
-            onChange={e => setForm(f => ({ ...f, hasVariants: e.target.checked, variants: e.target.checked && f.variants.length === 0 ? [{ id: Date.now().toString(), name: '', price: '', costPrice: '' }] : f.variants }))}
+            onChange={e => setForm(f => ({ ...f, hasVariants: e.target.checked, variants: e.target.checked && f.variants.length === 0 ? [{ id: Date.now().toString(), name: '', price: '', costPrice: '', barcode: '' }] : f.variants }))}
             className="rounded accent-primary-800" />
           <span className="text-sm text-stone-700">Variantlar var (ölçü, növ…)</span>
         </label>
@@ -2440,16 +2472,24 @@ function AdminPageContent() {
           </div>
         ) : (
           <div className="space-y-2">
-            <div className="grid grid-cols-9 gap-2 text-xs text-stone-500 px-1">
+            <div className={`grid ${isShop && barcodesLoaded ? 'grid-cols-12' : 'grid-cols-9'} gap-2 text-xs text-stone-500 px-1`}>
               <span className="col-span-3">Variant adı</span>
+              {isShop && barcodesLoaded && <span className="col-span-3">Barkod</span>}
               <span className="col-span-2">Qiymət (₼)</span>
               <span className="col-span-2">Maya (₼)</span>
               <span className="col-span-2">Marja</span>
             </div>
             {form.variants.map((v, i) => (
-              <div key={v.id} className="grid grid-cols-9 gap-2 items-center">
+              <div key={v.id} className={`grid ${isShop && barcodesLoaded ? 'grid-cols-12' : 'grid-cols-9'} gap-2 items-center`}>
                 <input className="col-span-3 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
                   placeholder={`Variant ${i + 1}`} value={v.name} onChange={e => updateVariant(i, 'name', e.target.value)} required />
+                {isShop && barcodesLoaded && (
+                  <input type="text" placeholder="Skan edin"
+                    title={barcodeOwner(menu, v.barcode, { itemId: editingId, variantId: v.id }) ? `Bu barkod artıq var: ${barcodeOwner(menu, v.barcode, { itemId: editingId, variantId: v.id })}` : undefined}
+                    className={`col-span-3 border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white ${barcodeOwner(menu, v.barcode, { itemId: editingId, variantId: v.id }) ? 'border-red-400 text-red-700' : 'border-stone-200'}`}
+                    value={v.barcode} onChange={e => updateVariant(i, 'barcode', e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }} />
+                )}
                 <input type="number" placeholder="0.00" step="0.01" min="0"
                   className="col-span-2 border border-stone-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
                   value={v.price} onChange={e => updateVariant(i, 'price', e.target.value)} required />

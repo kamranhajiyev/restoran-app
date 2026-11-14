@@ -8,7 +8,7 @@ import {
   fetchSuppliers, createSupplier, updateSupplier, deleteSupplier, fetchSupplierLedger, fetchReceiptDebts, addSupplierPayment, fetchSupplierPaymentLog,
   fetchStockItems, createStockItem, updateStockItem, trashStockItem,
   fetchBalances, fetchReceipts, recordReceipt, updateReceipt, voidReceipt, recordWriteoff,
-  fetchReceiptLines, fetchWriteoffs,
+  fetchReceiptLines, fetchWriteoffs, fetchBarcodeStock,
   fetchTransfers, fetchTransferLines, recordTransfer, voidTransfer,
   fetchSalesWarehouse, setSalesWarehouse,
   fetchStockFailures, retryOrderStock, StockFailure,
@@ -16,6 +16,7 @@ import {
 import { Warehouse as Wh, Supplier, StockItem, StockBalance, StockReceipt, ReceiptLine, ReceiptLineDetail, StockTransfer, TransferLine, TransferLineDetail, WriteoffEntry, SupplierLedger, SupplierPayment } from '@/types';
 import { DialogState } from '@/components/AppDialog';
 import { goneItems, stockLeftQuestion, stockTrashDone, stockTrashMessage } from '@/lib/stock-trash';
+import { addScannedLine, cleanBarcode } from '@/lib/barcode';
 import { inputCls, btnPrimary, btnGhost, Modal, Empty } from '@/components/panel-ui';
 import { formatDateTime, formatDayMonthTime } from '@/lib/dates';
 
@@ -776,6 +777,18 @@ function NewReceipt({ activeWh, suppliers, items, initial, initialLines, onClose
   );
   // Items of this purchase that are in the Zibil qutusu now (lib/stock-trash).
   const [gone, setGone] = useState(() => goneItems(initialLines ?? [], items));
+  // Scanning goods in (lib/barcode): which Anbar item each barcode fills. The
+  // box shows only once some product has a barcode.
+  const [codes, setCodes] = useState<Record<string, string>>({});
+  const [scan, setScan] = useState('');
+  const [scanMsg, setScanMsg] = useState('');
+  useEffect(() => { fetchBarcodeStock().then(setCodes); }, []);
+  function takeScan() {
+    const id = codes[cleanBarcode(scan)];
+    if (!id) { setScanMsg(`Barkod tapılmadı: ${scan.trim()}`); setScan(''); return; }
+    setLines(prev => addScannedLine(prev, id, { unitCost: '' }));
+    setScanMsg(''); setScan('');
+  }
   const [busy, setBusy] = useState(false);
   // One id per opened screen, so Save pressed again after a lost reply is recorded once.
   const [saveId] = useState(() => crypto.randomUUID());
@@ -838,6 +851,14 @@ function NewReceipt({ activeWh, suppliers, items, initial, initialLines, onClose
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-stone-500">Məhsullar</span>
         </div>
+        {Object.keys(codes).length > 0 && (
+          <div>
+            <input className={inputCls} placeholder="Barkod skan edin — məhsul özü əlavə olunur" value={scan}
+              onChange={e => setScan(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (scan.trim()) takeScan(); } }} />
+            {scanMsg && <p className="text-xs text-red-600 mt-1">{scanMsg}</p>}
+          </div>
+        )}
         {lines.map((l, i) => (
           <div key={i} className="space-y-1.5 rounded-lg border border-stone-100 p-2">
             {/* Product name on its own full-width row so long names are always fully visible. */}
