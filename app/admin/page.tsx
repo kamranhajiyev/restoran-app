@@ -3977,7 +3977,8 @@ function AdminPageContent() {
                               {order.status === 'ödənilib' && printerConnected && (
                                 <button
                                   onClick={async () => {
-                                    const ok = await printReceipt(order, companyName, undefined, tableTitle(tables, order.tableNumber, order.tableName, halls));
+                                    // Admin reads orders from the server: the number is the real one.
+                                    const ok = await printReceipt(order, companyName, undefined, tableTitle(tables, order.tableNumber, order.tableName, halls), isShop, isShop);
                                     if (!ok) setPrinterError('Çap alınmadı — yazıcı bağlantısını yoxlayın');
                                   }}
                                   className="text-xs font-semibold text-emerald-600 border border-emerald-200 hover:bg-emerald-50 rounded-lg px-2.5 py-1 transition-colors flex items-center gap-1"

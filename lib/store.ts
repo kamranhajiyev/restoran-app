@@ -1577,6 +1577,17 @@ export async function deleteSupplier(id: string): Promise<string | null> {
   return null;
 }
 
+// The number the server gave an order (the assign_order_number trigger). The
+// browser till only guesses it until the next read; a shop's receipt barcode
+// must carry the real one. Null when it cannot be read.
+export async function fetchOrderNumber(orderId: string): Promise<number | null> {
+  try {
+    const { data, error } = await supabase.from('orders').select('order_number').eq('id', orderId).maybeSingle();
+    if (error || !data?.order_number) return null;
+    return Number(data.order_number);
+  } catch { return null; }
+}
+
 // Whether this database has menu_items.barcode (20261111_menu_barcode.sql).
 // Asked of the database, not read off the menu: a new shop's empty menu shows
 // no columns, and its first product's barcode must still be saved.

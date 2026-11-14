@@ -239,7 +239,8 @@ const row = (label: string, amount: string) => `${label}${amount.padStart(WIDTH 
 const money = (n: number) => `${n.toFixed(2)}m`;
 
 // The header both papers share: who, which order, which table, when, whose.
-function head(order: Order, companyName: string, heading?: string, table?: string): Line[] {
+// `shop`: a Mağaza's receipt (SHOP-MODE.md) — Qəbz, Mağazada, Kassir.
+function head(order: Order, companyName: string, heading?: string, table?: string, shop = false): Line[] {
   const date = formatDateTime(order.createdAt);
   const lines: Line[] = [
     { text: companyName, big: true, center: true },
@@ -249,15 +250,15 @@ function head(order: Order, companyName: string, heading?: string, table?: strin
   lines.push(
     // The label, not the bare number: on a second till these are the only two
     // characters telling this receipt apart from the other №45 in the room.
-    { text: `Sifariş #${orderLabel(order)}`, center: true },
+    { text: `${shop ? 'Qəbz' : 'Sifariş'} #${orderLabel(order)}`, center: true },
     // The table's name, not its id — see tableTitle in lib/order-place.ts. The id
     // is only there for a caller that has no table list to look it up in.
     // The same words as the till's screen (PLACE_WORDS).
     { text: order.tableNumber === 0
-        ? (order.online ? PLACE_WORDS.online : order.courierId ? PLACE_WORDS.delivery : PLACE_WORDS.takeaway)
+        ? (order.online ? PLACE_WORDS.online : order.courierId ? PLACE_WORDS.delivery : shop ? PLACE_WORDS.shop : PLACE_WORDS.takeaway)
         : table ?? `Masa: ${order.tableNumber}`, center: true },
     { text: date, center: true },
-    { text: `Ofisiant: ${order.sellerName}`, center: true },
+    { text: `${shop ? 'Kassir' : 'Ofisiant'}: ${order.sellerName}`, center: true },
     { text: '='.repeat(WIDTH) },
   );
   return lines;
@@ -332,7 +333,9 @@ function serviceLine(order: Order, service: number): Line {
   return { text: row(`Xidmət haqqı (${order.serviceChargePercent}%):`, money(service)) };
 }
 
-export function receiptLines(order: Order, companyName: string, table?: string): Line[] {
+// `barcode`: the order's number is the server's, not the till's guess, so the
+// barcode at the foot cannot point a return at someone else's sale.
+export function receiptLines(order: Order, companyName: string, table?: string, shop = false, barcode = false): Line[] {
   // A courier order closed on debt tenders nothing, so cash+card is 0. Reading
   // the total off that would print a 0.00 receipt and, worse, divide by zero
   // when reconstructing a percentage discount below.
@@ -340,7 +343,7 @@ export function receiptLines(order: Order, companyName: string, table?: string):
   const paid = (order.cashAmount ?? 0) + (order.cardAmount ?? 0) || debt;
   const total = paid + (order.discountAmount ?? 0);
 
-  const lines: Line[] = [...head(order, companyName, undefined, table), ...itemLines(order)];
+  const lines: Line[] = [...head(order, companyName, undefined, table, shop), ...itemLines(order)];
 
   lines.push({ text: '='.repeat(WIDTH) });
 
@@ -374,13 +377,19 @@ export function receiptLines(order: Order, companyName: string, table?: string):
 
   lines.push({ text: '-'.repeat(WIDTH), center: true });
   lines.push({ text: 'Təşəkkürlər!', center: true });
+  // A shop's receipt ends in its number as a barcode: a return finds the sale
+  // with one scan (Qaytarma). Not before the server numbered it (0).
+  if (shop && barcode && order.orderNumber) {
+    lines.push({ text: '' });
+    lines.push({ text: orderLabel(order), barcode: orderLabel(order) });
+  }
   return lines;
 }
 
-export async function printReceipt(order: Order, companyName: string, logoUrl?: string | null, table?: string): Promise<boolean> {
+export async function printReceipt(order: Order, companyName: string, logoUrl?: string | null, table?: string, shop = false, barcode = false): Promise<boolean> {
   try {
     const logo = await loadLogo(logoUrl);
-    return await send(receiptLines(order, companyName, table), logo);
+    return await send(receiptLines(order, companyName, table, shop, barcode), logo);
   } catch (err) {
     console.error('[Printer] Cap alinmadi:', err);
     return false;

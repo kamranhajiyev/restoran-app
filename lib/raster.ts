@@ -6,6 +6,7 @@
 // character table from the problem entirely — and it is the only way to print
 // ə at all, since no ESC/POS codepage contains U+0259.
 
+import { code128Modules } from './code128';
 import { TICKET_FONT } from './ticket-font';
 
 const DOTS = 576;          // 72mm at 203dpi, the printer's full carriage
@@ -31,10 +32,14 @@ export type Line = {
   // widens the letters, so the caller wraps to WIDTH / x columns. For the few
   // words a cook reads from across the kitchen, where no column has to line up.
   scale?: [number, number];
+  // Drawn as a Code 128 barcode, centred (lib/code128) — the receipt number at
+  // the foot of a shop's receipt. `text` is printed under it.
+  barcode?: string;
 };
 
+const BARCODE_H = 80;
 const lineHeight = (l: Line) =>
-  l.scale ? Math.round(NORMAL_H * l.scale[1]) : l.big ? BIG_H : NORMAL_H;
+  l.barcode ? BARCODE_H + NORMAL_H : l.scale ? Math.round(NORMAL_H * l.scale[1]) : l.big ? BIG_H : NORMAL_H;
 
 // Thermal heads spread ink and the paper fades, so a thin face at ~20px prints
 // grey and breaks up. Bold is the single biggest legibility win available here,
@@ -91,6 +96,20 @@ export function rasterize(lines: Line[], cols: number, logo?: Logo | null): Uint
   }
 
   for (const line of lines) {
+    if (line.barcode) {
+      const modules = code128Modules(line.barcode);
+      if (modules) {
+        // As wide a module as fits (2–3 dots reads well), with quiet zones.
+        const total = modules.reduce((a, b) => a + b, 0) + 20;
+        const unit = Math.max(1, Math.min(3, Math.floor(DOTS / total)));
+        let bx = Math.round((DOTS - (total - 20) * unit) / 2);
+        modules.forEach((w, i) => { if (i % 2 === 0) ctx.fillRect(bx, y + 4, w * unit, BARCODE_H - 8); bx += w * unit; });
+      }
+      const tx = Math.max(0, (DOTS - ctx.measureText(line.text).width) / 2);
+      ctx.fillText(line.text, tx, y + BARCODE_H + 2);
+      y += lineHeight(line);
+      continue;
+    }
     const sx = line.scale?.[0] ?? 1;
     const x = line.center ? Math.max(0, (DOTS - ctx.measureText(line.text).width * sx) / 2) : 0;
     if (line.scale) {

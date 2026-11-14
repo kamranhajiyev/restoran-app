@@ -13,7 +13,7 @@ import { supabase } from '@/lib/supabase';
 import { pinKey } from '@/lib/pin-keys';
 import {
   addOrder, addItemsToOrder, removeOrderItems, splitOrder, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, setCompanyContext,
-  fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchCompanyKind, fetchOpenShift, fetchShifts, openShift, closeShift, addShiftMovement, fetchShiftSales,
+  fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchCompanyKind, fetchOrderNumber, fetchOpenShift, fetchShifts, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, verifyStaffPin, verifyStaffCard, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
   fetchStations, fetchStationReady, fetchStationReadyOrNull, type StationReady,
@@ -2598,6 +2598,23 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // for the receipt that jammed, tore, or was thrown away before anyone read it.
   // Like the bill, this writes nothing: the order was closed once and stays closed,
   // so the second copy is identical to the first rather than a fresh event.
+  // A shop's receipt carries its number as a barcode (Qaytarma finds the sale
+  // by it), so it must be the server's number, never the browser's guess. The
+  // exe and APK number orders themselves; a link till reads its recent list.
+  async function realOrderNumber(order: Order): Promise<number | null> {
+    if (hasLocalDb()) return order.orderNumber || null;
+    if (overrideCompanyId) {
+      const d = await readTerminalOrders(overrideCompanyId, '&limit=30');
+      return d?.orders.find(o => o.id === order.id)?.orderNumber ?? null;
+    }
+    return fetchOrderNumber(order.id);
+  }
+  async function printShopReceipt(order: Order, cName: string): Promise<boolean> {
+    const n = await realOrderNumber(order);
+    const forPaper = n ? { ...order, orderNumber: n } : order;
+    return printReceipt(forPaper, cName, logoUrl, tableTitle(tables, order.tableNumber, order.tableName, halls), true, !!n);
+  }
+
   async function handleReprintReceipt(order: Order) {
     if (printBillBusy) return;
     setPrintBillBusy(order.id);
@@ -2608,7 +2625,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         setPrinterConnected(ready);
         if (!ready) return;
       }
-      const ok = await printReceipt(order, overrideCompanyName || getSession()?.companyName || '', logoUrl, tableTitle(tables, order.tableNumber, order.tableName, halls));
+      const ok = isShop
+        ? await printShopReceipt(order, overrideCompanyName || getSession()?.companyName || '')
+        : await printReceipt(order, overrideCompanyName || getSession()?.companyName || '', logoUrl, tableTitle(tables, order.tableNumber, order.tableName, halls));
       if (!ok) {
         setPrinterConnected(false);
         showAlert('Qəbz çap olunmadı — yazıcı bağlantısını yoxlayın.');
@@ -2760,7 +2779,10 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         // The public terminal link has no session, so the name has to come off
         // the props there or the receipt prints with a blank header.
         const cName = overrideCompanyName || getSession()?.companyName || '';
-        if (shouldPrintReceipt) printReceipt(paidOrder, cName, logoUrl, tableTitle(tables, paidOrder.tableNumber, paidOrder.tableName, halls));
+        if (shouldPrintReceipt) {
+          if (isShop) void printShopReceipt(paidOrder, cName);
+          else printReceipt(paidOrder, cName, logoUrl, tableTitle(tables, paidOrder.tableNumber, paidOrder.tableName, halls));
+        }
         // Every closed bill, not just the ones that put notes in the till: a card
         // payment still needs the drawer for change owed from an earlier round,
         // and a cashier who has to open it by key stops trusting the button.
