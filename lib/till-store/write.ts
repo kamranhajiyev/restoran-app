@@ -39,6 +39,9 @@ import {
 export const ADD_ORDER = 'supabase:addOrder';
 export const MARK_READY = 'supabase:markStationReady';
 export const UNMARK_READY = 'supabase:unmarkStationReady';
+/** A cash return's Kassa movement: record_return() already put it in the
+ *  server's shift, so it goes into this machine's copy only, never the outbox. */
+export const RETURN_MOVEMENT = 'local:returnMovement';
 
 export interface WriteResult {
   ok: boolean;
@@ -522,6 +525,19 @@ function applyMovement(id: string, body: Record<string, unknown>, companyId: str
   return { ok: true };
 }
 
+// A cash return (lib/returns): the server added this movement when it saved the
+// return, with the return's id. Sending it again would book the cash out twice,
+// so it is not queued; leaving it out left the drawer count short at closing.
+function applyReturnMovement(body: Record<string, unknown>, companyId: string): WriteResult {
+  const movement = body.movement as ShiftMovement | undefined;
+  if (!movement?.id) return { ok: false, error: 'bad_request' };
+  const shift = getOpenShift(companyId);
+  if (!shift) return { ok: true };
+  if (shift.movements.some(m => m.id === movement.id)) return { ok: true };
+  putShift(companyId, { ...shift, movements: [...shift.movements, movement] });
+  return { ok: true };
+}
+
 // Mirrors app/api/add-courier-payment/route.ts.
 //
 // Two things happen at once and both have to survive an outage: the courier's
@@ -688,6 +704,7 @@ export function applyWrite(
       case '/api/close-shift':              return applyCloseShift(id, body, companyId);
       case MARK_READY:                      return applyReady(id, body, companyId, true);
       case UNMARK_READY:                    return applyReady(id, body, companyId, false);
+      case RETURN_MOVEMENT:                 return applyReturnMovement(body, companyId);
       // Anything else is a write this file has not been taught. Refusing is the
       // only honest answer: silently queuing it would leave the screen showing
       // a change the machine never made.

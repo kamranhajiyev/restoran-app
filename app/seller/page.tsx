@@ -13,7 +13,7 @@ import { supabase } from '@/lib/supabase';
 import { pinKey } from '@/lib/pin-keys';
 import {
   addOrder, addItemsToOrder, removeOrderItems, splitOrder, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, setCompanyContext,
-  fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchCompanyKind, fetchOrderNumber, fetchLowStockForTill,
+  fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchCompanyKind, fetchOrderNumber, noteReturnInLocalShift, fetchLowStockForTill,
   recordReturn, fetchSaleForReturn, fetchReturnsOrNull, fetchOpenShift, fetchShifts, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, verifyStaffPin, verifyStaffCard, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
@@ -81,7 +81,7 @@ import OrderNote from '@/components/OrderNote';
 import { OPENING_TAB, sellerTabs, type SellerTab } from '@/lib/seller-nav';
 import { cleanKind, type CompanyKind } from '@/lib/company-kind';
 import { paysNow, shopDeliveryType, shopSaleType, tabLabel } from '@/lib/shop-mode';
-import { findByBarcode, scanCatcher } from '@/lib/barcode';
+import { findByBarcode, RECEIPT_MIN_KEYS, SCAN_MIN_KEYS, scanCatcher } from '@/lib/barcode';
 import { leftLabel, lowKey } from '@/lib/low-stock';
 import { cartToReturnLines, parseReceiptLabel, requestTotal, returnErrorText, returnTotals, rowToReturn, type ReturnRequest, type SaleForReturn, type SaleReturn } from '@/lib/returns';
 import { refundNeeds } from '@/lib/till-rules';
@@ -608,6 +608,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const [approvalPin, setApprovalPin] = useState('');
   const [approvalMsg, setApprovalMsg] = useState('');
   const [approvalBusy, setApprovalBusy] = useState(false);
+  // The PIN or card that last approved, for a return: the server checks it again
+  // itself (20261114_return_approval.sql) instead of taking the name on trust.
+  const approvalCredRef = useRef<{ pin?: string; card?: string } | null>(null);
   // PIN, card or either, as the owner chose in İcazələr.
   const approvalMode = approveWith(tillRules);
 
@@ -686,7 +689,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       else msg = isOnline() ? 'Yanlış PIN' : 'Oflayn — PIN tanınmadı';
     }
     setApprovalBusy(false);
-    if (manager) { closeApproval(manager); return; }
+    if (manager) { approvalCredRef.current = { pin: next }; closeApproval(manager); return; }
     setApprovalPin('');
     setApprovalMsg(msg);
   }
@@ -722,7 +725,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       else msg = isOnline() ? 'Kart tanınmadı' : 'Oflayn — kart tanınmadı';
     }
     setApprovalBusy(false);
-    if (manager) { closeApproval(manager); return; }
+    if (manager) { approvalCredRef.current = { card }; closeApproval(manager); return; }
     setApprovalPin('');
     setApprovalMsg(msg);
   }
@@ -1887,17 +1890,25 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       setApproval({ label, resolve });
     });
   }
-  async function approveReturn(): Promise<string | null> {
+  // Who approves a return, and the PIN or card that proves it: the server checks
+  // it again (a name alone could be sent by anyone holding the till's link). A
+  // manager at the till types their own PIN too, for the same reason.
+  async function approveReturn(): Promise<{ name: string; pin?: string; card?: string } | null> {
     const need = refundNeeds(rulesOn ? tillRules : null, activeStaff ? myRole : undefined);
     if (need === 'deny') { showAlert('İcazəniz yoxdur: Qaytarma'); return null; }
-    if (need === 'manager') return effectiveSeller;
-    // The owner, signed in with no PIN person on: they are the one who approves.
-    if (!activeStaff && getSession()?.role === 'owner') return getSession()?.name || effectiveSeller;
-    if (!pinStaffList.some(st => st.active && st.role === 'manager')) {
+    const managers = pinStaffList.some(st => st.active && st.role === 'manager');
+    // The owner, signed in, in a company with no manager: their session approves.
+    if (!managers && !overrideCompanyId && getSession()?.role === 'owner') return { name: getSession()?.name || effectiveSeller };
+    if (!managers) {
       showAlert('Qaytarma üçün menecer təsdiqi lazımdır.\n\nAdmin → Əməkdaşlar bölməsində menecer əlavə edin.');
       return null;
     }
-    return askManager('Qaytarma');
+    approvalCredRef.current = null;
+    const name = await askManager('Qaytarma');
+    const cred = approvalCredRef.current as { pin?: string; card?: string } | null;
+    approvalCredRef.current = null;
+    if (!name || !cred) return null;
+    return { name, ...cred };
   }
 
   // With a receipt: the sale, any day, by its number (or its barcode).
@@ -1934,11 +1945,12 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     if (returnIdRef.current?.key !== key) returnIdRef.current = { key, id: crypto.randomUUID() };
     const request: ReturnRequest = {
       id: returnIdRef.current.id, orderId: returnSale?.id ?? null, pay: returnPay,
-      seller: effectiveSeller, approvedBy: approver, lines,
+      seller: effectiveSeller, approvedBy: approver.name, pin: approver.pin, card: approver.card, device: getDeviceId(), lines,
     };
     setReturnBusy(true);
     let err: string | null = null;
     let total = requestTotal(lines);
+    let approvedBy = approver.name;
     if (overrideCompanyId) {
       try {
         const res = await tillFetch('/api/add-return', {
@@ -1946,15 +1958,21 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
           body: JSON.stringify({ companyId: overrideCompanyId, token: overrideToken, request }),
         });
         const d = await res.json().catch(() => null);
-        if (!res.ok || !d?.ok) err = d?.error ?? `HTTP ${res.status}`; else total = Number(d.total);
+        if (!res.ok || !d?.ok) err = d?.error ?? `HTTP ${res.status}`;
+        else { total = Number(d.total); approvedBy = d.approvedBy || approvedBy; }
       } catch (e) { err = String(e); }
     } else {
-      err = await recordReturn(request);
+      const reply = await recordReturn(request);
+      if (!reply.ok) err = reply.error ?? 'not_approved';
+      else { total = Number(reply.total ?? total); approvedBy = reply.approvedBy || approvedBy; }
     }
     setReturnBusy(false);
     if (err) { showAlert(`Qaytarılmadı.\n\n${returnErrorText(err)}`); return; }
+    // The exe/APK count the drawer from their own copy of the shift: the cash
+    // that went back has to be in it too (the server's copy already has it).
+    if (request.pay === 'cash') await noteReturnInLocalShift(request.id, total, returnSale?.label ?? null, request.seller);
     returnIdRef.current = null;
-    const paper = { total, pay: request.pay, sellerName: request.seller, approvedBy: approver, createdAt: new Date().toISOString(), lines };
+    const paper = { total, pay: request.pay, sellerName: request.seller, approvedBy, createdAt: new Date().toISOString(), lines };
     if (printerConnected) {
       if (shouldPrintReceipt) void printReturnReceipt(paper, overrideCompanyName || getSession()?.companyName || '', returnSale?.label ?? null);
       if (request.pay === 'cash') openCashDrawer();
@@ -2076,9 +2094,13 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // another box being typed in, is left alone.
   const scannedRef = useRef(scanned);
   scannedRef.current = scanned;
+  const receiptWaitRef = useRef(false);
+  receiptWaitRef.current = returnMode && !returnSale;
   useEffect(() => {
     if (view !== 'menu' || modifierItem || payingOrder) return;
-    const catcher = scanCatcher(code => scannedRef.current(code));
+    // Qaytarma with no receipt yet: a short receipt number is a scan too.
+    const catcher = scanCatcher(code => scannedRef.current(code), Date.now,
+      () => (receiptWaitRef.current ? RECEIPT_MIN_KEYS : SCAN_MIN_KEYS));
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;

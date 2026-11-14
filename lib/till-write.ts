@@ -19,6 +19,8 @@ export type { OutboxEntry };
 export const ADD_ORDER = "supabase:addOrder";
 export const MARK_READY = "supabase:markStationReady";
 export const UNMARK_READY = "supabase:unmarkStationReady";
+/** A cash return's Kassa movement, into this machine's shift only (lib/till-store/write.ts). */
+export const RETURN_MOVEMENT = "local:returnMovement";
 
 function local(): NonNullable<PosNative["till"]> | null {
   if (typeof window === "undefined") return null;

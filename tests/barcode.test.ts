@@ -74,7 +74,7 @@ describe('the till', () => {
   const seller = read('app/seller/page.tsx');
   it('scans through the search box and anywhere on the products', () => {
     expect(seller).toMatch(/if \(e\.key === 'Enter' && menuSearch\.trim\(\)\) \{ e\.preventDefault\(\); scanned\(menuSearch\); \}/);
-    expect(seller).toMatch(/const catcher = scanCatcher\(code => scannedRef\.current\(code\)\)/);
+    expect(seller).toMatch(/const catcher = scanCatcher\(code => scannedRef\.current\(code\), Date\.now,/);
     expect(seller).toMatch(/showAlert\(`Barkod tapılmadı: \$\{raw\.trim\(\)\}`\)/);
     // A size goes in as that size, through addToCart's same-line +1.
     expect(seller).toMatch(/addToCart\(\{ \.\.\.hit\.item, price: v\.price \}, v\.name, v\.id\)/);

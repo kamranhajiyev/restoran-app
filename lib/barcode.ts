@@ -48,6 +48,10 @@ export function barcodeOwner(menu: MenuItem[], raw: string, self: { itemId: stri
 
 /** Fewer keys than this in one burst is a person. */
 export const SCAN_MIN_KEYS = 4;
+/** A receipt's barcode is just its number ("45", "7/2"): while Qaytarma waits
+ *  for one, a burst of any length counts. Speed alone still tells it from a
+ *  person, who cannot type a key and Enter within SCAN_GAP_MS. */
+export const RECEIPT_MIN_KEYS = 1;
 /** Longer than this between two keys and it was not a reader. */
 export const SCAN_GAP_MS = 50;
 
@@ -56,7 +60,7 @@ export const SCAN_GAP_MS = 50;
  * person types and end in Enter. Keys typed slower are left alone (the page
  * handles them as ordinary typing).
  */
-export function scanCatcher(onScan: (code: string) => void, now: () => number = Date.now) {
+export function scanCatcher(onScan: (code: string) => void, now: () => number = Date.now, minKeys: () => number = () => SCAN_MIN_KEYS) {
   let buf = '';
   let last = 0;
   return {
@@ -69,7 +73,7 @@ export function scanCatcher(onScan: (code: string) => void, now: () => number = 
     },
     /** Enter: true when it ended a scan, so nothing else should act on it. */
     enter(): boolean {
-      const fast = now() - last <= SCAN_GAP_MS && buf.length >= SCAN_MIN_KEYS;
+      const fast = now() - last <= SCAN_GAP_MS && buf.length >= minKeys();
       const code = buf;
       buf = '';
       if (fast) onScan(code);

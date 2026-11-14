@@ -14,7 +14,7 @@ import type { LeftStock } from './kind-change';
 import type { StockTrashResult } from './stock-trash';
 import { loginEventFromRow, type LoginEvent } from './login-events';
 import { supabase } from './supabase';
-import { ADD_ORDER, localWrite, type LocalWrite } from './till-write';
+import { ADD_ORDER, localWrite, RETURN_MOVEMENT, type LocalWrite } from './till-write';
 import type { TillSettings } from './desktopPrint';
 import { cleanRules, type TillRules } from './till-rules';
 import { cleanOrderTypes, menuPriceColumn, orderTypeColumns, type OrderType } from './order-types';
@@ -26,7 +26,7 @@ import { cleanKind, kindForInsert, type CompanyKind } from './company-kind';
 import { cleanBarcode } from './barcode';
 import { lowForTill, lowStock, type StockLimit } from './low-stock';
 import { orderLabel } from './order-label';
-import { parseReceiptLabel, rowToReturn, saleForReturn, type ReturnRequest, type SaleForReturn, type SaleReturn } from './returns';
+import { parseReceiptLabel, returnMovement, returnRpcArgs, rowToReturn, saleForReturn, type ReturnReply, type ReturnRequest, type SaleForReturn, type SaleReturn } from './returns';
 
 async function authHeaders(): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -1593,13 +1593,20 @@ export async function fetchOrderNumber(orderId: string): Promise<number | null> 
 
 // Qaytarma (lib/returns). Signed-in tills call the database function straight;
 // a link till goes through /api/add-return. Online only — never queued.
-export async function recordReturn(request: ReturnRequest): Promise<string | null> {
-  const { error } = await supabase.rpc('record_return', {
-    p_id: request.id, p_order_id: request.orderId, p_lines: request.lines, p_pay: request.pay,
-    p_seller: request.seller, p_approved_by: request.approvedBy,
-  });
-  if (error) { console.error('[recordReturn]', error.message); return error.message; }
-  return null;
+export async function recordReturn(request: ReturnRequest): Promise<ReturnReply> {
+  const { data, error } = await supabase.rpc('record_return', returnRpcArgs(request));
+  if (error) { console.error('[recordReturn]', error.message); return { ok: false, error: error.message }; }
+  const reply = data as ReturnReply;
+  return reply.ok ? reply : { ok: false, error: reply.error ?? 'not_approved' };
+}
+
+// A cash return's Kassa movement, put into the exe's or APK's own copy of the
+// open shift. The server already added it (record_return), so this one is
+// never sent again: without it the till's drawer count was short by every
+// cash return at closing. Same id as the server's: added once, whatever
+// happens. Nothing to do in a browser till, which reads the server's shift.
+export async function noteReturnInLocalShift(id: string, total: number, receipt: string | null, by: string): Promise<void> {
+  await localWrite(`return-movement:${id}`, RETURN_MOVEMENT, { movement: returnMovement(id, total, receipt, by) }, _companyId);
 }
 
 /** Qaytarma with a receipt, signed in: the paid sale with that number, any

@@ -3,7 +3,7 @@
 // checks the link. Online only: the till never queues a return.
 import { NextRequest } from 'next/server';
 import { createServerClient, verifySellerToken } from '@/lib/supabase-server';
-import type { ReturnRequest } from '@/lib/returns';
+import { returnRpcArgs, type ReturnReply, type ReturnRequest } from '@/lib/returns';
 
 export async function POST(req: NextRequest) {
   const { companyId, token, request } = (await req.json()) as { companyId?: string; token?: string; request?: ReturnRequest };
@@ -12,10 +12,10 @@ export async function POST(req: NextRequest) {
 
   const db = createServerClient();
   // Sent twice (a lost reply): the function finds the id and saves nothing more.
-  const { data, error } = await db.rpc('record_return', {
-    p_id: request.id, p_order_id: request.orderId, p_lines: request.lines, p_pay: request.pay,
-    p_seller: request.seller, p_approved_by: request.approvedBy, p_company: companyId,
-  });
+  // The manager's PIN or card is checked in there, not here: one place.
+  const { data, error } = await db.rpc('record_return', returnRpcArgs(request, companyId));
   if (error) return Response.json({ ok: false, error: error.message }, { status: 422 });
-  return Response.json({ ok: true, total: (data as { total: number }).total });
+  const reply = data as ReturnReply;
+  if (!reply.ok) return Response.json({ ok: false, error: reply.error ?? 'not_approved' }, { status: 403 });
+  return Response.json({ ok: true, total: reply.total, approvedBy: reply.approvedBy });
 }

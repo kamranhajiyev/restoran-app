@@ -25,7 +25,33 @@ export interface ReturnRequest {
   pay: 'cash' | 'card';
   seller: string;
   approvedBy: string;
+  /** The manager's PIN or card: record_return() checks it itself and saves
+   *  the name it finds (20261114_return_approval.sql). Neither = only the
+   *  owner's own session, in a company with no manager. */
+  pin?: string;
+  card?: string;
+  device?: string;
   lines: { menuItemId: string | null; variantId: string | null; name: string; qty: number; price: number }[];
+}
+
+/** What record_return() hands back: saved, or refused for the approval. */
+export interface ReturnReply { ok: boolean; error?: string; total?: number; approvedBy?: string }
+
+/** The arguments for record_return(), the same from both paths (a signed-in
+ *  till calls it straight, a link till through /api/add-return). */
+export function returnRpcArgs(r: ReturnRequest, company?: string): Record<string, unknown> {
+  return {
+    p_id: r.id, p_order_id: r.orderId, p_lines: r.lines, p_pay: r.pay,
+    p_seller: r.seller, p_approved_by: r.approvedBy,
+    p_pin: r.pin ?? null, p_card: r.card ?? null, p_device: r.device ?? '',
+    ...(company ? { p_company: company } : {}),
+  };
+}
+
+/** The Kassa movement record_return() adds for a cash return, for the exe's
+ *  and APK's own copy of the shift: same id, so it is never counted twice. */
+export function returnMovement(id: string, total: number, receipt: string | null, by: string, at = new Date().toISOString()) {
+  return { id, at, amount: -total, reason: `Qaytarma${receipt ? ` · №${receipt}` : ''}`, by };
 }
 
 /** The money given back, split the way the boxes show it. */
@@ -68,7 +94,8 @@ export function returnErrorText(code: string): string {
   if (/not_paid/.test(code)) return 'Bu qəbz hələ ödənilməyib.';
   if (/not_found/.test(code)) return 'Qəbz tapılmadı.';
   if (/no_shift/.test(code)) return 'Nağd qaytarmaq üçün növbə açıq olmalıdır (Kassa).';
-  if (/not_approved/.test(code)) return 'Menecer təsdiqi lazımdır.';
+  if (/not_approved/.test(code)) return 'Menecer təsdiqi lazımdır (PIN və ya kart yoxlanmadı).';
+  if (/^locked$/.test(code)) return 'Çox sayda yanlış cəhd — bir az gözləyin.';
   if (/fetch|network|failed to fetch|load failed/i.test(code)) return 'İnternet bağlantısı yoxdur — qaytarma yalnız onlayn olur.';
   return code;
 }
