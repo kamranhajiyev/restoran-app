@@ -32,3 +32,23 @@ export function shopDeliveryType(types: OrderType[], deliveryOn: boolean): Order
 export function paysNow(s: { kind: CompanyKind; appending: boolean; delivery: boolean }): boolean {
   return s.kind === 'shop' && !s.appending && !s.delivery;
 }
+
+/** Admin's side menu and page titles in a shop. Masalar becomes Onlayn: only
+ *  the online menu link and its switches are left there. */
+export const SHOP_ADMIN: Partial<Record<string, { label: string; title: string; subtitle?: string }>> = {
+  orders: { label: 'Satışlar', title: 'Satışlar', subtitle: 'Bütün satışlar' },
+  menu: { label: 'Məhsullar', title: 'Məhsullar' },
+  tables: { label: 'Onlayn', title: 'Onlayn', subtitle: 'Onlayn menyu və QR sifariş' },
+};
+
+/** How a sale was paid, for a shop's Satışlar list in place of the status:
+ *  Nağd, Kart, Nağd + Kart — or Kuryerdə while the courier still has it. */
+export function paidHow(o: { status: string; cashAmount?: number; cardAmount?: number; courierDebt?: number }): string | null {
+  if (o.status !== 'ödənilib') return null;
+  if ((o.courierDebt ?? 0) > 0) return 'Kuryerdə';
+  const cash = (o.cashAmount ?? 0) > 0, card = (o.cardAmount ?? 0) > 0;
+  return cash && card ? 'Nağd + Kart' : card ? 'Kart' : 'Nağd';
+}
+
+/** Till permissions a shop never meets: it prints no bill before payment. */
+export const SHOP_HIDDEN_ACTIONS: readonly string[] = ['remove_after_bill', 'add_after_bill'];

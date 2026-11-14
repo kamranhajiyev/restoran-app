@@ -21,6 +21,6 @@ describe('a dish edit in admin', () => {
   });
 
   it('hides the set picker when it would show a wrong answer', () => {
-    expect(admin).toMatch(/\{modifiersLoaded && form\.modifiersKnown && modifierGroups\.length > 0 && \(/);
+    expect(admin).toMatch(/\{!isShop && modifiersLoaded && form\.modifiersKnown && modifierGroups\.length > 0 && \(/);
   });
 });

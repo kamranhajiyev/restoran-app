@@ -20,6 +20,7 @@ export function placeSales(
   orders: Order[],
   deliveryOn: boolean,
   total: (o: Order) => number,
+  shop = false,
 ): PlaceSale[] {
   const sums = new Map<PlaceKind, { rev: number; count: number }>();
   for (const o of orders) {
@@ -29,9 +30,11 @@ export function placeSales(
     s.count += 1;
     sums.set(k, s);
   }
+  // A shop's counter sale is "Mağazada" (lib/shop-mode, SHOP-MODE.md).
   return ROWS.flatMap(r => {
     const s = sums.get(r.kind);
-    return s ? [{ ...r, ...s }] : [];
+    const label = shop && r.kind === 'takeaway' ? PLACE_WORDS.shop : r.label;
+    return s ? [{ ...r, label, ...s }] : [];
   });
 }
 

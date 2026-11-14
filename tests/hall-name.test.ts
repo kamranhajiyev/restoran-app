@@ -52,7 +52,7 @@ describe('the hall beside the table', () => {
     expect(withoutHalls(seller)).toEqual([]);
     expect(seller).toMatch(/withHall\(tables\.find/);
     const admin = read('app/admin/page.tsx');
-    expect(admin).toContain('{ tables, tablesOn, deliveryOn, halls }');
+    expect(admin).toContain('{ tables, tablesOn: tablesOn && !isShop, deliveryOn, halls, shop: isShop }');
     expect(withoutHalls(admin)).toEqual([]);
     expect(admin).toContain('tableSales(chartPaid, tables, orderTotal, halls)');
     expect(withoutHalls(read('app/station/page.tsx'))).toEqual([]);

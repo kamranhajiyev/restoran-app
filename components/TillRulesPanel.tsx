@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { KeyRound, Lock, ShieldCheck } from 'lucide-react';
 import { fetchTillRules, saveTillRules } from '@/lib/store';
+import { SHOP_HIDDEN_ACTIONS } from '@/lib/shop-mode';
 import { APPROVE_WITH, ROLE_NAMES, TILL_ACTIONS, TILL_RULES_NEW, approveWith, fixedRule, ruleFor, type ApproveWith, type Rule, type RuledRole, type TillAction, type TillRules } from '@/lib/till-rules';
 import type { Staff } from '@/types';
 
@@ -15,7 +16,7 @@ const RULES: { id: Rule; label: string; icon: React.ElementType; on: string }[] 
   { id: 'deny', label: 'Qadağan',   icon: Lock,        on: 'bg-white shadow-sm text-red-700' },
 ];
 
-export default function TillRulesPanel({ staff }: { staff: Staff[] }) {
+export default function TillRulesPanel({ staff, shop = false }: { staff: Staff[]; shop?: boolean }) {
   const [rules, setRules] = useState<TillRules | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [role, setRole] = useState<RuledRole>('seller');
@@ -99,7 +100,7 @@ export default function TillRulesPanel({ staff }: { staff: Staff[] }) {
             <p className="text-xs text-stone-500">Hər vəzifə üçün: sərbəst, menecerin PIN-i ilə, ya da qadağan. Menecerdən PIN soruşulmur.</p>
           </div>
           <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5">
-            {ROLES.map(r => (
+            {ROLES.filter(r => !(shop && r === 'waiter')).map(r => (
               <button key={r} onClick={() => setRole(r)}
                 className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${role === r ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
                 {ROLE_NAMES[r]}
@@ -114,7 +115,7 @@ export default function TillRulesPanel({ staff }: { staff: Staff[] }) {
           </p>
         ) : (
           <div className="divide-y divide-stone-100">
-            {TILL_ACTIONS.map(a => {
+            {TILL_ACTIONS.filter(a => !(shop && SHOP_HIDDEN_ACTIONS.includes(a.id))).map(a => {
               const current = ruleFor(rules, role, a.id);
               const fixed = fixedRule(role, a.id);
               return (

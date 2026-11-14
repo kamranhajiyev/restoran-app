@@ -109,6 +109,7 @@ import { STATUS_COLORS, STATUS_DOTS } from '@/components/seller/order-format';
 import { card as cardCls, Tag, Segmented, FilterSelect, DateRange, SearchBox, toolBtn } from '@/components/panel-ui';
 import { groupByDay, dayHeading } from '@/lib/group-by-day';
 import type { CompanyKind } from '@/lib/company-kind';
+import { paidHow, SHOP_ADMIN } from '@/lib/shop-mode';
 import { barcodeOwner, cleanBarcode } from '@/lib/barcode';
 
 // RPC raise messages are machine codes — translated here for display
@@ -576,8 +577,8 @@ function AdminPageContent() {
   // 'categories' merged into 'menu', 'logins' moved under Tənzimləmələr — keep old links working
   const tab = (rawTab === 'categories' ? 'menu' : rawTab === 'logins' ? 'settings' : rawTab as Tab | null) ?? 'stats';
   // Tənzimləmələr sub-view. Absent ?sub= means Sifariş növləri.
-  const settingsSub: 'növlər' | 'xidmət' | 'girişlər' = rawTab === 'logins' || searchParams.get('sub') === 'girisler' ? 'girişlər'
-    : searchParams.get('sub') === 'xidmet' ? 'xidmət' : 'növlər';
+  const settingsSubAsked: 'növlər' | 'xidmət' | 'girişlər' | 'brendinq' = rawTab === 'logins' || searchParams.get('sub') === 'girisler' ? 'girişlər'
+    : searchParams.get('sub') === 'xidmet' ? 'xidmət' : searchParams.get('sub') === 'brendinq' ? 'brendinq' : 'növlər';
   // Statistika sub-view. Absent ?sub= means Ümumi, so existing /admin?tab=stats links are unchanged.
   const statsSub: 'ümumi' | 'analiz' = searchParams.get('sub') === 'analiz' ? 'analiz' : 'ümumi';
   const usersSub = searchParams.get('sub');
@@ -603,6 +604,11 @@ function AdminPageContent() {
   // Restoran or Mağaza (lib/company-kind, lib/shop-mode).
   const [kind, setKind] = useState<CompanyKind>('restaurant');
   const isShop = kind === 'shop';
+  // A shop's Tənzimləmələr is Brendinq and Girişlər only (no order types, no
+  // service charge); a restaurant's has no Brendinq tab (it is under Masalar).
+  const settingsSub = isShop
+    ? (settingsSubAsked === 'girişlər' ? 'girişlər' : 'brendinq')
+    : (settingsSubAsked === 'brendinq' ? 'növlər' : settingsSubAsked);
   // False on a database without the barcode column: the form neither shows
   // nor saves barcodes (lib/barcode).
   const [barcodesLoaded, setBarcodesLoaded] = useState(false);
@@ -1821,7 +1827,7 @@ function AdminPageContent() {
     // A new item has no parts and no modifier sets. Saying so ([], not undefined)
     // lets Düzəlt show Növ and the set contents without a page refresh.
     const item: MenuItem = {
-      id: crypto.randomUUID(), name, price: Math.round(price * 100) / 100, category: cat, available: true, kind: kindFilter === 'all' ? 'meal' : kindFilter,
+      id: crypto.randomUUID(), name, price: Math.round(price * 100) / 100, category: cat, available: true, kind: kindFilter === 'all' ? (isShop ? 'product' : 'meal') : kindFilter,
       setItems: setsLoaded ? [] : undefined,
       modifierGroupIds: modifiersLoaded ? [] : undefined,
     };
@@ -2377,13 +2383,13 @@ function AdminPageContent() {
 
         {/* A set's parts each go to their own sex (lib/stations prepLines), so
             the set has none to pick. */}
-        {stations.length > 0 && form.kind === 'set' && (
+        {!isShop && stations.length > 0 && form.kind === 'set' && (
           <div>
             <label className="text-xs font-medium text-stone-600 mb-1.5 block">Sex</label>
             <p className="text-sm text-stone-500 py-2">İçindəkilər öz sexlərinə gedir</p>
           </div>
         )}
-        {stations.length > 0 && form.kind !== 'set' && (
+        {!isShop && stations.length > 0 && form.kind !== 'set' && (
           <div>
             <label className="text-xs font-medium text-stone-600 mb-1.5 block">Sex</label>
             <select value={form.stationId} onChange={e => setForm(f => ({ ...f, stationId: e.target.value }))}
@@ -2399,7 +2405,7 @@ function AdminPageContent() {
           <div className="inline-flex rounded-lg border border-stone-200 overflow-hidden">
             {/* Set needs the set contents column: without it (a database the
                 migration has not reached) the button is not offered. */}
-            {(['product', 'meal', 'set'] as const).filter(val => val !== 'set' || (setsLoaded && form.setKnown)).map(val => (
+            {(['product', 'meal', 'set'] as const).filter(val => !(isShop && val === 'meal' && form.kind !== 'meal')).filter(val => val !== 'set' || (setsLoaded && form.setKnown)).map(val => (
               <button
                 key={val}
                 type="button"
@@ -2593,7 +2599,7 @@ function AdminPageContent() {
         {(!modifiersLoaded || !form.modifiersKnown) && editingId && (
           <p className="text-xs text-stone-500">Modifikatorlar yüklənmədi — bu məhsulun dəstləri dəyişməyəcək. Səhifəni yeniləyin.</p>
         )}
-        {modifiersLoaded && form.modifiersKnown && modifierGroups.length > 0 && (
+        {!isShop && modifiersLoaded && form.modifiersKnown && modifierGroups.length > 0 && (
           <div>
             <label className="text-xs font-medium text-stone-600 mb-1.5 block">
               Modifikatorlar
@@ -2659,7 +2665,7 @@ function AdminPageContent() {
   // Place and courier sit after the audit filter and before the search box, so
   // they narrow whichever period is in charge and the Excel export — which takes
   // visibleOrders — carries them for free.
-  const placeCfg = { tables, tablesOn, deliveryOn, halls };
+  const placeCfg = { tables, tablesOn: tablesOn && !isShop, deliveryOn, halls, shop: isShop };
   // Deactivated riders included: their old deliveries are still in the history,
   // and a name missing from the list would make them unfindable.
   const courierOptions = Object.entries(courierNames)
@@ -2898,7 +2904,9 @@ function AdminPageContent() {
 
         {/* Nav */}
         <nav className={`flex flex-col gap-1 p-3 flex-1 ${isCollapsed ? 'items-center' : ''}`}>
-          {NAV_ITEMS.map(n => {
+          {NAV_ITEMS.map(raw => {
+            // A shop's names (lib/shop-mode): Satışlar, Məhsullar, Onlayn.
+            const n = isShop ? { ...raw, label: SHOP_ADMIN[raw.id]?.label ?? raw.label, icon: raw.id === 'tables' ? Globe : raw.icon } : raw;
             const Icon = n.icon;
             const isActive = tab === n.id;
             const badge = n.id === 'orders' && activeOrders.length > 0 ? activeOrders.length : null;
@@ -3054,7 +3062,70 @@ function AdminPageContent() {
     );
   }
 
-  const meta = PAGE_META[tab];
+  // Logo and colour (Brendinq): under Masalar for a restaurant, its own
+  // Tənzimləmələr tab for a shop (SHOP-MODE.md).
+  const brandingBlock = (
+    <>
+              {/* ── Brendinq ── */}
+              <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider px-1">Brendinq</p>
+
+              <div className="bg-white rounded-lg border border-stone-200 p-4 space-y-4">
+                {/* Logo */}
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-lg border border-stone-200 bg-stone-50 flex items-center justify-center overflow-hidden shrink-0">
+                    {logoUrl
+                      ? <img src={logoUrl} alt="" className="w-full h-full object-cover" />
+                      : <ImageIcon className="w-6 h-6 text-stone-300" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-stone-800">Loqo</p>
+                    <p className="text-xs text-stone-500">Satıcı, QR menyu və admin panelində görünür</p>
+                  </div>
+                  <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoFile} />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => logoInputRef.current?.click()}
+                      disabled={logoBusy}
+                      className="px-3 py-1.5 rounded-lg border border-stone-200 text-xs font-semibold text-stone-600 hover:bg-stone-50 transition-colors disabled:opacity-60"
+                    >
+                      {logoBusy ? 'Yüklənir…' : logoUrl ? 'Dəyiş' : 'Yüklə'}
+                    </button>
+                    {logoUrl && (
+                      <button
+                        onClick={removeLogo}
+                        disabled={logoBusy}
+                        className="px-3 py-1.5 rounded-lg border border-stone-200 text-xs font-semibold text-red-500 hover:bg-red-50 transition-colors disabled:opacity-60"
+                      >
+                        Sil
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Accent color */}
+                <div className="border-t border-stone-100 pt-4">
+                  <p className="text-sm font-semibold text-stone-800">Rəng</p>
+                  <p className="text-xs text-stone-500 mb-3">Tətbiqin əsas rəngi</p>
+                  <div className="flex flex-wrap gap-2.5">
+                    {BRAND_PRESETS.map(p => (
+                      <button
+                        key={p.key}
+                        onClick={() => pickBrandColor(p.key)}
+                        title={p.label}
+                        className={`w-9 h-9 rounded-full transition-transform hover:scale-105 ring-offset-2 ${brandColor === p.key ? 'ring-2 ring-stone-400' : 'ring-1 ring-stone-200'}`}
+                        style={{ backgroundColor: p.swatch }}
+                      >
+                        {brandColor === p.key && <Check className="w-4 h-4 text-white mx-auto" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+    </>
+  );
+
+  const meta = isShop && SHOP_ADMIN[tab] ? { ...PAGE_META[tab], ...SHOP_ADMIN[tab] } : PAGE_META[tab];
 
   return (
     <div
@@ -3370,13 +3441,14 @@ function AdminPageContent() {
                   )}
                 </div>
 
-                <div className="bg-white rounded-lg border border-stone-200 card p-5">
+                {/* A shop without delivery sells one way only: nothing to split. */}
+                <div className={`bg-white rounded-lg border border-stone-200 card p-5 ${isShop && !deliveryOn ? 'hidden' : ''}`}>
                   <h3 className="font-semibold text-stone-800 text-sm mb-4">Satış tipləri</h3>
                   {chartRevenue === 0 ? (
                     <p className="text-sm text-stone-400 text-center py-4">Məlumat yoxdur</p>
                   ) : (
                     <div className="space-y-3">
-                      {placeSales(chartPaid, deliveryOn, orderTotal).map(ps => {
+                      {placeSales(chartPaid, deliveryOn, orderTotal, isShop).map(ps => {
                         const pct = (ps.rev / chartRevenue) * 100;
                         const isMasa = ps.kind === 'masa';
                         return (
@@ -3633,7 +3705,7 @@ function AdminPageContent() {
                 {/* Offered only where the answer can differ. A company running
                     neither tables nor delivery has one kind of order and nothing
                     to choose between. */}
-                {(tablesOn || deliveryOn) && (
+                {(isShop ? deliveryOn : (tablesOn || deliveryOn)) && (
                   <FilterSelect
                     icon={MapPin}
                     active={!!placeFilter}
@@ -3648,10 +3720,10 @@ function AdminPageContent() {
                     }}
                   >
                     <option value="">Bütün yerlər</option>
-                    {tablesOn && <option value="masa">Masa</option>}
+                    {tablesOn && !isShop && <option value="masa">Masa</option>}
                     {deliveryOn && <option value="delivery">Çatdırılma</option>}
-                    {deliveryOn && <option value="online">Onlayn sifariş</option>}
-                    <option value="takeaway">Takeaway</option>
+                    {deliveryOn && !isShop && <option value="online">Onlayn sifariş</option>}
+                    <option value="takeaway">{isShop ? 'Mağazada' : 'Takeaway'}</option>
                   </FilterSelect>
                 )}
 
@@ -3702,7 +3774,7 @@ function AdminPageContent() {
                 <input
                   value={orderSearch}
                   onChange={e => setOrderSearch(e.target.value)}
-                  placeholder="Sifariş № və ya satıcı adı ilə axtar"
+                  placeholder={isShop ? 'Qəbz № və ya satıcı adı ilə axtar' : 'Sifariş № və ya satıcı adı ilə axtar'}
                   className="w-full bg-white border border-stone-200 rounded-lg pl-9 pr-3 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
                 />
               </div>
@@ -3751,7 +3823,9 @@ function AdminPageContent() {
               {visibleOrders.length > 0 && (
               <div className={`${cardCls} overflow-hidden`}>
                 <div className="hidden md:grid grid-cols-[96px_minmax(0,1fr)_150px_96px] gap-4 px-6 py-2.5 text-xs font-semibold text-stone-600 uppercase tracking-wide border-b border-stone-200 bg-stone-50">
-                  <span>Vaxt</span><span>Sifariş</span><span>Durum</span><span className="text-right">Ümumi</span>
+                  {isShop
+                    ? <><span>Vaxt</span><span>Satış</span><span>Ödəniş</span><span className="text-right">Ümumi</span></>
+                    : <><span>Vaxt</span><span>Sifariş</span><span>Durum</span><span className="text-right">Ümumi</span></>}
                 </div>
                 {groupByDay(visibleOrders, o => businessDay(o.createdAt, bizSettings)).map(g => (
                 <div key={g.day}>
@@ -3783,13 +3857,15 @@ function AdminPageContent() {
                       >
                         <span className="hidden md:block tabular-nums">
                           <span className="block text-sm text-stone-900">{formatTime(order.createdAt, bizSettings.timezone)}</span>
-                          <span className="block text-xs text-stone-400">→ {closedAt ? formatTime(closedAt, bizSettings.timezone) : '—'}</span>
+                          {!isShop && <span className="block text-xs text-stone-400">→ {closedAt ? formatTime(closedAt, bizSettings.timezone) : '—'}</span>}
                         </span>
                         <span className="min-w-0 flex items-start gap-2">
                           <ChevronDown className={`w-4 h-4 mt-0.5 text-stone-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                           <span className="min-w-0">
                           <span className="block text-sm font-medium text-stone-900 truncate">
-                            {place
+                            {isShop
+                              ? (order.courierId ? `Çatdırılma${rider ? ` · ${rider}` : ''}` : order.sellerName)
+                              : place
                               ? <span className={order.online && !order.tableNumber ? 'text-sky-700' : ''}>{place}{rider ? ` · ${rider}` : ''}</span>
                               : order.sellerName}
                           </span>
@@ -3798,7 +3874,7 @@ function AdminPageContent() {
                               Grey except Endirim (green, as on the till) and
                               "silinib", the one warning here. */}
                             <span className="flex items-center gap-1.5 mt-0.5 min-w-0">
-                              <span className="text-xs text-stone-500 truncate">№{orderLabel(order)}{place ? ` · ${order.sellerName}` : ''}</span>
+                              <span className="text-xs text-stone-500 truncate">{isShop ? `Qəbz №${orderLabel(order)}${order.courierId ? ` · ${order.sellerName}` : ''}` : `№${orderLabel(order)}${place ? ` · ${order.sellerName}` : ''}`}</span>
                               <span className="hidden sm:contents">
                                 {(order.discountAmount ?? 0) > 0 && <Tag tone="good">Endirim −{order.discountAmount!.toFixed(2)} ₼</Tag>}
                                 {extra !== 0 && (
@@ -3813,7 +3889,11 @@ function AdminPageContent() {
                           </span>
                         </span>
                         <span>
-                          <span className={`inline-block text-xs px-2.5 py-0.5 rounded-full font-medium whitespace-nowrap ${STATUS_COLORS[order.status]}`}>{STATUS_LABELS[order.status]}</span>
+                          {/* A shop shows how it was paid (lib/shop-mode paidHow); an open or
+                              cancelled sale still shows its status. */}
+                          {isShop && paidHow(order)
+                            ? <span className={`inline-block text-xs px-2.5 py-0.5 rounded-full font-medium whitespace-nowrap ${paidHow(order) === 'Kuryerdə' ? 'bg-amber-50 text-amber-800' : 'bg-stone-100 text-stone-700'}`}>{paidHow(order)}</span>
+                            : <span className={`inline-block text-xs px-2.5 py-0.5 rounded-full font-medium whitespace-nowrap ${STATUS_COLORS[order.status]}`}>{STATUS_LABELS[order.status]}</span>}
                         </span>
                         <span className="text-right tabular-nums">
                           <span className="block text-sm font-semibold text-stone-900">{orderTotal(order).toFixed(2)} ₼</span>
@@ -4291,7 +4371,8 @@ function AdminPageContent() {
           {/* ── MENU ───────────────────────────────────────────────────── */}
           {tab === 'menu' && (
             <div className="max-w-3xl">
-              <div className="flex items-center gap-2 mb-5">
+              {/* A shop has no kitchen stations and no modifiers: only its products. */}
+              <div className={`flex items-center gap-2 mb-5 ${isShop ? 'hidden' : ''}`}>
                 {([['items', 'Məhsullar'], ['stations', 'Sexlər'], ['modifiers', 'Modifikatorlar']] as const).map(([val, label]) => (
                   <button
                     key={val}
@@ -4344,7 +4425,7 @@ function AdminPageContent() {
               </div>
 
               <div className="flex items-center gap-2 mb-3">
-                {([['all', 'Hamısı'], ['meal', 'Yeməklər'], ['product', 'Məhsullar'], ['set', 'Setlər']] as const).filter(([val]) => val !== 'set' || setsLoaded).map(([val, label]) => (
+                {([['all', 'Hamısı'], ['meal', 'Yeməklər'], ['product', 'Məhsullar'], ['set', 'Setlər']] as const).filter(([val]) => !(isShop && val === 'meal')).filter(([val]) => val !== 'set' || setsLoaded).map(([val, label]) => (
                   <button
                     key={val}
                     onClick={() => setKindFilter(val)}
@@ -4543,7 +4624,7 @@ function AdminPageContent() {
             </div>
           )}
           {tab === 'users' && usersSub === 'icazeler' && (
-            <div className="max-w-2xl"><TillRulesPanel staff={pinStaff} /></div>
+            <div className="max-w-2xl"><TillRulesPanel staff={pinStaff} shop={isShop} /></div>
           )}
           {tab === 'users' && usersSub !== 'icazeler' && (
             <div className="max-w-lg space-y-4">
@@ -4680,7 +4761,8 @@ function AdminPageContent() {
                     People, so they live here beside the PIN sellers rather than in
                     Sexlər — that tab is about the sex itself: its name, its printer,
                     what it makes. */}
-                <div className="flex items-center justify-between gap-3 pt-6 mt-2 border-t border-stone-200">
+                {/* A shop has no kitchen, so no kitchen staff. */}
+                <div className={`flex items-center justify-between gap-3 pt-6 mt-2 border-t border-stone-200 ${isShop ? 'hidden' : ''}`}>
                   <div>
                     <p className="text-sm font-semibold text-stone-600">Sex əməkdaşları · {employees.length}</p>
                     <p className="text-xs text-stone-400 mt-0.5">Öz hesabı ilə daxil olur, yalnız öz sexinin hazırlayacağı yeməkləri görür</p>
@@ -4700,7 +4782,7 @@ function AdminPageContent() {
                   </button>
                 </div>
 
-                {stations.length === 0 ? (
+                {isShop ? null : stations.length === 0 ? (
                   // Nothing to attach an employee to. Say so rather than offering a
                   // form whose only dropdown would be empty.
                   <div className="bg-white rounded-lg border border-stone-200 p-10 text-center">
@@ -4784,23 +4866,26 @@ function AdminPageContent() {
 
           {tab === 'anbar' && (
             <div className="max-w-3xl">
-              <AnbarPanel setDialog={setDialog} />
+              <AnbarPanel setDialog={setDialog} shop={isShop} />
             </div>
           )}
 
           {/* ── TƏNZİMLƏMƏLƏR ──────────────────────────────────────────── */}
           {tab === 'settings' && (
             <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5 w-fit mb-4">
-              {(['növlər', 'xidmət', 'girişlər'] as const).map(s => (
-                <button key={s} onClick={() => router.replace(s === 'girişlər' ? '/admin?tab=settings&sub=girisler' : s === 'xidmət' ? '/admin?tab=settings&sub=xidmet' : '/admin?tab=settings')}
+              {(isShop ? ['brendinq', 'girişlər'] as const : ['növlər', 'xidmət', 'girişlər'] as const).map(s => (
+                <button key={s} onClick={() => router.replace(s === 'girişlər' ? '/admin?tab=settings&sub=girisler' : s === 'xidmət' ? '/admin?tab=settings&sub=xidmet' : s === 'brendinq' ? '/admin?tab=settings&sub=brendinq' : '/admin?tab=settings')}
                   className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${settingsSub === s ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
-                  {s === 'növlər' ? 'Sifariş növləri' : s === 'xidmət' ? 'Xidmət haqqı' : 'Girişlər'}
+                  {s === 'növlər' ? 'Sifariş növləri' : s === 'xidmət' ? 'Xidmət haqqı' : s === 'brendinq' ? 'Brendinq' : 'Girişlər'}
                 </button>
               ))}
             </div>
           )}
           {/* Sifariş növləri. Masa and Çatdırılma flip the same flags as the
               Masalar and Kuryerlər switches. */}
+          {tab === 'settings' && settingsSub === 'brendinq' && (
+            <div className="max-w-3xl space-y-4">{brandingBlock}</div>
+          )}
           {tab === 'settings' && settingsSub === 'növlər' && (
             <OrderTypesPanel
               tablesOn={tablesOn}
@@ -4936,66 +5021,13 @@ function AdminPageContent() {
           {/* ── TABLES ─────────────────────────────────────────────────── */}
           {tab === 'tables' && (
             <div className="max-w-3xl space-y-4">
-              {/* ── Brendinq ── */}
-              <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider px-1">Brendinq</p>
-
-              <div className="bg-white rounded-lg border border-stone-200 p-4 space-y-4">
-                {/* Logo */}
-                <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-lg border border-stone-200 bg-stone-50 flex items-center justify-center overflow-hidden shrink-0">
-                    {logoUrl
-                      ? <img src={logoUrl} alt="" className="w-full h-full object-cover" />
-                      : <ImageIcon className="w-6 h-6 text-stone-300" />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-stone-800">Loqo</p>
-                    <p className="text-xs text-stone-500">Satıcı, QR menyu və admin panelində görünür</p>
-                  </div>
-                  <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoFile} />
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      onClick={() => logoInputRef.current?.click()}
-                      disabled={logoBusy}
-                      className="px-3 py-1.5 rounded-lg border border-stone-200 text-xs font-semibold text-stone-600 hover:bg-stone-50 transition-colors disabled:opacity-60"
-                    >
-                      {logoBusy ? 'Yüklənir…' : logoUrl ? 'Dəyiş' : 'Yüklə'}
-                    </button>
-                    {logoUrl && (
-                      <button
-                        onClick={removeLogo}
-                        disabled={logoBusy}
-                        className="px-3 py-1.5 rounded-lg border border-stone-200 text-xs font-semibold text-red-500 hover:bg-red-50 transition-colors disabled:opacity-60"
-                      >
-                        Sil
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Accent color */}
-                <div className="border-t border-stone-100 pt-4">
-                  <p className="text-sm font-semibold text-stone-800">Rəng</p>
-                  <p className="text-xs text-stone-500 mb-3">Tətbiqin əsas rəngi</p>
-                  <div className="flex flex-wrap gap-2.5">
-                    {BRAND_PRESETS.map(p => (
-                      <button
-                        key={p.key}
-                        onClick={() => pickBrandColor(p.key)}
-                        title={p.label}
-                        className={`w-9 h-9 rounded-full transition-transform hover:scale-105 ring-offset-2 ${brandColor === p.key ? 'ring-2 ring-stone-400' : 'ring-1 ring-stone-200'}`}
-                        style={{ backgroundColor: p.swatch }}
-                      >
-                        {brandColor === p.key && <Check className="w-4 h-4 text-white mx-auto" />}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              {/* Brendinq: here for a restaurant; a shop has it in Tənzimləmələr. */}
+              {!isShop && brandingBlock}
 
               {/* ── QR & Onlayn ── */}
               <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider px-1 pt-6">QR &amp; Onlayn</p>
 
-              {(companySlug || tablesOn) && (
+              {(companySlug || tablesOn || isShop) && (
               <div className="bg-white rounded-lg border border-stone-200 divide-y divide-stone-100 overflow-hidden">
               {companySlug && (
                 <div className="bg-primary-50 px-4 py-3 flex items-center gap-3">
@@ -5020,7 +5052,7 @@ function AdminPageContent() {
                 </div>
               )}
 
-              {tablesOn && (
+              {(tablesOn || isShop) && (
                 <div className="p-4 flex items-center justify-between gap-4">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-stone-800">QR sifariş</p>
@@ -5050,7 +5082,7 @@ function AdminPageContent() {
                 </div>
               )}
 
-              {tablesOn && (
+              {(tablesOn || isShop) && (
                 <div className="p-4 flex items-center justify-between gap-4">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-stone-800">Yalnız menyu baxışı</p>
@@ -5082,6 +5114,8 @@ function AdminPageContent() {
               </div>
               )}
 
+              {/* A shop has no tables: only the online menu is left on this tab. */}
+              {!isShop && (<>
               {/* ── Masalar ── */}
               <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider px-1 pt-6">Masalar</p>
 
@@ -5343,6 +5377,7 @@ function AdminPageContent() {
                   })}
                 </div>
               )}
+              </>)}
               </>)}
               </>)}
             </div>
@@ -5840,7 +5875,8 @@ function AdminPageContent() {
               <div>
                 <label className="text-xs font-medium text-stone-600 block mb-1">Vəzifə</label>
                 <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5">
-                  {(['seller', 'waiter', 'manager'] as const).map(r => (
+                  {/* A shop has no waiters; one already saved as Ofisiant still shows. */}
+                  {(['seller', 'waiter', 'manager'] as const).filter(r => !(isShop && r === 'waiter' && sRole !== 'waiter')).map(r => (
                     <button key={r} type="button" onClick={() => setSRole(r)}
                       className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${sRole === r ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
                       {ROLE_NAMES[r]}

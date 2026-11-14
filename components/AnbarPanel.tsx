@@ -35,7 +35,9 @@ const SUBS: { id: Sub; label: string; icon: React.ElementType }[] = [
 const UNITS = ['ədəd', 'kq', 'q', 'litr', 'ml', 'paket'];
 
 
-export default function AnbarPanel({ setDialog }: { setDialog: (d: DialogState | null) => void }) {
+// `shop`: a Mağaza (SHOP-MODE.md) — it sells no dishes, so it has no
+// ingredients: Qalıqlar shows its products only.
+export default function AnbarPanel({ setDialog, shop = false }: { setDialog: (d: DialogState | null) => void; shop?: boolean }) {
   // Persist the active sub-tab in the URL (?sub=…) so a refresh keeps you where you were instead of
   // snapping back to the first sub-tab. Driven through Next's router (same as the main ?tab=…) so the
   // router's URL and the address bar stay in sync — a plain history.replaceState would diverge from
@@ -103,7 +105,7 @@ export default function AnbarPanel({ setDialog }: { setDialog: (d: DialogState |
             <PaymentsTab suppliers={suppliers} />
           )}
           {sub === 'balances' && (
-            <BalancesTab warehouses={warehouses} items={items} reloadItems={reloadCatalog} flash={flash} fail={fail} setDialog={setDialog} />
+            <BalancesTab warehouses={warehouses} items={items} reloadItems={reloadCatalog} flash={flash} fail={fail} setDialog={setDialog} shop={shop} />
           )}
           {sub === 'receipts' && (
             <ReceiptsTab warehouses={warehouses} suppliers={suppliers} items={items} flash={flash} fail={fail} setDialog={setDialog} />
@@ -418,7 +420,8 @@ function PaySupplierModal({ supplier, debt, onClose, onDone, fail }: {
 
 // ─── Qalıqlar (+ stock item catalog & write-off) ───────────────────────────────
 
-function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }: {
+function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog, shop = false }: {
+  shop?: boolean;
   warehouses: Wh[]; items: StockItem[]; reloadItems: () => Promise<void>; flash: (m: string) => void; fail: (m: string | null) => void; setDialog: (d: DialogState | null) => void;
 }) {
   const activeWh = useMemo(() => warehouses.filter(w => w.active), [warehouses]);
@@ -428,7 +431,8 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
   const [itemModal, setItemModal] = useState<StockItem | 'new' | null>(null);
   const [woItem, setWoItem] = useState<StockBalance | null>(null);
   const [trItem, setTrItem] = useState<StockBalance | null>(null);
-  const [typeFilter, setTypeFilter] = useState<'all' | 'product' | 'ingredient'>('all');
+  const [typeFilterPicked, setTypeFilter] = useState<'all' | 'product' | 'ingredient'>('all');
+  const typeFilter = shop ? 'product' : typeFilterPicked;
   const [search, setSearch] = useState('');
 
   const typeOf = useMemo(() => {
@@ -486,11 +490,11 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog }:
           <option value="ALL">Bütün anbarlar (ümumi)</option>
           {activeWh.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
         </select>
-        <button className={btnGhost} onClick={() => setItemModal('new')}><Plus className="w-4 h-4" /> Yeni inqrediyent</button>
+        {!shop && <button className={btnGhost} onClick={() => setItemModal('new')}><Plus className="w-4 h-4" /> Yeni inqrediyent</button>}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {([['all', 'Hamısı'], ['product', 'Məhsullar'], ['ingredient', 'İnqrediyentlər']] as const).map(([val, label]) => (
+        {(shop ? [] : [['all', 'Hamısı'], ['product', 'Məhsullar'], ['ingredient', 'İnqrediyentlər']] as const).map(([val, label]) => (
           <button key={val} onClick={() => setTypeFilter(val)}
             className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-colors ${typeFilter === val ? 'bg-primary-700 text-white' : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'}`}>
             {label}
