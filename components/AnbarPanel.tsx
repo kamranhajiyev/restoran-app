@@ -8,7 +8,7 @@ import {
   fetchSuppliers, createSupplier, updateSupplier, deleteSupplier, fetchSupplierLedger, fetchReceiptDebts, addSupplierPayment, fetchSupplierPaymentLog,
   fetchStockItems, createStockItem, updateStockItem, trashStockItem,
   fetchBalances, fetchReceipts, recordReceipt, updateReceipt, voidReceipt, recordWriteoff,
-  fetchReceiptLines, fetchWriteoffs, fetchBarcodeStock,
+  fetchReceiptLines, fetchWriteoffs, fetchBarcodeStock, fetchStockLimits, setStockLimit,
   fetchTransfers, fetchTransferLines, recordTransfer, voidTransfer,
   fetchSalesWarehouse, setSalesWarehouse,
   fetchStockFailures, retryOrderStock, StockFailure,
@@ -17,6 +17,7 @@ import { Warehouse as Wh, Supplier, StockItem, StockBalance, StockReceipt, Recei
 import { DialogState } from '@/components/AppDialog';
 import { goneItems, stockLeftQuestion, stockTrashDone, stockTrashMessage } from '@/lib/stock-trash';
 import { addScannedLine, cleanBarcode } from '@/lib/barcode';
+import { lowStock, stockTotals } from '@/lib/low-stock';
 import { inputCls, btnPrimary, btnGhost, Modal, Empty } from '@/components/panel-ui';
 import { formatDateTime, formatDayMonthTime } from '@/lib/dates';
 
@@ -434,6 +435,26 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog, s
   const [typeFilterPicked, setTypeFilter] = useState<'all' | 'product' | 'ingredient'>('all');
   const typeFilter = shop ? 'product' : typeFilterPicked;
   const [search, setSearch] = useState('');
+  // Az qalan mal (lib/low-stock), a shop's: the owner's limits and the stock
+  // over all warehouses they are checked against.
+  const [limits, setLimits] = useState<Record<string, number>>({});
+  const [totals, setTotals] = useState<Map<string, number>>(new Map());
+  async function reloadLow() {
+    if (!shop) return;
+    const [ls, all] = await Promise.all([fetchStockLimits(), fetchBalances()]);
+    setLimits(Object.fromEntries(ls.map(l => [l.stockItemId, l.minQty])));
+    setTotals(stockTotals(all));
+  }
+  useEffect(() => { void reloadLow(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [shop]);
+  const lowIds = new Set(lowStock(Object.entries(limits).map(([stockItemId, minQty]) => ({ stockItemId, minQty })), [...totals].map(([stockItemId, qty]) => ({ stockItemId, qty }))).map(l => l.stockItemId));
+  async function saveLimit(id: string, raw: string) {
+    const n = raw.trim() === '' ? null : Math.max(0, parseFloat(raw.replace(',', '.')) || 0);
+    if ((limits[id] ?? null) === (n || null)) return;
+    const err = await setStockLimit(id, n || null);
+    if (err) { fail(err); return; }
+    await reloadLow();
+    flash('Limit yadda saxlanıldı');
+  }
 
   const typeOf = useMemo(() => {
     const m = new Map(items.map(it => [it.id, it.type ?? 'ingredient']));
@@ -442,7 +463,9 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog, s
   const q = search.trim().toLowerCase();
   const shownBalances = balances.filter(b =>
     (typeFilter === 'all' || typeOf(b.stockItemId) === typeFilter) &&
-    (q === '' || (b.name ?? '').toLowerCase().includes(q)));
+    (q === '' || (b.name ?? '').toLowerCase().includes(q)))
+    // Running low first.
+    .sort((a, b) => Number(lowIds.has(b.stockItemId)) - Number(lowIds.has(a.stockItemId)));
   const shownItems = items.filter(it =>
     (typeFilter === 'all' || (it.type ?? 'ingredient') === typeFilter) &&
     (q === '' || it.name.toLowerCase().includes(q)));
@@ -510,9 +533,21 @@ function BalancesTab({ warehouses, items, reloadItems, flash, fail, setDialog, s
         {loadingBal ? <p className="text-sm text-stone-400 p-6 text-center">Yüklənir…</p>
           : shownBalances.length === 0 ? <p className="text-sm text-stone-400 p-6 text-center">{whId === 'ALL' ? 'Qalıq yoxdur' : 'Bu anbarda qalıq yoxdur'}</p>
           : shownBalances.map(b => (
-            <div key={b.stockItemId} className="flex items-center justify-between px-4 py-3">
-              <span className="text-sm text-stone-800">{b.name}</span>
+            <div key={b.stockItemId} className={`flex items-center justify-between px-4 py-3 ${lowIds.has(b.stockItemId) ? 'bg-red-50/60' : ''}`}>
+              <span className="text-sm text-stone-800">
+                {b.name}
+                {lowIds.has(b.stockItemId) && <span className="ml-2 text-xs font-semibold text-red-600">az qalıb</span>}
+              </span>
               <div className="flex items-center gap-3">
+                {shop && (
+                  <label className="flex items-center gap-1 text-xs text-stone-500" title="Bundan az qalanda xəbərdarlıq (bütün anbarlar üzrə)">
+                    Limit
+                    <input type="number" min="0" step="any" defaultValue={limits[b.stockItemId] ?? ''} key={`${b.stockItemId}:${limits[b.stockItemId] ?? ''}`}
+                      onBlur={e => void saveLimit(b.stockItemId, e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                      className="w-16 px-2 py-1 rounded-md border border-stone-200 text-sm text-right tabular-nums" />
+                  </label>
+                )}
                 <span className={`text-sm font-semibold tabular-nums ${b.qty <= 0 ? 'text-red-500' : 'text-stone-800'}`}>{b.qty} {b.unit}</span>
                 {/* The combined view has no source warehouse to move out of, so transfer/write-off
                     are only offered when one warehouse is selected. */}

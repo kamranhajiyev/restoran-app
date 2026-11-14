@@ -31,7 +31,7 @@ import {
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, moveTableToHall, fetchCompanySlug,
   fetchHalls, createHall, renameHall, deleteHall, saveHallOrder, adoptOrphanTables, fetchTablesOrNull, fetchHallsOrNull,
   fetchTablesEnabled, setTablesEnabled,
-  fetchDeliveryEnabled, setDeliveryEnabled, fetchCompanyKind, menuHasBarcode,
+  fetchDeliveryEnabled, setDeliveryEnabled, fetchCompanyKind, menuHasBarcode, fetchStockLimits, fetchBalances,
   fetchQrEnabled, setQrEnabled, fetchMenuOnly, setMenuOnly,
   fetchKassaEnabled, setKassaEnabled,
   fetchCompanyProfile, updateMyCompanyProfile, fetchMyUsername, updateOwnerAccount, verifyPassword,
@@ -110,6 +110,7 @@ import { card as cardCls, Tag, Segmented, FilterSelect, DateRange, SearchBox, to
 import { groupByDay, dayHeading } from '@/lib/group-by-day';
 import type { CompanyKind } from '@/lib/company-kind';
 import { paidHow, SHOP_ADMIN } from '@/lib/shop-mode';
+import { lowStock } from '@/lib/low-stock';
 import { barcodeOwner, cleanBarcode } from '@/lib/barcode';
 
 // RPC raise messages are machine codes — translated here for display
@@ -612,6 +613,14 @@ function AdminPageContent() {
   // False on a database without the barcode column: the form neither shows
   // nor saves barcodes (lib/barcode).
   const [barcodesLoaded, setBarcodesLoaded] = useState(false);
+  // Az qalan mal (lib/low-stock): how many of a shop's products are below
+  // their limit — the red number on Anbar. Read again on every tab change, so
+  // a limit set in Anbar shows as soon as the owner looks elsewhere.
+  const [lowCount, setLowCount] = useState(0);
+  useEffect(() => {
+    if (!isShop) { setLowCount(0); return; }
+    Promise.all([fetchStockLimits(), fetchBalances()]).then(([ls, bal]) => setLowCount(lowStock(ls, bal).length));
+  }, [isShop, tab]);
   // The recipe of the dish in the form, and the warehouse items to pick from.
   // 'failed': it did not load, so the form says so and saves nothing over it.
   const [recipe, setRecipe] = useState<{ state: 'loading' | 'ready' | 'failed'; rows: { stockItemId: string; qty: string }[]; items: StockItem[] }>({ state: 'loading', rows: [], items: [] });
@@ -2909,7 +2918,8 @@ function AdminPageContent() {
             const n = isShop ? { ...raw, label: SHOP_ADMIN[raw.id]?.label ?? raw.label, icon: raw.id === 'tables' ? Globe : raw.icon } : raw;
             const Icon = n.icon;
             const isActive = tab === n.id;
-            const badge = n.id === 'orders' && activeOrders.length > 0 ? activeOrders.length : null;
+            const badge = n.id === 'orders' && activeOrders.length > 0 ? activeOrders.length
+              : n.id === 'anbar' && lowCount > 0 ? lowCount : null;
 
             if (isCollapsed) {
               return (
@@ -2924,7 +2934,7 @@ function AdminPageContent() {
                   }`}
                 >
                   <Icon className="w-5 h-5" />
-                  {badge && <span className="absolute -top-1 -right-1 w-4 h-4 bg-primary-800 text-white text-[9px] rounded-full flex items-center justify-center font-semibold">{badge}</span>}
+                  {badge && <span className={`absolute -top-1 -right-1 w-4 h-4 ${n.id === 'anbar' ? 'bg-red-600' : 'bg-primary-800'} text-white text-[9px] rounded-full flex items-center justify-center font-semibold`}>{badge}</span>}
                 </button>
               );
             }
@@ -2942,7 +2952,7 @@ function AdminPageContent() {
                 <Icon className="w-5 h-5 shrink-0" />
                 <span className="flex-1 text-left truncate">{n.label}</span>
                 {badge && (
-                  <span className={`text-xs rounded-full px-1.5 py-0.5 font-semibold ${isActive ? 'bg-white/20 text-white' : 'bg-primary-800 text-white'}`}>
+                  <span className={`text-xs rounded-full px-1.5 py-0.5 font-semibold ${n.id === 'anbar' ? 'bg-red-600 text-white' : isActive ? 'bg-white/20 text-white' : 'bg-primary-800 text-white'}`}>
                     {badge}
                   </span>
                 )}

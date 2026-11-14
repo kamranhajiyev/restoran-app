@@ -13,7 +13,7 @@ import { supabase } from '@/lib/supabase';
 import { pinKey } from '@/lib/pin-keys';
 import {
   addOrder, addItemsToOrder, removeOrderItems, splitOrder, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, setCompanyContext,
-  fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchCompanyKind, fetchOrderNumber, fetchOpenShift, fetchShifts, openShift, closeShift, addShiftMovement, fetchShiftSales,
+  fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchCompanyKind, fetchOrderNumber, fetchLowStockForTill, fetchOpenShift, fetchShifts, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, verifyStaffPin, verifyStaffCard, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
   fetchStations, fetchStationReady, fetchStationReadyOrNull, type StationReady,
@@ -81,6 +81,7 @@ import { OPENING_TAB, sellerTabs, type SellerTab } from '@/lib/seller-nav';
 import { cleanKind, type CompanyKind } from '@/lib/company-kind';
 import { paysNow, shopDeliveryType, shopSaleType, tabLabel } from '@/lib/shop-mode';
 import { findByBarcode, scanCatcher } from '@/lib/barcode';
+import { leftLabel, lowKey } from '@/lib/low-stock';
 
 const TAB_ICONS: Record<SellerTab, typeof Receipt> = {
   'new-order': ShoppingBag, orders: Receipt, kassa: Wallet, couriers: Bike, history: History,
@@ -444,6 +445,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // until the settings say otherwise, like every other switch here.
   const [kind, setKind]                     = useState<CompanyKind>('restaurant');
   const isShop = kind === 'shop';
+  // Az qalan mal (lib/low-stock): product (or product:size) → how many left,
+  // only for those below the owner's limit. A failed read keeps what it has.
+  const [lowLeft, setLowLeft]               = useState<Record<string, number>>({});
   // Çatdırılma, switched on by the owner in the admin panel. Starts off like
   // kassaOn so a venue that does not deliver never flashes a Kuryerlər tab it
   // will lose a moment later; the boot fetch turns it on where it belongs.
@@ -1883,6 +1887,19 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     }
     addToCart({ ...hit.item, price: v.price }, v.name, v.id);
   }
+
+  // Read on opening, every minute, and after each sale (orders change).
+  const loadLow = useCallback(async () => {
+    const low = overrideCompanyId
+      ? await jsonOrNull(tillFetch(`/api/public-low-stock?companyId=${overrideCompanyId}`)).then(d => (d?.low ?? null) as Record<string, number> | null)
+      : await fetchLowStockForTill();
+    if (low) setLowLeft(low);
+  }, [overrideCompanyId]);
+  useEffect(() => {
+    void loadLow();
+    const id = setInterval(() => void loadLow(), 60_000);
+    return () => clearInterval(id);
+  }, [loadLow, orders.length]);
 
   // A scan with the cursor anywhere else on the products screen. The search
   // box takes its own (onKeyDown above); a pop-up open over the products, or
@@ -4808,6 +4825,15 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                           <div className="p-2.5">
                             <p className="text-sm font-medium text-stone-800 leading-tight">{item.name}</p>
                             <p className="text-primary-700 font-bold text-sm mt-0.5">{typedPrice(item.price, activeChange).toFixed(2)} ₼</p>
+                            {/* Below the owner's limit: a warning, never a block. A product
+                                with sizes says which one is low. */}
+                            {(() => {
+                              const own = lowLeft[lowKey(item.id)];
+                              const sizes = (item.variants ?? []).filter(v => lowLeft[lowKey(item.id, v.id)] !== undefined);
+                              const text = own !== undefined ? leftLabel(own)
+                                : sizes.length ? sizes.map(v => `${v.name}: ${leftLabel(lowLeft[lowKey(item.id, v.id)])}`).join(' · ') : null;
+                              return text ? <p className="text-[11px] font-semibold text-red-600 mt-0.5 leading-tight">{text}</p> : null;
+                            })()}
                           </div>
                         </button>
                       </div>

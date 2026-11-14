@@ -24,6 +24,7 @@ import type { SplitRequestPart } from './split-bill';
 import type { AccountEdit, AccountKind, FinanceAccount, FinanceClosing, FinanceEntry, FinanceSource, FinanceTransaction, SourceKind } from './finance';
 import { cleanKind, kindForInsert, type CompanyKind } from './company-kind';
 import { cleanBarcode } from './barcode';
+import { lowForTill, lowStock, type StockLimit } from './low-stock';
 
 async function authHeaders(): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -1635,6 +1636,40 @@ export async function fetchStockItems(): Promise<StockItem[]> {
     if (error || !data) return [];
     return data.map(s => ({ id: s.id, name: s.name, unit: s.unit, type: s.type ?? 'ingredient', createdAt: s.created_at }));
   } catch { return []; }
+}
+
+// Az qalan mal (lib/low-stock). Read on their own: a database without
+// 20261112_stock_min_qty.sql answers with no limits, and Anbar works as before.
+export async function fetchStockLimits(): Promise<StockLimit[]> {
+  try {
+    const { data, error } = await supabase.from('stock_items').select('id, min_qty').not('min_qty', 'is', null);
+    if (error || !data) return [];
+    return data.map(r => ({ stockItemId: r.id, minQty: Number(r.min_qty) }));
+  } catch { return []; }
+}
+
+/** The owner's limit; null takes it off. */
+export async function setStockLimit(stockItemId: string, minQty: number | null): Promise<string | null> {
+  const { error } = await supabase.from('stock_items').update({ min_qty: minQty }).eq('id', stockItemId);
+  if (error) { console.error('[setStockLimit]', error); return error.message; }
+  return null;
+}
+
+/** What a signed-in till shows on its cards ("3 qalıb"). Null when any read
+ *  failed: the till keeps what it showed. */
+export async function fetchLowStockForTill(): Promise<Record<string, number> | null> {
+  if (!_companyId) return null;
+  try {
+    const limits = await fetchStockLimits();
+    if (limits.length === 0) return {};
+    const [{ data: bal, error: e1 }, { data: links, error: e2 }] = await Promise.all([
+      supabase.from('stock_balances').select('stock_item_id, qty').eq('company_id', _companyId),
+      supabase.from('recipe_lines').select('menu_item_id, variant_id, stock_item_id').eq('company_id', _companyId),
+    ]);
+    if (e1 || e2 || !bal || !links) return null;
+    const low = lowStock(limits, bal.map(b => ({ stockItemId: b.stock_item_id, qty: Number(b.qty) })));
+    return lowForTill(low, links.map(l => ({ menuItemId: l.menu_item_id, variantId: l.variant_id ?? null, stockItemId: l.stock_item_id })));
+  } catch { return null; }
 }
 
 export async function createStockItem(name: string, unit: string, type: 'product' | 'ingredient' = 'ingredient'): Promise<string | null> {
