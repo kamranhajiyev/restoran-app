@@ -18,18 +18,17 @@ const TABLES = [
   'supplier_payments', 'stock_receipts', 'push_subscriptions', 'finance_transactions', 'finance_closings',
   'staff', 'login_events', 'finance_sources', 'view_as_events', 'stock_transfers', 'stock_balances',
   'health_reports', 'staff_pin_state', 'company_order_counters',
+  // Mağaza modu, Qaytarma (20261113_returns.sql).
+  'returns', 'return_lines',
 ];
 
 const nobody = '00000000-0000-0000-0000-000000000000';
 
 describe('a stranger with the public key', () => {
   it("reads nothing from any of a restaurant's tables", async () => {
-    const seen: string[] = [];
-    for (const t of TABLES) {
-      const { data } = await anon.from(t).select('*').limit(1);
-      if (data?.length) seen.push(t);
-    }
-    expect(seen).toEqual([]);
+    // All at once: one after another took over the 20 s limit on a slow line.
+    const reads = await Promise.all(TABLES.map(async t => ((await anon.from(t).select('*').limit(1)).data?.length ? t : null)));
+    expect(reads.filter(Boolean)).toEqual([]);
   });
 
   it("never reads a till's secret link", async () => {

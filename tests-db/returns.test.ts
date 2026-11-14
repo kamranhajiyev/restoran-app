@@ -79,7 +79,7 @@ describe('a return through the till', () => {
     made.push(id);
     const before = await stockNow();
     const first = await send({ companyId: companyA.id, token, request: request(id) });
-    expect(first).toEqual({ status: 200, body: { ok: true, total: 1.5 } });
+    expect(first).toEqual({ status: 200, body: { ok: true, total: 1.5, approvedBy: MANAGER } });
     const again = await send({ companyId: companyA.id, token, request: request(id) });
     expect(again.status).toBe(200);
     const { data: rows } = await admin.from('returns').select('total, pay, approved_by').eq('id', id);
