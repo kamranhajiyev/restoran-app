@@ -77,6 +77,11 @@ import { verifyPinOffline, rememberPin, forgetPins } from '@/lib/offline-pin';
 import { queueSize, enqueue, onEnqueue } from '@/lib/offline-queue';
 import { onLocalWrite, pendingWrites, tillPost } from '@/lib/till-write';
 import OrderNote from '@/components/OrderNote';
+import { OPENING_TAB, TAB_LABELS, sellerTabs, type SellerTab } from '@/lib/seller-nav';
+
+const TAB_ICONS: Record<SellerTab, typeof Receipt> = {
+  'new-order': ShoppingBag, orders: Receipt, kassa: Wallet, couriers: Bike, history: History,
+};
 import { moneyDiff } from '@/lib/shift-check';
 import { cardSalesToSave, expectedCash as drawerCash, movementsIn, movementsOut, movementsTotal } from '@/lib/shift-cash';
 import { REFRESH_GATHER_MS } from '@/lib/coalesce';
@@ -377,7 +382,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   setTillToken(overrideToken);
   // undefined: not known yet — a blank box, not the cup, until it is.
   const [logoUrl, setLogoUrl] = useState<string | null | undefined>(overrideCompanyId ? (overrideLogoUrl ?? null) : undefined);
-  const [view, setView]             = useState<View>('orders');
+  const [view, setView]             = useState<View>(OPENING_TAB);
   const [menu, setMenu]             = useState<MenuItem[]>([]);
   const [availableCategories, setAvailableCategories] = useState<Category[]>([]);
   const [orders, setOrders]         = useState<Order[]>([]);
@@ -3203,6 +3208,27 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const saleType = saleTypes.find(t => t.id === saleTypeId) ?? null;
   const activeChange = appendOrder ? changeFor(appendOrder.orderType, saleTypes) : saleType?.change ?? NO_CHANGE;
   const offeredTypes = shownTypes(saleTypes, { tablesOn, deliveryOn });
+  const navTabs = sellerTabs({ kassaShown, couriersShown })
+    .map(id => ({ id: id as View, label: TAB_LABELS[id], icon: TAB_ICONS[id] }));
+
+  // The till opens on "Yeni sifariş" (lib/seller-nav), so it has to start the
+  // way pressing that tab does: Masa picked and the table map showing. The
+  // owner's types and the tables switch arrive after the first paint, so this
+  // runs again when they do — but only while nothing has been started yet.
+  const offeredKey = offeredTypes.map(t => t.id).join(',');
+  const openedRef = useRef(false);
+  useEffect(() => {
+    if (view !== 'new-order' || cart.length > 0 || selectedTable !== null || appendOrderId) return;
+    if (openedRef.current && orderType !== null && orderType !== 'masa') return;
+    openedRef.current = true;
+    // One kind of order that needs no table: straight to the menu, as the tab does.
+    if (offeredTypes.length === 1 && typeFlow(offeredTypes[0], tablesOn) === 'takeaway') {
+      void pickSaleType(offeredTypes[0]);
+      return;
+    }
+    openOnMasa();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offeredKey, tablesOn]);
   // Xidmət haqqı on what is in the cart: the open order's percent when adding
   // to one (it was set when the order was taken), otherwise the new order's.
   const cartPercent = appendOrder ? appendOrder.serviceChargePercent ?? 0 : chargeFor(serviceCharge, newOrderTypeId(saleType, orderType));
@@ -3308,16 +3334,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         </div>
 
         <nav className={`flex flex-col gap-1 p-3 flex-1 ${collapsed ? 'items-center' : ''}`}>
-          {[
-            { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
-            { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
-            ...(kassaShown ? [{ id: 'kassa' as View, label: 'Kassa', icon: Wallet }] : []),
-            // Only where the owner turned çatdırılma on: a restaurant that does
-            // not deliver should not carry an empty tab around for the life of
-            // the app.
-            ...(couriersShown ? [{ id: 'couriers' as View, label: 'Kuryerlər', icon: Bike }] : []),
-            { id: 'history' as View,   label: 'Tarixçə',      icon: History },
-          ].map(n => {
+          {navTabs.map(n => {
             const Icon = n.icon;
             const isActive = view === n.id || (n.id === 'new-order' && view === 'menu');
             const badge = n.id === 'orders' && active.length > 0 ? active.length : null;
@@ -4756,13 +4773,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       {/* Mobile bottom navigation. Hidden from md, where the side menu shows —
           between md and lg both used to show, the same menu twice (2026-11-03). */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-stone-200 flex safe-area-inset-bottom">
-        {[
-          { id: 'orders' as View,    label: 'Sifarişlər',   icon: Receipt },
-          { id: 'new-order' as View, label: 'Yeni sifariş', icon: ShoppingBag },
-          ...(kassaShown ? [{ id: 'kassa' as View, label: 'Kassa', icon: Wallet }] : []),
-          ...(couriersShown ? [{ id: 'couriers' as View, label: 'Kuryerlər', icon: Bike }] : []),
-          { id: 'history' as View,   label: 'Tarixçə',      icon: History },
-        ].map(n => {
+        {navTabs.map(n => {
           const Icon = n.icon;
           const isActive = view === n.id || (n.id === 'new-order' && view === 'menu');
           const badge = n.id === 'orders' && active.length > 0 ? active.length : null;

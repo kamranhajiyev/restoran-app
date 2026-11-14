@@ -9,6 +9,7 @@ import {
   TILL_RULES_NEW, addAction, approvedBy, cleanRules, fixedRule, managerByPinOffline, removalAction, ruleFor, rulesApply, strictest,
 } from '@/lib/till-rules';
 import type { Staff } from '@/types';
+import { sellerTabs } from '@/lib/seller-nav';
 
 const sql = readFileSync('supabase/migrations/20261029_till_permissions.sql', 'utf8');
 const seller = readFileSync('app/seller/page.tsx', 'utf8');
@@ -163,7 +164,9 @@ describe('Kassa', () => {
   it('when closed, hides the tab and "Növbəni aç", and asks for a PIN on both ways in', () => {
     expect(seller).toMatch(/const kassaShown = kassaOn && !\(rulesOn && ruleFor\(tillRules, myRole, 'kassa'\) === 'deny'\)/);
     expect(seller).not.toMatch(/\(kassaOn \? \[\{ id: 'kassa'/);
-    expect(seller.match(/\(kassaShown \? \[\{ id: 'kassa'/g)?.length).toBe(2);
+    // Both menus come from one list (lib/seller-nav), fed by kassaShown.
+    expect(seller).toMatch(/sellerTabs\(\{ kassaShown, couriersShown \}\)/);
+    expect(sellerTabs({ kassaShown: false, couriersShown: true })).not.toContain('kassa');
     expect(seller).toMatch(/if \(id === 'kassa' && !kassaShown\) return;/);
     expect(seller).toMatch(/if \(!shift && kassaOn && !kassaShown\) \{/);
     expect(seller).toMatch(/async function handleOpenShift\(\) \{\s+if \(!\(await guard\(\['kassa'\]\)\)\.ok\) return;/);
@@ -176,7 +179,8 @@ describe('Kassa', () => {
     expect(ruleFor(TILL_RULES_NEW, 'waiter', 'couriers')).toBe('free');
     expect(seller).toMatch(/const couriersShown = deliveryOn && !\(rulesOn && ruleFor\(tillRules, myRole, 'couriers'\) === 'deny'\)/);
     expect(seller).not.toMatch(/\(deliveryOn \? \[\{ id: 'couriers'/);
-    expect(seller.match(/\(couriersShown \? \[\{ id: 'couriers'/g)?.length).toBe(2);
+    expect(seller).toMatch(/sellerTabs\(\{ kassaShown, couriersShown \}\)/);
+    expect(sellerTabs({ kassaShown: true, couriersShown: false })).not.toContain('couriers');
     expect(seller).toMatch(/if \(id === 'couriers' && !couriersShown\) return;/);
     expect(seller).toMatch(/id === 'couriers' && view !== 'couriers' && !\(await guard\(\['couriers'\]\)\)\.ok/);
     expect(seller).not.toMatch(/setView\('couriers'\)/);
