@@ -86,6 +86,27 @@ describe("a restaurant's own row", () => {
     await superadmin.from('companies').update({ expires_at: was!.expires_at }).eq('id', companyB.id);
   });
 
+  // Restoran / Mağaza (20261110_company_kind.sql): it changes the whole app, so
+  // the owner cannot flip it — only the superadmin, and only to the two kinds.
+  it('is switched between Restoran and Mağaza by the superadmin alone', async () => {
+    expect((await admin.from('companies').select('kind').eq('id', companyB.id).single()).data!.kind).toBe('restaurant');
+    for (const who of [ownerB, ownerA, sellerA, anon]) {
+      await who.from('companies').update({ kind: 'shop' }).eq('id', companyB.id);
+    }
+    expect((await admin.from('companies').select('kind').eq('id', companyB.id).single()).data!.kind).toBe('restaurant');
+    // The owner reads their own kind; the public key reads none.
+    expect((await ownerB.from('companies').select('kind').eq('id', companyB.id).single()).data?.kind).toBe('restaurant');
+    expect((await anon.from('companies').select('kind').eq('id', companyB.id).maybeSingle()).error).not.toBeNull();
+    try {
+      const r = await superadmin.from('companies').update({ kind: 'shop' }).eq('id', companyB.id).select('kind');
+      expect(r.error).toBeNull();
+      expect(r.data).toEqual([{ kind: 'shop' }]);
+      expect((await superadmin.from('companies').update({ kind: 'market' }).eq('id', companyB.id)).error).not.toBeNull();
+    } finally {
+      await admin.from('companies').update({ kind: 'restaurant' }).eq('id', companyB.id);
+    }
+  });
+
   it('joins a group one level deep only', async () => {
     const { data: branch } = await admin.from('companies').select('id').eq('parent_id', companyA.id).limit(1).maybeSingle();
     expect(branch).not.toBeNull();

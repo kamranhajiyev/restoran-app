@@ -22,6 +22,7 @@ import { cleanServiceCharge, serviceChargeColumn, type ServiceCharge } from './s
 import type { HealthProblem, HealthReport } from './health-report';
 import type { SplitRequestPart } from './split-bill';
 import type { AccountEdit, AccountKind, FinanceAccount, FinanceClosing, FinanceEntry, FinanceSource, FinanceTransaction, SourceKind } from './finance';
+import { cleanKind, kindForInsert, type CompanyKind } from './company-kind';
 
 async function authHeaders(): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -2509,6 +2510,21 @@ export async function setPrintTableMove(enabled: boolean): Promise<boolean> {
   return true;
 }
 
+// Restoran or Mağaza for the till (lib/company-kind). The exe and the APK keep
+// it with their settings; a signed-in till reads its own row. Null when the
+// read failed: the screen keeps what it has, so a blip never turns a shop's
+// till back into a restaurant's in the middle of a sale.
+export async function fetchCompanyKind(): Promise<CompanyKind | null> {
+  const local = await fromSettings(s => s.kind ?? null);
+  if (local !== null) return cleanKind(local);
+  try {
+    if (!_companyId) return null;
+    const { data, error } = await supabase.from('companies').select('kind').eq('id', _companyId).single();
+    if (error || !data) return null;
+    return cleanKind(data.kind);
+  } catch { return null; }
+}
+
 export async function fetchKassaEnabled(): Promise<boolean> {
   const local = await fromSettings(s => s.kassaEnabled);
   if (local !== null) return local;
@@ -2730,10 +2746,28 @@ export async function fetchCompanies(): Promise<{ id: string; name: string; slug
   } catch { return []; }
 }
 
-export async function createCompany(name: string, slug: string): Promise<void> {
+export async function createCompany(name: string, slug: string, kind: CompanyKind = 'restaurant'): Promise<void> {
   try {
-    await supabase.from('companies').insert({ name, slug });
+    await supabase.from('companies').insert({ name, slug, ...kindForInsert(kind) });
   } catch (e) { console.error('[createCompany]', e); }
+}
+
+// Restoran or Mağaza, per company (lib/company-kind). Read on its own, not in
+// fetchCompanies: a database without the column must still list the companies
+// (20261104_company_groups.sql — one missing column emptied the whole list).
+export async function fetchCompanyKinds(): Promise<Record<string, CompanyKind>> {
+  try {
+    const { data, error } = await supabase.from('companies').select('id, kind');
+    if (error || !data) return {};
+    return Object.fromEntries(data.map(c => [c.id, cleanKind(c.kind)]));
+  } catch { return {}; }
+}
+
+// Superadmin only — companies_update refuses everyone else.
+export async function updateCompanyKind(id: string, kind: CompanyKind): Promise<string | null> {
+  const { error } = await supabase.from('companies').update({ kind }).eq('id', id);
+  if (error) { console.error('[updateCompanyKind]', error); return error.message; }
+  return null;
 }
 
 // Trash = soft delete. The company row and ALL its data (profiles, menu,

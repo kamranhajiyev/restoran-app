@@ -48,7 +48,7 @@ describe('the hall beside the table', () => {
 
   it('reaches every screen and every paper that names a table', () => {
     const seller = read('app/seller/page.tsx');
-    expect(seller).toContain('placeOf(order, { tables, tablesOn, deliveryOn, halls })');
+    expect(seller).toContain('placeOf(order, { tables, tablesOn: tablesOn && !isShop, deliveryOn, halls, shop: isShop })');
     expect(withoutHalls(seller)).toEqual([]);
     expect(seller).toMatch(/withHall\(tables\.find/);
     const admin = read('app/admin/page.tsx');

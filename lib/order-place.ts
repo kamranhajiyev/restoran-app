@@ -17,6 +17,7 @@ export const PLACE_WORDS = {
   online: 'Onlayn sifariş',
   delivery: 'Çatdırılma',
   takeaway: 'Takeaway',
+  shop: 'Mağazada',
 } as const;
 
 /** The destinations, for filtering. Naming them is `orderPlace`'s job. */
@@ -30,6 +31,9 @@ export interface PlaceConfig {
   deliveryOn: boolean;
   /** For the hall in front of the table's name — see withHall. */
   halls?: HallRef[];
+  /** A Mağaza (lib/company-kind): no tables, and a sale at the counter is
+   *  "Mağazada", named only when there is a Çatdırılma to tell it from. */
+  shop?: boolean;
 }
 
 type TableRef = Pick<RestaurantTable, 'id' | 'name'> & Partial<Pick<RestaurantTable, 'hallId'>>;
@@ -108,5 +112,6 @@ export function orderPlace(order: PlaceOrder, cfg: PlaceConfig): string {
   }
   if (kind === 'online') return PLACE_WORDS.online;
   if (kind === 'delivery') return PLACE_WORDS.delivery;
+  if (cfg.shop) return cfg.deliveryOn ? PLACE_WORDS.shop : '';
   return cfg.tablesOn || cfg.deliveryOn ? PLACE_WORDS.takeaway : '';
 }

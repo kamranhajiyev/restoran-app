@@ -13,7 +13,7 @@ import { supabase } from '@/lib/supabase';
 import { pinKey } from '@/lib/pin-keys';
 import {
   addOrder, addItemsToOrder, removeOrderItems, splitOrder, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, setCompanyContext,
-  fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchOpenShift, fetchShifts, openShift, closeShift, addShiftMovement, fetchShiftSales,
+  fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchCompanyKind, fetchOpenShift, fetchShifts, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, verifyStaffPin, verifyStaffCard, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
   fetchStations, fetchStationReady, fetchStationReadyOrNull, type StationReady,
@@ -77,7 +77,9 @@ import { verifyPinOffline, rememberPin, forgetPins } from '@/lib/offline-pin';
 import { queueSize, enqueue, onEnqueue } from '@/lib/offline-queue';
 import { onLocalWrite, pendingWrites, tillPost } from '@/lib/till-write';
 import OrderNote from '@/components/OrderNote';
-import { OPENING_TAB, TAB_LABELS, sellerTabs, type SellerTab } from '@/lib/seller-nav';
+import { OPENING_TAB, sellerTabs, type SellerTab } from '@/lib/seller-nav';
+import { cleanKind, type CompanyKind } from '@/lib/company-kind';
+import { paysNow, shopDeliveryType, shopSaleType, tabLabel } from '@/lib/shop-mode';
 
 const TAB_ICONS: Record<SellerTab, typeof Receipt> = {
   'new-order': ShoppingBag, orders: Receipt, kassa: Wallet, couriers: Bike, history: History,
@@ -208,12 +210,15 @@ function ordersBetween(from: string, to: string, companyId: string | null | unde
 // their settings and a signed-in till reads the companies row (both
 // fetchSaleSettings); a link in a browser has no session for that row and asks
 // /api/public-settings. Null when the read failed: keep the ones in hand.
-async function readSaleSettings(linkCompanyId: string | null): Promise<{ types: SaleType[]; serviceCharge: ServiceCharge } | null> {
+// Restoran or Mağaza (lib/company-kind) comes the same way; null kind = the
+// read failed, keep the one in hand.
+async function readSaleSettings(linkCompanyId: string | null): Promise<{ types: SaleType[]; serviceCharge: ServiceCharge; kind: CompanyKind | null } | null> {
   if (linkCompanyId && !hasLocalDb()) {
     const d = await jsonOrNull(tillFetch(`/api/public-settings?companyId=${linkCompanyId}`));
-    return d?.settings ? { types: cleanOrderTypes(d.settings.orderTypes), serviceCharge: cleanServiceCharge(d.settings.serviceCharge) } : null;
+    return d?.settings ? { types: cleanOrderTypes(d.settings.orderTypes), serviceCharge: cleanServiceCharge(d.settings.serviceCharge), kind: cleanKind(d.settings.kind) } : null;
   }
-  return (await fetchSaleSettings()) ?? null;
+  const [sale, kind] = await Promise.all([fetchSaleSettings(), fetchCompanyKind()]);
+  return sale ? { ...sale, kind } : null;
 }
 
 // The station panel reads tables over the public API, which hands back raw DB
@@ -434,6 +439,10 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // Tables off (takeaway-only company): the Masa/Takeaway screen is skipped and
   // "Yeni sifariş" opens the product menu directly
   const [tablesOn, setTablesOn]             = useState(true);
+  // Restoran or Mağaza (lib/company-kind, lib/shop-mode). Starts a restaurant
+  // until the settings say otherwise, like every other switch here.
+  const [kind, setKind]                     = useState<CompanyKind>('restaurant');
+  const isShop = kind === 'shop';
   // Çatdırılma, switched on by the owner in the admin panel. Starts off like
   // kassaOn so a venue that does not deliver never flashes a Kuryerlər tab it
   // will lose a moment later; the boot fetch turns it on where it belongs.
@@ -1746,7 +1755,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     if (!companyId) return;
     const editsSoon = gatherParts(parts => { void refreshParts(parts); });
     const loadSaleTypes = () => readSaleSettings(overrideCompanyId ?? null).then(s => {
-      if (s) { setSaleTypes(s.types); setServiceCharge(s.serviceCharge); }
+      if (s) { setSaleTypes(s.types); setServiceCharge(s.serviceCharge); if (s.kind) setKind(s.kind); }
     });
     void loadSaleTypes();
     let channel = supabase.channel('seller-data');
@@ -1922,7 +1931,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // is going. The rule itself lives in lib/order-place.ts, because the admin
   // history shows the same thing about the same rows.
   function orderPlace(order: Pick<Order, 'tableNumber' | 'tableName' | 'courierId' | 'online'>): string {
-    return placeOf(order, { tables, tablesOn, deliveryOn, halls });
+    return placeOf(order, { tables, tablesOn: tablesOn && !isShop, deliveryOn, halls, shop: isShop });
   }
 
   function hallName(id: string | undefined): string {
@@ -2407,6 +2416,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     if (orderType === 'masa' && !selectedTable) return;
     if (orderType === 'kuryer' && !selectedCourier) return;
     setSubmitting(true);
+    const payNow = shopSale;
     const order: Order = {
       id: crypto.randomUUID(),
       // A guess, from the orders this screen happens to be holding — the web
@@ -2416,7 +2426,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       // the whole local table rather than from whatever is on screen.
       orderNumber: hasLocalDb() ? 0 : (orders[0]?.orderNumber ?? 0) + 1,
       tableNumber: orderType === 'masa' ? selectedTable! : 0,
-      items: printKitchen ? named(cart) : named(cart).map(oi => ({ ...oi, noPrint: true })),
+      items: printKitchen && !payNow ? named(cart) : named(cart).map(oi => ({ ...oi, noPrint: true })),
       status: 'gözləyir',
       createdAt: new Date().toISOString(),
       sellerName: effectiveSeller,
@@ -2485,6 +2495,11 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     if (order.tableNumber) updateTableDrafts(d => dropTableDraft(d, order.tableNumber));
     setCart([]); setNote(''); setPrintKitchen(true); setSelectedTable(null); setOrderType(null); setSaleTypeId(null); setSelectedCourier(null);
     setMobileCartOpen(false);
+    // A shop: pay now, then the empty "Yeni satış" is back for the next one.
+    // The sheet is opened on purpose here — the customer is at the counter with
+    // the money; the restaurant reason below (a stray tap closing a table's
+    // unpaid order) does not apply.
+    if (payNow) { setView('new-order'); openPayment(order); return; }
     setView('orders');
     // No payment sheet here on purpose. It used to open the moment the order was
     // placed, pre-filled with the full amount as cash, so one stray tap on
@@ -3209,7 +3224,17 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const activeChange = appendOrder ? changeFor(appendOrder.orderType, saleTypes) : saleType?.change ?? NO_CHANGE;
   const offeredTypes = shownTypes(saleTypes, { tablesOn, deliveryOn });
   const navTabs = sellerTabs({ kassaShown, couriersShown })
-    .map(id => ({ id: id as View, label: TAB_LABELS[id], icon: TAB_ICONS[id] }));
+    .map(id => ({ id: id as View, label: tabLabel(id, kind), icon: TAB_ICONS[id] }));
+
+  // A shop has no type row and no table map: "Yeni satış" is the products,
+  // with the sale already a Mağazada one. Runs whenever the till lands on
+  // "new-order" — on opening, on the tab, and after each payment.
+  const shopType = shopSaleType(saleTypes);
+  const shopDelivery = couriersShown ? shopDeliveryType(saleTypes, deliveryOn) : null;
+  useEffect(() => {
+    if (isShop && view === 'new-order' && !appendOrderId) void pickSaleType(shopType);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, isShop]);
 
   // The till opens on "Yeni sifariş" (lib/seller-nav), so it has to start the
   // way pressing that tab does: Masa picked and the table map showing. The
@@ -3218,7 +3243,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const offeredKey = offeredTypes.map(t => t.id).join(',');
   const openedRef = useRef(false);
   useEffect(() => {
-    if (view !== 'new-order' || cart.length > 0 || selectedTable !== null || appendOrderId) return;
+    if (isShop || view !== 'new-order' || cart.length > 0 || selectedTable !== null || appendOrderId) return;
     if (openedRef.current && orderType !== null && orderType !== 'masa') return;
     openedRef.current = true;
     // One kind of order that needs no table: straight to the menu, as the tab does.
@@ -3233,13 +3258,17 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // to one (it was set when the order was taken), otherwise the new order's.
   const cartPercent = appendOrder ? appendOrder.serviceChargePercent ?? 0 : chargeFor(serviceCharge, newOrderTypeId(saleType, orderType));
   const cartCharge = appendOrder ? addedCharge(appendOrder, cart) : serviceAmount(cartTotal, cartPercent);
+  // A shop sale is paid on the spot (lib/shop-mode): no note, no kitchen, and
+  // the button opens payment. A delivery is still sent and paid later.
+  const shopSale = paysNow({ kind, appending: !!appendOrderId, delivery: orderType === 'kuryer' });
+  const cartToPayNow = cartToPay(cartTotal, cartCharge);
   // The line under the cart's title: where this order is going, with the
   // type's name in front when it is one the owner added ("Banket · Masa 5").
   function cartHeading(): string {
     if (appendOrder) return `№${orderLabel(appendOrder)}-ə əlavə`;
     const place = orderType === 'kuryer' ? `Kuryer · ${courierNames[selectedCourier ?? ''] ?? ''}`
       : !tablesOn ? 'Yeni sifariş'
-      : orderType === 'takeaway' ? 'Takeaway'
+      : orderType === 'takeaway' ? (isShop ? 'Mağazada' : 'Takeaway')
       : tableName(selectedTable);
     if (!saleType || saleType.builtIn) return place;
     return orderType === 'masa' ? `${saleType.name} · ${place}` : saleType.name;
@@ -3755,7 +3784,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
               {/* One line: the title, the counts, and the two controls — the sound
                   bell and Yenilə. */}
               <div className="px-4 md:px-6 pt-5 pb-3 flex items-center gap-2 flex-wrap">
-                <h1 className="text-lg font-semibold text-stone-900 mr-1">Sifarişlər</h1>
+                <h1 className="text-lg font-semibold text-stone-900 mr-1">{isShop ? 'Satışlar' : 'Sifarişlər'}</h1>
                 <span className="px-2.5 py-0.5 rounded-full bg-stone-200/70 text-xs text-stone-700">Cəmi <span className="font-semibold text-stone-900">{active.length}</span></span>
                 <span className="px-2.5 py-0.5 rounded-full bg-white ring-1 ring-inset ring-stone-300 text-xs text-stone-700">Gözləyir <span className="font-semibold">{orders.filter(o => o.status === 'gözləyir').length}</span></span>
                 <span className="px-2.5 py-0.5 rounded-full bg-green-50 border border-green-200 text-xs text-green-800">Hazır <span className="font-semibold">{orders.filter(o => o.status === 'hazırdır').length}</span></span>
@@ -3861,9 +3890,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
             <div className="flex-1 flex flex-col overflow-hidden">
               <div className="px-4 md:px-6 pt-5 pb-2 flex items-end justify-between gap-3">
                 <div>
-                  <h1 className="text-lg font-semibold text-stone-900">Bu günün sifarişləri</h1>
+                  <h1 className="text-lg font-semibold text-stone-900">{isShop ? 'Bu günün satışları' : 'Bu günün sifarişləri'}</h1>
                   <p className="text-sm text-stone-600 mt-0.5">
-                    {historyLoading ? 'Yüklənir...' : `${historyOrders.length} sifariş`}
+                    {historyLoading ? 'Yüklənir...' : `${historyOrders.length} ${isShop ? 'satış' : 'sifariş'}`}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -4582,12 +4611,12 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
 
                 {/* Menu toolbar */}
                 <div className="px-3 py-2.5 border-b bg-white flex items-center gap-2 shrink-0">
-                  <button
+                  {!(isShop && !appendOrderId) && <button
                     onClick={() => { if (appendOrderId) { cancelAppend(); return; } setView(tablesOn ? 'new-order' : 'orders'); openOnMasa(); setCart([]); setMenuSearch(''); }}
                     className="h-10 shrink-0 flex items-center gap-1 pl-2 pr-3 rounded-xl border border-stone-200 text-sm font-semibold text-stone-700 hover:bg-stone-50 active:scale-95 transition-all"
                   >
                     <ChevronLeft className="w-5 h-5" /> Geri
-                  </button>
+                  </button>}
                   <div className="relative flex-1">
                     <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input
@@ -4602,6 +4631,35 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                       </button>
                     )}
                   </div>
+                  {/* A shop that delivers: Mağazada or Çatdırılma, without leaving the products. */}
+                  {isShop && !appendOrderId && shopDelivery && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex bg-stone-100 rounded-xl p-1">
+                        <button
+                          onClick={() => { setSaleTypeId(shopType.id); setOrderType('takeaway'); setSelectedCourier(null); }}
+                          className={`h-8 px-3 rounded-lg text-sm font-semibold ${orderType !== 'kuryer' ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500'}`}
+                        >
+                          <ShoppingBag className="w-4 h-4 inline mr-1 -mt-0.5" />Mağazada
+                        </button>
+                        <button
+                          onClick={() => { setSaleTypeId(shopDelivery.id); setOrderType('kuryer'); }}
+                          className={`h-8 px-3 rounded-lg text-sm font-semibold ${orderType === 'kuryer' ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500'}`}
+                        >
+                          <Bike className="w-4 h-4 inline mr-1 -mt-0.5" />Çatdırılma
+                        </button>
+                      </div>
+                      {orderType === 'kuryer' && (
+                        <select
+                          value={selectedCourier ?? ''}
+                          onChange={e => setSelectedCourier(e.target.value || null)}
+                          className={`h-10 rounded-xl border px-3 text-sm font-medium bg-white ${selectedCourier ? 'border-stone-200 text-stone-800' : 'border-red-300 text-red-600'}`}
+                        >
+                          <option value="">Kuryeri seçin</option>
+                          {activeCouriers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  )}
                   {/* Cart icon — mobile only */}
                   <button
                     onClick={() => setMobileCartOpen(true)}
@@ -4722,14 +4780,14 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   }
                 </div>
                 <div className="px-4 py-3 border-t space-y-3">
-                  <textarea
+                  {!shopSale && <textarea
                     placeholder="Qeyd..."
                     value={note}
                     onChange={e => setNote(e.target.value)}
                     rows={2}
                     className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary-400"
-                  />
-                  <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />
+                  />}
+                  {!shopSale && <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />}
                   <CartTotal dishes={cartTotal} percent={cartPercent} charge={cartCharge} />
                   <button
                     onClick={submitOrder}
@@ -4737,7 +4795,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                     className="w-full bg-primary-800 hover:bg-primary-900 disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
                   >
                     {(submitting || removing) && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                    {submit.label}
+                    {shopSale ? `Ödə · ${cartToPayNow.toFixed(2)} ₼` : submit.label}
                   </button>
                 </div>
               </div>
@@ -4840,14 +4898,14 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
               }
             </div>
             <div className="px-4 py-4 border-t space-y-3 bg-white shrink-0">
-              <textarea
+              {!shopSale && <textarea
                 placeholder="Qeyd..."
                 value={note}
                 onChange={e => setNote(e.target.value)}
                 rows={2}
                 className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary-400"
-              />
-              <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />
+              />}
+              {!shopSale && <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />}
               <CartTotal dishes={cartTotal} percent={cartPercent} charge={cartCharge} big />
               <button
                 onClick={submitOrder}
@@ -4855,7 +4913,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 className="w-full bg-primary-800 hover:bg-primary-900 disabled:bg-stone-300 text-white font-semibold py-4 rounded-2xl transition-colors text-base active:scale-95 flex items-center justify-center gap-2"
               >
                 {(submitting || removing) && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                {submit.label}
+                {shopSale ? `Ödə · ${cartToPayNow.toFixed(2)} ₼` : submit.label}
               </button>
             </div>
           </div>

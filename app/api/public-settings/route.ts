@@ -13,6 +13,7 @@
 import { NextRequest } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { refuseTillRead } from '@/lib/till-read-auth';
+import { cleanKind } from '@/lib/company-kind';
 
 export async function GET(req: NextRequest) {
   const companyId = req.nextUrl.searchParams.get('companyId');
@@ -28,6 +29,10 @@ export async function GET(req: NextRequest) {
     .single();
 
   if (error || !data) return Response.json({ error: 'not found' }, { status: 404 });
+
+  // Restoran or Mağaza (lib/company-kind), read on its own: a database without
+  // 20261110_company_kind.sql must still hand the till all its other switches.
+  const kindRead = await db.from('companies').select('kind').eq('id', companyId).maybeSingle();
 
   // Explicit booleans rather than the row as it stands: a null column means "not
   // set", which everywhere in the app has always meant on, and the till should
@@ -54,6 +59,7 @@ export async function GET(req: NextRequest) {
       orderTypes: data.order_types ?? null,
       // Xidmət haqqı, the same way.
       serviceCharge: data.service_charge ?? null,
+      kind: cleanKind(kindRead.data?.kind),
     },
   });
 }

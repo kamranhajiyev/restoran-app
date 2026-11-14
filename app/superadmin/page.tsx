@@ -9,7 +9,7 @@ import { backToSuperadmin, startViewAs } from '@/lib/view-as-session';
 import {
   fetchCompanies, createCompany, trashCompany, toggleCompanyActive, updateCompanyName, updateCompanyExpiry,
   fetchAllUsers, createUser, deleteUser, toggleUserActive, updateCompanyProfile, updateOwnerAccount,
-  fetchCompanyTrash, restoreCompany, permanentlyDeleteCompany, verifyPassword, updateUser, updateCompanyTimezone, updateCompanyParent,
+  fetchCompanyTrash, restoreCompany, permanentlyDeleteCompany, verifyPassword, updateUser, updateCompanyTimezone, updateCompanyParent, fetchCompanyKinds, updateCompanyKind,
 } from '@/lib/store';
 import { DEFAULT_TZ } from '@/lib/business-day';
 import { TrashItem } from '@/types';
@@ -19,6 +19,7 @@ import HealthReportPanel from '@/components/HealthReportPanel';
 import { validatePassword } from '@/lib/password';
 import { formatDate } from '@/lib/dates';
 import { withBranches } from '@/lib/company-tree';
+import { KIND_OPTIONS, type CompanyKind } from '@/lib/company-kind';
 
 // Each company's clock for statistics — superadmin picks it per company
 const TIMEZONES: { value: string; label: string }[] = [
@@ -52,12 +53,13 @@ interface Company {
   phone: string | null;
   timezone: string;
   parentId: string | null;
+  kind: CompanyKind;
   ownerUser?: SAUser;
 }
 
 interface ModalSnapshot {
   owner: string; address: string; phone: string;
-  timezone: string; expiry: string | null; parentId: string | null;
+  timezone: string; expiry: string | null; parentId: string | null; kind: CompanyKind;
   accName: string; accUsername: string;
 }
 
@@ -81,6 +83,7 @@ export default function SuperadminPage() {
   const [profExpiry, setProfExpiry] = useState<string | null>(null);
   const [profTimezone, setProfTimezone] = useState(DEFAULT_TZ);
   const [profParent, setProfParent] = useState<string | null>(null);
+  const [profKind, setProfKind] = useState<CompanyKind>('restaurant');
   const [showCustomDate, setShowCustomDate] = useState(false);
   const [profMsg, setProfMsg] = useState('');
 
@@ -100,6 +103,7 @@ export default function SuperadminPage() {
   const [showCompanyForm, setShowCompanyForm] = useState(false);
   const [companyName, setCompanyName] = useState('');
   const [companySlug, setCompanySlug] = useState('');
+  const [companyKind, setCompanyKind] = useState<CompanyKind>('restaurant');
   const [saving, setSaving] = useState(false);
 
   // trash
@@ -146,10 +150,11 @@ export default function SuperadminPage() {
 
   async function loadData(): Promise<Company[]> {
     setLoading(true);
-    const [comps, usrs] = await Promise.all([fetchCompanies(), fetchAllUsers()]);
+    const [comps, usrs, kinds] = await Promise.all([fetchCompanies(), fetchAllUsers(), fetchCompanyKinds()]);
     const owners = (usrs ?? []).filter(u => u.role === 'owner');
     const withOwners: Company[] = comps.map(c => ({
       ...c,
+      kind: kinds[c.id] ?? 'restaurant',
       // A failed users read keeps each company's owner as it was.
       ownerUser: usrs ? owners.find(u => u.companyId === c.id) : companies.find(p => p.id === c.id)?.ownerUser,
     }));
@@ -176,6 +181,7 @@ export default function SuperadminPage() {
     setProfExpiry(c.expiresAt ?? null);
     setProfTimezone(c.timezone || DEFAULT_TZ);
     setProfParent(c.parentId);
+    setProfKind(c.kind);
     setModalOwnerUser(c.ownerUser ?? null);
     setOwnerName(c.ownerUser?.name ?? '');
     setOwnerUsername(c.ownerUser?.username ?? '');
@@ -186,6 +192,7 @@ export default function SuperadminPage() {
       timezone: c.timezone || DEFAULT_TZ,
       expiry: c.expiresAt ?? null,
       parentId: c.parentId,
+      kind: c.kind,
       accName: c.ownerUser?.name ?? '',
       accUsername: c.ownerUser?.username ?? '',
     });
@@ -200,6 +207,7 @@ export default function SuperadminPage() {
       || profTimezone !== snapshot.timezone
       || profExpiry !== snapshot.expiry
       || profParent !== snapshot.parentId
+      || profKind !== snapshot.kind
       || ownerName !== snapshot.accName
       || ownerUsername !== snapshot.accUsername;
   }
@@ -247,6 +255,7 @@ export default function SuperadminPage() {
       updateCompanyExpiry(profileCompany.id, profExpiry),
       updateCompanyTimezone(profileCompany.id, profTimezone),
       profParent !== profileCompany.parentId ? updateCompanyParent(profileCompany.id, profParent) : Promise.resolve(null),
+      profKind !== profileCompany.kind ? updateCompanyKind(profileCompany.id, profKind) : Promise.resolve(null),
     ]);
     const profErr = errs.find(Boolean);
     if (profErr) {
@@ -272,7 +281,7 @@ export default function SuperadminPage() {
     if (accErr) {
       // Keep whatever was typed into the account fields so it can be corrected —
       // only mark the company details as saved.
-      setSnapshot(s => s && { ...s, owner, address, phone, timezone: profTimezone, expiry: profExpiry, parentId: profParent });
+      setSnapshot(s => s && { ...s, owner, address, phone, timezone: profTimezone, expiry: profExpiry, parentId: profParent, kind: profKind });
       setOwnerMsg('Xəta: ' + accErr);
       return;
     }
@@ -342,8 +351,8 @@ export default function SuperadminPage() {
   async function handleCreateCompany(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    await createCompany(companyName.trim(), companySlug.trim().toLowerCase());
-    setCompanyName(''); setCompanySlug('');
+    await createCompany(companyName.trim(), companySlug.trim().toLowerCase(), companyKind);
+    setCompanyName(''); setCompanySlug(''); setCompanyKind('restaurant');
     setShowCompanyForm(false);
     setSaving(false);
     loadData();
@@ -726,6 +735,18 @@ export default function SuperadminPage() {
                   required
                 />
               </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Növ</label>
+                <div className="flex rounded-xl border border-gray-200 overflow-hidden">
+                  {KIND_OPTIONS.map(o => (
+                    <button key={o.value} type="button" onClick={() => setCompanyKind(o.value)}
+                      className={`flex-1 py-2 text-sm font-medium transition-colors ${companyKind === o.value ? 'bg-[#2779a7] text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-1">Mağaza: masa və mətbəx yoxdur. Sonra dəyişmək olar.</p>
+              </div>
               <button
                 type="submit"
                 disabled={saving}
@@ -834,6 +855,18 @@ export default function SuperadminPage() {
                   {TIMEZONES.map(tz => <option key={tz.value} value={tz.value}>{tz.label}</option>)}
                 </select>
                 <p className="text-xs text-gray-400 mt-1">Statistika və hesabatlar bu saat qurşağı ilə hesablanır</p>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><Building2 className="w-3.5 h-3.5" />Növ</label>
+                <div className="flex rounded-xl border border-gray-200 overflow-hidden">
+                  {KIND_OPTIONS.map(o => (
+                    <button key={o.value} type="button" onClick={() => setProfKind(o.value)}
+                      className={`flex-1 py-2 text-sm font-medium transition-colors ${profKind === o.value ? 'bg-[#2779a7] text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-1">Dəyişəndə heç nə silinmir: məsələn masalar gizlənir, geri qaytaranda yenə görünür.</p>
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1"><Building2 className="w-3.5 h-3.5" />Əsas məkan</label>

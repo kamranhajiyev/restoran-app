@@ -55,6 +55,8 @@ export interface TillSettings {
   /** Sifariş növləri as companies.order_types holds them (lib/order-types). */
   orderTypes?: unknown;
   serviceCharge?: unknown;
+  /** Restoran or Mağaza (lib/company-kind). Missing on a till that pulled before it existed. */
+  kind?: string;
 }
 
 /** The till's local database, present only in a build that ships the app. */
