@@ -12,7 +12,7 @@
 import bcrypt from 'bcryptjs';
 import type { Order, OrderItem, Staff, StaffRole } from '../types';
 
-export type TillAction = 'remove_item' | 'remove_after_bill' | 'add_after_bill' | 'cancel' | 'discount' | 'view_history' | 'kassa' | 'couriers';
+export type TillAction = 'remove_item' | 'remove_after_bill' | 'add_after_bill' | 'cancel' | 'discount' | 'view_history' | 'kassa' | 'couriers' | 'refund';
 export type Rule = 'free' | 'pin' | 'deny';
 /** The roles the owner sets rules for. A manager needs none. */
 export type RuledRole = Exclude<StaffRole, 'manager'>;
@@ -29,7 +29,16 @@ export const TILL_ACTIONS: { id: TillAction; label: string; hint: string }[] = [
   { id: 'view_history',      label: 'Tarixçəyə baxmaq',           hint: 'Keçmiş sifarişləri və günün satışını görmək' },
   { id: 'kassa',             label: 'Kassa',                      hint: 'Kassa bölməsini görmək, növbəni açmaq və bağlamaq' },
   { id: 'couriers',          label: 'Kuryerlər',                  hint: 'Kuryerlər bölməsini görmək və onlardan pul qəbul etmək' },
+  // A shop's (SHOP-MODE.md): never free — every return needs a manager.
+  { id: 'refund',            label: 'Qaytarma',                   hint: 'Müştəriyə malın pulunu qaytarmaq — hər dəfə menecer təsdiqləyir' },
 ];
+
+/** Qaytarma (lib/returns): a manager approves every return, rules or not. A
+ *  manager doing it is the approval; "not allowed" stops it; anything else asks. */
+export function refundNeeds(rules: TillRules | null | undefined, role: StaffRole | undefined): 'manager' | 'approve' | 'deny' {
+  if (role === 'manager') return 'manager';
+  return rules?.[role as RuledRole]?.refund === 'deny' ? 'deny' : 'approve';
+}
 
 /**
  * Rules the owner cannot change. The seller keeps the kassa: closed to the

@@ -31,7 +31,7 @@ import {
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, moveTableToHall, fetchCompanySlug,
   fetchHalls, createHall, renameHall, deleteHall, saveHallOrder, adoptOrphanTables, fetchTablesOrNull, fetchHallsOrNull,
   fetchTablesEnabled, setTablesEnabled,
-  fetchDeliveryEnabled, setDeliveryEnabled, fetchCompanyKind, menuHasBarcode, fetchStockLimits, fetchBalances,
+  fetchDeliveryEnabled, setDeliveryEnabled, fetchCompanyKind, menuHasBarcode, fetchStockLimits, fetchBalances, fetchReturnsOrNull,
   fetchQrEnabled, setQrEnabled, fetchMenuOnly, setMenuOnly,
   fetchKassaEnabled, setKassaEnabled,
   fetchCompanyProfile, updateMyCompanyProfile, fetchMyUsername, updateOwnerAccount, verifyPassword,
@@ -111,6 +111,7 @@ import { groupByDay, dayHeading } from '@/lib/group-by-day';
 import type { CompanyKind } from '@/lib/company-kind';
 import { paidHow, SHOP_ADMIN } from '@/lib/shop-mode';
 import { lowStock } from '@/lib/low-stock';
+import { itemsAfterReturns, netOfReturns, type SaleReturn } from '@/lib/returns';
 import { barcodeOwner, cleanBarcode } from '@/lib/barcode';
 
 // RPC raise messages are machine codes — translated here for display
@@ -617,6 +618,9 @@ function AdminPageContent() {
   // their limit — the red number on Anbar. Read again on every tab change, so
   // a limit set in Anbar shows as soon as the owner looks elsewhere.
   const [lowCount, setLowCount] = useState(0);
+  // A shop's returns in Statistika's range (lib/returns), taken off its
+  // income, profit and Top məhsullar. A failed read keeps what it has.
+  const [statsReturns, setStatsReturns] = useState<SaleReturn[]>([]);
   useEffect(() => {
     if (!isShop) { setLowCount(0); return; }
     Promise.all([fetchStockLimits(), fetchBalances()]).then(([ls, bal]) => setLowCount(lowStock(ls, bal).length));
@@ -1082,6 +1086,15 @@ function AdminPageContent() {
   }, [tab, settingsSub, sessionReady, loginsLoaded]);
 
   // Stats orders are fetched per selected range — only the period being viewed is downloaded.
+  useEffect(() => {
+    if (!sessionReady || !isShop) { setStatsReturns([]); return; }
+    const bizT = businessToday(bizSettings);
+    const valid = !!(customFrom && customTo && customFrom <= customTo);
+    const [f, t] = valid ? [customFrom, customTo] : presetRange('bugün', bizT);
+    const [from, to] = statsRangeUtc(f, t, bizSettings);
+    fetchReturnsOrNull(from, to).then(rs => { if (rs) setStatsReturns(rs); });
+  }, [sessionReady, isShop, customFrom, customTo, bizSettings, tab]);
+
   // Fetched ranges are cached in memory: fully-past ranges forever, ranges touching today for 60s.
   useEffect(() => {
     if (!sessionReady) return;
@@ -2767,9 +2780,12 @@ function AdminPageContent() {
   const chartPaid = ordersInDays(paidOrders, bizSettings, rangeFrom, rangeTo);
   const allClosedOrders = (dataLoading || statsFailed ? [] : statsOrders).filter(o => o.status === 'ödənilib' || o.status === 'ləğv edildi');
   const chartAllOrders = ordersInDays(allClosedOrders, bizSettings, rangeFrom, rangeTo);
+  const grossStats = statsSummary(chartPaid, menuCostMap);
+  const chartAvg = grossStats.avg;
+  // After a shop's returns (lib/returns): what really stayed sold.
   const {
-    revenue: chartRevenue, cost: chartCost, profit: chartProfit, marginPct: chartMarginPct, avg: chartAvg,
-  } = statsSummary(chartPaid, menuCostMap);
+    revenue: chartRevenue, cost: chartCost, profit: chartProfit, marginPct: chartMarginPct, back: chartReturned,
+  } = netOfReturns(grossStats, statsReturns, id => menuCostMap[id] ?? 0);
 
   // Counted like Tarixçə (lib/history-shifts): only the range's own sales. A
   // delivery the rider paid back inside the range is Nağd or Kart, otherwise
@@ -2791,8 +2807,9 @@ function AdminPageContent() {
   // Counted by lib/item-sales, the same function Tarixçə's Məhsullar list uses.
   // A unit's cost is fixed per item and per size, so cost is qty × unit cost.
   const soldItems = itemSales(chartPaid).items;
-  const itemMap: Record<string, { name: string; cat: string; qty: number; rev: number; cost: number }> =
-    Object.fromEntries(soldItems.map(s => [s.id, { name: s.name, cat: s.category, qty: s.qty, rev: s.rev, cost: (menuCostMap[s.id] ?? 0) * s.qty }]));
+  const itemMap: Record<string, { name: string; cat: string; qty: number; rev: number; cost: number }> = itemsAfterReturns(
+    Object.fromEntries(soldItems.map(s => [s.id, { name: s.name, cat: s.category, qty: s.qty, rev: s.rev, cost: (menuCostMap[s.id] ?? 0) * s.qty }])),
+    statsReturns, id => menuCostMap[id] ?? 0);
   const topItemsSorted = Object.values(itemMap).sort((a, b) => {
     if (topSort === 'profit') return (b.rev - b.cost) - (a.rev - a.cost);
     if (topSort === 'qty') return b.qty - a.qty;
@@ -3375,6 +3392,7 @@ function AdminPageContent() {
                     { label: 'Mənfəət',     value: `${chartProfit.toFixed(2)} ₼`,   icon: TrendingUp,color: chartProfit >= 0 ? 'text-green-600' : 'text-red-500' },
                     { label: 'Mənfəət %',   value: `${chartMarginPct.toFixed(1)}%`, icon: Percent,   color: chartMarginPct >= 0 ? 'text-green-600' : 'text-red-500' },
                     { label: 'Orta çek',    value: `${chartAvg.toFixed(2)} ₼`,      icon: Receipt,   color: 'text-stone-800' },
+                    ...(isShop ? [{ label: 'Qaytarma', value: `${chartReturned > 0 ? '−' : ''}${chartReturned.toFixed(2)} ₼`, icon: RefreshCw, color: 'text-red-600' }] : []),
                     { label: 'Sifarişlər',  value: String(chartPaid.length),         icon: Coffee,    color: 'text-stone-800' },
                   ].map((kpi, i, arr) => {
                     const Icon = kpi.icon;

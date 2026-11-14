@@ -60,6 +60,9 @@ export function historyReportLines(r: HistoryReport, head: {
   printedBy: string;
   timezone: string;
   shift?: string;      // "Növbə 2" when one shift is picked
+  // A shop's returns in the same window (lib/returns returnTotals): their own
+  // lines, and what is left after them — so the cash count matches.
+  returns?: { cash: number; card: number; total: number };
 }): Line[] {
   const at = (iso: string) => formatDateTime(iso, head.timezone);
   const day = formatDate(head.from, head.timezone);
@@ -89,5 +92,15 @@ export function historyReportLines(r: HistoryReport, head: {
     // The till's own words: there is no "ləğv" button anywhere.
     { text: row(`Ödənişsiz bağlanan (${r.legv.count})`, money(r.legv.sum)) },
   );
+  const back = head.returns;
+  if (back && back.total > 0.005) {
+    lines.push(
+      { text: '-'.repeat(WIDTH) },
+      { text: row('Qaytarma', `-${money(back.total)}`) },
+      { text: row('  Nağd', `-${money(back.cash)}`) },
+      { text: row('  Kart', `-${money(back.card)}`) },
+      { text: row('Qaytarmadan sonra', money(Math.round((r.cemi - back.total) * 100) / 100)), big: true },
+    );
+  }
   return lines;
 }

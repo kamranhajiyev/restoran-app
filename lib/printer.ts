@@ -12,6 +12,7 @@ import { formatDateTime } from './dates';
 import { dishesTotal, orderServiceCharge } from './service-charge';
 import { orderTotal } from '@/components/seller/order-format';
 import { tillDialogs } from './dialog-queue';
+import type { SaleReturn } from './returns';
 
 installAndroidBridge();
 
@@ -392,6 +393,35 @@ export async function printReceipt(order: Order, companyName: string, logoUrl?: 
     return await send(receiptLines(order, companyName, table, shop, barcode), logo);
   } catch (err) {
     console.error('[Printer] Cap alinmadi:', err);
+    return false;
+  }
+}
+
+// Qaytarma (lib/returns): the paper the customer gets back with the money —
+// what came back, the minus total, how it was paid back, and who approved.
+export function returnReceiptLines(r: Pick<SaleReturn, 'total' | 'pay' | 'sellerName' | 'approvedBy' | 'createdAt' | 'lines'>, companyName: string, receipt: string | null): Line[] {
+  const lines: Line[] = [
+    { text: companyName, big: true, center: true },
+    { text: '-'.repeat(WIDTH), center: true },
+    { text: 'QAYTARMA', big: true, center: true },
+    ...(receipt ? [{ text: `Qəbz #${receipt}`, center: true }] : [{ text: 'Qəbzsiz', center: true }]),
+    { text: formatDateTime(r.createdAt), center: true },
+    ...(r.sellerName ? [{ text: `Kassir: ${r.sellerName}`, center: true }] : []),
+    { text: '='.repeat(WIDTH) },
+  ];
+  for (const l of r.lines) lines.push({ text: row(`${l.name} x${l.qty}`.slice(0, WIDTH - 10), money(l.qty * l.price)) });
+  lines.push({ text: '='.repeat(WIDTH) });
+  lines.push({ text: row('CƏMİ:', `-${money(r.total)}`), big: true });
+  lines.push({ text: row(r.pay === 'cash' ? 'Nağd qaytarıldı:' : 'Karta qaytarıldı:', money(r.total)) });
+  if (r.approvedBy) lines.push({ text: `Təsdiq: ${r.approvedBy}`, center: true });
+  return lines;
+}
+
+export async function printReturnReceipt(r: Parameters<typeof returnReceiptLines>[0], companyName: string, receipt: string | null): Promise<boolean> {
+  try {
+    return await send(returnReceiptLines(r, companyName, receipt));
+  } catch (err) {
+    console.error('[Printer] Qaytarma cap alinmadi:', err);
     return false;
   }
 }

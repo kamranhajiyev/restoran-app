@@ -18,11 +18,14 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 
 /** paid — orders paid since the shift opened; courierCardPayments — riders'
  *  settlements by card since then, which land on the bank terminal. */
-export function shiftSales(paid: ShiftSaleRow[], courierCardPayments: { amount?: Money }[]): ShiftSales {
+// cardReturns — a shop's returns paid back to a card since then (lib/returns):
+// they leave the bank terminal, so the Terminal figure is net of them. Cash
+// returns are not here: they are Kassa movements, counted with the drawer.
+export function shiftSales(paid: ShiftSaleRow[], courierCardPayments: { amount?: Money }[], cardReturns: { total?: Money }[] = []): ShiftSales {
   const settledByCard = sum(courierCardPayments, p => p.amount);
   return {
     cash: r2(sum(paid, o => o.cash_amount)),
-    card: r2(sum(paid, o => o.card_amount) + settledByCard),
+    card: r2(sum(paid, o => o.card_amount) + settledByCard - sum(cardReturns, r => r.total)),
     courierCard: r2(settledByCard),
     courierSales: courierSold(paid),
     courier: courierStillOut(paid),

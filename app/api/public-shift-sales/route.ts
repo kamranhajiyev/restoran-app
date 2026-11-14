@@ -39,5 +39,10 @@ export async function GET(req: NextRequest) {
   // by every courier card payment, and the shift closes on it.
   if (!courierCard) return Response.json({ error: 'read failed' }, { status: 500 });
 
-  return Response.json(shiftSales(data, courierCard));
+  // A shop's returns to a card since the shift opened (lib/returns). A database
+  // without the table has none; any other failure is a failure, as above.
+  const back = await db.from('returns').select('total').eq('company_id', companyId).eq('pay', 'card').gte('created_at', openedAt);
+  if (back.error && !/does not exist|schema cache/.test(back.error.message)) return Response.json({ error: 'read failed' }, { status: 500 });
+
+  return Response.json(shiftSales(data, courierCard, back.data ?? []));
 }

@@ -25,6 +25,8 @@ import type { AccountEdit, AccountKind, FinanceAccount, FinanceClosing, FinanceE
 import { cleanKind, kindForInsert, type CompanyKind } from './company-kind';
 import { cleanBarcode } from './barcode';
 import { lowForTill, lowStock, type StockLimit } from './low-stock';
+import { orderLabel } from './order-label';
+import { parseReceiptLabel, rowToReturn, saleForReturn, type ReturnRequest, type SaleForReturn, type SaleReturn } from './returns';
 
 async function authHeaders(): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -1586,6 +1588,58 @@ export async function fetchOrderNumber(orderId: string): Promise<number | null> 
     const { data, error } = await supabase.from('orders').select('order_number').eq('id', orderId).maybeSingle();
     if (error || !data?.order_number) return null;
     return Number(data.order_number);
+  } catch { return null; }
+}
+
+// Qaytarma (lib/returns). Signed-in tills call the database function straight;
+// a link till goes through /api/add-return. Online only — never queued.
+export async function recordReturn(request: ReturnRequest): Promise<string | null> {
+  const { error } = await supabase.rpc('record_return', {
+    p_id: request.id, p_order_id: request.orderId, p_lines: request.lines, p_pay: request.pay,
+    p_seller: request.seller, p_approved_by: request.approvedBy,
+  });
+  if (error) { console.error('[recordReturn]', error.message); return error.message; }
+  return null;
+}
+
+/** Qaytarma with a receipt, signed in: the paid sale with that number, any
+ *  day, and what of it can still come back. Null = not found or the read failed. */
+export async function fetchSaleForReturn(raw: string): Promise<SaleForReturn | null> {
+  const label = parseReceiptLabel(raw);
+  if (!label || !_companyId) return null;
+  try {
+    let q = supabase.from('orders').select('id, order_number, till_number, status, discount_amount, order_items(menu_item_id, variant_id, menu_item_name, menu_item_price, quantity, removed_at)')
+      .eq('company_id', _companyId).eq('order_number', label.number).eq('status', 'ödənilib')
+      .order('created_at', { ascending: false }).limit(1);
+    q = label.till && label.till > 1 ? q.eq('till_number', label.till) : q.or('till_number.is.null,till_number.lte.1');
+    const { data, error } = await q;
+    const o = data?.[0] as Record<string, unknown> | undefined;
+    if (error || !o) return null;
+    const { data: back } = await supabase.from('return_lines')
+      .select('menu_item_id, variant_id, qty, returns!inner(order_id)').eq('returns.order_id', o.id as string);
+    const items = ((o.order_items as Record<string, unknown>[]) ?? []).filter(i => !i.removed_at).map(i => ({
+      menuItemId: String(i.menu_item_id), variantId: (i.variant_id as string | null) || null,
+      name: String(i.menu_item_name), qty: Number(i.quantity), price: Number(i.menu_item_price),
+    }));
+    return saleForReturn(
+      { id: o.id as string, label: orderLabel({ orderNumber: o.order_number as number, tillNumber: (o.till_number as number) ?? undefined }), discountAmount: Number(o.discount_amount ?? 0) },
+      items,
+      (back ?? []).map(b => ({ menuItemId: b.menu_item_id as string | null, variantId: (b.variant_id as string | null) || null, qty: Number(b.qty) })),
+    );
+  } catch { return null; }
+}
+
+/** The returns made between two times. Null when the read failed (the screen
+ *  keeps what it has); [] on a database that has no returns table yet. */
+export async function fetchReturnsOrNull(from: string, to?: string): Promise<SaleReturn[] | null> {
+  try {
+    let q = supabase.from('returns')
+      .select('id, order_id, total, pay, seller_name, approved_by, created_at, return_lines(menu_item_id, variant_id, name, qty, price)')
+      .gte('created_at', from).order('created_at', { ascending: false }).limit(1000);
+    if (to) q = q.lt('created_at', to);
+    const { data, error } = await q;
+    if (error) return /does not exist|schema cache/.test(error.message) ? [] : null;
+    return (data ?? []).map(r => rowToReturn(r as Record<string, unknown>));
   } catch { return null; }
 }
 
@@ -3321,7 +3375,10 @@ export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promis
     // As app/api/public-shift-sales: without the courier card part the Terminal
     // figure is short by all of it, and closing the shift saved it (2026-10-09).
     if (!courierCard) return null;
-    return shiftSales(data, courierCard);
+    // A shop's card returns since the shift opened (lib/returns), as the route.
+    const back = await supabase.from('returns').select('total').eq('pay', 'card').gte('created_at', openedAt);
+    if (back.error && !/does not exist|schema cache/.test(back.error.message)) return null;
+    return shiftSales(data, courierCard, back.data ?? []);
   } catch { return null; }
 }
 

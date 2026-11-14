@@ -63,7 +63,7 @@ describe('a shop\'s admin', () => {
     expect(admin).toMatch(/filter\(r => !\(isShop && r === 'waiter' && sRole !== 'waiter'\)\)/);
     expect(admin).toMatch(/\{isShop \? null : stations\.length === 0 \? \(/);
     expect(admin).toMatch(/<TillRulesPanel staff=\{pinStaff\} shop=\{isShop\} \/>/);
-    expect(rules).toMatch(/TILL_ACTIONS\.filter\(a => !\(shop && SHOP_HIDDEN_ACTIONS\.includes\(a\.id\)\)\)/);
+    expect(rules).toMatch(/TILL_ACTIONS\.filter\(a => shop \? !SHOP_HIDDEN_ACTIONS\.includes\(a\.id\) : !SHOP_ONLY_ACTIONS\.includes\(a\.id\)\)/);
   });
 
   it('has no ingredients in Anbar', () => {

@@ -6,14 +6,15 @@ import {
   Receipt, Coffee, ShoppingBag, UtensilsCrossed,
   ShoppingCart, ChevronLeft, ChevronRight, ChevronDown, Wallet,
   History, Search, Delete, KeyRound, Trash2, Check, Bell, BellOff, Printer, CloudOff,
-  Bike, Tag, List, RefreshCw,
+  Bike, Tag, List, RefreshCw, RotateCcw,
 } from 'lucide-react';
 import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { pinKey } from '@/lib/pin-keys';
 import {
   addOrder, addItemsToOrder, removeOrderItems, splitOrder, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, moveOrderTable, setCompanyContext,
-  fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchCompanyKind, fetchOrderNumber, fetchLowStockForTill, fetchOpenShift, fetchShifts, openShift, closeShift, addShiftMovement, fetchShiftSales,
+  fetchTablesEnabled, fetchDeliveryEnabled, fetchKassaEnabled, fetchCompanyKind, fetchOrderNumber, fetchLowStockForTill,
+  recordReturn, fetchSaleForReturn, fetchReturnsOrNull, fetchOpenShift, fetchShifts, openShift, closeShift, addShiftMovement, fetchShiftSales,
   fetchCompanySettings, verifyStaffPin, verifyStaffCard, getDeviceId, fetchPrintReceipt, setPrintReceiptEnabled, fetchBranding,
   fetchSoundEnabled, fetchFailedPrintOrders, retryPrintJobs,
   fetchStations, fetchStationReady, fetchStationReadyOrNull, type StationReady,
@@ -32,7 +33,7 @@ import { pickableCouriers, settleableCouriers } from '@/lib/couriers';
 import { historyTotals, ordersOfShift, shiftLoadWindow, shiftTotals, shiftsOfDay, shiftWindow, type HistoryShift } from '@/lib/history-shifts';
 import { CashShift, Category, Courier, CourierPayMethod, CourierPendingOrder, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
-import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, printHistoryReport, openCashDrawer } from '@/lib/printer';
+import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, printHistoryReport, openCashDrawer, printReturnReceipt } from '@/lib/printer';
 import { historyReport, historyReportLines } from '@/lib/history-report';
 import { itemSales, itemSalesLines, shownSizes } from '@/lib/item-sales';
 import { installExeFocusFix } from '@/lib/exe-focus';
@@ -82,6 +83,8 @@ import { cleanKind, type CompanyKind } from '@/lib/company-kind';
 import { paysNow, shopDeliveryType, shopSaleType, tabLabel } from '@/lib/shop-mode';
 import { findByBarcode, scanCatcher } from '@/lib/barcode';
 import { leftLabel, lowKey } from '@/lib/low-stock';
+import { cartToReturnLines, parseReceiptLabel, requestTotal, returnErrorText, returnTotals, rowToReturn, type ReturnRequest, type SaleForReturn, type SaleReturn } from '@/lib/returns';
+import { refundNeeds } from '@/lib/till-rules';
 
 const TAB_ICONS: Record<SellerTab, typeof Receipt> = {
   'new-order': ShoppingBag, orders: Receipt, kassa: Wallet, couriers: Bike, history: History,
@@ -230,7 +233,7 @@ function normalizeTables(rows: ApiTableRow[]): RestaurantTable[] {
   return rows.map(({ hall_id, ...t }) => ({ ...t, hallId: hall_id ?? undefined }));
 }
 
-type View = 'orders' | 'new-order' | 'menu' | 'kassa' | 'history' | 'couriers';
+type View = 'orders' | 'new-order' | 'menu' | 'kassa' | 'history' | 'couriers' | 'qaytarma';
 type PayMethod = 'nağd' | 'kart';
 type OrderType = 'masa' | 'takeaway' | 'kuryer';
 // How a courier order closes. 'paid' is the ordinary cash/card sheet — the guest
@@ -448,6 +451,19 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // Az qalan mal (lib/low-stock): product (or product:size) → how many left,
   // only for those below the owner's limit. A failed read keeps what it has.
   const [lowLeft, setLowLeft]               = useState<Record<string, number>>({});
+  // Qaytarma (lib/returns): the product screen in return mode, its own tab.
+  // With a receipt, `returnSale` is the sale it came from: only its products,
+  // at the price paid, no more than was bought.
+  const [returnMode, setReturnMode]         = useState(false);
+  const [returnPay, setReturnPay]           = useState<'cash' | 'card'>('cash');
+  const [returnSale, setReturnSale]         = useState<SaleForReturn | null>(null);
+  const [returnCode, setReturnCode]         = useState('');
+  const [returnBusy, setReturnBusy]         = useState(false);
+  // One id per return being made: pressed again after a lost reply, it is the
+  // same return, saved once (record_return).
+  const returnIdRef = useRef<{ key: string; id: string } | null>(null);
+  // Today's returns, for Tarixçə's boxes and its Hesabat.
+  const [historyReturns, setHistoryReturns] = useState<SaleReturn[]>([]);
   // Çatdırılma, switched on by the owner in the admin panel. Starts off like
   // kassaOn so a venue that does not deliver never flashes a Kuryerlər tab it
   // will lose a moment later; the boot fetch turns it on where it belongs.
@@ -1861,11 +1877,165 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       .filter((g): g is ModifierGroup => !!g && g.options.length > 0);
   }
 
+  // ── Qaytarma (lib/returns) ─────────────────────────────────────────────────
+  // A manager approves every return (lib/till-rules refundNeeds). Asked
+  // through the same PIN/card pad as every other approval.
+  function askManager(label: string): Promise<string | null> {
+    return new Promise(resolve => {
+      setApprovalPin('');
+      setApprovalMsg('');
+      setApproval({ label, resolve });
+    });
+  }
+  async function approveReturn(): Promise<string | null> {
+    const need = refundNeeds(rulesOn ? tillRules : null, activeStaff ? myRole : undefined);
+    if (need === 'deny') { showAlert('İcazəniz yoxdur: Qaytarma'); return null; }
+    if (need === 'manager') return effectiveSeller;
+    // The owner, signed in with no PIN person on: they are the one who approves.
+    if (!activeStaff && getSession()?.role === 'owner') return getSession()?.name || effectiveSeller;
+    if (!pinStaffList.some(st => st.active && st.role === 'manager')) {
+      showAlert('Qaytarma üçün menecer təsdiqi lazımdır.\n\nAdmin → Əməkdaşlar bölməsində menecer əlavə edin.');
+      return null;
+    }
+    return askManager('Qaytarma');
+  }
+
+  // With a receipt: the sale, any day, by its number (or its barcode).
+  async function findReturnSale(raw: string) {
+    if (!parseReceiptLabel(raw)) { showAlert(`Qəbz nömrəsi düzgün deyil: ${raw.trim()}`); return; }
+    const sale = overrideCompanyId
+      ? await jsonOrNull(tillFetch(`/api/public-sale?companyId=${overrideCompanyId}&label=${encodeURIComponent(raw.trim())}`)).then(d => (d?.sale ?? null) as SaleForReturn | null)
+      : await fetchSaleForReturn(raw);
+    setReturnCode('');
+    if (!sale) { showAlert(`Qəbz №${raw.trim()} tapılmadı (və ya hamısı artıq qaytarılıb).`); return; }
+    setReturnSale(sale); setCart([]); returnIdRef.current = null;
+  }
+
+  // A product off the receipt: at the price paid, never more than is left.
+  function addFromSale(line: SaleForReturn['lines'][number]) {
+    const inCart = cart.filter(c => c.menuItem.id === line.menuItemId && (c.variantId ?? null) === line.variantId).reduce((n, c) => n + c.quantity, 0);
+    if (inCart >= line.left) { showAlert(`${line.name}: qəbzdə ${line.left} əd qaytarıla bilər.`); return; }
+    const known = menu.find(m => m.id === line.menuItemId);
+    setCart(prev => {
+      const k = prev.findIndex(c => c.menuItem.id === line.menuItemId && (c.variantId ?? null) === line.variantId);
+      if (k >= 0) return prev.map((c, i) => i === k ? { ...c, quantity: c.quantity + 1 } : c);
+      const item = { ...(known ?? { category: '', available: true }), id: line.menuItemId, name: line.name, price: line.price } as MenuItem;
+      return [...prev, { menuItem: item, quantity: 1, ...(line.variantId ? { variantId: line.variantId } : {}) }];
+    });
+  }
+
+  async function submitReturn() {
+    if (cart.length === 0 || returnBusy) return;
+    const approver = await approveReturn();
+    if (!approver) return;
+    const lines = cartToReturnLines(cart);
+    // The same return pressed again (a lost reply) keeps its id; a changed one gets a new one.
+    const key = JSON.stringify([returnSale?.id ?? null, returnPay, lines]);
+    if (returnIdRef.current?.key !== key) returnIdRef.current = { key, id: crypto.randomUUID() };
+    const request: ReturnRequest = {
+      id: returnIdRef.current.id, orderId: returnSale?.id ?? null, pay: returnPay,
+      seller: effectiveSeller, approvedBy: approver, lines,
+    };
+    setReturnBusy(true);
+    let err: string | null = null;
+    let total = requestTotal(lines);
+    if (overrideCompanyId) {
+      try {
+        const res = await tillFetch('/api/add-return', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ companyId: overrideCompanyId, token: overrideToken, request }),
+        });
+        const d = await res.json().catch(() => null);
+        if (!res.ok || !d?.ok) err = d?.error ?? `HTTP ${res.status}`; else total = Number(d.total);
+      } catch (e) { err = String(e); }
+    } else {
+      err = await recordReturn(request);
+    }
+    setReturnBusy(false);
+    if (err) { showAlert(`Qaytarılmadı.\n\n${returnErrorText(err)}`); return; }
+    returnIdRef.current = null;
+    const paper = { total, pay: request.pay, sellerName: request.seller, approvedBy: approver, createdAt: new Date().toISOString(), lines };
+    if (printerConnected) {
+      if (shouldPrintReceipt) void printReturnReceipt(paper, overrideCompanyName || getSession()?.companyName || '', returnSale?.label ?? null);
+      if (request.pay === 'cash') openCashDrawer();
+    }
+    setCart([]); setReturnSale(null); setReturnCode(''); setMobileCartOpen(false);
+    showAlert(`Qaytarıldı: −${total.toFixed(2)} ₼ (${request.pay === 'cash' ? 'kassadan nağd' : 'karta'}).`);
+    void loadLow();
+  }
+
+  // The return cart's own part: the receipt (optional), each line's price when
+  // there is no receipt, and how the money goes back.
+  function returnPanel() {
+    return (
+      <div className="space-y-2.5">
+        {!returnSale ? (
+          <div className="flex gap-2">
+            <input value={returnCode} onChange={e => setReturnCode(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && returnCode.trim()) { e.preventDefault(); void findReturnSale(returnCode); } }}
+              placeholder="Qəbz № skan edin (varsa)"
+              className="flex-1 min-w-0 border border-stone-200 rounded-lg px-3 py-1.5 text-sm" />
+            <button onClick={() => returnCode.trim() && void findReturnSale(returnCode)} className="px-3 rounded-lg border border-stone-200 text-sm font-semibold text-stone-700 hover:bg-stone-50">Tap</button>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-red-200 bg-red-50/50 p-2.5 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-stone-800">Qəbz №{returnSale.label}</span>
+              <button onClick={() => { setReturnSale(null); setReturnCode(''); setCart([]); }} title="Qəbzi sil — qəbzsiz qaytar"
+                className="w-6 h-6 flex items-center justify-center rounded-md text-stone-500 hover:bg-white hover:text-red-600"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {returnSale.lines.map((l, k) => (
+                <button key={k} onClick={() => addFromSale(l)}
+                  className="px-2 py-1 rounded-lg bg-white border border-stone-200 text-xs text-stone-700 hover:border-red-300">
+                  {l.name} ×{l.left} · {l.price.toFixed(2)}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-stone-500">Ödənilən qiymətlə, alınandan çox olmaz.</p>
+          </div>
+        )}
+        {!returnSale && cart.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-xs text-stone-500">Qiymət — müştəri başqa qiymətə alıbsa dəyişin:</p>
+            {cart.map((oi, idx) => (
+              <div key={idx} className="flex items-center gap-2 text-sm">
+                <span className="flex-1 truncate text-stone-700">{oi.menuItem.name} × {oi.quantity}</span>
+                <input type="number" step="0.01" min="0" value={oi.menuItem.price}
+                  onChange={e => { const v = Math.max(0, parseFloat(e.target.value) || 0); setCart(c => c.map((x, k) => k === idx ? { ...x, menuItem: { ...x.menuItem, price: v } } : x)); }}
+                  className="w-20 border border-stone-200 rounded-lg px-2 py-1 text-sm text-right tabular-nums" />
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex bg-stone-100 rounded-xl p-1">
+          {(['cash', 'card'] as const).map(m => (
+            <button key={m} onClick={() => setReturnPay(m)}
+              className={`flex-1 h-8 rounded-lg text-sm font-semibold ${returnPay === m ? 'bg-white shadow-sm text-stone-900' : 'text-stone-500'}`}>
+              {m === 'cash' ? 'Nağd (kassadan)' : 'Karta'}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   // A barcode, scanned anywhere on the products or typed into the search box
   // and Enter (lib/barcode). One more of the same product is the same line, +1.
   // A product with option groups still asks for them; a size is already chosen.
   function scanned(raw: string) {
     const hit = findByBarcode(menu, raw);
+    if (returnMode) {
+      // No sale picked yet and not a product: it is the receipt's barcode.
+      if (!returnSale && !hit && parseReceiptLabel(raw)) { setMenuSearch(''); void findReturnSale(raw); return; }
+      if (returnSale) {
+        setMenuSearch('');
+        const line = hit && returnSale.lines.find(l => l.menuItemId === hit.item.id && l.variantId === (hit.variant?.id ?? null));
+        if (!line) { showAlert(hit ? `${hit.item.name} həmin qəbzdə yoxdur.` : `Barkod tapılmadı: ${raw.trim()}`); return; }
+        addFromSale(line);
+        return;
+      }
+    }
     if (!hit) {
       // Typed text that names products is a search: Enter on exactly one adds
       // it, on several does nothing. Only a code that matches nothing at all
@@ -1920,6 +2090,17 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   }, [view, modifierItem, payingOrder]);
 
   function handleMenuItemTap(item: MenuItem) {
+    // Returning with a receipt: only what that sale had, at its price.
+    if (returnMode && returnSale) {
+      const line = returnSale.lines.find(l => l.menuItemId === item.id && (!item.variants?.length || l.variantId));
+      if (!line) { showAlert(`${item.name} həmin qəbzdə yoxdur.`); return; }
+      if (item.variants?.length && returnSale.lines.filter(l => l.menuItemId === item.id).length > 1) {
+        showAlert('Ölçünü qəbz bölməsindən seçin.');
+        return;
+      }
+      addFromSale(line);
+      return;
+    }
     const groups = groupsForItem(item);
     const hasVariants = (item.variants?.length ?? 0) > 0;
     if (hasVariants || groups.length > 0) {
@@ -2097,6 +2278,16 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   }, [overrideCompanyId]);
 
   async function handleNav(id: View) {
+    if (id === 'qaytarma') {
+      if (!(await confirmDiscardRemovals())) return;
+      setAppendOrderId(null);
+      setReturnMode(true); setReturnSale(null); setReturnCode(''); returnIdRef.current = null;
+      setCart([]); setMobileCartOpen(false); setMenuSearch('');
+      setSaleTypeId(shopType.id); setOrderType('takeaway'); setSelectedCourier(null);
+      setView('menu');
+      return;
+    }
+    if (id === 'new-order') setReturnMode(false);
     if (id === 'kassa' && !kassaShown) return;
     if (id === 'couriers' && !couriersShown) return;
     // Asked on every way in, before anything on screen is thrown away.
@@ -2674,6 +2865,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         printedBy: effectiveSeller,
         timezone: bizSettings.timezone,
         shift: shiftNo >= 0 ? `Növbə ${shiftNo + 1}` : undefined,
+        returns: isShop ? historyBack : undefined,
       });
       if (!(await printHistoryReport(lines))) {
         setPrinterConnected(false);
@@ -3123,6 +3315,12 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     Promise.all([
       load.then(list => { if (list) { setHistoryOrders(picked ? ordersOfShift(list, picked, now) : list); setHistoryWindow({ from, to }); } }),
       courierCollections(from, to, overrideCompanyId).then(setHistoryCollected),
+      // A shop's returns in the same window (lib/returns). A failed read keeps what it has.
+      (overrideCompanyId
+        ? jsonOrNull(tillFetch(`/api/public-returns?companyId=${overrideCompanyId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`))
+            .then(d => (Array.isArray(d?.returns) ? (d.returns as Record<string, unknown>[]).map(rowToReturn) : null))
+        : fetchReturnsOrNull(from, to)
+      ).then(rs => { if (rs) setHistoryReturns(rs); }),
     ]).finally(() => setHistoryLoading(false));
     // siteGet, not tillFetch: the till keeps only the open shift, and closed
     // ones are what this list is for. Offline the picker simply stays hidden.
@@ -3309,7 +3507,11 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const activeChange = appendOrder ? changeFor(appendOrder.orderType, saleTypes) : saleType?.change ?? NO_CHANGE;
   const offeredTypes = shownTypes(saleTypes, { tablesOn, deliveryOn });
   const navTabs = sellerTabs({ kassaShown, couriersShown })
-    .map(id => ({ id: id as View, label: tabLabel(id, kind), icon: TAB_ICONS[id] }));
+    .map(id => ({ id: id as View, label: tabLabel(id, kind), icon: TAB_ICONS[id] }))
+    // A shop's Qaytarma, last in the menu (SHOP-MODE.md).
+    .concat(isShop ? [{ id: 'qaytarma' as View, label: 'Qaytarma', icon: RotateCcw }] : []);
+  // Return mode lasts only while on the products screen.
+  useEffect(() => { if (view !== 'menu' && returnMode) { setReturnMode(false); setReturnSale(null); setReturnCode(''); returnIdRef.current = null; } }, [view, returnMode]);
 
   // A shop has no type row and no table map: "Yeni satış" is the products,
   // with the sale already a Mağazada one. Runs whenever the till lands on
@@ -3427,6 +3629,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const historyPaidIds = historyCollected.paidOrderIds ? new Set(historyCollected.paidOrderIds) : undefined;
   const { nagd: historyNagd, kart: historyKart, kuryer: historyKuryer, cemi: historyRevenue } =
     historyTotals(historyOrders, orderTotal, historyPaidIds);
+  // A shop's returns in view: their own box, and Cəmi after them (lib/returns).
+  const historyBack = returnTotals(historyReturns);
   // Məhsullar: every order in view like the boxes, not only the ones the search shows.
   const historyItems = itemSales(historyOrders);
 
@@ -3450,7 +3654,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         <nav className={`flex flex-col gap-1 p-3 flex-1 ${collapsed ? 'items-center' : ''}`}>
           {navTabs.map(n => {
             const Icon = n.icon;
-            const isActive = view === n.id || (n.id === 'new-order' && view === 'menu');
+            const isActive = n.id === 'qaytarma' ? returnMode && view === 'menu' : view === n.id || (n.id === 'new-order' && view === 'menu' && !returnMode);
             const badge = n.id === 'orders' && active.length > 0 ? active.length : null;
 
             if (collapsed) {
@@ -4050,9 +4254,15 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                         <p className="text-lg font-bold text-amber-700">{historyKuryer.toFixed(2)} ₼</p>
                       </div>
                     )}
+                    {isShop && (
+                      <div className="flex-1 bg-white rounded-xl border border-red-100 px-4 py-3">
+                        <p className="text-xs text-stone-500 mb-0.5">Qaytarma</p>
+                        <p className="text-lg font-bold text-red-600">{historyBack.total > 0 ? '−' : ''}{historyBack.total.toFixed(2)} ₼</p>
+                      </div>
+                    )}
                     <div className="flex-1 bg-primary-50 rounded-xl border border-primary-100 px-4 py-3">
                       <p className="text-xs text-primary-700 mb-0.5">Cəmi</p>
-                      <p className="text-lg font-bold text-primary-800">{historyRevenue.toFixed(2)} ₼</p>
+                      <p className="text-lg font-bold text-primary-800">{round2(historyRevenue - (isShop ? historyBack.total : 0)).toFixed(2)} ₼</p>
                     </div>
                   </div>
                 </div>
@@ -4719,7 +4929,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                     )}
                   </div>
                   {/* A shop that delivers: Mağazada or Çatdırılma, without leaving the products. */}
-                  {isShop && !appendOrderId && shopDelivery && (
+                  {isShop && !appendOrderId && !returnMode && shopDelivery && (
                     <div className="flex items-center gap-2 shrink-0">
                       <div className="flex bg-stone-100 rounded-xl p-1">
                         <button
@@ -4854,7 +5064,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   ) : (
                     <div className="flex items-center justify-between">
                       <div>
-                        <h2 className="font-bold text-stone-800">{appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className="text-primary-700">({cartCount})</span>}</h2>
+                        <h2 className={`font-bold ${returnMode ? 'text-red-600' : 'text-stone-800'}`}>{returnMode ? 'Qaytarma' : appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className={returnMode ? 'text-red-600' : 'text-primary-700'}>({cartCount})</span>}</h2>
                         <p className="text-xs text-stone-500">{cartHeading()}</p>
                       </div>
                       {cart.length > 0 && (
@@ -4884,14 +5094,15 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                     className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary-400"
                   />}
                   {!shopSale && <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />}
+                  {returnMode && returnPanel()}
                   <CartTotal dishes={cartTotal} percent={cartPercent} charge={cartCharge} />
                   <button
-                    onClick={submitOrder}
-                    disabled={submit.disabled}
-                    className="w-full bg-primary-800 hover:bg-primary-900 disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2"
+                    onClick={returnMode ? () => void submitReturn() : submitOrder}
+                    disabled={returnMode ? cart.length === 0 || returnBusy : submit.disabled}
+                    className={`w-full ${returnMode ? 'bg-red-600 hover:bg-red-700' : 'bg-primary-800 hover:bg-primary-900'} disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2`}
                   >
-                    {(submitting || removing) && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                    {shopSale ? `Ödə · ${cartToPayNow.toFixed(2)} ₼` : submit.label}
+                    {(submitting || removing || returnBusy) && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                    {returnMode ? `Qaytar · −${cartToPayNow.toFixed(2)} ₼` : shopSale ? `Ödə · ${cartToPayNow.toFixed(2)} ₼` : submit.label}
                   </button>
                 </div>
               </div>
@@ -4929,7 +5140,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-stone-200 flex safe-area-inset-bottom">
         {navTabs.map(n => {
           const Icon = n.icon;
-          const isActive = view === n.id || (n.id === 'new-order' && view === 'menu');
+          const isActive = n.id === 'qaytarma' ? returnMode && view === 'menu' : view === n.id || (n.id === 'new-order' && view === 'menu' && !returnMode);
           const badge = n.id === 'orders' && active.length > 0 ? active.length : null;
           return (
             <button
@@ -4968,7 +5179,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="font-bold text-stone-800">
-                      {appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className="text-primary-700">({cartCount})</span>}
+                      {returnMode ? 'Qaytarma' : appendOrder ? 'Əlavə' : 'Sifariş'} {cartCount > 0 && <span className={returnMode ? 'text-red-600' : 'text-primary-700'}>({cartCount})</span>}
                     </h2>
                     <p className="text-xs text-stone-500">{cartHeading()}</p>
                   </div>
@@ -5002,14 +5213,15 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary-400"
               />}
               {!shopSale && <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />}
+                  {returnMode && returnPanel()}
               <CartTotal dishes={cartTotal} percent={cartPercent} charge={cartCharge} big />
               <button
-                onClick={submitOrder}
-                disabled={submit.disabled}
-                className="w-full bg-primary-800 hover:bg-primary-900 disabled:bg-stone-300 text-white font-semibold py-4 rounded-2xl transition-colors text-base active:scale-95 flex items-center justify-center gap-2"
+                onClick={returnMode ? () => void submitReturn() : submitOrder}
+                disabled={returnMode ? cart.length === 0 || returnBusy : submit.disabled}
+                className={`w-full ${returnMode ? 'bg-red-600 hover:bg-red-700' : 'bg-primary-800 hover:bg-primary-900'} disabled:bg-stone-300 text-white font-semibold py-4 rounded-2xl transition-colors text-base active:scale-95 flex items-center justify-center gap-2`}
               >
-                {(submitting || removing) && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                {shopSale ? `Ödə · ${cartToPayNow.toFixed(2)} ₼` : submit.label}
+                {(submitting || removing || returnBusy) && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                {returnMode ? `Qaytar · −${cartToPayNow.toFixed(2)} ₼` : shopSale ? `Ödə · ${cartToPayNow.toFixed(2)} ₼` : submit.label}
               </button>
             </div>
           </div>

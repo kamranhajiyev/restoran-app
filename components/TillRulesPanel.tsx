@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { KeyRound, Lock, ShieldCheck } from 'lucide-react';
 import { fetchTillRules, saveTillRules } from '@/lib/store';
-import { SHOP_HIDDEN_ACTIONS } from '@/lib/shop-mode';
+import { SHOP_HIDDEN_ACTIONS, SHOP_ONLY_ACTIONS } from '@/lib/shop-mode';
 import { APPROVE_WITH, ROLE_NAMES, TILL_ACTIONS, TILL_RULES_NEW, approveWith, fixedRule, ruleFor, type ApproveWith, type Rule, type RuledRole, type TillAction, type TillRules } from '@/lib/till-rules';
 import type { Staff } from '@/types';
 
@@ -115,8 +115,9 @@ export default function TillRulesPanel({ staff, shop = false }: { staff: Staff[]
           </p>
         ) : (
           <div className="divide-y divide-stone-100">
-            {TILL_ACTIONS.filter(a => !(shop && SHOP_HIDDEN_ACTIONS.includes(a.id))).map(a => {
-              const current = ruleFor(rules, role, a.id);
+            {TILL_ACTIONS.filter(a => shop ? !SHOP_HIDDEN_ACTIONS.includes(a.id) : !SHOP_ONLY_ACTIONS.includes(a.id)).map(a => {
+              // Qaytarma unset still asks a manager (refundNeeds): show it so.
+              const current = a.id === 'refund' && ruleFor(rules, role, a.id) === 'free' ? 'pin' : ruleFor(rules, role, a.id);
               const fixed = fixedRule(role, a.id);
               return (
                 <div key={a.id} className="flex items-center justify-between gap-3 py-3 flex-wrap">
@@ -125,7 +126,8 @@ export default function TillRulesPanel({ staff, shop = false }: { staff: Staff[]
                     <p className="text-xs text-stone-500">{fixed ? `${ROLE_NAMES[role]} üçün həmişə açıqdır` : a.hint}</p>
                   </div>
                   <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5 shrink-0">
-                    {RULES.map(r => {
+                    {/* Qaytarma is never free: a manager approves every return. */}
+                    {RULES.filter(r => !(a.id === 'refund' && r.id === 'free')).map(r => {
                       const Icon = r.icon;
                       return (
                         <button key={r.id} disabled={saving || !!fixed} onClick={() => current !== r.id && set(a.id, r.id)}
