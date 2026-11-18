@@ -190,3 +190,23 @@ describe('Kassa', () => {
     expect(seller).toMatch(/else if \(open && !shift\) setShift\(open\);/);
   });
 });
+
+// 2026-11-18: changing a table and splitting a bill were open to everyone.
+// Now both are in İcazələr, free until the owner changes them.
+describe('Masanı dəyişmək and Hesabı bölmək', () => {
+  it('are free for a new restaurant and follow the owner when set', () => {
+    for (const role of ['seller', 'waiter'] as const) {
+      expect(ruleFor(TILL_RULES_NEW, role, 'move_table')).toBe('free');
+      expect(ruleFor(TILL_RULES_NEW, role, 'split_bill')).toBe('free');
+    }
+    expect(ruleFor({ waiter: { move_table: 'pin' } }, 'waiter', 'move_table')).toBe('pin');
+    expect(ruleFor({ seller: { split_bill: 'deny' } }, 'seller', 'split_bill')).toBe('deny');
+    expect(cleanRules({ waiter: { move_table: 'pin', split_bill: 'deny' } })).toEqual({ waiter: { move_table: 'pin', split_bill: 'deny' } });
+  });
+
+  it('are asked before the move or split screen opens', () => {
+    expect(seller).toMatch(/async function openMove\(order: Order\) \{\s+if \(!\(await guard\(\['move_table'\]\)\)\.ok\) return;/);
+    expect(seller).toMatch(/async function openSplit\(order: Order\) \{\s+if \(!\(await guard\(\['split_bill'\]\)\)\.ok\) return;/);
+    expect(seller).not.toMatch(/onSplit=\{\(\) => setSplittingOrder/);
+  });
+});

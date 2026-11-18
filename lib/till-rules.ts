@@ -12,7 +12,7 @@
 import bcrypt from 'bcryptjs';
 import type { Order, OrderItem, Staff, StaffRole } from '../types';
 
-export type TillAction = 'remove_item' | 'remove_after_bill' | 'add_after_bill' | 'cancel' | 'discount' | 'view_history' | 'kassa' | 'couriers' | 'refund';
+export type TillAction = 'remove_item' | 'remove_after_bill' | 'add_after_bill' | 'cancel' | 'discount' | 'view_history' | 'kassa' | 'couriers' | 'refund' | 'move_table' | 'split_bill';
 export type Rule = 'free' | 'pin' | 'deny';
 /** The roles the owner sets rules for. A manager needs none. */
 export type RuledRole = Exclude<StaffRole, 'manager'>;
@@ -29,6 +29,9 @@ export const TILL_ACTIONS: { id: TillAction; label: string; hint: string }[] = [
   { id: 'view_history',      label: 'Tarixçəyə baxmaq',           hint: 'Keçmiş sifarişləri və günün satışını görmək' },
   { id: 'kassa',             label: 'Kassa',                      hint: 'Kassa bölməsini görmək, növbəni açmaq və bağlamaq' },
   { id: 'couriers',          label: 'Kuryerlər',                  hint: 'Kuryerlər bölməsini görmək və onlardan pul qəbul etmək' },
+  // Free unless the owner says otherwise (2026-11-18): neither changes the money.
+  { id: 'move_table',        label: 'Masanı dəyişmək',            hint: 'Sifarişi başqa masaya köçürmək' },
+  { id: 'split_bill',        label: 'Hesabı bölmək',              hint: 'Masanın hesabını qonaqlar arasında bölmək' },
   // A shop's (SHOP-MODE.md): never free — every return needs a manager.
   { id: 'refund',            label: 'Qaytarma',                   hint: 'Müştəriyə malın pulunu qaytarmaq — hər dəfə menecer təsdiqləyir' },
 ];

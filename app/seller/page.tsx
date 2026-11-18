@@ -2346,6 +2346,11 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // "Hesabı böl": guests 2, 3, … become new orders on the same table. One write,
   // in the database or on this machine's own copy (lib/split-bill), and nothing
   // goes to the kitchen again. A link till goes through /api/split-order.
+  async function openSplit(order: Order) {
+    if (!(await guard(['split_bill'])).ok) return;
+    setSplittingOrder(order);
+  }
+
   async function confirmSplit(order: Order, parts: SplitPart[]) {
     if (splitBusy) return;
     const request = splitRequest(parts);
@@ -3181,7 +3186,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     }
   }
 
-  function openMove(order: Order) {
+  async function openMove(order: Order) {
+    if (!(await guard(['move_table'])).ok) return;
     setMovingOrder(order);
     setMoveTarget(null);
   }
@@ -4186,13 +4192,13 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 {prevOrders.length > 0 && (
                   <div>
                     <div className="px-4 xl:px-6 py-2 bg-stone-50 md:border-b md:border-stone-200 text-xs font-semibold text-stone-600 uppercase tracking-wide">Əvvəlki günlər · {prevOrders.length}</div>
-                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onSplit={() => setSplittingOrder(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    {prevOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onSplit={() => openSplit(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
                 {todayOrders.length > 0 && (
                   <div>
                     <div className="px-4 xl:px-6 py-2 bg-stone-50 md:border-b md:border-stone-200 text-xs font-semibold text-stone-600 uppercase tracking-wide">Bu gün · {todayOrders.length}</div>
-                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onSplit={() => setSplittingOrder(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
+                    {todayOrders.map(o => <OrderRow key={o.id} order={o} tableLabel={orderPlace(o)} tz={bizSettings.timezone} printFailed={printFailed.has(o.id)} unsent={unsent.has(o.id)} progress={readyProgress(o)} isItemReady={item => isItemReady(o, item)} onReprint={() => handleReprint(o.id)} onPay={() => openPayment(o)} onCancel={() => openCancel(o)} courierName={o.courierId ? courierNames[o.courierId] : undefined} canPickCourier={deliveryOn && activeCouriers.length > 0 && !!(o.courierId || o.online)} onAppend={() => startAppend(o)} onMove={() => openMove(o)} onSplit={() => openSplit(o)} onReassign={() => openReassign(o)} onPrintBill={() => handlePrintBill(o)} billBusy={printBillBusy === o.id} onStatusChange={handleStatusChange} />)}
                   </div>
                 )}
               </div>

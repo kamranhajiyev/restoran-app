@@ -61,7 +61,7 @@ describe('a shop\'s admin', () => {
   });
 
   it('has no waiters, kitchen staff or after-the-bill rules', () => {
-    expect(SHOP_HIDDEN_ACTIONS).toEqual(['remove_after_bill', 'add_after_bill']);
+    expect(SHOP_HIDDEN_ACTIONS).toEqual(['remove_after_bill', 'add_after_bill', 'move_table', 'split_bill']);
     expect(admin).toMatch(/filter\(r => !\(isShop && r === 'waiter' && sRole !== 'waiter'\)\)/);
     expect(admin).toMatch(/\{isShop \? null : stations\.length === 0 \? \(/);
     expect(admin).toMatch(/<TillRulesPanel staff=\{pinStaff\} shop=\{isShop\} \/>/);

@@ -64,6 +64,6 @@ export function paidHow(o: { status: string; cashAmount?: number; cardAmount?: n
 }
 
 /** Till permissions a shop never meets: it prints no bill before payment. */
-export const SHOP_HIDDEN_ACTIONS: readonly string[] = ['remove_after_bill', 'add_after_bill'];
+export const SHOP_HIDDEN_ACTIONS: readonly string[] = ['remove_after_bill', 'add_after_bill', 'move_table', 'split_bill'];
 /** Till permissions only a shop has (Qaytarma). */
 export const SHOP_ONLY_ACTIONS: readonly string[] = ['refund'];
