@@ -89,7 +89,7 @@ import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt } from '@/lib/printer';
 import { isDesktop } from '@/lib/desktopPrint';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
-import { copySpot, keepLocalTables, nextTableName, resizeTable, tableBox, tableRadius, tablesInHall, toggleShape } from '@/lib/floor-plan';
+import { copySpot, copyTableName, keepLocalTables, nextTableName, resizeTable, tableBox, tableRadius, tablesInHall, toggleShape } from '@/lib/floor-plan';
 import { orderPlace, orderPlaceKind, PlaceKind, tableTitle } from '@/lib/order-place';
 import { placeWithType, typeExtra } from '@/lib/order-types';
 import { placeSales, tableSales } from '@/lib/place-sales';
@@ -2346,11 +2346,11 @@ function AdminPageContent() {
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   }
-  // Same shape, size and seats, next number, just right of the original.
+  // Same shape, size and seats, same word with the next number, just right of the original.
   async function duplicateTable(t: typeof tables[0]) {
     if (tSaving) return;
     setTSaving(true);
-    const name = nextTableName(hallTables.map(x => x.name));
+    const name = copyTableName(t.name, hallTables.map(x => x.name));
     const err = await createTable(name, t.capacity, t.shape ?? 'rect', t.w, t.h, t.hallId ?? activeHallId);
     if (err) { setDialog({ title: 'Xəta', message: err }); setTSaving(false); return; }
     await placeNewTable(name, copySpot(tableBox(t, hallTables.findIndex(o => o.id === t.id))));

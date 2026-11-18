@@ -53,6 +53,28 @@ export function nextTableName(names: string[]): string {
 }
 
 /**
+ * The name of a copied table. A numbered table ("5") gets the next number, as
+ * before. A named one keeps its word and gets the next number of that word:
+ * "VIP 3" → "VIP 4", "VIP" → "VIP 2". The copy used to drop the word, so
+ * copying "VIP 3" made a plain "13". Never the same name twice in a hall.
+ */
+export function copyTableName(original: string, names: string[]): string {
+  const name = original.trim();
+  if (Number.isFinite(parseInt(name, 10))) return nextTableName(names);
+  const m = name.match(/^(.*?)\s*(\d+)$/);
+  const word = (m ? m[1] : name).trim() || name;
+  const key = word.toLowerCase();
+  let top = 1;
+  for (const n of names) {
+    const t = n.trim();
+    if (t.toLowerCase() === key) continue; // bare "VIP" counts as 1
+    const mm = t.match(/^(.*?)\s*(\d+)$/);
+    if (mm && mm[1].trim().toLowerCase() === key) top = Math.max(top, parseInt(mm[2], 10));
+  }
+  return `${word} ${top + 1}`;
+}
+
+/**
  * The tables of one hall. A table with no hall predates halls (or its
  * company's first hall is only being made now): it sits in the first hall
  * rather than nowhere.

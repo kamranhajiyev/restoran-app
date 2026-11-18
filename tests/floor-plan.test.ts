@@ -4,7 +4,7 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { copySpot, fitPlan, keepLocalTables, MIN_TABLE, nextTableName, PLAN_PAD, resizeTable, tableBox, tableRadius, tablesInHall, toggleShape } from '@/lib/floor-plan';
+import { copySpot, copyTableName, fitPlan, keepLocalTables, MIN_TABLE, nextTableName, PLAN_PAD, resizeTable, tableBox, tableRadius, tablesInHall, toggleShape } from '@/lib/floor-plan';
 
 // A hall laid out on a wide admin screen: the far table sits at x 1100.
 const wideHall = [
@@ -59,6 +59,27 @@ describe('floor plan fit', () => {
   it('names a one-click table after the highest number in the names given', () => {
     expect(nextTableName([])).toBe('1');
     expect(nextTableName(['3', '16 (Zal 1)', 'Bar', 'Müdür'])).toBe('17');
+  });
+
+  // Copying "VIP 3" made a plain "13": the word was dropped.
+  it('a copied table keeps its word and takes the next number of that word', () => {
+    const hall = ['1', '12', 'VIP', 'VIP 3', 'Teras 2', 'Bar'];
+    expect(copyTableName('VIP 3', hall)).toBe('VIP 4');
+    expect(copyTableName('VIP', hall)).toBe('VIP 4');
+    expect(copyTableName('VIP', ['VIP'])).toBe('VIP 2');
+    expect(copyTableName('vip', ['VIP', 'VIP 2'])).toBe('vip 3');
+    expect(copyTableName('Teras 2', hall)).toBe('Teras 3');
+    expect(copyTableName('Bar', hall)).toBe('Bar 2');
+    // A numbered table still gets the hall's next number.
+    expect(copyTableName('12', hall)).toBe('13');
+    expect(copyTableName('16 (Zal 1)', ['16 (Zal 1)'])).toBe('17');
+    // Never a name already in the hall.
+    for (const n of hall) expect(hall).not.toContain(copyTableName(n, hall));
+  });
+
+  it('the admin copy button uses the copy name', () => {
+    const src = readFileSync('app/admin/page.tsx', 'utf8');
+    expect(src).toContain('copyTableName(t.name, hallTables.map(x => x.name))');
   });
 
   it('starts every hall from 1, counting only that hall (2026-10-25, Natiq)', () => {
