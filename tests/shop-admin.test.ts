@@ -2,7 +2,7 @@
 // Məhsullar and Onlayn in place of Sifarişlər, Menyu and Masalar; how a sale
 // was paid in place of its status; no stations, modifiers, dishes, waiters,
 // kitchen staff, ingredients, order types or service charge; Brendinq in
-// Tənzimləmələr. A restaurant's admin is unchanged.
+// Tənzimləmələr (a restaurant's too, since 2026-11-18).
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -52,10 +52,12 @@ describe('a shop\'s admin', () => {
     expect(admin.match(/\{\(tablesOn \|\| isShop\) && \(/g)).toHaveLength(2);
   });
 
-  it('keeps Brendinq and Girişlər in Tənzimləmələr', () => {
-    expect(admin).toMatch(/isShop \? \['brendinq', 'girişlər'\] as const : \['növlər', 'xidmət', 'girişlər'\] as const/);
+  it('keeps Brendinq in Tənzimləmələr for a shop and a restaurant, never under Masalar', () => {
+    expect(admin).toMatch(/isShop \? \['brendinq', 'girişlər'\] as const : \['növlər', 'xidmət', 'brendinq', 'girişlər'\] as const/);
     expect(admin).toMatch(/\{tab === 'settings' && settingsSub === 'brendinq' && \(\s*<div className="max-w-3xl space-y-4">\{brandingBlock\}<\/div>/);
-    expect(admin).toMatch(/\{!isShop && brandingBlock\}/);
+    // Shown in exactly one place: the Tənzimləmələr tab.
+    expect(admin.match(/\{brandingBlock\}/g)).toHaveLength(1);
+    expect(admin).not.toMatch(/settingsSubAsked === 'brendinq' \? 'növlər'/);
   });
 
   it('has no waiters, kitchen staff or after-the-bill rules', () => {

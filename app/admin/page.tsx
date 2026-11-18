@@ -607,10 +607,10 @@ function AdminPageContent() {
   const [kind, setKind] = useState<CompanyKind>('restaurant');
   const isShop = kind === 'shop';
   // A shop's Tənzimləmələr is Brendinq and Girişlər only (no order types, no
-  // service charge); a restaurant's has no Brendinq tab (it is under Masalar).
+  // service charge); a restaurant's has all four.
   const settingsSub = isShop
     ? (settingsSubAsked === 'girişlər' ? 'girişlər' : 'brendinq')
-    : (settingsSubAsked === 'brendinq' ? 'növlər' : settingsSubAsked);
+    : settingsSubAsked;
   // False on a database without the barcode column: the form neither shows
   // nor saves barcodes (lib/barcode).
   const [barcodesLoaded, setBarcodesLoaded] = useState(false);
@@ -3089,8 +3089,8 @@ function AdminPageContent() {
     );
   }
 
-  // Logo and colour (Brendinq): under Masalar for a restaurant, its own
-  // Tənzimləmələr tab for a shop (SHOP-MODE.md).
+  // Logo and colour (Brendinq): its own Tənzimləmələr tab, for a restaurant
+  // and a shop alike.
   const brandingBlock = (
     <>
               {/* ── Brendinq ── */}
@@ -3857,8 +3857,8 @@ function AdminPageContent() {
                 </div>
                 {groupByDay(visibleOrders, o => businessDay(o.createdAt, bizSettings)).map(g => (
                 <div key={g.day}>
-                <div className="px-4 md:px-6 py-2 bg-stone-50 border-b border-stone-200 text-xs font-semibold text-stone-600 uppercase tracking-wide">
-                  {dayHeading(g.day, businessToday(bizSettings))} · {g.items.length}
+                <div className="px-4 md:px-6 py-2.5 bg-stone-800 text-sm font-bold text-white uppercase tracking-wide">
+                  {dayHeading(g.day, businessToday(bizSettings))} <span className="font-medium text-stone-300">· {g.items.length}</span>
                 </div>
                 {g.items.map(order => {
                   const isExpanded = expandedOrderId === order.id;
@@ -4902,7 +4902,7 @@ function AdminPageContent() {
           {/* ── TƏNZİMLƏMƏLƏR ──────────────────────────────────────────── */}
           {tab === 'settings' && (
             <div className="flex gap-0.5 bg-stone-100 rounded-lg p-0.5 w-fit mb-4">
-              {(isShop ? ['brendinq', 'girişlər'] as const : ['növlər', 'xidmət', 'girişlər'] as const).map(s => (
+              {(isShop ? ['brendinq', 'girişlər'] as const : ['növlər', 'xidmət', 'brendinq', 'girişlər'] as const).map(s => (
                 <button key={s} onClick={() => router.replace(s === 'girişlər' ? '/admin?tab=settings&sub=girisler' : s === 'xidmət' ? '/admin?tab=settings&sub=xidmet' : s === 'brendinq' ? '/admin?tab=settings&sub=brendinq' : '/admin?tab=settings')}
                   className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${settingsSub === s ? 'bg-white shadow-sm text-stone-800' : 'text-stone-600 hover:text-stone-800'}`}>
                   {s === 'növlər' ? 'Sifariş növləri' : s === 'xidmət' ? 'Xidmət haqqı' : s === 'brendinq' ? 'Brendinq' : 'Girişlər'}
@@ -5050,11 +5050,9 @@ function AdminPageContent() {
           {/* ── TABLES ─────────────────────────────────────────────────── */}
           {tab === 'tables' && (
             <div className="max-w-3xl space-y-4">
-              {/* Brendinq: here for a restaurant; a shop has it in Tənzimləmələr. */}
-              {!isShop && brandingBlock}
-
+              {/* Brendinq is in Tənzimləmələr for everyone. */}
               {/* ── QR & Onlayn ── */}
-              <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider px-1 pt-6">QR &amp; Onlayn</p>
+              <p className="text-xs font-semibold text-stone-500 uppercase tracking-wider px-1">QR &amp; Onlayn</p>
 
               {(companySlug || tablesOn || isShop) && (
               <div className="bg-white rounded-lg border border-stone-200 divide-y divide-stone-100 overflow-hidden">
