@@ -1,7 +1,7 @@
 // How an order is shown and totalled on the till. Moved out of
 // app/seller/page.tsx unchanged.
 
-import type { Order, OrderStatus } from '@/types';
+import { isOrderOpen, type Order, type OrderStatus } from '@/types';
 import { orderServiceCharge } from '@/lib/service-charge';
 
 // One set for the till and admin alike. Fixed colours, never the brand's: with a
@@ -61,4 +61,19 @@ export function round2(n: number): number {
 export function orderTotal(order: Order): number {
   const gross = order.items.reduce((s, oi) => s + oi.menuItem.price * oi.quantity, 0);
   return round2(gross + orderServiceCharge(order) - (order.discountAmount ?? 0));
+}
+
+// What a busy table owes: every open order on it.
+export function tableTotal(orders: Order[], tableId: number): number {
+  return round2(orders
+    .filter(o => o.tableNumber === tableId && isOrderOpen(o))
+    .reduce((s, o) => s + orderTotal(o), 0));
+}
+
+// The amount on a table button. It used to be rounded to whole manats, so a
+// 12.60 bill showed 13 ₼ on the floor plan. Kopeks are kept; a whole amount
+// drops the ".00" so the small button stays short.
+export function tableAmount(n: number): string {
+  const r = round2(n);
+  return `${Number.isInteger(r) ? r : r.toFixed(2)} ₼`;
 }

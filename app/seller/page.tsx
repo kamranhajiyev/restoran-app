@@ -56,7 +56,7 @@ import { OrderRow, ORDER_GRID } from '@/components/seller/OrderRow';
 import SplitBill from '@/components/seller/SplitBill';
 import { splitRequest, type SplitPart } from '@/lib/split-bill';
 import { PrintKitchenToggle } from '@/components/seller/PrintKitchenToggle';
-import { STATUS_COLORS, STATUS_LABELS, orderTotal, round2 } from '@/components/seller/order-format';
+import { STATUS_COLORS, STATUS_LABELS, orderTotal, round2, tableAmount, tableTotal } from '@/components/seller/order-format';
 import { cardOverBill, otherPart } from '@/lib/pay-split';
 import { canLink, checkLink, clearLink, readLink, saveLink, type Terminal } from '@/lib/terminal-link';
 import { tillImage } from '@/lib/till-image';
@@ -4820,9 +4820,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                     {hallTables.map((t, i) => {
                       const busy = tableHasActive(t.id, orders);
                       const { x: posX, y: posY, w, h } = plan.place(tableBox(t, i));
-                      const busyTotal = orders
-                        .filter(o => o.tableNumber === t.id && isOrderOpen(o))
-                        .reduce((s, o) => s + orderTotal(o), 0);
+                      const busyTotal = tableTotal(orders, t.id);
                       const draftLabel = tableDraftLabel(tableDrafts[String(t.id)]);
                       return (
                         <button
@@ -4845,7 +4843,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                           }`}
                         >
                           <span className="font-bold text-sm leading-tight truncate px-1 max-w-full">{t.name}</span>
-                          {busy && busyTotal > 0 && <span className="text-[10px] opacity-80 font-semibold">{busyTotal.toFixed(0)} ₼</span>}
+                          {busy && busyTotal > 0 && <span className="text-[10px] opacity-80 font-semibold">{tableAmount(busyTotal)}</span>}
                           {draftLabel && (
                             <span className={`text-[10px] font-medium leading-tight truncate px-1 max-w-full ${busy ? 'text-blue-700' : 'opacity-80'}`}>{draftLabel}</span>
                           )}
