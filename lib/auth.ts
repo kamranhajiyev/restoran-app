@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { Role } from '@/types';
+import { closedByDate, doorFor, settingsFromRow, type Door } from './subscription';
 
 const AUTH_KEY = 'restoran_auth';
 const ADMIN_LOCK_KEY = 'restoran_admin_locked';
@@ -66,7 +67,7 @@ export interface Session {
   stationId: string | null;
 }
 
-export type LoginResult = { session: Session } | { error: 'invalid' | 'inactive' };
+export type LoginResult = { session: Session } | { error: 'invalid' | 'inactive' | 'expired' };
 
 export async function login(username: string, password: string): Promise<LoginResult> {
   try {
@@ -100,7 +101,9 @@ export async function login(username: string, password: string): Promise<LoginRe
 
 // The app's own session for whoever supabase is now signed in as, saved to this
 // device. Shared by the login form and the superadmin's "Bax" (lib/view-as-session).
-export async function sessionFor(userId: string): Promise<LoginResult> {
+//
+// `viewing` is the superadmin's "Bax": the date never closes it (lib/subscription).
+export async function sessionFor(userId: string, { viewing = false }: { viewing?: boolean } = {}): Promise<LoginResult> {
   const { data: profile } = await supabase
     .from('profiles')
     .select('name, role, company_id, active, station_id')
@@ -116,10 +119,16 @@ export async function sessionFor(userId: string): Promise<LoginResult> {
   if (profile.company_id) {
     const { data: co } = await supabase
       .from('companies')
-      .select('name, expires_at, active, trashed_at')
+      .select('name, expires_at, active, trashed_at, timezone, work_open, work_close')
       .eq('id', profile.company_id)
       .single();
     if (!co || !co.active || co.trashed_at) return { error: 'inactive' };
+    // Refused here rather than let in and thrown out by the page a second later,
+    // which looked like a wrong password.
+    if (!viewing && closedByDate(doorFor(profile.role), co.expires_at, settingsFromRow(co))) {
+      await supabase.auth.signOut({ scope: 'local' });
+      return { error: 'expired' };
+    }
     companyName = co.name ?? null;
     expiresAt = co.expires_at ?? null;
   }
@@ -235,7 +244,25 @@ export function switchedJustNow(): boolean {
   } catch { return false; }
 }
 
-export async function validateSession(session: Session): Promise<boolean> {
+// Why the last validateSession said no, for the login page's message. Only
+// 'expired' has words of its own; everything else is the ordinary login screen.
+let endedBy: 'expired' | null = null;
+
+/** Where to send someone validateSession just turned away. */
+export function loginAfterCheck(): string {
+  return endedBy === 'expired' ? '/login?r=expired' : '/login';
+}
+
+// A "Bax" visit is open on this device (lib/view-as-session keeps the
+// superadmin's own login under VIEW_AS_KEY for the way back).
+function isViewingAs(): boolean {
+  try { return localStorage.getItem(VIEW_AS_KEY) !== null; } catch { return false; }
+}
+
+// `door` is the page asking: /admin closes on the expiry date, the till and
+// kitchen screens after the grace days, whoever is signed in (lib/subscription).
+export async function validateSession(session: Session, door: Door): Promise<boolean> {
+  endedBy = null;
   try {
     const { data } = await supabase.auth.getUser();
     if (!data.user) return false;
@@ -267,11 +294,15 @@ export async function validateSession(session: Session): Promise<boolean> {
     if (session.companyId) {
       const { data: co } = await supabase
         .from('companies')
-        .select('active, expires_at, trashed_at')
+        .select('active, expires_at, trashed_at, timezone, work_open, work_close')
         .eq('id', session.companyId)
         .single();
       if (!co?.active || co.trashed_at) return false;
-      if (co.expires_at && new Date(co.expires_at) < new Date()) return false;
+      // "Bax" is the superadmin looking in: the date does not close it.
+      if (!isViewingAs() && closedByDate(door, co.expires_at, settingsFromRow(co))) {
+        endedBy = 'expired';
+        return false;
+      }
       // Write fresh expiry back so the banner always reflects the DB value
       const stored = getSession();
       if (stored) {

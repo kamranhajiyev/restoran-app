@@ -53,7 +53,7 @@ export async function startViewAs(companyId: string): Promise<string | null> {
     await backToSuperadmin();
     return error?.message ?? 'Daxil olmaq alınmadı';
   }
-  const owner = await sessionFor(data.user.id);
+  const owner = await sessionFor(data.user.id, { viewing: true });
   if ('error' in owner) {
     await backToSuperadmin();
     return 'Hesab deaktivdir';

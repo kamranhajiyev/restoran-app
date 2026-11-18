@@ -1,9 +1,11 @@
 'use client';
-import { use, useEffect, useState } from 'react';
+import { use, useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { forgetTill } from '@/lib/auth';
 import { LINK_CHECK_MS } from '@/lib/link-check';
 import { focusRefreshDue } from '@/lib/focus-refresh';
+import { tillRefusal, type TillRefusal } from '@/lib/subscription';
+import TillRefused from '@/components/TillRefused';
 // The till itself, not the /seller route's wrapper: this route has already
 // resolved the terminal from the address bar, and asking the machine which
 // terminal it is would be a second, contradictory answer.
@@ -39,59 +41,69 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
 
   const [state, setState] = useState<
     | { status: 'loading' }
-    | { status: 'invalid' }
-    | { status: 'ready'; companyId: string; companyName: string; logoUrl: string | null; brandColor: string | null; expiresAt: string | null }
+    // The server said no. companyId is what this machine last knew, so sales
+    // still waiting to be sent can go from the stop screen (components/TillRefused).
+    | { status: 'refused'; reason: TillRefusal; companyId: string | null }
+    | ReadyState
   >({ status: 'loading' });
 
-  useEffect(() => {
-    fetch(`/api/seller-token?slug=${encodeURIComponent(slug)}&token=${encodeURIComponent(token)}`)
-      .then(r => r.json())
-      .then(d => {
-        if (d.companyId) {
-          const ready = { status: 'ready' as const, companyId: d.companyId, companyName: d.companyName, logoUrl: d.logoUrl ?? null, brandColor: d.brandColor ?? null, expiresAt: d.expiresAt ?? null };
-          setState(ready);
-          // Kept so the terminal can open itself again during an outage. Only
-          // ever written from a real answer, so a revoked link stops working as
-          // soon as the server is reachable enough to say so.
-          rememberTerminal(slug, token, ready);
-        } else {
-          forgetTerminal(slug, token);
-          setState({ status: 'invalid' });
-        }
-      })
-      .catch(() => {
-        // The line is down, not the link. Answering "etibarsız" here would put
-        // the whole offline till behind an error screen it can never clear —
-        // the terminal would be dead exactly when the queue was meant to save
-        // it. Reopen on what this machine was last told.
-        const cached = recallTerminal(slug, token);
-        setState(cached ?? { status: 'invalid' });
-      });
+  const ask = useCallback(async (): Promise<'ok' | 'refused' | 'offline'> => {
+    let r: Response;
+    try {
+      r = await fetch(`/api/seller-token?slug=${encodeURIComponent(slug)}&token=${encodeURIComponent(token)}`);
+    } catch {
+      return 'offline';
+    }
+    const d = await r.json().catch(() => null);
+    if (r.ok && d?.companyId) {
+      const ready: ReadyState = { status: 'ready', companyId: d.companyId, companyName: d.companyName, logoUrl: d.logoUrl ?? null, brandColor: d.brandColor ?? null, expiresAt: d.expiresAt ?? null };
+      // An open till only takes the fresh expiry: a renewal paid mid-shift clears
+      // the banner without remounting the till under the seller. A stopped one
+      // opens again — the restaurant paid, or was switched back on.
+      setState(s => (s.status === 'ready' ? { ...s, expiresAt: ready.expiresAt } : ready));
+      // Kept so the terminal can open itself again during an outage. Only
+      // ever written from a real answer, so a revoked link stops working as
+      // soon as the server is reachable enough to say so.
+      rememberTerminal(slug, token, ready);
+      return 'ok';
+    }
+    // A 500 is the server having a bad minute, not an answer about this link.
+    if (r.status !== 404) return 'offline';
+    const known = recallTerminal(slug, token);
+    forgetTerminal(slug, token);
+    setState(s => ({
+      status: 'refused',
+      reason: tillRefusal(d),
+      companyId: s.status === 'ready' ? s.companyId : s.status === 'refused' ? s.companyId : known?.companyId ?? null,
+    }));
+    return 'refused';
   }, [slug, token]);
+
+  useEffect(() => {
+    void ask().then(answer => {
+      if (answer !== 'offline') return;
+      // The line is down, not the link. Answering "etibarsız" here would put
+      // the whole offline till behind an error screen it can never clear —
+      // the terminal would be dead exactly when the queue was meant to save
+      // it. Reopen on what this machine was last told.
+      const cached = recallTerminal(slug, token);
+      setState(cached ?? { status: 'refused', reason: 'invalid', companyId: null });
+    });
+  }, [ask, slug, token]);
 
   // Re-validate the link while the terminal stays open so rotating it ("Linki yenilə")
   // locks an already-open session — on an interval and whenever the tab regains focus —
-  // without the seller needing to refresh. A 404 means the token was revoked; network
-  // blips are ignored so a transient error doesn't lock a valid terminal.
+  // without the seller needing to refresh. A 404 means the token was revoked, the
+  // restaurant switched off, or its grace days over (that one lands at the start of
+  // a business day, lib/subscription.ts); network blips are ignored so a transient
+  // error doesn't lock a valid terminal. The same poll reopens a stopped till.
   useEffect(() => {
     let cancelled = false;
     let last = Date.now();
     const revalidate = async () => {
-      if (document.visibilityState === 'hidden') return;
+      if (document.visibilityState === 'hidden' || cancelled) return;
       last = Date.now();
-      try {
-        const r = await fetch(`/api/seller-token?slug=${encodeURIComponent(slug)}&token=${encodeURIComponent(token)}`);
-        if (cancelled) return;
-        if (r.status === 404) { forgetTerminal(slug, token); setState({ status: 'invalid' }); return; }
-        // A renewal paid mid-shift should clear the subscription banner on its
-        // own — this poll is already running, so it costs nothing to carry.
-        if (r.ok) {
-          const d = await r.json();
-          if (!cancelled) {
-            setState(s => (s.status === 'ready' ? { ...s, expiresAt: d.expiresAt ?? null } : s));
-          }
-        }
-      } catch { /* ignore transient network errors */ }
+      await ask();
     };
     const id = setInterval(revalidate, LINK_CHECK_MS);
     // At most once per half minute on focus (lib/focus-refresh.ts).
@@ -105,7 +117,9 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [slug, token]);
+  }, [ask]);
+
+  const retry = useCallback(async () => { await ask(); }, [ask]);
 
   if (state.status === 'loading') {
     return (
@@ -115,23 +129,15 @@ export default function PublicSellerPage({ params }: { params: Promise<{ slug: s
     );
   }
 
-  if (state.status === 'invalid') {
+  if (state.status === 'refused') {
     return (
-      <div className="min-h-screen bg-stone-50 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-stone-800 font-semibold mb-1">Bu keçid etibarsız</p>
-          <p className="text-stone-500 text-sm">Admindən yeni link alın</p>
-          {/* A rotated link would otherwise leave the desktop shell — which has no
-              browser chrome and reopens this very page — stranded on this screen
-              for good. Forget the till and offer the way back to admin. */}
-          <button
-            onClick={() => { forgetTill(); router.replace('/admin'); }}
-            className="mt-5 px-4 py-2 rounded-xl border border-stone-200 text-sm text-stone-600 hover:bg-stone-100 transition-colors"
-          >
-            Admin panelinə keç
-          </button>
-        </div>
-      </div>
+      <TillRefused
+        reason={state.reason}
+        companyId={state.companyId}
+        token={token}
+        onRetry={retry}
+        onAdmin={state.reason === 'invalid' ? () => { forgetTill(); router.replace('/admin'); } : undefined}
+      />
     );
   }
 

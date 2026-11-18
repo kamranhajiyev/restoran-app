@@ -10,7 +10,7 @@ import { splitItemNote } from '@/lib/item-note';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Bell, CircleCheck, Check, Settings } from 'lucide-react';
-import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
+import { getSession, logout, validateSession, loginAfterCheck, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
   setCompanyContext, fetchMenuOrNull, fetchOrdersOrNull, fetchStationsOrNull, fetchTables, fetchHalls,
@@ -187,8 +187,8 @@ export default function StationPage() {
     setFontLevel(loadFontLevel(session.id));
     setCompanyContext(session.companyId);
 
-    validateSession(session).then(valid => {
-      if (!valid) { logout(); router.replace('/login'); return; }
+    validateSession(session, 'till').then(valid => {
+      if (!valid) { logout(); router.replace(loginAfterCheck()); return; }
       // validateSession re-reads station_id — an owner may have moved them mid-shift.
       const fresh = getSession();
       if (!fresh?.stationId) { router.replace('/no-station'); return; }

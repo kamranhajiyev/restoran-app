@@ -14,6 +14,7 @@
 import { useState } from 'react';
 import { Link2, Loader2 } from 'lucide-react';
 import { checkLink, normalTillNumber, parseTerminalLink, saveLink, type Terminal } from '@/lib/terminal-link';
+import { TILL_REFUSAL_TEXT } from '@/lib/subscription';
 
 export default function TillLink({ onLinked }: { onLinked: (t: Terminal) => void }) {
   const [value, setValue] = useState('');
@@ -43,6 +44,10 @@ export default function TillLink({ onLinked }: { onLinked: (t: Terminal) => void
     // the local database from the wrong restaurant — or from nothing at all.
     if (result.status === 'invalid') {
       setError('Bu keçid işləmir. Admindən yenisini alın.');
+      return;
+    }
+    if (result.status === 'refused') {
+      setError(`${TILL_REFUSAL_TEXT[result.reason].title}. ${TILL_REFUSAL_TEXT[result.reason].hint}.`);
       return;
     }
     if (result.status === 'offline') {

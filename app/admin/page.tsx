@@ -19,7 +19,8 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { getSession, logout, validateSession, clearLocalSession, updateSession, lockAdmin, unlockAdmin, isAdminLocked, rememberTill, forgetTill } from '@/lib/auth';
+import { subscriptionBanner, SUPPORT_URL } from '@/lib/subscription';
+import { getSession, logout, validateSession, loginAfterCheck, clearLocalSession, updateSession, lockAdmin, unlockAdmin, isAdminLocked, rememberTill, forgetTill } from '@/lib/auth';
 import {
   fetchMenu, fetchMenuOrNull, fetchCategoriesOrNull, saveMenu, fetchOrders, fetchOrdersOrNull, fetchOrdersCount, updateOrderStatus, cancelOrder, editOrderPayment, editCourierOrderSplit, deleteOrder, restoreOrder,
   fetchShifts, fetchShiftSales, closeShift, fetchOpenShift, addShiftMovement,
@@ -1021,8 +1022,8 @@ function AdminPageContent() {
   useEffect(() => {
     const session = getSession();
     if (!session || session.role !== 'owner') { router.replace('/login'); return; }
-    validateSession(session).then(valid => {
-      if (!valid) { logout(); router.replace('/login'); return; }
+    validateSession(session, 'admin').then(valid => {
+      if (!valid) { logout(); router.replace(loginAfterCheck()); return; }
       const exp = getSession()?.expiresAt;
       if (exp) setExpiresAt(exp);
     });
@@ -3287,23 +3288,20 @@ function AdminPageContent() {
 
       {/* ── Subscription warning banner ── */}
       {(() => {
-        const exp = expiresAt;
-        if (!exp) return null;
-        const days = Math.ceil((new Date(exp).getTime() - Date.now()) / 86400000);
-        if (days > 10) return null;
-        const expired = days < 0;
+        // Words and days from lib/subscription, the same as the till's banner.
+        const banner = subscriptionBanner(expiresAt, bizSettings);
+        if (!banner) return null;
+        const expired = banner.expired;
         return (
           <div className={`relative flex items-center justify-between gap-4 px-5 py-3 ${expired ? 'bg-red-600' : 'bg-primary-500'}`}>
             <div className="flex items-center gap-3">
               <span className={`w-2 h-2 rounded-full animate-pulse shrink-0 ${expired ? 'bg-red-200' : 'bg-primary-200'}`} />
               <p className="text-white text-sm font-medium">
-                {expired
-                  ? 'Abunəliyinizin müddəti bitib. Sistemə giriş məhdudlaşdırıla bilər.'
-                  : `Abunəliyinizin müddəti ${days} gün sonra bitir. Xidmətin fasiləsiz davam etməsi üçün ödənişi tamamlayın.`}
+                {banner.text}
               </p>
             </div>
             <a
-              href="https://wa.me/994998989876"
+              href={SUPPORT_URL}
               target="_blank"
               rel="noopener noreferrer"
               className={`shrink-0 text-xs font-semibold px-4 py-1.5 rounded-lg transition-colors ${expired ? 'bg-white text-red-600 hover:bg-red-50' : 'bg-white text-primary-600 hover:bg-primary-50'}`}

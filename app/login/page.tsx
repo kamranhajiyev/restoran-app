@@ -1,8 +1,11 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { login, homeFor } from '@/lib/auth';
 import { Store } from 'lucide-react';
+import { SUPPORT_URL } from '@/lib/subscription';
+
+const EXPIRED = 'Abunəliyinizin müddəti bitib.';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -10,6 +13,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError]       = useState('');
   const [loading, setLoading]   = useState(false);
+
+  // A page that threw someone out over the date says so (lib/auth loginAfterCheck),
+  // instead of leaving a bare login form that reads as a wrong password.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('r') === 'expired') setError(EXPIRED);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -20,7 +29,9 @@ export default function LoginPage() {
     if ('error' in result) {
       setError(result.error === 'inactive'
         ? 'Hesabınız deaktiv edilib. Zəhmət olmasa əlaqə saxlayın.'
-        : 'İstifadəçi adı və ya şifrə yanlışdır');
+        : result.error === 'expired'
+          ? EXPIRED
+          : 'İstifadəçi adı və ya şifrə yanlışdır');
       return;
     }
     const { session } = result;
@@ -61,11 +72,18 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            error.includes('deaktiv') ? (
+            error === EXPIRED ? (
+              <p className="text-red-500 text-sm text-center">
+                {EXPIRED}{' '}
+                <a href={SUPPORT_URL} target="_blank" rel="noopener noreferrer" className="underline font-semibold hover:text-red-700">
+                  Ödəniş üçün əlaqə saxlayın
+                </a>
+              </p>
+            ) : error.includes('deaktiv') ? (
               <p className="text-red-500 text-sm text-center">
                 Hesabınız deaktiv edilib.{' '}
                 <a
-                  href="https://wa.me/994998989876"
+                  href={SUPPORT_URL}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="underline font-semibold hover:text-red-700"

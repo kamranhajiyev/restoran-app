@@ -133,7 +133,7 @@ async function doSwitch(targetId: string, venues: Venue[]): Promise<SwitchResult
   const there = await sessionFor(data.user.id);
   if ('error' in there) {
     await goHome(home);
-    return { error: 'Məkanın hesabı deaktivdir', moved: true };
+    return { error: there.error === 'expired' ? 'Məkanın abunəliyi bitib' : 'Məkanın hesabı deaktivdir', moved: true };
   }
   forgetTill();
 

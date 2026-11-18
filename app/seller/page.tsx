@@ -8,7 +8,7 @@ import {
   History, Search, Delete, KeyRound, Trash2, Check, Bell, BellOff, Printer, CloudOff,
   Bike, Tag, List, RefreshCw, RotateCcw,
 } from 'lucide-react';
-import { getSession, logout, validateSession, clearLocalSession, homeFor } from '@/lib/auth';
+import { getSession, logout, validateSession, loginAfterCheck, clearLocalSession, homeFor } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { pinKey } from '@/lib/pin-keys';
 import {
@@ -59,6 +59,8 @@ import { PrintKitchenToggle } from '@/components/seller/PrintKitchenToggle';
 import { STATUS_COLORS, STATUS_LABELS, orderTotal, round2, tableAmount, tableTotal } from '@/components/seller/order-format';
 import { cardOverBill, otherPart } from '@/lib/pay-split';
 import { canLink, checkLink, clearLink, readLink, saveLink, type Terminal } from '@/lib/terminal-link';
+import TillRefused from '@/components/TillRefused';
+import { subscriptionBanner, SUPPORT_URL } from '@/lib/subscription';
 import { tillImage } from '@/lib/till-image';
 import { TILL_ACTIONS, addAction, approveWith, approvedBy, cleanRules, managerByCardOffline, managerByPinOffline, removalAction, ruleFor, rulesApply, strictest, type TillAction, type TillRules } from '@/lib/till-rules';
 import { ApprovalPad } from '@/components/seller/ApprovalPad';
@@ -316,6 +318,30 @@ export default function SellerRoute(props: SellerProps = {}) {
   // undefined until the machine has been asked. Both the server render and the
   // first client render see it, so there is nothing to mismatch on hydration.
   const [linked, setLinked] = useState<boolean | undefined>(undefined);
+  // The server said this machine's link is right but closed: the restaurant is
+  // switched off or its grace days are over. The link stays on the machine, and
+  // the same link opens the till again once that changes (lib/subscription.ts).
+  const [refused, setRefused] = useState<'inactive' | 'expired' | null>(null);
+
+  // Ask the server about the stored link, and act on the answer.
+  const recheck = useCallback(async (stored: Terminal, isLive: () => boolean = () => true) => {
+    const result = await checkLink(stored.slug, stored.token, stored.tillNumber);
+    if (result.status === 'offline') return;
+    if (result.status === 'invalid') {
+      await clearLink();
+      if (!isLive()) return;
+      setRefused(null);
+      setTerminal(null);
+      setLinked(false);
+      return;
+    }
+    if (result.status === 'refused') {
+      if (isLive()) setRefused(result.reason);
+      return;
+    }
+    await saveLink(result.terminal);
+    if (isLive()) setRefused(null);
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -338,27 +364,23 @@ export default function SellerRoute(props: SellerProps = {}) {
       // which counter this machine sits on, which the server has no way to know.
       // Omitting it here would quietly reset every second till to 1 on the first
       // refresh after it was set up.
-      void checkLink(stored.slug, stored.token, stored.tillNumber).then(async result => {
-        if (result.status === 'offline') return;
-        if (result.status === 'invalid') {
-          await clearLink();
-          if (!live) return;
-          setTerminal(null);
-          setLinked(false);
-          return;
-        }
-        await saveLink(result.terminal);
-      });
+      void recheck(stored, () => live);
     });
 
     return () => { live = false; };
-  }, [props.overrideCompanyId]);
+  }, [props.overrideCompanyId, recheck]);
+
+  const retry = useCallback(async () => { if (terminal) await recheck(terminal); }, [terminal, recheck]);
 
   // One frame, on the desktop only, while SQLite answers.
   if (linked === undefined) return null;
 
   if (!linked) {
     return <TillLink onLinked={t => { setTerminal(t); setLinked(true); }} />;
+  }
+
+  if (refused && terminal) {
+    return <TillRefused reason={refused} companyId={terminal.companyId} token={terminal.token} onRetry={retry} />;
   }
 
   return terminal
@@ -1578,8 +1600,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     // The till is not an employee's screen — send them to their own sex rather than
     // to a login form they are already past.
     if (session.role !== 'seller' && session.role !== 'owner') { router.replace(homeFor(session)); return; }
-    validateSession(session).then(valid => {
-      if (!valid) { logout(); router.replace('/login'); return; }
+    validateSession(session, 'till').then(valid => {
+      if (!valid) { logout(); router.replace(loginAfterCheck()); return; }
       const exp = getSession()?.expiresAt;
       if (exp !== undefined) setExpiresAt(exp);
     });
@@ -4061,22 +4083,20 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
 
       {/* ── Subscription warning banner ── */}
       {(() => {
-        if (!expiresAt) return null;
-        const days = Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86400000);
-        if (days > 10) return null;
-        const expired = days < 0;
+        // Words and days from lib/subscription, the same as admin's banner.
+        const banner = subscriptionBanner(expiresAt, bizSettings);
+        if (!banner) return null;
+        const expired = banner.expired;
         return (
           <div className={`relative flex items-center justify-between gap-4 px-5 py-3 ${expired ? 'bg-red-600' : 'bg-primary-500'}`}>
             <div className="flex items-center gap-3">
               <span className={`w-2 h-2 rounded-full animate-pulse shrink-0 ${expired ? 'bg-red-200' : 'bg-primary-200'}`} />
               <p className="text-white text-sm font-medium">
-                {expired
-                  ? 'Abunəliyinizin müddəti bitib. Sistemə giriş məhdudlaşdırıla bilər.'
-                  : `Abunəliyinizin müddəti ${days} gün sonra bitir. Xidmətin fasiləsiz davam etməsi üçün ödənişi tamamlayın.`}
+                {banner.text}
               </p>
             </div>
             <a
-              href="https://wa.me/994998989876"
+              href={SUPPORT_URL}
               target="_blank"
               rel="noopener noreferrer"
               className={`shrink-0 text-xs font-bold px-4 py-1.5 rounded-lg transition-colors ${expired ? 'bg-white text-red-600 hover:bg-red-50' : 'bg-white text-primary-600 hover:bg-primary-50'}`}

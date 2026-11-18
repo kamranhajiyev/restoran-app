@@ -16,6 +16,7 @@
 
 import type { PosNative } from "./desktopPrint";
 import { apiBase } from "./till-write";
+import { tillRefusal } from "./subscription";
 
 /** A terminal, as this machine last understood it. */
 export interface Terminal {
@@ -114,6 +115,11 @@ export type LinkCheck =
   | { status: "ok"; terminal: Terminal }
   /** The server answered, and this link is not one. */
   | { status: "invalid" }
+  /**
+   * The link is right, but the restaurant is switched off or its subscription
+   * ended. Kept on the machine: the same link opens again once that changes.
+   */
+  | { status: "refused"; reason: "inactive" | "expired" }
   /** Nobody to ask. The caller keeps whatever it already had. */
   | { status: "offline" };
 
@@ -156,9 +162,15 @@ export async function checkLink(
     return { status: "offline" };
   }
 
-  // 404 is the server saying the link is wrong or revoked. A 500 is the server
-  // having a bad minute, and must not wipe a working till's setup.
-  if (res.status === 404) return { status: "invalid" };
+  // 404 is the server saying no: the link is wrong or revoked, or right but
+  // closed (lib/subscription.ts). A 500 is the server having a bad minute, and
+  // must not wipe a working till's setup.
+  if (res.status === 404) {
+    let body: unknown = null;
+    try { body = JSON.parse(res.body); } catch { /* an old server: no reason */ }
+    const reason = tillRefusal(body);
+    return reason === "invalid" ? { status: "invalid" } : { status: "refused", reason };
+  }
   if (!res.ok) return { status: "offline" };
 
   type Answer = {
