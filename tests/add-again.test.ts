@@ -307,9 +307,9 @@ describe('the guest receipt and bill', () => {
       { id: 'r1', menuItem: limonad, quantity: 5 },
       { id: 'r2', menuItem: ayran, quantity: 3 },
       { id: 'r3', menuItem: limonad, quantity: 3 },
-    ])).map(l => l.text);
+    ])).filter(l => !l.rule).map(l => l.text).slice(2); // past the column heads
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toMatch(/^Limonad\s+8x\s+16\.00m$/);
+    expect(lines[0]).toMatch(/^Limonad\s+8 əd\s+2\.00\s+16\.00$/);
   });
 
   it('keeps another price or size on its own line', () => {
@@ -318,7 +318,7 @@ describe('the guest receipt and bill', () => {
       { id: 'r2', menuItem: { ...limonad, price: 2.5 }, quantity: 1 },
       { id: 'r3', menuItem: fanta, quantity: 1, modifiers: '0.33 L', variantId: 'v33' },
       { id: 'r4', menuItem: fanta, quantity: 1, modifiers: '0.5 L', variantId: 'v5' },
-    ]));
+    ])).filter(l => !l.rule).slice(2);
     expect(lines).toHaveLength(4);
   });
 });

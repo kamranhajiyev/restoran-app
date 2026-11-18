@@ -117,7 +117,7 @@ describe('the till', () => {
     const t = returnReceiptLines(ret({}), 'Test Mağaza', '45').map(l => l.text.replace(/\s+/g, ' '));
     expect(t).toContain('QAYTARMA');
     expect(t).toContain('Qəbz #45');
-    expect(t).toContain('CƏMİ: -2.00m');
+    expect(t).toContain('CƏMİ: -2.00');
     expect(t).toContain('Təsdiq: Menecer');
   });
 

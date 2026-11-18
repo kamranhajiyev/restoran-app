@@ -35,11 +35,15 @@ export type Line = {
   // Drawn as a Code 128 barcode, centred (lib/code128) — the receipt number at
   // the foot of a shop's receipt. `text` is printed under it.
   barcode?: string;
+  // A hairline across the paper, one dot high: what parts a shop's items
+  // without the weight of a row of dashes. `text` stays empty.
+  rule?: boolean;
 };
 
 const BARCODE_H = 80;
+const RULE_H = 10;
 const lineHeight = (l: Line) =>
-  l.barcode ? BARCODE_H + NORMAL_H : l.scale ? Math.round(NORMAL_H * l.scale[1]) : l.big ? BIG_H : NORMAL_H;
+  l.rule ? RULE_H : l.barcode ? BARCODE_H + NORMAL_H : l.scale ? Math.round(NORMAL_H * l.scale[1]) : l.big ? BIG_H : NORMAL_H;
 
 // Thermal heads spread ink and the paper fades, so a thin face at ~20px prints
 // grey and breaks up. Bold is the single biggest legibility win available here,
@@ -96,6 +100,11 @@ export function rasterize(lines: Line[], cols: number, logo?: Logo | null): Uint
   }
 
   for (const line of lines) {
+    if (line.rule) {
+      ctx.fillRect(0, y + Math.floor(RULE_H / 2), DOTS, 1);
+      y += RULE_H;
+      continue;
+    }
     if (line.barcode) {
       const modules = code128Modules(line.barcode);
       if (modules) {

@@ -48,7 +48,7 @@ describe('a shop sale', () => {
     expect(seller).toMatch(/if \(payNow\) \{ setView\('new-order'\); openPayment\(order\); return; \}/);
     expect(seller).toMatch(/if \(isShop && view === 'new-order' && !appendOrderId\) void pickSaleType\(shopType\)/);
     expect(seller.match(/shopSale \? `Ödə · \$\{cartToPayNow\.toFixed\(2\)\} ₼` : submit\.label/g)).toHaveLength(2);
-    expect(seller.match(/\{!shopSale && <PrintKitchenToggle/g)).toHaveLength(2);
+    expect(seller.match(/\{printsKitchen\(kind\) && !shopSale && <PrintKitchenToggle/g)).toHaveLength(2);
   });
 });
 

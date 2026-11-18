@@ -1,5 +1,5 @@
 import type { Order } from '@/types';
-import { stringToBytes, ESC, WIDTH } from './escpos';
+import { stringToBytes, ESC, WIDTH, wrap } from './escpos';
 import { rasterize, type Line, type Logo } from './raster';
 import { ticketFontReady } from './ticket-font';
 import { loadLogo } from './logo';
@@ -239,25 +239,34 @@ export function savePrinter(_name: string): void {
 const row = (label: string, amount: string) => `${label}${amount.padStart(WIDTH - label.length)}`;
 const money = (n: number) => `${n.toFixed(2)}m`;
 
+/** A Mağaza's paper (SHOP-MODE.md). `delivery`: the shop also delivers, so a
+ *  counter sale is called "Mağazada" to tell it from a Çatdırılma. Without
+ *  delivery every sale is a counter sale and the word says nothing, so the
+ *  paper leaves it off, as the screen does (orderPlace in lib/order-place). */
+export interface ShopPaper { delivery: boolean }
+
 // The header both papers share: who, which order, which table, when, whose.
-// `shop`: a Mağaza's receipt (SHOP-MODE.md) — Qəbz, Mağazada, Kassir.
-function head(order: Order, companyName: string, heading?: string, table?: string, shop = false): Line[] {
+// `shop`: a Mağaza's receipt — Qəbz, Kassir, and Mağazada only beside delivery.
+function head(order: Order, companyName: string, heading?: string, table?: string, shop?: ShopPaper): Line[] {
   const date = formatDateTime(order.createdAt);
   const lines: Line[] = [
     { text: companyName, big: true, center: true },
     { text: '-'.repeat(WIDTH), center: true },
   ];
   if (heading) lines.push({ text: heading, big: true, center: true });
+  // The table's name, not its id — see tableTitle in lib/order-place.ts. The id
+  // is only there for a caller that has no table list to look it up in.
+  // The same words as the till's screen (PLACE_WORDS).
+  const place = order.tableNumber !== 0 ? table ?? `Masa: ${order.tableNumber}`
+    : order.online ? PLACE_WORDS.online
+    : order.courierId ? PLACE_WORDS.delivery
+    : shop ? (shop.delivery ? PLACE_WORDS.shop : '')
+    : PLACE_WORDS.takeaway;
   lines.push(
     // The label, not the bare number: on a second till these are the only two
     // characters telling this receipt apart from the other №45 in the room.
     { text: `${shop ? 'Qəbz' : 'Sifariş'} #${orderLabel(order)}`, center: true },
-    // The table's name, not its id — see tableTitle in lib/order-place.ts. The id
-    // is only there for a caller that has no table list to look it up in.
-    // The same words as the till's screen (PLACE_WORDS).
-    { text: order.tableNumber === 0
-        ? (order.online ? PLACE_WORDS.online : order.courierId ? PLACE_WORDS.delivery : shop ? PLACE_WORDS.shop : PLACE_WORDS.takeaway)
-        : table ?? `Masa: ${order.tableNumber}`, center: true },
+    ...(place ? [{ text: place, center: true }] : []),
     { text: date, center: true },
     { text: `${shop ? 'Kassir' : 'Ofisiant'}: ${order.sellerName}`, center: true },
     { text: '='.repeat(WIDTH) },
@@ -265,19 +274,64 @@ function head(order: Order, companyName: string, heading?: string, table?: strin
   return lines;
 }
 
-// name | qty | price, filling the line exactly. The modifier rides on the
-// same line as its dish — on a line of its own it read as another item.
-// Batches of one dish print as one line, the way the till shows them: Limonad
-// ordered 5 then 3 more read "5x" and "3x" on the guest's paper (Test Restoran,
-// 2026-10-20). Another price stays its own line, so each line still adds up.
+// A restaurant's bill and receipt: the same columns as a shop's paper, so the
+// guest sees the price of one beside the line's total (customer request,
+// 2026-11-17). The modifier rides on its dish's line — on a line of its own it
+// read as another item. Batches of one dish print as one line, the way the till
+// shows them: Limonad ordered 5 then 3 more read "5x" and "3x" on the guest's
+// paper (Test Restoran, 2026-10-20). Another price stays its own line, so each
+// line still adds up.
 export function itemLines(order: Order): Line[] {
-  return mergeLines(order.items, [], {}).lines.map(({ item, quantity }) => {
-    const label = item.modifiers ? `${item.menuItem.name} (${item.modifiers})` : item.menuItem.name;
-    const name = label.substring(0, WIDTH - 12).padEnd(WIDTH - 12);
-    const qty = `${quantity}x`.padStart(4);
-    const price = money(item.menuItem.price * quantity).padStart(8);
-    return { text: `${name}${qty}${price}` };
+  return shopItemLines(orderShopRows(order), 'Məhsul');
+}
+
+/** A shop's line: what it is, how many, the price of one. */
+export interface ShopRow { name: string; qty: number; price: number }
+
+// "10 əd", not "10.000 əd": the zeros a scale would print say nothing for a
+// count. Kept to three places for the kq selling SHOP-MODE.md plans.
+export const qtyText = (q: number) => `${Number(q.toFixed(3))} əd`;
+
+const QTY_COL = 8;
+const MONEY_COL = 9;
+const NAME_COL = WIDTH - QTY_COL - 2 * MONEY_COL;
+
+// A shop's paper writes money as bare numbers, like the columns above it: "61.25"
+// beside "3.40", not "61.25m" — two ways of writing one manat read as two things.
+const plain = (n: number) => n.toFixed(2);
+
+// A shop's items the way a supermarket receipt prints them: Miqdar, Qiymət and
+// Toplam in their own columns, so the customer checks the shelf price of one
+// against the paper (customer request, 2026-11-17). A short name shares its
+// row with the numbers; a long one wraps, and the numbers sit on its last row
+// if that row leaves room, else on a row of their own — the columns never
+// move. A hairline between items says which numbers are whose.
+export function shopItemLines(rows: ShopRow[], nameHead = 'Malın adı'): Line[] {
+  const lines: Line[] = [
+    { text: nameHead.padEnd(NAME_COL) + 'Miqdar'.padStart(QTY_COL) + 'Qiymət'.padStart(MONEY_COL) + 'Toplam'.padStart(MONEY_COL) },
+    { text: '-'.repeat(WIDTH) },
+  ];
+  rows.forEach((r, i) => {
+    if (i > 0) lines.push({ text: '', rule: true });
+    const nums = qtyText(r.qty).padStart(QTY_COL) + plain(r.price).padStart(MONEY_COL) + plain(r.price * r.qty).padStart(MONEY_COL);
+    const name = wrap(r.name, WIDTH);
+    const last = name[name.length - 1];
+    // One space at least between a name and its quantity.
+    const shares = last.length < NAME_COL;
+    for (const w of shares ? name.slice(0, -1) : name) lines.push({ text: w });
+    lines.push({ text: (shares ? last : '').padEnd(NAME_COL) + nums });
   });
+  return lines;
+}
+
+// An order's lines as shop rows — merged exactly as itemLines merges them, so
+// the two papers can never count the same order differently.
+export function orderShopRows(order: Order): ShopRow[] {
+  return mergeLines(order.items, [], {}).lines.map(({ item, quantity }) => ({
+    name: item.modifiers ? `${item.menuItem.name} (${item.modifiers})` : item.menuItem.name,
+    qty: quantity,
+    price: item.menuItem.price,
+  }));
 }
 
 async function send(lines: Line[], logo?: Logo | null): Promise<boolean> {
@@ -330,13 +384,13 @@ export async function printBill(order: Order, companyName: string, logoUrl?: str
 
 // Xidmət haqqı on its own line, unlike an order type's price change: the guest
 // is meant to see why the total is more than the dishes (lib/service-charge).
-function serviceLine(order: Order, service: number): Line {
-  return { text: row(`Xidmət haqqı (${order.serviceChargePercent}%):`, money(service)) };
+function serviceLine(order: Order, service: number, cur = money): Line {
+  return { text: row(`Xidmət haqqı (${order.serviceChargePercent}%):`, cur(service)) };
 }
 
 // `barcode`: the order's number is the server's, not the till's guess, so the
 // barcode at the foot cannot point a return at someone else's sale.
-export function receiptLines(order: Order, companyName: string, table?: string, shop = false, barcode = false): Line[] {
+export function receiptLines(order: Order, companyName: string, table?: string, shop?: ShopPaper, barcode = false): Line[] {
   // A courier order closed on debt tenders nothing, so cash+card is 0. Reading
   // the total off that would print a 0.00 receipt and, worse, divide by zero
   // when reconstructing a percentage discount below.
@@ -344,35 +398,40 @@ export function receiptLines(order: Order, companyName: string, table?: string, 
   const paid = (order.cashAmount ?? 0) + (order.cardAmount ?? 0) || debt;
   const total = paid + (order.discountAmount ?? 0);
 
-  const lines: Line[] = [...head(order, companyName, undefined, table, shop), ...itemLines(order)];
+  const lines: Line[] = [
+    ...head(order, companyName, undefined, table, shop),
+    ...(shop ? shopItemLines(orderShopRows(order)) : itemLines(order)),
+    // Both print Miqdar · Qiymət · Toplam; only the first column's name differs.
+  ];
 
   lines.push({ text: '='.repeat(WIDTH) });
 
+  const cur = shop ? plain : money;
   const discount = order.discountAmount ?? 0;
   const service = orderServiceCharge(order);
   if (service > 0) {
-    lines.push({ text: row('Cəmi:', money(dishesTotal(order.items))) });
-    lines.push(serviceLine(order, service));
+    lines.push({ text: row('Cəmi:', cur(dishesTotal(order.items))) });
+    lines.push(serviceLine(order, service, cur));
   } else if (discount > 0) {
-    lines.push({ text: row('Cəmi:', money(total)) });
+    lines.push({ text: row('Cəmi:', cur(total)) });
   }
   if (discount > 0) {
     // The percentage the cashier typed isn't stored — only the manat it came
     // to — so it's read back off the pre-discount total.
     const pct = total > 0 ? Math.round((discount / total) * 100) : 0;
     const label = order.discountType === '%' ? `Endirim (${pct}%)` : 'Endirim';
-    lines.push({ text: row(label, `-${money(discount)}`) });
+    lines.push({ text: row(label, `-${cur(discount)}`) });
   }
 
-  lines.push({ text: row('CƏMİ:', money(paid)), big: true });
+  lines.push({ text: row('CƏMİ:', cur(paid)), big: true });
 
-  if ((order.cashAmount ?? 0) > 0) lines.push({ text: row('Nağd:', money(order.cashAmount!)) });
-  if ((order.cardAmount ?? 0) > 0) lines.push({ text: row('Kart:', money(order.cardAmount!)) });
-  if ((order.changeAmount ?? 0) > 0) lines.push({ text: row('Qaytarıldı:', money(order.changeAmount!)) });
+  if ((order.cashAmount ?? 0) > 0) lines.push({ text: row('Nağd:', cur(order.cashAmount!)) });
+  if ((order.cardAmount ?? 0) > 0) lines.push({ text: row('Kart:', cur(order.cardAmount!)) });
+  if ((order.changeAmount ?? 0) > 0) lines.push({ text: row('Qaytarıldı:', cur(order.changeAmount!)) });
   // The guest has not paid yet — the rider collects at the door. Saying so on
   // the slip is the difference between a receipt and a demand for money.
   if (debt > 0) {
-    lines.push({ text: row('ÖDƏNİLMƏYİB:', money(debt)) });
+    lines.push({ text: row('ÖDƏNİLMƏYİB:', cur(debt)) });
     lines.push({ text: 'Kuryer yığacaq', center: true });
   }
 
@@ -387,7 +446,7 @@ export function receiptLines(order: Order, companyName: string, table?: string, 
   return lines;
 }
 
-export async function printReceipt(order: Order, companyName: string, logoUrl?: string | null, table?: string, shop = false, barcode = false): Promise<boolean> {
+export async function printReceipt(order: Order, companyName: string, logoUrl?: string | null, table?: string, shop?: ShopPaper, barcode = false): Promise<boolean> {
   try {
     const logo = await loadLogo(logoUrl);
     return await send(receiptLines(order, companyName, table, shop, barcode), logo);
@@ -409,10 +468,11 @@ export function returnReceiptLines(r: Pick<SaleReturn, 'total' | 'pay' | 'seller
     ...(r.sellerName ? [{ text: `Kassir: ${r.sellerName}`, center: true }] : []),
     { text: '='.repeat(WIDTH) },
   ];
-  for (const l of r.lines) lines.push({ text: row(`${l.name} x${l.qty}`.slice(0, WIDTH - 10), money(l.qty * l.price)) });
+  // Qaytarma is a shop's paper: the same columns as the sale it undoes.
+  lines.push(...shopItemLines(r.lines));
   lines.push({ text: '='.repeat(WIDTH) });
-  lines.push({ text: row('CƏMİ:', `-${money(r.total)}`), big: true });
-  lines.push({ text: row(r.pay === 'cash' ? 'Nağd qaytarıldı:' : 'Karta qaytarıldı:', money(r.total)) });
+  lines.push({ text: row('CƏMİ:', `-${plain(r.total)}`), big: true });
+  lines.push({ text: row(r.pay === 'cash' ? 'Nağd qaytarıldı:' : 'Karta qaytarıldı:', plain(r.total)) });
   if (r.approvedBy) lines.push({ text: `Təsdiq: ${r.approvedBy}`, center: true });
   return lines;
 }

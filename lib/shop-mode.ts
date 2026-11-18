@@ -33,6 +33,19 @@ export function paysNow(s: { kind: CompanyKind; appending: boolean; delivery: bo
   return s.kind === 'shop' && !s.appending && !s.delivery;
 }
 
+/** Whether the till offers comments: the Şərh on each line and the Qeyd for the
+ *  whole order. A shop has neither — not for delivery, not when adding to an
+ *  open sale (the user, 2026-11-17). */
+export function takesNotes(kind: CompanyKind): boolean {
+  return kind !== 'shop';
+}
+
+/** Whether the till sends tickets to the kitchen and shows "Mətbəxə çap et".
+ *  A shop has no kitchen — not for a delivery either (the user, 2026-11-17). */
+export function printsKitchen(kind: CompanyKind): boolean {
+  return kind !== 'shop';
+}
+
 /** Admin's side menu and page titles in a shop. Masalar becomes Onlayn: only
  *  the online menu link and its switches are left there. */
 export const SHOP_ADMIN: Partial<Record<string, { label: string; title: string; subtitle?: string }>> = {

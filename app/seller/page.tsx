@@ -80,7 +80,7 @@ import { onLocalWrite, pendingWrites, tillPost } from '@/lib/till-write';
 import OrderNote from '@/components/OrderNote';
 import { OPENING_TAB, sellerTabs, type SellerTab } from '@/lib/seller-nav';
 import { cleanKind, type CompanyKind } from '@/lib/company-kind';
-import { paysNow, shopDeliveryType, shopSaleType, tabLabel } from '@/lib/shop-mode';
+import { paysNow, printsKitchen, shopDeliveryType, shopSaleType, tabLabel, takesNotes } from '@/lib/shop-mode';
 import { findByBarcode, RECEIPT_MIN_KEYS, SCAN_MIN_KEYS, scanCatcher } from '@/lib/barcode';
 import { leftLabel, lowKey } from '@/lib/low-stock';
 import { cartToReturnLines, parseReceiptLabel, requestTotal, returnErrorText, returnTotals, rowToReturn, type ReturnRequest, type SaleForReturn, type SaleReturn } from '@/lib/returns';
@@ -493,6 +493,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // "Mətbəxə çap et". Back to on after every order, so an untick meant for one
   // counter drink can't silently keep the kitchen in the dark for the next table.
   const [printKitchen, setPrintKitchen]     = useState(true);
+  // A shop never prints for a kitchen, whatever the toggle says (lib/shop-mode).
+  const toKitchen = printKitchen && printsKitchen(kind);
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [submitting, setSubmitting]         = useState(false);
 
@@ -2469,7 +2471,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     if (cart.length === 0 && !hasRemovals && target && editedNote !== (target.note ?? '').trim()) {
       setSubmitting(true);
       let noteTicket: { printed: string[] } | undefined;
-      if (printKitchen && editedNote) {
+      if (toKitchen && editedNote) {
         const printCompany = overrideCompanyId ?? getSession()?.companyId;
         noteTicket = {
           printed: hasLocalDb() && printCompany
@@ -2512,7 +2514,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       setView('orders');
       return;
     }
-    let newItems = printKitchen ? named(cart) : named(cart).map(oi => ({ ...oi, noPrint: true }));
+    let newItems = toKitchen ? named(cart) : named(cart).map(oi => ({ ...oi, noPrint: true }));
     const newNote = note.trim();
     setSubmitting(true);
     // The desktop till prints the kitchen ticket itself, before the write; see
@@ -2702,7 +2704,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       // the whole local table rather than from whatever is on screen.
       orderNumber: hasLocalDb() ? 0 : (orders[0]?.orderNumber ?? 0) + 1,
       tableNumber: orderType === 'masa' ? selectedTable! : 0,
-      items: printKitchen && !payNow ? named(cart) : named(cart).map(oi => ({ ...oi, noPrint: true })),
+      items: toKitchen && !payNow ? named(cart) : named(cart).map(oi => ({ ...oi, noPrint: true })),
       status: 'gözləyir',
       createdAt: new Date().toISOString(),
       sellerName: effectiveSeller,
@@ -2842,7 +2844,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   async function printShopReceipt(order: Order, cName: string): Promise<boolean> {
     const n = await realOrderNumber(order);
     const forPaper = n ? { ...order, orderNumber: n } : order;
-    return printReceipt(forPaper, cName, logoUrl, tableTitle(tables, order.tableNumber, order.tableName, halls), true, !!n);
+    return printReceipt(forPaper, cName, logoUrl, tableTitle(tables, order.tableNumber, order.tableName, halls), { delivery: deliveryOn }, !!n);
   }
 
   async function handleReprintReceipt(order: Order) {
@@ -3570,6 +3572,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // A shop sale is paid on the spot (lib/shop-mode): no note, no kitchen, and
   // the button opens payment. A delivery is still sent and paid later.
   const shopSale = paysNow({ kind, appending: !!appendOrderId, delivery: orderType === 'kuryer' });
+  // No Şərh per line and no Qeyd for the order in a shop (lib/shop-mode takesNotes).
+  const lineNote = takesNotes(kind) ? setLineNote : undefined;
   const cartToPayNow = cartToPay(cartTotal, cartCharge);
   // The line under the cart's title: where this order is going, with the
   // type's name in front when it is one the owner added ("Banket · Masa 5").
@@ -5101,21 +5105,21 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                     last line; once the list reaches the bottom it scrolls and the footer stays put. */}
                 <div className="min-h-0 overflow-y-auto px-4 py-3">
                   {appendOrder
-                    ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onSetNote={setLineNote} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} removing={removing} />
+                    ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onSetNote={lineNote} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} removing={removing} />
                     : cart.length === 0
                     ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
-                    : <CartItems cart={cart} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onSetNote={setLineNote} />
+                    : <CartItems cart={cart} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onSetNote={lineNote} />
                   }
                 </div>
                 <div className="px-4 py-3 border-t space-y-3">
-                  {!shopSale && <textarea
+                  {takesNotes(kind) && !shopSale && <textarea
                     placeholder="Qeyd..."
                     value={note}
                     onChange={e => setNote(e.target.value)}
                     rows={2}
                     className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary-400"
                   />}
-                  {!shopSale && <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />}
+                  {printsKitchen(kind) && !shopSale && <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />}
                   {returnMode && returnPanel()}
                   <CartTotal dishes={cartTotal} percent={cartPercent} charge={cartCharge} />
                   <button
@@ -5220,21 +5224,21 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
             </div>
             <div className="flex-1 overflow-y-auto px-4 py-3">
               {appendOrder
-                ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onSetNote={setLineNote} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} removing={removing} />
+                ? <CartItems cart={cart} existingItems={appendOrder.items} removedItems={appendOrder.removedItems} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onSetNote={lineNote} onDecrementExisting={oi => handleDecrementItem(appendOrder, oi)} addAgain={addAgainFor} onTakeBackOne={takeBackOneRemoval} pendingRemovals={pendingRemovals} removing={removing} />
                 : cart.length === 0
                 ? <p className="text-center text-stone-500 text-sm py-8">Boşdur</p>
-                : <CartItems cart={cart} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onSetNote={setLineNote} />
+                : <CartItems cart={cart} addToCart={addCartLineAgain} removeFromCart={removeFromCart} onSetNote={lineNote} />
               }
             </div>
             <div className="px-4 py-4 border-t space-y-3 bg-white shrink-0">
-              {!shopSale && <textarea
+              {takesNotes(kind) && !shopSale && <textarea
                 placeholder="Qeyd..."
                 value={note}
                 onChange={e => setNote(e.target.value)}
                 rows={2}
                 className="w-full text-sm border border-stone-200 rounded-xl px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-primary-400"
               />}
-              {!shopSale && <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />}
+              {printsKitchen(kind) && !shopSale && <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />}
                   {returnMode && returnPanel()}
               <CartTotal dishes={cartTotal} percent={cartPercent} charge={cartCharge} big />
               <button
