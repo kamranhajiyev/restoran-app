@@ -4,7 +4,7 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { byCompany, problemLine } from '@/lib/health-report';
+import { byCompany, problemLine, shownProblems } from '@/lib/health-report';
 
 const sql = readFileSync('supabase/migrations/20261012_health_reports.sql', 'utf8');
 
@@ -50,5 +50,32 @@ describe('the nightly report', () => {
     expect(groups.map(g => g.company)).toEqual(['İXLAS', 'Latte Art'].sort((a, b) => a.localeCompare(b)));
     const latte = groups.find(g => g.company === 'Latte Art')!;
     expect(latte.lines).toEqual(['№9 3 saatdan çoxdur açıqdır', '№12 içində məhsul yoxdur']);
+  });
+});
+
+// 2026-11-18: "Son 24 saatda sifariş yoxdur" said 24 even after 3 days, and the
+// 3-hour open order was noise (long table visits are normal).
+describe('the report since 20261116', () => {
+  const hours = readFileSync('supabase/migrations/20261116_health_report_hours.sql', 'utf8');
+
+  it('says the real hours since the last order', () => {
+    const p = { company: 'X', problem: 'no orders today', order_number: null, at: '2026-11-16T00:00:00Z' };
+    expect(problemLine({ ...p, count: 56 })).toBe('Son 56 saatda sifariş yoxdur — kassa işləyirmi?');
+    expect(problemLine(p)).toBe('Son 24 saatda sifariş yoxdur — kassa işləyirmi?');
+    expect(hours).toMatch(/'no orders today', null, l\.last_at,\s+floor\(extract\(epoch from now\(\) - l\.last_at\) \/ 3600\)/);
+  });
+
+  it('no longer shows an order open for 3 hours, old nights included', () => {
+    expect(hours).toMatch(/where problem <> 'open > 3h'/);
+    expect(shownProblems([
+      { company: 'A', problem: 'open > 3h', order_number: 9, at: '2026-11-16T00:00:00Z' },
+      { company: 'A', problem: 'no items', order_number: 12, at: '2026-11-16T00:00:00Z' },
+    ]).map(p => p.problem)).toEqual(['no items']);
+  });
+
+  it('stays closed to everyone but the superadmin', () => {
+    expect(hours).toMatch(/revoke all on function public\.health_check_restaurants\(\) from public, anon, authenticated/);
+    expect(hours).toMatch(/if auth\.uid\(\) is not null and not public\.is_superadmin\(\) then/);
+    expect(hours).toMatch(/revoke all on function public\.save_health_report\(\) from public, anon/);
   });
 });

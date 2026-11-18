@@ -19,7 +19,7 @@ import type { TillSettings } from './desktopPrint';
 import { cleanRules, type TillRules } from './till-rules';
 import { cleanOrderTypes, menuPriceColumn, orderTypeColumns, type OrderType } from './order-types';
 import { cleanServiceCharge, serviceChargeColumn, type ServiceCharge } from './service-charge';
-import type { HealthProblem, HealthReport } from './health-report';
+import { shownProblems, type HealthProblem, type HealthReport } from './health-report';
 import type { SplitRequestPart } from './split-bill';
 import type { AccountEdit, AccountKind, FinanceAccount, FinanceClosing, FinanceEntry, FinanceSource, FinanceTransaction, SourceKind } from './finance';
 import { cleanKind, newCompanyRow, type CompanyKind } from './company-kind';
@@ -2878,7 +2878,7 @@ export async function adoptOrphanTables(hallId: string): Promise<void> {
 // ─── Superadmin: Health report ────────────────────────────────────────────────
 
 function toHealthReport(r: { id: number; run_at: string; problems: unknown }): HealthReport {
-  return { id: r.id, runAt: r.run_at, problems: Array.isArray(r.problems) ? r.problems as HealthProblem[] : [] };
+  return { id: r.id, runAt: r.run_at, problems: Array.isArray(r.problems) ? shownProblems(r.problems as HealthProblem[]) : [] };
 }
 
 /** The last nights, newest first; null when the read failed (not "no problems"). */

@@ -28,9 +28,18 @@ export function problemLine(p: HealthProblem): string {
     case 'shift open > 24h':    return `Növbə 1 gündən çoxdur bağlanmayıb (açılıb: ${bakuDate(p.at)})`;
     case 'tickets not printed': return `${p.count ?? '?'} mətbəx çeki çap olunmayıb`;
     case 'expires soon':        return `Ödəniş müddəti bitir: ${bakuDate(p.at)}`;
-    case 'no orders today':     return 'Son 24 saatda sifariş yoxdur — kassa işləyirmi?';
+    // count = whole hours since the last order (20261116); older nights have none.
+    case 'no orders today':     return `Son ${p.count ?? 24} saatda sifariş yoxdur — kassa işləyirmi?`;
     default:                    return `${p.order_number ? order + ' ' : ''}${p.problem}`;
   }
+}
+
+/** Problems the report no longer shows (still in nights saved before 20261116). */
+const HIDDEN = new Set(['open > 3h']);
+
+/** A saved night's problems without the ones the report no longer shows. */
+export function shownProblems(problems: HealthProblem[]): HealthProblem[] {
+  return problems.filter(p => !HIDDEN.has(p.problem));
 }
 
 /** One block per restaurant, in name order, its problems oldest first. */
