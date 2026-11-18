@@ -22,7 +22,7 @@ import { cleanServiceCharge, serviceChargeColumn, type ServiceCharge } from './s
 import type { HealthProblem, HealthReport } from './health-report';
 import type { SplitRequestPart } from './split-bill';
 import type { AccountEdit, AccountKind, FinanceAccount, FinanceClosing, FinanceEntry, FinanceSource, FinanceTransaction, SourceKind } from './finance';
-import { cleanKind, kindForInsert, type CompanyKind } from './company-kind';
+import { cleanKind, newCompanyRow, type CompanyKind } from './company-kind';
 import { cleanBarcode } from './barcode';
 import { lowForTill, lowStock, type StockLimit } from './low-stock';
 import { orderLabel } from './order-label';
@@ -2899,7 +2899,7 @@ export async function fetchCompanies(): Promise<{ id: string; name: string; slug
 
 export async function createCompany(name: string, slug: string, kind: CompanyKind = 'restaurant'): Promise<void> {
   try {
-    await supabase.from('companies').insert({ name, slug, ...kindForInsert(kind) });
+    await supabase.from('companies').insert(newCompanyRow(name, slug, kind));
   } catch (e) { console.error('[createCompany]', e); }
 }
 

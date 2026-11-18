@@ -22,3 +22,18 @@ export function cleanKind(value: unknown): CompanyKind {
 export function kindForInsert(kind: CompanyKind): { kind?: 'shop' } {
   return kind === 'shop' ? { kind: 'shop' } : {};
 }
+
+/** How every new account starts (2026-11-18): table-change slips, Kassa and
+ *  Çatdırılma on, and the QR menu only to look at — guests cannot order before
+ *  the restaurant has set up its menu and printing. Set on the insert, not as
+ *  column defaults, so old accounts never change. */
+export const NEW_COMPANY_SETTINGS = {
+  print_table_move: true,
+  kassa_enabled: true,
+  delivery_enabled: true,
+  menu_only: true,
+} as const;
+
+export function newCompanyRow(name: string, slug: string, kind: CompanyKind) {
+  return { name, slug, ...NEW_COMPANY_SETTINGS, ...kindForInsert(kind) };
+}

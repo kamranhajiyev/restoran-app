@@ -5,7 +5,7 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { cleanKind, kindForInsert, KIND_OPTIONS } from '@/lib/company-kind';
+import { cleanKind, kindForInsert, KIND_OPTIONS, newCompanyRow } from '@/lib/company-kind';
 
 const store = readFileSync('lib/store.ts', 'utf8');
 const superadmin = readFileSync('app/superadmin/page.tsx', 'utf8');
@@ -25,7 +25,18 @@ describe('company kind', () => {
   it('sends nothing for a new restaurant, so creating one never needs the column', () => {
     expect(kindForInsert('restaurant')).toEqual({});
     expect(kindForInsert('shop')).toEqual({ kind: 'shop' });
-    expect(store).toMatch(/insert\(\{ name, slug, \.\.\.kindForInsert\(kind\) \}\)/);
+    expect(store).toMatch(/from\('companies'\)\.insert\(newCompanyRow\(name, slug, kind\)\)/);
+  });
+
+  it('starts a new account with table-change slips, Kassa, Çatdırılma on and the QR menu view-only', () => {
+    for (const kind of ['restaurant', 'shop'] as const) {
+      expect(newCompanyRow('A', 'a', kind)).toMatchObject({
+        name: 'A', slug: 'a',
+        print_table_move: true, kassa_enabled: true, delivery_enabled: true, menu_only: true,
+      });
+    }
+    expect(newCompanyRow('A', 'a', 'restaurant')).not.toHaveProperty('kind');
+    expect(newCompanyRow('A', 'a', 'shop').kind).toBe('shop');
   });
 
   it('is read apart from the company list, so a missing column cannot empty it', () => {
