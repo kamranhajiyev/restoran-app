@@ -18,12 +18,31 @@ function storage() {
   };
 }
 
-/** An Android WebView: PosAndroid, no WebUSB. `fail` makes every print refuse. */
-function android(opts: { fail?: string; found?: string[] } = {}) {
+type Found = { id: string; name: string }[];
+
+/**
+ * An Android WebView: PosAndroid, no WebUSB. `fail` makes every print refuse.
+ * `local` is an APK that also prints on USB and Bluetooth (LocalPrinters.java):
+ * the printers it finds, or the error Android gives instead.
+ */
+function android(opts: { fail?: string; found?: string[]; local?: { usb?: Found; bt?: Found | string } } = {}) {
   const prints: { ip: string; port: number; bytes: number[] }[] = [];
+  const local: { way: string; id: string; bytes: number[] }[] = [];
+  const reply = (id: string, error: string | null, result: string | null) =>
+    queueMicrotask(() => (win.__posAndroid as Answer)(id, error, result));
+  const localCalls = opts.local ? {
+    usbList: (id: string) => reply(id, null, JSON.stringify(opts.local!.usb ?? [])),
+    usbPrint: (id: string, key: string, b64: string) => { local.push({ way: 'usb', id: key, bytes: [...Buffer.from(b64, 'base64')] }); reply(id, opts.fail ?? null, null); },
+    btList: (id: string) => {
+      const bt = opts.local!.bt ?? [];
+      reply(id, typeof bt === 'string' ? bt : null, typeof bt === 'string' ? null : JSON.stringify(bt));
+    },
+    btPrint: (id: string, mac: string, b64: string) => { local.push({ way: 'bt', id: mac, bytes: [...Buffer.from(b64, 'base64')] }); reply(id, opts.fail ?? null, null); },
+  } : {};
   const win: Record<string, unknown> = {
     btoa: (s: string) => Buffer.from(s, 'binary').toString('base64'),
     PosAndroid: {
+      ...localCalls,
       print(id: string, ip: string, port: number, base64: string) {
         prints.push({ ip, port, bytes: [...Buffer.from(base64, 'base64')] });
         queueMicrotask(() => (win.__posAndroid as Answer)(id, opts.fail ?? null, null));
@@ -37,7 +56,7 @@ function android(opts: { fail?: string; found?: string[] } = {}) {
   vi.stubGlobal('localStorage', storage());
   vi.stubGlobal('navigator', {});
   vi.stubGlobal('alert', () => {});
-  return { win, prints };
+  return { win, prints, local };
 }
 
 const DRAWER = [0x1B, 0x70, 0x00, 0x19, 0xFF];
@@ -144,6 +163,72 @@ describe('the receipt printer on the Android till', () => {
     await printer.selectPrinter();
     await printer.printRawToUsb(new Uint8Array([7]));
     expect(prints).toEqual([{ ip: '192.168.1.60', port: 9100, bytes: [7] }]);
+  });
+});
+
+// Clopos prints on a phone's USB cable, Bluetooth, and a Sunmi's built-in
+// printer (a paired Bluetooth device); our APK could only reach Wi-Fi.
+describe('a USB or Bluetooth printer on the Android till', () => {
+  const WIFI = 0, USB_WAY = 1, BT = 2;
+
+  it('prints on the USB printer that was picked, and remembers it', async () => {
+    const { local, prints } = android({ local: { usb: [{ id: '0416:5011', name: 'XP-58' }] } });
+    const asked = await answering([USB_WAY]);
+    const printer = await import('@/lib/printer');
+    expect(await printer.connectPrinter()).toBe(false);
+    expect(await printer.selectPrinter()).toBe(true);
+    expect(asked).toEqual(['Çek printeri necə qoşulub?']);
+    expect(await printer.connectPrinter()).toBe(true);
+    expect(printer.getSavedPrinter()).toBe('XP-58');
+    expect(await printer.openCashDrawer()).toBe(true);
+    expect(local).toEqual([{ way: 'usb', id: '0416:5011', bytes: DRAWER }]);
+    expect(prints).toEqual([]);
+  });
+
+  it("asks which one when several are paired, and prints a Sunmi's built-in printer over Bluetooth", async () => {
+    const { local } = android({ local: { bt: [{ id: 'AA:BB:CC:DD:EE:FF', name: 'Headphones' }, { id: '00:11:22:33:44:55', name: 'InnerPrinter' }] } });
+    const asked = await answering([BT, 1]);
+    const printer = await import('@/lib/printer');
+    expect(await printer.selectPrinter()).toBe(true);
+    expect(asked).toEqual(['Çek printeri necə qoşulub?', 'Hansı printer?']);
+    await printer.printRawToUsb(new Uint8Array([7]));   // a sex set to "USB"
+    expect(local).toEqual([{ way: 'bt', id: '00:11:22:33:44:55', bytes: [7] }]);
+  });
+
+  it('says why when Bluetooth is off, and keeps the old printer', async () => {
+    android({ local: { bt: 'bluetooth off' } });
+    const asked = await answering([BT]);
+    const printer = await import('@/lib/printer');
+    expect(await printer.selectPrinter()).toBe(false);
+    expect(asked[1]).toMatch(/^Bluetooth söndürülüb/);
+    expect(await printer.connectPrinter()).toBe(false);
+  });
+
+  it('says no printer when nothing is on the cable', async () => {
+    android({ local: { usb: [] } });
+    const asked = await answering([USB_WAY]);
+    const printer = await import('@/lib/printer');
+    expect(await printer.selectPrinter()).toBe(false);
+    expect(asked[1]).toMatch(/^USB printer tapılmadı/);
+  });
+
+  it('goes back to Wi-Fi when the IP is picked again', async () => {
+    const { local, prints } = android({ local: { usb: [{ id: '0416:5011', name: 'XP-58' }] } });
+    await answering([USB_WAY, WIFI, '192.168.1.60']);
+    const printer = await import('@/lib/printer');
+    await printer.selectPrinter();
+    await printer.selectPrinter();
+    expect(await printer.openCashDrawer()).toBe(true);
+    expect(prints).toEqual([{ ip: '192.168.1.60', port: 9100, bytes: DRAWER }]);
+    expect(local).toEqual([]);
+  });
+
+  it('says it did not print when the printer is off, so the till offers to pick again', async () => {
+    android({ fail: 'USB printer not plugged in', local: { usb: [{ id: '0416:5011', name: 'XP-58' }] } });
+    await answering([USB_WAY]);
+    const printer = await import('@/lib/printer');
+    await printer.selectPrinter();
+    expect(await printer.openCashDrawer()).toBe(false);
   });
 });
 

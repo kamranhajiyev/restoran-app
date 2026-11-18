@@ -7,6 +7,13 @@
          without NFC still installs the till and approves with a PIN. -->
     <uses-permission android:name="android.permission.NFC" />
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <!-- A receipt printer on the phone itself (LocalPrinters): a USB cable, or
+         Bluetooth, which also reaches a Sunmi's built-in printer. Neither is
+         required: a phone without them still prints over Wi-Fi. -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- The updater's permission and receiver are in src/direct/: the Google Play app has neither. -->
 
     <application

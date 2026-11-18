@@ -13,6 +13,7 @@ import { dishesTotal, orderServiceCharge } from './service-charge';
 import { orderTotal } from '@/components/seller/order-format';
 import { tillDialogs } from './dialog-queue';
 import type { SaleReturn } from './returns';
+import type { LocalPrinter } from './desktopPrint';
 
 installAndroidBridge();
 
@@ -41,7 +42,8 @@ export function isWebUSBAvailable(): boolean {
 
 // The Android app has no WebUSB — its WebView leaves it out — but it can reach
 // the Wi-Fi. So there the receipt printer is an IP, kept on the device, and the
-// bytes go through the app's socket like a sex's ticket. The exe has both, so
+// bytes go through the app's socket like a sex's ticket — or, since the app
+// learned them, its own USB or Bluetooth (localReceipt below). The exe has both, so
 // the cashier picks USB or IP there, and the till remembers which.
 const RECEIPT_IP_KEY = 'restoran_receipt_printer_ip';
 const RECEIPT_KIND_KEY = 'restoran_receipt_printer_kind';
@@ -55,9 +57,97 @@ function wifiTill(): boolean {
   return hasSocket() && !isWebUSBAvailable();
 }
 
-/** The receipt goes to the saved IP: always on Android, on the exe when IP was picked. */
+// The Android app can also print on a printer on the device itself — a USB
+// cable or Bluetooth, which also reaches a Sunmi's built-in printer. Which one
+// is kept on the device, like the IP.
+type LocalKind = 'usb' | 'bt';
+const RECEIPT_DEVICE_KEY = 'restoran_receipt_printer_device';
+const RECEIPT_DEVICE_NAME_KEY = 'restoran_receipt_printer_name';
+
+/** On Android, the USB or Bluetooth receipt printer that was picked, if one was. */
+function localReceipt(): { kind: LocalKind; id: string; name: string } | null {
+  if (!wifiTill()) return null;
+  const n = window.posNative!;
+  try {
+    const kind = localStorage.getItem(RECEIPT_KIND_KEY);
+    const id = localStorage.getItem(RECEIPT_DEVICE_KEY);
+    if (!id) return null;
+    // An older APK without that way of printing goes back to the IP.
+    if (kind === 'usb' && n.printUsb) return { kind, id, name: localStorage.getItem(RECEIPT_DEVICE_NAME_KEY) ?? id };
+    if (kind === 'bt' && n.printBt) return { kind, id, name: localStorage.getItem(RECEIPT_DEVICE_NAME_KEY) ?? id };
+  } catch { /* no storage: the IP, as before */ }
+  return null;
+}
+
+function setLocalReceipt(p: { kind: LocalKind } & LocalPrinter | null): void {
+  try {
+    if (p) {
+      localStorage.setItem(RECEIPT_KIND_KEY, p.kind);
+      localStorage.setItem(RECEIPT_DEVICE_KEY, p.id);
+      localStorage.setItem(RECEIPT_DEVICE_NAME_KEY, p.name);
+    } else {
+      localStorage.removeItem(RECEIPT_KIND_KEY);
+      localStorage.removeItem(RECEIPT_DEVICE_KEY);
+      localStorage.removeItem(RECEIPT_DEVICE_NAME_KEY);
+    }
+  } catch { /* the choice lasts until the page closes */ }
+}
+
+/** What Android said, in words the cashier can act on. */
+function localError(kind: LocalKind, err: unknown): string {
+  const m = err instanceof Error ? err.message : String(err);
+  if (m.includes('bluetooth off')) return 'Bluetooth söndürülüb\n\nTelefonda Bluetooth-u yandırın.';
+  if (m.includes('permission refused')) return 'İcazə verilmədi\n\nYenidən «Yazıcı seç» basıb «İcazə ver» seçin.';
+  if (m.includes('no bluetooth')) return 'Bu cihazda Bluetooth yoxdur';
+  return `${kind === 'usb' ? 'USB' : 'Bluetooth'} printer tapılmadı\n\n${m}`;
+}
+
+/**
+ * "Yazıcı seç" on Android: Wi-Fi IP, USB or Bluetooth. An APK from before USB
+ * and Bluetooth goes straight to the IP, as it always did.
+ */
+async function pickAndroidPrinter(): Promise<boolean> {
+  const n = window.posNative!;
+  const ways: { label: string; kind: 'ip' | LocalKind }[] = [{ label: 'IP (şəbəkə)', kind: 'ip' }];
+  if (n.usbPrinters && n.printUsb) ways.push({ label: 'USB', kind: 'usb' });
+  if (n.btPrinters && n.printBt) ways.push({ label: 'Bluetooth', kind: 'bt' });
+  let kind: 'ip' | LocalKind = 'ip';
+  if (ways.length > 1) {
+    const pick = await tillDialogs.choose('Çek printeri necə qoşulub?', ways.map(w => w.label));
+    if (pick === null) return false;
+    kind = ways[pick].kind;
+  }
+  if (kind === 'ip') {
+    if (!(await askReceiptIp())) return false;
+    setLocalReceipt(null);
+    return true;
+  }
+  let found: LocalPrinter[];
+  try {
+    found = await (kind === 'usb' ? n.usbPrinters!() : n.btPrinters!());
+  } catch (err) {
+    await tillDialogs.alert(localError(kind, err));
+    return false;
+  }
+  if (found.length === 0) {
+    await tillDialogs.alert(kind === 'usb'
+      ? 'USB printer tapılmadı\n\nKabeli və printerin yandığını yoxlayın.'
+      : 'Cütləşdirilmiş Bluetooth printer yoxdur\n\nƏvvəlcə telefonun Bluetooth ayarlarında printeri cütləşdirin.');
+    return false;
+  }
+  let chosen = found[0];
+  if (found.length > 1) {
+    const pick = await tillDialogs.choose('Hansı printer?', found.map(f => f.name));
+    if (pick === null) return false;
+    chosen = found[pick];
+  }
+  setLocalReceipt({ kind, ...chosen });
+  return true;
+}
+
+/** The receipt goes to the saved IP: on Android unless USB or Bluetooth was picked, on the exe when IP was picked. */
 function ipReceipt(): boolean {
-  if (wifiTill()) return true;
+  if (wifiTill()) return localReceipt() === null;
   if (!hasSocket()) return false;
   try { return localStorage.getItem(RECEIPT_KIND_KEY) === 'ip'; } catch { return false; }
 }
@@ -152,6 +242,17 @@ let queue: Promise<unknown> = Promise.resolve();
 
 function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
   const next = queue.then(async () => {
+    const local = localReceipt();
+    if (local) {
+      const n = window.posNative!;
+      try {
+        await (local.kind === 'usb' ? n.printUsb!(local.id, bytes) : n.printBt!(local.id, bytes));
+        return true;
+      } catch (err) {
+        console.error('[Printer] Göndərmə xətası:', err);
+        return false;
+      }
+    }
     if (ipReceipt()) {
       const ip = receiptIp();
       if (!ip) return false;
@@ -195,6 +296,7 @@ export async function usbPrinterReady(): Promise<boolean> {
 }
 
 export async function connectPrinter(): Promise<boolean> {
+  if (localReceipt()) return true;
   if (ipReceipt()) return receiptIp() !== null;
   if (!isWebUSBAvailable()) return false;
   try {
@@ -217,7 +319,7 @@ export async function connectPrinter(): Promise<boolean> {
 }
 
 export async function selectPrinter(): Promise<boolean> {
-  if (wifiTill()) return askReceiptIp();
+  if (wifiTill()) return pickAndroidPrinter();
   if (!isWebUSBAvailable()) return false;
   // The exe can reach a LAN printer as well as a USB one, so the cashier says
   // which. The browser has no socket: USB only, no question. The USB picker
@@ -254,12 +356,16 @@ export async function disconnectPrinter(): Promise<void> {
 const printerName = (d: USBDevice) => d.productName || 'USB yazıcı';
 
 export async function getPrinterList(): Promise<string[]> {
+  const local = localReceipt();
+  if (local) return [local.name];
   if (ipReceipt()) return receiptIp() ? [receiptIp()!] : [];
   if (!isWebUSBAvailable()) return [];
   return (await navigator.usb.getDevices()).map(printerName);
 }
 
 export function getSavedPrinter(): string | null {
+  const local = localReceipt();
+  if (local) return local.name;
   if (ipReceipt()) return receiptIp();
   return device ? printerName(device) : null;
 }

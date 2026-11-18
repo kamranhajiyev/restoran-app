@@ -128,6 +128,12 @@ export interface PosNative {
   print(ip: string, port: number, bytes: Uint8Array, timeoutMs?: number): Promise<void>;
   /** Network printers answering on port 9100. Absent in installers before 0.3.7. */
   scanPrinters?(): Promise<string[]>;
+  // A receipt printer on the Android device itself (android/…/LocalPrinters.java).
+  // Android only, and absent in APKs built before it.
+  usbPrinters?(): Promise<LocalPrinter[]>;
+  printUsb?(id: string, bytes: Uint8Array): Promise<void>;
+  btPrinters?(): Promise<LocalPrinter[]>;
+  printBt?(id: string, bytes: Uint8Array): Promise<void>;
   // Absent when the shell was pointed at a website with --url=: that build is
   // the web app in a window and still reads through the API routes.
   till?: TillDb;
@@ -139,6 +145,12 @@ export interface PosNative {
     onReady(cb: (status: DesktopUpdate) => void): () => void;
     install(): Promise<void>;
   };
+}
+
+/** A USB printer ("vid:pid") or a paired Bluetooth one (its address), and its name. */
+export interface LocalPrinter {
+  id: string;
+  name: string;
 }
 
 /** A downloaded update. `required` when it was already waiting as the app opened. */

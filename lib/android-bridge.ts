@@ -16,7 +16,7 @@
 // app calls window.__posAndroid(id, error, result) when the socket is done.
 
 import { androidTill, type AndroidTillBridge } from './android-till';
-import type { DesktopUpdate, PosNative } from './desktopPrint';
+import type { DesktopUpdate, LocalPrinter, PosNative } from './desktopPrint';
 
 /** A new version, as android/…/Updater.java reports it. */
 export interface AndroidUpdateBridge {
@@ -30,6 +30,11 @@ export interface AndroidUpdateBridge {
 export interface AndroidPrinterBridge extends Partial<AndroidTillBridge>, Partial<AndroidUpdateBridge> {
   print(id: string, ip: string, port: number, base64: string, timeoutMs: number): void;
   scan(id: string): void;
+  // LocalPrinters.java; absent in APKs built before it.
+  usbList?(id: string): void;
+  usbPrint?(id: string, key: string, base64: string): void;
+  btList?(id: string): void;
+  btPrint?(id: string, mac: string, base64: string): void;
 }
 
 type Answer = (id: string, error: string | null, result: string | null) => void;
@@ -119,6 +124,22 @@ export function androidNative(win: AndroidWindow): PosNative {
     async scanPrinters() {
       return JSON.parse((await ask(id => bridge.scan(id))) ?? '[]') as string[];
     },
+    ...(typeof bridge.usbList === 'function' && typeof bridge.usbPrint === 'function' ? {
+      async usbPrinters() {
+        return JSON.parse((await ask(id => bridge.usbList!(id))) ?? '[]') as LocalPrinter[];
+      },
+      async printUsb(key: string, bytes: Uint8Array) {
+        await ask(id => bridge.usbPrint!(id, key, toBase64(bytes, s => win.btoa(s))));
+      },
+    } : {}),
+    ...(typeof bridge.btList === 'function' && typeof bridge.btPrint === 'function' ? {
+      async btPrinters() {
+        return JSON.parse((await ask(id => bridge.btList!(id))) ?? '[]') as LocalPrinter[];
+      },
+      async printBt(mac: string, bytes: Uint8Array) {
+        await ask(id => bridge.btPrint!(id, mac, toBase64(bytes, s => win.btoa(s))));
+      },
+    } : {}),
   };
 }
 

@@ -125,6 +125,7 @@ public class PrinterBridge {
 
     void shutdown() {
         printing.shutdownNow();
+        localPrinting.shutdownNow();
         knocking.shutdownNow();
         network.shutdownNow();
     }
@@ -260,6 +261,56 @@ public class PrinterBridge {
                 answer(id, "printer " + ip + ":" + port + ": " + e.getMessage(), null);
             }
         });
+    }
+
+    // ── A printer on the device itself: USB cable or Bluetooth (LocalPrinters) ──
+    // A queue of its own: a Bluetooth printer that is off takes seconds to fail,
+    // and the kitchen's LAN tickets must not wait behind it.
+
+    private final ExecutorService localPrinting = Executors.newSingleThreadExecutor();
+    private volatile LocalPrinters local;
+
+    void setLocalPrinters(LocalPrinters local) {
+        this.local = local;
+    }
+
+    LocalPrinters localPrinters() {
+        return local;
+    }
+
+    private interface LocalJob { String run(LocalPrinters p) throws Exception; }
+
+    private void onLocal(final String id, final LocalJob job) {
+        final LocalPrinters p = local;
+        if (!trusted) { answer(id, "not allowed on this page", null); return; }
+        if (p == null) { answer(id, "not available", null); return; }
+        localPrinting.execute(() -> {
+            try {
+                answer(id, null, job.run(p));
+            } catch (Exception e) {
+                answer(id, String.valueOf(e.getMessage()), null);
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public void usbList(final String id) {
+        onLocal(id, LocalPrinters::usbList);
+    }
+
+    @JavascriptInterface
+    public void usbPrint(final String id, final String key, final String base64) {
+        onLocal(id, p -> { p.usbPrint(key, Base64.decode(base64, Base64.DEFAULT)); return null; });
+    }
+
+    @JavascriptInterface
+    public void btList(final String id) {
+        onLocal(id, LocalPrinters::btList);
+    }
+
+    @JavascriptInterface
+    public void btPrint(final String id, final String mac, final String base64) {
+        onLocal(id, p -> { p.btPrint(mac, Base64.decode(base64, Base64.DEFAULT)); return null; });
     }
 
     @JavascriptInterface

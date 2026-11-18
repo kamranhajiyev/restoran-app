@@ -63,6 +63,7 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(printers, "PosAndroid");
         nfc = new NfcCards(this, web);
         printers.setNfc(nfc);
+        printers.setLocalPrinters(new LocalPrinters(this));
         // Only a release replaces itself; the debug build is Android Studio's,
         // and the Google Play app is updated by Play (null).
         if (!BuildConfig.DEBUG) updater = Updater.create(this, web);
@@ -187,6 +188,14 @@ public class MainActivity extends Activity {
     protected void onPause() {
         nfc.pause();
         super.onPause();
+    }
+
+    // The Bluetooth question LocalPrinters asked (Android 12+).
+    @Override
+    public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(code, permissions, results);
+        LocalPrinters p = printers.localPrinters();
+        if (code == LocalPrinters.BT_PERMISSION_REQUEST && p != null) p.permissionAnswered();
     }
 
     @Override
