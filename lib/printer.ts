@@ -92,21 +92,57 @@ async function askReceiptIp(): Promise<boolean> {
   return true;
 }
 
+// Only one program can hold a USB printer at a time. A till that kept it open
+// from page load locked every other one out: with the till open in Chrome, the
+// exe on the same PC could not print at all. So the printer is taken for each
+// print and let go straight after, as Poster does — `device` is only which
+// printer, never an open handle.
 async function openDevice(d: USBDevice): Promise<void> {
   await d.open();
-  if (d.configuration === null) await d.selectConfiguration(1);
-  for (const i of d.configuration?.interfaces ?? []) {
-    for (const alt of i.alternates) {
-      const out = alt.endpoints.find(e => e.direction === 'out' && e.type === 'bulk');
-      if (!out) continue;
-      await d.claimInterface(i.interfaceNumber);
-      iface = i.interfaceNumber;
-      endpoint = out.endpointNumber;
+  try {
+    if (d.configuration === null) await d.selectConfiguration(1);
+    for (const i of d.configuration?.interfaces ?? []) {
+      for (const alt of i.alternates) {
+        const out = alt.endpoints.find(e => e.direction === 'out' && e.type === 'bulk');
+        if (!out) continue;
+        await d.claimInterface(i.interfaceNumber);
+        iface = i.interfaceNumber;
+        endpoint = out.endpointNumber;
+        return;
+      }
+    }
+    throw new Error('USB cihazında çap kanalı yoxdur');
+  } catch (err) {
+    await d.close().catch(() => {});
+    throw err;
+  }
+}
+
+async function letGo(d: USBDevice): Promise<void> {
+  try { await d.releaseInterface(iface); } catch { /* not claimed */ }
+  try { await d.close(); } catch { /* already closed */ }
+}
+
+// The other program may be printing at this very moment: wait and try again.
+const USB_TRIES = 3;
+const USB_RETRY_MS = 400;
+
+async function printOnUsb(d: USBDevice, bytes: Uint8Array<ArrayBuffer>): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await openDevice(d);
+    } catch (err) {
+      if (attempt >= USB_TRIES) throw err;
+      await new Promise(r => setTimeout(r, USB_RETRY_MS));
+      continue;
+    }
+    try {
+      await d.transferOut(endpoint, bytes);
       return;
+    } finally {
+      await letGo(d);
     }
   }
-  await d.close();
-  throw new Error('USB cihazında çap kanalı yoxdur');
 }
 
 // One print at a time. A sex can print its tickets here too (see
@@ -132,7 +168,7 @@ function sendBytes(bytes: Uint8Array<ArrayBuffer>): Promise<boolean> {
       return false;
     }
     try {
-      await device.transferOut(endpoint, bytes);
+      await printOnUsb(device, bytes);
       return true;
     } catch (err) {
       console.error('[Printer] Göndərmə xətası:', err);
@@ -164,9 +200,11 @@ export async function connectPrinter(): Promise<boolean> {
   try {
     // getDevices() returns only what this site was already granted, which in
     // practice is the one printer someone picked — try each until one opens.
+    // Opened only to check it is a printer, then let go at once.
     for (const d of await navigator.usb.getDevices()) {
       try {
         await openDevice(d);
+        await letGo(d);
         device = d;
         return true;
       } catch { /* not a printer, or busy — try the next */ }
@@ -198,6 +236,7 @@ export async function selectPrinter(): Promise<boolean> {
   try {
     const d = await navigator.usb.requestDevice({ filters: USB_FILTERS });
     await openDevice(d);
+    await letGo(d);
     device = d;
     setIpReceipt(false);
     return true;
@@ -207,12 +246,8 @@ export async function selectPrinter(): Promise<boolean> {
   }
 }
 
+/** Forget the printer. It is never held between prints, so there is nothing to close. */
 export async function disconnectPrinter(): Promise<void> {
-  if (!device) return;
-  try {
-    await device.releaseInterface(iface);
-    await device.close();
-  } catch { /* ignore */ }
   device = null;
 }
 

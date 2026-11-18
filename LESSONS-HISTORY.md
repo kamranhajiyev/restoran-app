@@ -245,6 +245,16 @@ because it has no USB, but through window.prompt, which the exe does not have.
 Now "Yazıcı seç" in the exe asks "USB" or "IP (şəbəkə)" in the till's own popup,
 remembers the answer, and an IP printer prints over the same socket as the sexes.
 
+**Does this hold a device, file or port that another program on the same PC
+also needs?**
+Ani Coffeeshop, 2026-11-18: the till was open in Chrome and in the exe on the
+same PC. With WinUSB only one program can hold a USB printer, and the till
+opened it on page load and kept it until the page closed. Whichever opened
+first won; the other showed "Yazıcı seç" and printed nothing. Now
+`lib/printer.ts` opens the printer for each print and closes it straight after
+(as Poster's exe does), and waits and tries again if the other program is
+printing at that moment.
+
 ## 3. Money
 
 **Can the screen calculate a total from data that has not loaded yet?**

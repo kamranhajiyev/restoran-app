@@ -145,6 +145,11 @@ Guard: `lib/exe-focus`, `tests/exe-focus.test.ts`
 Customer, 2026-10-30: the sexes printed by IP, but the exe's receipt printer was USB only.
 Guard: `tests/android-print.test.ts` ("the exe")
 
+**Does this hold a device, file or port that another program on the same PC
+also needs? Take it for the job and let go after.**
+Ani Coffeeshop, 2026-11-18: the till open in Chrome held the USB printer, so the exe could not print.
+Guard: `tests/android-print.test.ts` ("shares the USB printer")
+
 **When data refreshes in the background, does a screen someone is reading start
 over?**
 Exe, 2026-10-08: every 5-minute pull reloaded Tarixçə back to the top.

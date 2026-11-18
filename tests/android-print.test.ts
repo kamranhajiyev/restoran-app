@@ -259,6 +259,45 @@ describe('the exe', () => {
     expect(asked).toEqual([]);
   });
 
+  // A USB printer allows one program at a time. The till held it from page
+  // load, so with the till open in Chrome the exe on the same PC could not print.
+  describe('shares the USB printer with another program on the PC', () => {
+    /** One USB printer, two programs: `other` is the second program holding it. */
+    function shared(sent: number[][]) {
+      const state = { mine: false, other: false };
+      const p = {
+        ...usbPrinter(sent),
+        open: async () => { if (state.other) throw new Error('Access denied'); state.mine = true; },
+        close: async () => { state.mine = false; },
+      };
+      return { p, state };
+    }
+
+    it('lets go of it after finding it and after every print', async () => {
+      const sent: number[][] = [];
+      const { p, state } = shared(sent);
+      exe({ usb: p });
+      const printer = await import('@/lib/printer');
+      expect(await printer.connectPrinter()).toBe(true);
+      expect(state.mine).toBe(false);
+      expect(await printer.openCashDrawer()).toBe(true);
+      expect(sent).toEqual([DRAWER]);
+      expect(state.mine).toBe(false);
+    });
+
+    it('waits for the other program to finish printing, then prints', async () => {
+      const sent: number[][] = [];
+      const { p, state } = shared(sent);
+      exe({ usb: p });
+      const printer = await import('@/lib/printer');
+      await printer.connectPrinter();
+      state.other = true;
+      setTimeout(() => { state.other = false; }, 100);
+      expect(await printer.openCashDrawer()).toBe(true);
+      expect(sent).toEqual([DRAWER]);
+    });
+  });
+
   it('still serves menu pictures from its own cache', async () => {
     vi.stubGlobal('window', { posNative: { isDesktop: true, till: {} } });
     const { tillImage } = await import('@/lib/till-image');
