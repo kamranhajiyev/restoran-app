@@ -83,6 +83,8 @@ export default function CustomerMenuPage({
   // Variant picker state
   const [variantItem, setVariantItem] = useState<MenuItem | null>(null);
   const [selectedVariant, setSelectedVariant] = useState<MenuItemVariant | null>(null);
+  // Yeməyin tərkibi (lib/ingredients): which card shows its whole text.
+  const [openIngredients, setOpenIngredients] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -123,6 +125,8 @@ export default function CustomerMenuPage({
         qrVisible: (r.qr_visible as boolean) ?? true,
         variants: (r.variants as MenuItem['variants'])?.map(v => ({ ...v, price: typed(v.price) })) ?? undefined,
         image: (r.image as string) ?? undefined,
+        // Yeməyin tərkibi (20261115_menu_ingredients.sql); absent on an older database.
+        ingredients: (r.ingredients as string | null) ?? undefined,
         setItems: lt.sets[r.id as string],
       }));
       // Two independent switches, both of which must be on for a customer to see it:
@@ -366,6 +370,17 @@ export default function CustomerMenuPage({
                 <div className="p-3 flex flex-col flex-1">
                   <p className="text-sm font-semibold text-gray-800">{item.name}</p>
                   {item.setItems && <p className="text-xs text-gray-500 mt-1">{guestSetLine(item.setItems, menuAll)}</p>}
+                  {item.ingredients && (
+                    <button
+                      type="button"
+                      onClick={() => setOpenIngredients(o => o === item.id ? null : item.id)}
+                      className="text-left mt-1"
+                    >
+                      <span className={`text-xs text-gray-500 ${openIngredients === item.id ? '' : 'line-clamp-2'}`}>
+                        <span className="font-medium text-gray-600">Tərkibi: </span>{item.ingredients}
+                      </span>
+                    </button>
+                  )}
                   <div className="flex-1" />
                   <p className="text-xs text-primary-800 font-bold mt-1">
                     {hasVariants

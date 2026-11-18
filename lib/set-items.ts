@@ -119,7 +119,7 @@ export function cleanSetItems(selfId: string, parts: { id: string; qty: number; 
 
 /** Columns a menu row may leave out: the screen did not load them (an older
  *  database, a list read without them), so the database keeps what it has. */
-const OPTIONAL_MENU_COLUMNS = ['set_items', 'barcode'] as const;
+const OPTIONAL_MENU_COLUMNS = ['set_items', 'barcode', 'ingredients'] as const;
 
 /** Menu rows for saving, in batches that each name the same columns. A dish
  *  whose set contents (or barcode) this screen never loaded has no such key,

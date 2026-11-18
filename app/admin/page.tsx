@@ -31,7 +31,7 @@ import {
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, moveTableToHall, fetchCompanySlug,
   fetchHalls, createHall, renameHall, deleteHall, saveHallOrder, adoptOrphanTables, fetchTablesOrNull, fetchHallsOrNull,
   fetchTablesEnabled, setTablesEnabled,
-  fetchDeliveryEnabled, setDeliveryEnabled, fetchCompanyKind, menuHasBarcode, fetchStockLimits, fetchBalances, fetchReturnsOrNull,
+  fetchDeliveryEnabled, setDeliveryEnabled, fetchCompanyKind, menuHasBarcode, menuHasIngredients, fetchStockLimits, fetchBalances, fetchReturnsOrNull,
   fetchQrEnabled, setQrEnabled, fetchMenuOnly, setMenuOnly,
   fetchKassaEnabled, setKassaEnabled,
   fetchCompanyProfile, updateMyCompanyProfile, fetchMyUsername, updateOwnerAccount, verifyPassword,
@@ -110,6 +110,7 @@ import { card as cardCls, Tag, Segmented, FilterSelect, DateRange, SearchBox, to
 import { groupByDay, dayHeading } from '@/lib/group-by-day';
 import type { CompanyKind } from '@/lib/company-kind';
 import { paidHow, SHOP_ADMIN } from '@/lib/shop-mode';
+import { INGREDIENTS_MAX, takesIngredients } from '@/lib/ingredients';
 import { lowStock } from '@/lib/low-stock';
 import { itemsAfterReturns, netOfReturns, type SaleReturn } from '@/lib/returns';
 import { barcodeOwner, cleanBarcode } from '@/lib/barcode';
@@ -154,7 +155,7 @@ type ChartPreset = 'bugün' | '7g' | '30g' | 'ay' | '6ay' | '1il';
 type FormVariant = { id: string; name: string; price: string; costPrice: string; barcode: string };
 
 function emptyForm(cat: string) {
-  return { name: '', price: '', costPrice: '', barcode: '', category: cat, image: '', stationId: '', kind: 'meal' as ItemKind, hasVariants: false, variants: [] as FormVariant[], modifierGroupIds: [] as string[], modifiersKnown: true, setItems: [] as { id: string; qty: string; variantId: string }[], setKnown: true };
+  return { name: '', price: '', costPrice: '', barcode: '', ingredients: '', category: cat, image: '', stationId: '', kind: 'meal' as ItemKind, hasVariants: false, variants: [] as FormVariant[], modifierGroupIds: [] as string[], modifiersKnown: true, setItems: [] as { id: string; qty: string; variantId: string }[], setKnown: true };
 }
 
 const AZ_MON_SHORT = ['Yan','Fev','Mar','Apr','May','İyn','İyl','Avq','Sen','Okt','Noy','Dek'];
@@ -614,6 +615,8 @@ function AdminPageContent() {
   // False on a database without the barcode column: the form neither shows
   // nor saves barcodes (lib/barcode).
   const [barcodesLoaded, setBarcodesLoaded] = useState(false);
+  // Yeməyin tərkibi (lib/ingredients): asked of the database, as the barcode is.
+  const [ingredientsLoaded, setIngredientsLoaded] = useState(false);
   // Az qalan mal (lib/low-stock): how many of a shop's products are below
   // their limit — the red number on Anbar. Read again on every tab change, so
   // a limit set in Anbar shows as soon as the owner looks elsewhere.
@@ -1075,6 +1078,7 @@ function AdminPageContent() {
       // Restoran or Mağaza (lib/company-kind): null = the read failed, keep it.
       fetchCompanyKind().then(k => { if (k) setKind(k); });
       menuHasBarcode().then(setBarcodesLoaded);
+      menuHasIngredients().then(setIngredientsLoaded);
     });
     return () => authSub.subscription.unsubscribe();
   }, [router]);
@@ -1697,6 +1701,7 @@ function AdminPageContent() {
       price: item.variants?.length ? '' : String(item.price),
       costPrice: item.costPrice ? String(item.costPrice) : '',
       barcode: item.barcode ?? '',
+      ingredients: item.ingredients ?? '',
       category: item.category,
       image: item.image ?? '',
       stationId: item.stationId ?? '',
@@ -1783,6 +1788,12 @@ function AdminPageContent() {
       // read without it): saveMenu then leaves it alone. With sizes, each size
       // carries its own and the product has none.
       barcode: barcodesLoaded ? (form.hasVariants ? null : (cleanBarcode(form.barcode) || null)) : undefined,
+      // Yeməyin tərkibi (lib/ingredients). Undefined when this database has no
+      // such column: saveMenu then leaves it alone. A shop has no box, and the
+      // form still carries what the dish had, so it is kept as it was.
+      // A dish whose text never loaded (undefined) is left alone too, so a save
+      // cannot wipe what the database holds.
+      ingredients: ingredientsLoaded && (!editingId || menu.find(m => m.id === editingId)?.ingredients !== undefined) ? form.ingredients : undefined,
       costPrice: form.costPrice ? parseFloat(form.costPrice) : undefined,
       image: form.image || undefined,
       stationId: form.stationId || null,
@@ -2394,6 +2405,20 @@ function AdminPageContent() {
             className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white"
             required />
         </div>
+
+        {/* Yeməyin tərkibi (lib/ingredients): restaurant only, shown to guests
+            on the QR / online menu and nowhere else. */}
+        {takesIngredients(kind) && ingredientsLoaded && (
+          <div>
+            <label className="text-xs font-medium text-stone-600 mb-1.5 block">
+              Yeməyin tərkibi <span className="text-stone-400 font-normal">— yalnız QR menyuda görünür</span>
+            </label>
+            <textarea placeholder="Məs: düyü, quzu əti, qaysı, kişmiş" rows={2} maxLength={INGREDIENTS_MAX}
+              value={form.ingredients}
+              onChange={e => setForm(f => ({ ...f, ingredients: e.target.value }))}
+              className="w-full border border-stone-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-700 bg-white resize-none" />
+          </div>
+        )}
 
         <div>
           <label className="text-xs font-medium text-stone-600 mb-1.5 block">Kateqoriya</label>

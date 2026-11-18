@@ -39,6 +39,20 @@ describe('the cost price', () => {
     expect(JSON.stringify(data)).not.toContain('2.35');
   });
 
+  it('the QR menu does carry Yeməyin tərkibi (20261115_menu_ingredients.sql)', async () => {
+    const text = 'Autotest tərkib: düyü, ət';
+    const upd = await ownerA.from('menu_items').update({ ingredients: text }).eq('id', dishId);
+    expect(upd.error).toBeNull();
+    const { data, error } = await anon.rpc('get_public_menu_items', { p_company_id: companyA.id });
+    expect(error).toBeNull();
+    const row = (data as { id: string; ingredients: string | null; cost_price: number | null }[]).find(r => r.id === dishId)!;
+    expect(row.ingredients).toBe(text);
+    expect(row.cost_price).toBeNull();
+    // Too long is refused by the database, not cut silently.
+    const long = await ownerA.from('menu_items').update({ ingredients: 'a'.repeat(501) }).eq('id', dishId);
+    expect(long.error).not.toBeNull();
+  });
+
   it('is never read straight from the database by a stranger or another restaurant', async () => {
     for (const who of [anon, ownerB]) {
       const { data } = await who.from('menu_items').select('cost_price').eq('id', dishId);

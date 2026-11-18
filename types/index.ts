@@ -96,6 +96,7 @@ export interface MenuItem {
   available: boolean;
   qrVisible?: boolean;         // absent = visible. QR menu only; the POS ignores it.
   barcode?: string | null;     // lib/barcode. Undefined = not read (an older database): saves leave it alone.
+  ingredients?: string | null; // Yeməyin tərkibi (lib/ingredients), QR menu only. Undefined = not read: saves leave it alone.
   variants?: MenuItemVariant[];
   costPrice?: number;
   image?: string;

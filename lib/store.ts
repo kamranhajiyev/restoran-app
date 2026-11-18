@@ -24,6 +24,7 @@ import type { SplitRequestPart } from './split-bill';
 import type { AccountEdit, AccountKind, FinanceAccount, FinanceClosing, FinanceEntry, FinanceSource, FinanceTransaction, SourceKind } from './finance';
 import { cleanKind, newCompanyRow, type CompanyKind } from './company-kind';
 import { cleanBarcode } from './barcode';
+import { cleanIngredients } from './ingredients';
 import { lowForTill, lowStock, type StockLimit } from './low-stock';
 import { orderLabel } from './order-label';
 import { parseReceiptLabel, returnMovement, returnRpcArgs, rowToReturn, saleForReturn, type ReturnReply, type ReturnRequest, type SaleForReturn, type SaleReturn } from './returns';
@@ -170,6 +171,7 @@ export async function fetchMenuOrNull(opts?: ReadOpts): Promise<MenuItem[] | nul
       qrVisible: r.qr_visible ?? true,
       // Undefined on a database without the column: saveMenu then leaves it out.
       barcode: r.barcode === undefined ? undefined : (r.barcode ?? null),
+      ingredients: r.ingredients === undefined ? undefined : (r.ingredients ?? null),
       variants: r.variants ?? undefined,
       costPrice: r.cost_price ? Number(r.cost_price) : undefined,
       image: r.image ?? undefined,
@@ -239,6 +241,8 @@ export async function saveMenu(menu: MenuItem[]): Promise<string | null> {
         // The same for the barcode (lib/barcode): undefined = not loaded or not
         // given (an import without the column), so the database keeps its own.
         ...(m.barcode !== undefined ? { barcode: cleanBarcode(m.barcode) || null } : {}),
+        // Yeməyin tərkibi, the same way: undefined = not loaded, the database keeps its own.
+        ...(m.ingredients !== undefined ? { ingredients: cleanIngredients(m.ingredients) } : {}),
       });
     }
     for (const batch of menuRowBatches(rows)) {
@@ -1656,6 +1660,15 @@ export async function fetchReturnsOrNull(from: string, to?: string): Promise<Sal
 export async function menuHasBarcode(): Promise<boolean> {
   try {
     const { error } = await supabase.from('menu_items').select('barcode').limit(1);
+    return !error;
+  } catch { return false; }
+}
+
+/** Whether menu_items has Yeməyin tərkibi (20261115_menu_ingredients.sql) —
+ *  asked of the database, not read off the dishes: a new restaurant has none. */
+export async function menuHasIngredients(): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('menu_items').select('ingredients').limit(1);
     return !error;
   } catch { return false; }
 }
