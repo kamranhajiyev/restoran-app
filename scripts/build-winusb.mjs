@@ -13,10 +13,11 @@
 // Anywhere else it says so and does nothing: the app runs without the file and
 // simply never offers to install the driver.
 
-import { cp, mkdir, rm, readdir, access } from 'node:fs/promises';
+import { cp, mkdir, rm, readdir, access, readFile, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { staticRuntime, sharedRuntimeImports } from './winusb/static-runtime.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WORK = path.join(ROOT, '.winusb-build');
@@ -50,6 +51,9 @@ async function main() {
   const pkg = path.join(WORK, 'package');
 
   await cp(path.join(ROOT, 'scripts', 'winusb', 'generator.cpp'), path.join(pkg, 'src', 'generator.cpp'));
+  // Built with its own copy of the C runtime, so it loads without Visual C++.
+  const gyp = path.join(pkg, 'binding.gyp');
+  await writeFile(gyp, staticRuntime(await readFile(gyp, 'utf8')));
 
   // --ignore-scripts: its install script would fetch the published prebuilt
   // binary, which is exactly the one that cannot do the job.
@@ -60,6 +64,10 @@ async function main() {
 
   const built = path.join(pkg, 'build', 'Release', 'Generator.node');
   await access(built);
+  const needs = sharedRuntimeImports(await readFile(built));
+  if (needs.length > 0) {
+    throw new Error(`Generator.node still needs ${needs.join(', ')} — it would not load on a PC without Visual C++`);
+  }
   await rm(OUT, { recursive: true, force: true });
   await mkdir(OUT, { recursive: true });
   await cp(built, path.join(OUT, 'Generator.node'));

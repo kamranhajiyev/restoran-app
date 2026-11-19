@@ -466,3 +466,12 @@ Kamran, Test Restoran, 2026-11-02: Tailwind 4 draws a `border-b` with no colour
 in the text colour, where Tailwind 3 used light grey; every such line on the
 order list came out black. A base rule in `app/globals.css` puts the grey back
 everywhere.
+
+**Does the exe need anything on the PC that a fresh Windows does not have?**
+Xan İzqara 2, 2026-11-19: on an ex-Clopos till, clicking USB showed no driver
+prompt and the kitchen ticket stayed "USB printer not connected".
+printer-driver.log said "load failed: The specified module could not be found"
+for winusb\Generator.node: winusb-driver-generator's binding.gyp builds it with
+/MD, so it needs VCRUNTIME140.dll, and that PC had no Visual C++. Installing
+vc_redist.x64 fixed the till; build-winusb now switches it to /MT and fails the
+build if the .node still imports the Visual C++ DLLs.

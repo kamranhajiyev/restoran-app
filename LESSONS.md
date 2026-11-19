@@ -150,6 +150,10 @@ also needs? Take it for the job and let go after.**
 Ani Coffeeshop, 2026-11-18: the till open in Chrome held the USB printer, so the exe could not print.
 Guard: `tests/android-print.test.ts` ("shares the USB printer")
 
+**Does the exe need anything on the PC that a fresh Windows does not have?**
+Xan İzqara 2, 2026-11-19: the driver tool needed Visual C++, so no driver prompt and the USB printer never paired.
+Guard: `tests/winusb-static-runtime.test.ts`
+
 **When data refreshes in the background, does a screen someone is reading start
 over?**
 Exe, 2026-10-08: every 5-minute pull reloaded Tarixçə back to the top.
