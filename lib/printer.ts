@@ -636,21 +636,27 @@ export async function printReceipt(order: Order, companyName: string, logoUrl?: 
 // Qaytarma (lib/returns): the paper the customer gets back with the money —
 // what came back, the minus total, how it was paid back, and who approved.
 export function returnReceiptLines(r: Pick<SaleReturn, 'total' | 'pay' | 'sellerName' | 'approvedBy' | 'createdAt' | 'lines'>, companyName: string, receipt: string | null): Line[] {
+  // Every line carries a style: its item columns do, and the new paper skips
+  // a line without one, so a mixed slip printed only the items (2026-11-22).
+  const date = formatDateTime(r.createdAt);
+  const [day, time = ''] = date.split(' ');
+  const number = receipt ? `Qəbz #${receipt}` : 'Qəbzsiz';
   const lines: Line[] = [
-    { text: companyName, big: true, center: true },
-    { text: '-'.repeat(WIDTH), center: true },
-    { text: 'QAYTARMA', big: true, center: true },
-    ...(receipt ? [{ text: `Qəbz #${receipt}`, center: true }] : [{ text: 'Qəbzsiz', center: true }]),
-    { text: formatDateTime(r.createdAt), center: true },
-    ...(r.sellerName ? [{ text: `Kassir: ${r.sellerName}`, center: true }] : []),
-    { text: '='.repeat(WIDTH) },
+    { text: companyName, big: true, center: true, style: { k: 'title' } },
+    { text: '-'.repeat(WIDTH), center: true, style: { k: 'hr' } },
+    { text: 'QAYTARMA', big: true, center: true, style: { k: 'bar', text: 'QAYTARMA' } },
+    { text: number, center: true, style: { k: 'kv', left: number, right: '', strong: true } },
+    { text: date, center: true, style: { k: 'kv', left: day, right: time } },
+    ...(r.sellerName ? [{ text: `Kassir: ${r.sellerName}`, center: true, style: { k: 'kv', left: 'Kassir', right: r.sellerName, strong: true } } as Line] : []),
+    { text: '='.repeat(WIDTH), style: { k: 'gap', h: 22 } },
   ];
   // Qaytarma is a shop's paper: the same columns as the sale it undoes.
   lines.push(...shopItemLines(r.lines));
-  lines.push({ text: '='.repeat(WIDTH) });
-  lines.push({ text: row('CƏMİ:', `-${plain(r.total)}`), big: true });
-  lines.push({ text: row(r.pay === 'cash' ? 'Nağd qaytarıldı:' : 'Karta qaytarıldı:', plain(r.total)) });
-  if (r.approvedBy) lines.push({ text: `Təsdiq: ${r.approvedBy}`, center: true });
+  lines.push({ text: '='.repeat(WIDTH), style: { k: 'hr' } });
+  lines.push({ text: row('CƏMİ:', `-${plain(r.total)}`), big: true, style: { k: 'total', left: 'CƏMİ', right: `−${manat(r.total)}` } });
+  const how = r.pay === 'cash' ? 'Nağd qaytarıldı' : 'Karta qaytarıldı';
+  lines.push(moneyLine(how, plain(r.total), manat(r.total)));
+  if (r.approvedBy) lines.push({ text: `Təsdiq: ${r.approvedBy}`, center: true, style: { k: 'kv', left: 'Təsdiq', right: r.approvedBy } });
   return lines;
 }
 

@@ -8,7 +8,7 @@ import type { Order } from '@/types';
 import type { Line } from '@/lib/raster';
 import { cleanLogo, wrapToWidth } from '@/lib/paper';
 import { cashGiven } from '@/lib/cash-given';
-import { billLines, receiptLines } from '@/lib/printer';
+import { billLines, receiptLines, returnReceiptLines } from '@/lib/printer';
 
 const drawn: Line[][] = [];
 vi.mock('@/lib/raster', async (orig) => ({
@@ -134,5 +134,21 @@ describe('wrapping by width', () => {
   });
   it('splits a word wider than the row', () => {
     expect(wrapToWidth('abcdefghij', 40, measure)).toEqual(['abcd', 'efgh', 'ij']);
+  });
+});
+
+// The new drawing skips a line without a style, so a paper that mixes the two
+// prints only half. The Qaytarma slip took the item columns with their styles
+// and lost its name, heading and minus total (2026-11-22, before any till had it).
+describe('every line of a paper is drawn', () => {
+  const unstyled = (lines: Line[]) => lines.some(l => l.style) ? lines.filter(l => !l.style).map(l => l.text) : [];
+  const back = { total: 2, pay: 'cash' as const, sellerName: 'Kamran', approvedBy: 'Menecer', createdAt: '2026-11-14T10:00:00Z',
+    lines: [{ menuItemId: 'cappy', variantId: null, name: 'Cappy', qty: 1, price: 2 }] };
+  it('receipt, bill, shop receipt and return slip', () => {
+    expect(unstyled(receiptLines(paid, 'Şəhrizad', 'Masa 6'))).toEqual([]);
+    expect(unstyled(billLines(paid, 'Şəhrizad', 'Masa 6'))).toEqual([]);
+    expect(unstyled(receiptLines(paid, 'Mağaza', undefined, { delivery: false }, true))).toEqual([]);
+    expect(unstyled(returnReceiptLines(back, 'Mağaza', '45'))).toEqual([]);
+    expect(unstyled(returnReceiptLines({ ...back, approvedBy: null, sellerName: null }, 'Mağaza', null))).toEqual([]);
   });
 });
