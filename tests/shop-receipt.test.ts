@@ -87,9 +87,9 @@ describe('a shop\'s receipt', () => {
     expect(lines[at + 1].text).toBe('Çörək N1 400qr Borodin');
   });
   it('writes money one way on a shop\'s paper; a restaurant\'s keeps its m', () => {
-    expect(texts(eggs, true).map(l => squash(l.text))).toEqual(expect.arrayContaining(['CƏMİ: 2.85', 'Nağd: 2.85']));
+    expect(texts(eggs, true).map(l => squash(l.text))).toEqual(expect.arrayContaining(['YEKUN: 2.85', 'Nağd: 2.85']));
     expect(texts(eggs, true).some(l => /\dm$/.test(l.text))).toBe(false);
-    expect(texts(eggs, false).map(l => squash(l.text))).toContain('CƏMİ: 2.85m');
+    expect(texts(eggs, false).map(l => squash(l.text))).toContain('YEKUN: 2.85m');
   });
   it('drops the zeros from a count', () => {
     expect(qtyText(10)).toBe('10 əd');
@@ -103,7 +103,7 @@ describe('a shop\'s receipt', () => {
     expect(t).toContain('Yumurta AG ED 2 əd 0.17 0.34');
   });
   it('ends in the number as a barcode only when the number is the server\'s', () => {
-    expect(texts(order, true, true).at(-1)).toEqual({ text: '100125', barcode: '100125' });
+    expect(texts(order, true, true).at(-1)).toMatchObject({ text: '100125', barcode: '100125' });
     expect(texts(order, true, false).some(l => l.barcode)).toBe(false);
     expect(texts({ ...order, orderNumber: 0 } as Order, true, true).some(l => l.barcode)).toBe(false);
   });

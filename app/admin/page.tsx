@@ -88,6 +88,7 @@ import SearchAdd from '@/components/SearchAdd';
 import QRCode from 'react-qr-code';
 import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printReceipt } from '@/lib/printer';
+import { cashGiven } from '@/lib/cash-given';
 import { isDesktop } from '@/lib/desktopPrint';
 import { orderLabel, orderSearchText } from '@/lib/order-label';
 import { copySpot, copyTableName, keepLocalTables, nextTableName, resizeTable, tableBox, tableRadius, tablesInHall, toggleShape } from '@/lib/floor-plan';
@@ -4080,7 +4081,7 @@ function AdminPageContent() {
                               )}
                               {(order.changeAmount ?? 0) > 0 && (
                                 <span className="text-xs text-stone-500">
-                                  💸 {((order.cashAmount ?? 0) + order.changeAmount!).toFixed(2)} alındı · {order.changeAmount!.toFixed(2)} qaytarıldı
+                                  💸 {cashGiven(order).toFixed(2)} alındı · {order.changeAmount!.toFixed(2)} qaytarıldı
                                 </span>
                               )}
                             </div>

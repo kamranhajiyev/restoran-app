@@ -6,7 +6,7 @@ import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { STACK } from '@/lib/raster';
-import { TICKET_FONT, TICKET_FONT_URL } from '@/lib/ticket-font';
+import { PAPER_FONT, PAPER_FONT_URL, TICKET_FONT, TICKET_FONT_URL } from '@/lib/ticket-font';
 
 // Whether a TrueType file maps a character, from its Windows Unicode cmap.
 function fontHas(file: Buffer, ch: string): boolean {
@@ -27,6 +27,11 @@ describe('ticket font', () => {
   it('ships a font with every Azerbaijani letter', () => {
     const file = readFileSync(join('public', TICKET_FONT_URL));
     for (const ch of 'əƏçÇğĞıİöÖşŞüÜ') expect(fontHas(file, ch), ch).toBe(true);
+  });
+
+  it('the paper\'s face has every Azerbaijani letter, ₼ and Russian too', () => {
+    const file = readFileSync(join('public', PAPER_FONT_URL));
+    for (const ch of 'əƏçÇğĞıİöÖşŞüÜ₼жЖщЩыЫ') expect(fontHas(file, ch), ch).toBe(true);
   });
 
   it('comes after the system faces, so the exe keeps its own, and before the generic ones', () => {
@@ -67,8 +72,8 @@ describe('ticketFontReady', () => {
     const { ticketFontReady } = await import('@/lib/ticket-font');
     await ticketFontReady();
     await ticketFontReady();
-    expect(made).toEqual([`${TICKET_FONT} url(${TICKET_FONT_URL})`]);
-    expect(added).toHaveLength(1);
+    expect(made).toEqual([`${TICKET_FONT} url(${TICKET_FONT_URL})`, `${PAPER_FONT} url(${PAPER_FONT_URL})`]);
+    expect(added).toHaveLength(2);
   });
 
   it('a failed load still prints, and the next ticket tries again', async () => {
@@ -79,7 +84,7 @@ describe('ticketFontReady', () => {
     await expect(ticketFontReady()).resolves.toBeUndefined();
     offline = false;
     await ticketFontReady();
-    expect(made).toHaveLength(2);
-    expect(added).toHaveLength(1);
+    expect(made).toHaveLength(4);
+    expect(added).toHaveLength(2);
   });
 });

@@ -8,6 +8,7 @@
 
 import { code128Modules } from './code128';
 import { TICKET_FONT } from './ticket-font';
+import { drawPaper, type Style } from './paper';
 
 const DOTS = 576;          // 72mm at 203dpi, the printer's full carriage
 const BYTES_PER_ROW = DOTS / 8;
@@ -38,6 +39,10 @@ export type Line = {
   // A hairline across the paper, one dot high: what parts a shop's items
   // without the weight of a row of dashes. `text` stays empty.
   rule?: boolean;
+  // How a receipt, bill or kitchen ticket draws this line (lib/paper.ts). A
+  // paper whose lines carry styles is drawn there in Montserrat; one without
+  // (the history report, a return slip) keeps the monospace columns below.
+  style?: Style;
 };
 
 const BARCODE_H = 80;
@@ -74,6 +79,10 @@ function logoBox(logo: Logo): { w: number; h: number } {
 export type Logo = CanvasImageSource & { width: number; height: number };
 
 export function rasterize(lines: Line[], cols: number, logo?: Logo | null): Uint8Array {
+  if (lines.some(l => l.style)) {
+    const { px, height } = drawPaper(lines, logo);
+    return toRaster(px, height);
+  }
   const box = logo ? logoBox(logo) : null;
   const height = lines.reduce((h, l) => h + lineHeight(l), PAD_TOP * 2)
     + (box ? box.h + LOGO_GAP : 0);

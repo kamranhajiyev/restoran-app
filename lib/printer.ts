@@ -11,6 +11,7 @@ import { installAndroidBridge } from './android-bridge';
 import { formatDateTime } from './dates';
 import { dishesTotal, orderServiceCharge } from './service-charge';
 import { orderTotal } from '@/components/seller/order-format';
+import { cashGiven } from './cash-given';
 import { tillDialogs } from './dialog-queue';
 import type { SaleReturn } from './returns';
 import type { LocalPrinter } from './desktopPrint';
@@ -391,10 +392,10 @@ export interface ShopPaper { delivery: boolean }
 function head(order: Order, companyName: string, heading?: string, table?: string, shop?: ShopPaper): Line[] {
   const date = formatDateTime(order.createdAt);
   const lines: Line[] = [
-    { text: companyName, big: true, center: true },
-    { text: '-'.repeat(WIDTH), center: true },
+    { text: companyName, big: true, center: true, style: { k: 'title' } },
+    { text: '-'.repeat(WIDTH), center: true, style: { k: 'hr' } },
   ];
-  if (heading) lines.push({ text: heading, big: true, center: true });
+  if (heading) lines.push({ text: heading, big: true, center: true, style: { k: 'bar', text: heading } });
   // The table's name, not its id — see tableTitle in lib/order-place.ts. The id
   // is only there for a caller that has no table list to look it up in.
   // The same words as the till's screen (PLACE_WORDS).
@@ -403,14 +404,18 @@ function head(order: Order, companyName: string, heading?: string, table?: strin
     : order.courierId ? PLACE_WORDS.delivery
     : shop ? (shop.delivery ? PLACE_WORDS.shop : '')
     : PLACE_WORDS.takeaway;
+  // Drawn as three rows of two: number | place, day | time, waiter | name.
+  const [day, time = ''] = date.split(' ');
+  const who = shop ? 'Kassir' : 'Ofisiant';
+  const number = `${shop ? 'Qəbz' : 'Sifariş'} #${orderLabel(order)}`;
   lines.push(
     // The label, not the bare number: on a second till these are the only two
     // characters telling this receipt apart from the other №45 in the room.
-    { text: `${shop ? 'Qəbz' : 'Sifariş'} #${orderLabel(order)}`, center: true },
-    ...(place ? [{ text: place, center: true }] : []),
-    { text: date, center: true },
-    { text: `${shop ? 'Kassir' : 'Ofisiant'}: ${order.sellerName}`, center: true },
-    { text: '='.repeat(WIDTH) },
+    { text: number, center: true, style: { k: 'kv', left: number, right: place, strong: true } },
+    ...(place ? [{ text: place, center: true, style: { k: 'skip' } } as Line] : []),
+    { text: date, center: true, style: { k: 'kv', left: day, right: time } },
+    { text: `${who}: ${order.sellerName}`, center: true, style: { k: 'kv', left: who, right: order.sellerName, strong: true } },
+    { text: '='.repeat(WIDTH), style: { k: 'gap', h: 22 } },
   );
   return lines;
 }
@@ -426,8 +431,9 @@ export function itemLines(order: Order): Line[] {
   return shopItemLines(orderShopRows(order), 'Məhsul');
 }
 
-/** A shop's line: what it is, how many, the price of one. */
-export interface ShopRow { name: string; qty: number; price: number }
+/** A shop's line: what it is, how many, the price of one. `base` and `note`
+ *  are the name split from its modifier, so the paper sets the note in italics. */
+export interface ShopRow { name: string; qty: number; price: number; base?: string; note?: string }
 
 // "10 əd", not "10.000 əd": the zeros a scale would print say nothing for a
 // count. Kept to three places for the kq selling SHOP-MODE.md plans.
@@ -449,18 +455,22 @@ const plain = (n: number) => n.toFixed(2);
 // move. A hairline between items says which numbers are whose.
 export function shopItemLines(rows: ShopRow[], nameHead = 'Malın adı'): Line[] {
   const lines: Line[] = [
-    { text: nameHead.padEnd(NAME_COL) + 'Miqdar'.padStart(QTY_COL) + 'Qiymət'.padStart(MONEY_COL) + 'Toplam'.padStart(MONEY_COL) },
-    { text: '-'.repeat(WIDTH) },
+    { text: nameHead.padEnd(NAME_COL) + 'Miqdar'.padStart(QTY_COL) + 'Qiymət'.padStart(MONEY_COL) + 'Toplam'.padStart(MONEY_COL),
+      style: { k: 'cols', head: true, cells: [nameHead, 'Miqdar', 'Qiymət', 'Toplam'] } },
+    { text: '-'.repeat(WIDTH), style: { k: 'skip' } },
   ];
   rows.forEach((r, i) => {
-    if (i > 0) lines.push({ text: '', rule: true });
+    // The new paper parts items by space alone (2026-11-20).
+    if (i > 0) lines.push({ text: '', rule: true, style: { k: 'skip' } });
     const nums = qtyText(r.qty).padStart(QTY_COL) + plain(r.price).padStart(MONEY_COL) + plain(r.price * r.qty).padStart(MONEY_COL);
     const name = wrap(r.name, WIDTH);
     const last = name[name.length - 1];
     // One space at least between a name and its quantity.
     const shares = last.length < NAME_COL;
-    for (const w of shares ? name.slice(0, -1) : name) lines.push({ text: w });
-    lines.push({ text: (shares ? last : '').padEnd(NAME_COL) + nums });
+    const texts = [...(shares ? name.slice(0, -1) : name), (shares ? last : '').padEnd(NAME_COL) + nums];
+    // The whole item is drawn by its first line; the rest are its plain wording.
+    const cols: Line['style'] = { k: 'cols', cells: [r.base ?? r.name, String(Number(r.qty.toFixed(3))), plain(r.price), plain(r.price * r.qty)], note: r.note };
+    texts.forEach((text, n) => lines.push({ text, style: n === 0 ? cols : { k: 'skip' } }));
   });
   return lines;
 }
@@ -472,6 +482,8 @@ export function orderShopRows(order: Order): ShopRow[] {
     name: item.modifiers ? `${item.menuItem.name} (${item.modifiers})` : item.menuItem.name,
     qty: quantity,
     price: item.menuItem.price,
+    base: item.menuItem.name,
+    note: item.modifiers || undefined,
   }));
 }
 
@@ -500,17 +512,36 @@ export function billLines(order: Order, companyName: string, table?: string): Li
 
   const lines: Line[] = [...head(order, companyName, 'HESAB', table), ...itemLines(order)];
 
-  lines.push({ text: '='.repeat(WIDTH) });
+  lines.push({ text: '='.repeat(WIDTH), style: { k: 'hr' } });
   // A discount agreed before payment still belongs on the bill — the customer
   // is being asked for the net figure, not the menu one.
-  if (service > 0 || discount > 0) lines.push({ text: row('Cəmi:', money(gross)) });
+  if (service > 0 || discount > 0) lines.push(moneyLine('Cəmi', money(gross), manat(gross)));
   if (service > 0) lines.push(serviceLine(order, service));
-  if (discount > 0) lines.push({ text: row('Endirim:', `-${money(discount)}`) });
+  if (discount > 0) lines.push(moneyLine('Endirim', `-${money(discount)}`, `−${manat(discount)}`));
   // orderTotal, as the payment sheet will ask for
-  lines.push({ text: row('ÖDƏNİLƏCƏK:', money(orderTotal(order))), big: true });
-  lines.push({ text: '-'.repeat(WIDTH), center: true });
-  lines.push({ text: 'Təşəkkürlər!', center: true });
+  const due = orderTotal(order);
+  lines.push({ text: row('ÖDƏNİLƏCƏK:', money(due)), big: true, style: { k: 'total', left: 'ÖDƏNİLƏCƏK', right: manat(due) } });
+  lines.push(...foot());
   return lines;
+}
+
+// Money on the new paper: the manat sign, not the "m" the monospace face needed.
+const manat = (n: number) => `${n.toFixed(2)} ₼`;
+
+// A label with its amount on the right. `text` keeps the old wording.
+function moneyLine(label: string, amount: string, shown: string, strong = false): Line {
+  return { text: row(`${label}:`, amount), style: { k: 'kv', left: label, right: shown, strong } };
+}
+
+// What every bill and receipt ends with: thanks, and who made the till — one
+// small line, the way other systems sign their paper (2026-11-20).
+export const POWERED_BY = 'Powered by possiblle';
+function foot(): Line[] {
+  return [
+    { text: '-'.repeat(WIDTH), center: true, style: { k: 'hr' } },
+    { text: 'Təşəkkürlər!', center: true, style: { k: 'center', size: 28, weight: 700 } },
+    { text: POWERED_BY, center: true, style: { k: 'center', size: 15, weight: 600 } },
+  ];
 }
 
 export async function printBill(order: Order, companyName: string, logoUrl?: string | null, table?: string): Promise<boolean> {
@@ -526,7 +557,7 @@ export async function printBill(order: Order, companyName: string, logoUrl?: str
 // Xidmət haqqı on its own line, unlike an order type's price change: the guest
 // is meant to see why the total is more than the dishes (lib/service-charge).
 function serviceLine(order: Order, service: number, cur = money): Line {
-  return { text: row(`Xidmət haqqı (${order.serviceChargePercent}%):`, cur(service)) };
+  return moneyLine(`Xidmət haqqı (${order.serviceChargePercent}%)`, cur(service), manat(service));
 }
 
 // `barcode`: the order's number is the server's, not the till's guess, so the
@@ -545,44 +576,49 @@ export function receiptLines(order: Order, companyName: string, table?: string, 
     // Both print Miqdar · Qiymət · Toplam; only the first column's name differs.
   ];
 
-  lines.push({ text: '='.repeat(WIDTH) });
+  lines.push({ text: '='.repeat(WIDTH), style: { k: 'hr' } });
 
   const cur = shop ? plain : money;
   const discount = order.discountAmount ?? 0;
   const service = orderServiceCharge(order);
   if (service > 0) {
-    lines.push({ text: row('Cəmi:', cur(dishesTotal(order.items))) });
+    const dishes = dishesTotal(order.items);
+    lines.push(moneyLine('Cəmi', cur(dishes), manat(dishes)));
     lines.push(serviceLine(order, service, cur));
   } else if (discount > 0) {
-    lines.push({ text: row('Cəmi:', cur(total)) });
+    lines.push(moneyLine('Cəmi', cur(total), manat(total)));
   }
   if (discount > 0) {
     // The percentage the cashier typed isn't stored — only the manat it came
     // to — so it's read back off the pre-discount total.
     const pct = total > 0 ? Math.round((discount / total) * 100) : 0;
     const label = order.discountType === '%' ? `Endirim (${pct}%)` : 'Endirim';
-    lines.push({ text: row(label, `-${cur(discount)}`) });
+    lines.push({ text: row(label, `-${cur(discount)}`), style: { k: 'kv', left: label, right: `−${manat(discount)}` } });
   }
 
-  lines.push({ text: row('CƏMİ:', cur(paid)), big: true });
+  // YEKUN, not a second "Cəmi": the guest read two Cəmi with two different
+  // amounts and could not tell which one was paid (2026-11-20).
+  lines.push({ text: row('YEKUN:', cur(paid)), big: true, style: { k: 'total', left: 'YEKUN', right: manat(paid) } });
 
-  if ((order.cashAmount ?? 0) > 0) lines.push({ text: row('Nağd:', cur(order.cashAmount!)) });
-  if ((order.cardAmount ?? 0) > 0) lines.push({ text: row('Kart:', cur(order.cardAmount!)) });
-  if ((order.changeAmount ?? 0) > 0) lines.push({ text: row('Qaytarıldı:', cur(order.changeAmount!)) });
+  // The cash the guest handed over, not what the till kept: Nağd + Kart −
+  // Qaytarıldı now comes to the total in the guest's head (lib/cash-given).
+  const given = cashGiven(order);
+  if (given > 0) lines.push(moneyLine('Nağd', cur(given), manat(given)));
+  if ((order.cardAmount ?? 0) > 0) lines.push(moneyLine('Kart', cur(order.cardAmount!), manat(order.cardAmount!)));
+  if ((order.changeAmount ?? 0) > 0) lines.push(moneyLine('Qaytarıldı', cur(order.changeAmount!), manat(order.changeAmount!)));
   // The guest has not paid yet — the rider collects at the door. Saying so on
   // the slip is the difference between a receipt and a demand for money.
   if (debt > 0) {
-    lines.push({ text: row('ÖDƏNİLMƏYİB:', cur(debt)) });
-    lines.push({ text: 'Kuryer yığacaq', center: true });
+    lines.push(moneyLine('ÖDƏNİLMƏYİB', cur(debt), manat(debt), true));
+    lines.push({ text: 'Kuryer yığacaq', center: true, style: { k: 'center', weight: 700 } });
   }
 
-  lines.push({ text: '-'.repeat(WIDTH), center: true });
-  lines.push({ text: 'Təşəkkürlər!', center: true });
+  lines.push(...foot());
   // A shop's receipt ends in its number as a barcode: a return finds the sale
   // with one scan (Qaytarma). Not before the server numbered it (0).
   if (shop && barcode && order.orderNumber) {
-    lines.push({ text: '' });
-    lines.push({ text: orderLabel(order), barcode: orderLabel(order) });
+    lines.push({ text: '', style: { k: 'gap' } });
+    lines.push({ text: orderLabel(order), barcode: orderLabel(order), style: { k: 'gap', h: 0 } });
   }
   return lines;
 }

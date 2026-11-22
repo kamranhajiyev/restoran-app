@@ -20,8 +20,10 @@ const order = {
 describe('the HESAB bill', () => {
   it('ends with Təşəkkürlər!', async () => {
     const { billLines } = await import('@/lib/printer');
+    const { POWERED_BY } = await import('@/lib/printer');
     const lines = billLines(order, 'Test Restoran', 'Masa 3');
-    expect(lines[lines.length - 1].text).toBe('Təşəkkürlər!');
+    // Only the small "Powered by" line comes after the thanks (2026-11-20).
+    expect(lines.slice(-2).map(l => l.text)).toEqual(['Təşəkkürlər!', POWERED_BY]);
   });
 
   it('is still a HESAB, not a receipt', async () => {

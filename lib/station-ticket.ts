@@ -11,7 +11,8 @@
 // agent/ runs in Node with no DOM and keeps using the character path. Both
 // build the same layout, so a change to one belongs in the other.
 
-import { ESC, placeLines, WIDTH, itemRows, partRows, ruleText, sizedNoteRows, stringToBytes, ticketRows, wrap, type TicketPayload } from './escpos';
+import { ESC, placeLines, WIDTH, itemRows, partRows, ruleText, stringToBytes, ticketRows, wrap, type TicketPayload } from './escpos';
+import { noteLines } from './order-note';
 import { rasterize, type Line } from './raster';
 import { ticketFontReady } from './ticket-font';
 import { formatDayMonthTime } from './dates';
@@ -47,49 +48,75 @@ export async function buildStationTicketRaster(p: TicketPayload, tableName?: (id
   const place = (t: number) => (tableName ? tableName(t) : `Masa ${t}`);
 
   const when = formatDayMonthTime(p.at);
+  const skip = { k: 'skip' } as const;
 
-  const lines: Line[] = [{ text: p.station, big: true, center: true }];
+  // Station and time on one row at the top; the heading under them in white on
+  // black, so new, extra and cancelled read apart from across the kitchen.
+  const lines: Line[] = [{ text: p.station, big: true, center: true,
+    style: { k: 'kv', left: p.station.toLocaleUpperCase('az'), right: when, strong: true } }];
 
   // A cancellation must be unmistakable at a glance across a hot kitchen.
   if (p.kind === 'cancel' || p.kind === 'move' || p.kind === 'note') {
-    lines.push({ text: `*** ${HEADING[p.kind]} ***`, big: true, center: true });
+    lines.push({ text: `*** ${HEADING[p.kind]} ***`, big: true, center: true, style: { k: 'bar', text: HEADING[p.kind] } });
   } else {
-    lines.push({ text: HEADING[p.kind], center: true });
+    lines.push({ text: HEADING[p.kind], center: true, style: { k: 'bar', text: HEADING[p.kind] } });
   }
 
   const number = `Sifariş #${p.orderNumber ?? '-'}`;
+  const places = placeLines(p, place);
+  // Where the food goes is what the cook needs most, so it is the biggest line.
+  lines.push(...places.map((text, i): Line => ({ text, style: { k: 'center', size: i === 0 ? 44 : 24, weight: 800 } })));
   lines.push(
-    { text: '-'.repeat(WIDTH), center: true },
-    p.kind === 'note' ? { text: number, scale: NOTE_NUMBER_SCALE } : { text: number },
+    { text: '-'.repeat(WIDTH), center: true, style: skip },
+    p.kind === 'note' ? { text: number, scale: NOTE_NUMBER_SCALE, style: { k: 'center', size: 40, weight: 800 } }
+      : { text: number, style: { k: 'center', size: 24, weight: 700 } },
   );
 
-  lines.push(...placeLines(p, place).map(text => ({ text })));
-
-  lines.push({ text: when });
-  if (p.waiter) lines.push({ text: `Ofisiant: ${p.waiter}` });
-  lines.push({ text: '='.repeat(WIDTH) });
+  lines.push({ text: when, style: skip });
+  if (p.waiter) lines.push({ text: `Ofisiant: ${p.waiter}`, style: { k: 'center', size: 20 } });
+  lines.push({ text: '='.repeat(WIDTH), style: { k: 'hr', heavy: true } });
 
   // A note slip has no items: the note is the whole message, so it takes their
   // place, in the same large type.
   if (p.kind === 'note') {
-    for (const row of wrap(p.note ?? '', WIDTH)) lines.push({ text: row, big: true });
+    wrap(p.note ?? '', WIDTH).forEach((row, n) => lines.push({ text: row, big: true,
+      style: n === 0 ? { k: 'text', size: 30, weight: 700, whole: p.note ?? '' } : skip }));
   }
 
-  // Sets as blocks, then plain dishes (escpos ticketRows). The whole raster is
-  // bold already; a set stands out by its capitals and its parts' indent.
+  // Sets as blocks, then plain dishes (escpos ticketRows). A set stands out by
+  // its capitals and its parts listed under it.
+  let first = true;
   for (const r of ticketRows(p.items)) {
     // Quantity first and doubled in size: from arm's length that's the only
     // number a cook needs to read correctly.
-    if (r.kind === 'rule') { lines.push({ text: ruleText(r.heavy) }); continue; }
-    const rows = r.kind === 'part' ? partRows(r.qty, r.name, ITEM_COLS) : itemRows(`${r.qty}x`, r.name, ITEM_COLS);
-    for (const row of rows) lines.push({ text: row, scale: ITEM_SCALE });
-    if (r.kind !== 'part' && r.modifiers) lines.push({ text: `    ${r.modifiers}` });
+    if (r.kind === 'rule') { lines.push({ text: ruleText(r.heavy), style: { k: 'hr', heavy: r.heavy } }); first = true; continue; }
+    if (r.kind === 'part') {
+      // Parts are wrapped by the paper under their dot, beside their set.
+      partRows(r.qty, r.name, ITEM_COLS).forEach((row, n) => lines.push({ text: row, scale: ITEM_SCALE,
+        style: n === 0 ? { k: 'mod', lead: '· ', text: `${r.qty}x ${r.name}` } : skip }));
+      continue;
+    }
+    // A hairline between dishes says which notes are whose.
+    if (!first) lines.push({ text: '', style: { k: 'hr' } });
+    first = false;
+    itemRows(`${r.qty}x`, r.name, ITEM_COLS).forEach((row, n) => lines.push({ text: row, scale: ITEM_SCALE,
+      style: n === 0 ? { k: 'item', qty: `${r.qty}x`, name: r.name } : skip }));
+    if (r.modifiers) lines.push({ text: `    ${r.modifiers}`, style: { k: 'mod', lead: '→ ', text: r.modifiers } });
   }
 
-  lines.push({ text: '='.repeat(WIDTH) });
+  lines.push({ text: '='.repeat(WIDTH), style: { k: 'hr', heavy: true } });
+  // The guest's words in a box at the foot: Qeyd larger than phone and address.
+  // The same rows as sizedNoteRows, each note line drawn whole by its first row.
   if (p.note && p.kind !== 'note') {
-    for (const row of sizedNoteRows(p.note)) {
-      lines.push(row.big ? { text: row.text, scale: QEYD_SCALE } : { text: row.text });
+    for (const line of noteLines(p.note)) {
+      const big = line.startsWith('Qeyd:');
+      wrap(line, WIDTH).forEach((row, n) => {
+        // Rows after the first are drawn already, but stay in the box's run.
+        const style = n > 0 ? { k: 'text', box: true, cont: true } as const
+          : big ? { k: 'text', size: 26, weight: 700, box: true, whole: line } as const
+          : { k: 'text', size: 20, weight: 600, box: true, whole: line } as const;
+        lines.push(big ? { text: row, scale: QEYD_SCALE, style } : { text: row, style });
+      });
     }
   }
 

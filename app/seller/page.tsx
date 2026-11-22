@@ -34,6 +34,7 @@ import { historyTotals, ordersOfShift, shiftLoadWindow, shiftTotals, shiftsOfDay
 import { CashShift, Category, Courier, CourierPayMethod, CourierPendingOrder, Hall, MenuItem, ModifierGroup, Order, OrderItem, OrderStatus, RestaurantTable, SelectedModifier, ShiftMovement, Staff, Station, isOrderOpen } from '@/types';
 import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, printHistoryReport, openCashDrawer, printReturnReceipt } from '@/lib/printer';
+import { cashGiven } from '@/lib/cash-given';
 import { historyReport, historyReportLines } from '@/lib/history-report';
 import { itemSales, itemSalesLines, shownSizes } from '@/lib/item-sales';
 import { installExeFocusFix } from '@/lib/exe-focus';
@@ -4479,7 +4480,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                                   )}
                                   {(order.changeAmount ?? 0) > 0 && (
                                     <span className="text-xs text-stone-500">
-                                      💸 {((order.cashAmount ?? 0) + order.changeAmount!).toFixed(2)} alındı · {order.changeAmount!.toFixed(2)} qaytarıldı
+                                      💸 {cashGiven(order).toFixed(2)} alındı · {order.changeAmount!.toFixed(2)} qaytarıldı
                                     </span>
                                   )}
                                 </div>

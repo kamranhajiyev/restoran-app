@@ -142,7 +142,7 @@ describe('the paper', () => {
     const texts = receiptLines(paid, 'Test Restoran', 'Masa 3').map(l => l.text.replace(/\s+/g, ' '));
     expect(texts).toContain('Cəmi: 100.00m');
     expect(texts).toContain('Xidmət haqqı (8%): 8.00m');
-    expect(texts).toContain('CƏMİ: 108.00m');
+    expect(texts).toContain('YEKUN: 108.00m');
   });
 
   it('prints no charge line on an order without one', async () => {
