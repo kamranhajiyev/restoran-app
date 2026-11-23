@@ -79,6 +79,20 @@ jobs:
       # So the url no longer decides *what* is built, only which site the till
       # syncs with — posUrl feeds API_URL in electron/main.ts, and does not
       # disable the bundle the way --url= does. Blank still means production.
+      # Which Supabase the till is exported with. The page's live signals
+      # (lib/till-signal.ts) and its direct reads go straight to this project,
+      # while posUrl only picks the site it syncs with. A test exe synced with
+      # the preview site (testing) but listened on production, so it never heard
+      # a new order and waited for its 3-minute timer (Natiq, 2026-11-23).
+      # Blank url or the production site: production. Any other site: testing.
+      - name: Pick the database
+        shell: bash
+        env:
+          URL: ${{ inputs.url }}
+          PROD_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          PROD_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+        run: node scripts/pick-database.mjs "$URL" >> "$GITHUB_ENV"
+
       - name: Build installer
         run: |
           npm run desktop:till
@@ -93,13 +107,9 @@ jobs:
           # electron-builder would otherwise try to publish to GitHub on its own.
           # The release step below does that, and only for tags.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # The till is exported with its Supabase project baked in, and there is
-          # no .env.local on a runner — without these the export stops with a
-          # named error rather than shipping a till that cannot reach anything.
-          # Only the two public values: the service-role key must never be near
-          # a build that produces a customer's exe.
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          # NEXT_PUBLIC_SUPABASE_URL and _ANON_KEY come from "Pick the database"
+          # above. Only the two public values: the service-role key must never
+          # be near a build that produces a customer's exe.
 
       - uses: actions/upload-artifact@v4
         with:

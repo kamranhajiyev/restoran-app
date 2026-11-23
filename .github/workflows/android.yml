@@ -62,13 +62,29 @@ jobs:
 
       - run: npm install --no-audit --no-fund
 
+      # The site this APK syncs with decides the Supabase it is exported with,
+      # the same rule as desktop.yml: a test APK must listen on testing, or it
+      # never hears a new order (Natiq, 2026-11-23). The site is chosen the
+      # same way as in "Build APK" below.
+      - name: Pick the database
+        env:
+          URL: ${{ inputs.url }}
+          PROD_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          PROD_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+        run: |
+          if [ "${{ inputs.release }}" = "true" ] || [[ "$GITHUB_REF" == refs/tags/apk-* ]]; then
+            site=""
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            site="$PREVIEW_URL"
+          else
+            site="$URL"
+          fi
+          node scripts/pick-database.mjs "$site" >> "$GITHUB_ENV"
+
+      # Only the two public values, as in desktop.yml: the service-role key
+      # must never be near a build that goes onto a restaurant's phone.
       - name: Export the till page
         run: npm run android:till
-        env:
-          # Only the two public values, as in desktop.yml: the service-role key
-          # must never be near a build that goes onto a restaurant's phone.
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
 
       - uses: actions/setup-java@v4
         with:

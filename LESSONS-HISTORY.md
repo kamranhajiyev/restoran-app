@@ -475,3 +475,17 @@ for winusb\Generator.node: winusb-driver-generator's binding.gyp builds it with
 /MD, so it needs VCRUNTIME140.dll, and that PC had no Visual C++. Installing
 vc_redist.x64 fixed the till; build-winusb now switches it to /MT and fails the
 build if the .node still imports the Visual C++ DLLs.
+
+**Does every part of a build talk to the same server: the site it syncs with and
+the database it listens on?**
+Natiq, Test Restoran PR, 2026-11-23: on the test exe and APK, new orders showed
+on screen and printed 1-3 minutes late (main was instant). Two causes. First,
+the "restoran testing" project's Realtime had stopped making the day partitions
+of realtime.messages after 21 Nov, so every till signal failed silently;
+restarting the project and connecting one listener brought it back. Second, and
+still after that: the exe and APK are exported with NEXT_PUBLIC_SUPABASE_URL
+from one GitHub secret (production), while the url input only points the sync
+at the preview site. The till saved to testing and listened for signals on
+production, so it only noticed new orders on its 3-minute safety timer. Chrome
+on the preview site was fast. scripts/pick-database.mjs now picks testing for
+any non-production site, in both workflows.

@@ -154,6 +154,11 @@ Guard: `tests/android-print.test.ts` ("shares the USB printer")
 Xan İzqara 2, 2026-11-19: the driver tool needed Visual C++, so no driver prompt and the USB printer never paired.
 Guard: `tests/winusb-static-runtime.test.ts`
 
+**Does every part of a build talk to the same server: the site it syncs with and
+the database it listens on?**
+Natiq, 2026-11-23: a test exe synced with the preview site (testing) but was exported with production's Supabase, so it never heard a new order and waited 1-3 minutes.
+Guard: `tests/pick-database.test.ts`
+
 **When data refreshes in the background, does a screen someone is reading start
 over?**
 Exe, 2026-10-08: every 5-minute pull reloaded Tarixçə back to the top.
