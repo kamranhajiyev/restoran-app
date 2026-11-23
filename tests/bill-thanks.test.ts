@@ -26,6 +26,11 @@ describe('the HESAB bill', () => {
     expect(lines.slice(-2).map(l => l.text)).toEqual(['Təşəkkürlər!', POWERED_BY]);
   });
 
+  it('signs the brand with a capital P', async () => {
+    const { POWERED_BY } = await import('@/lib/printer');
+    expect(POWERED_BY).toBe('Powered by Possiblle');
+  });
+
   it('is still a HESAB, not a receipt', async () => {
     const { billLines } = await import('@/lib/printer');
     const texts = billLines(order, 'Test Restoran', 'Masa 3').map((l) => l.text);

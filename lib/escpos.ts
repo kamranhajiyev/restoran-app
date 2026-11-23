@@ -7,6 +7,7 @@
 // the carriage makes the printer wrap on its own, and that wrap lands on top of
 // our own newline — which is what pushed every price one row below its name.
 import { noteLines } from './order-note';
+import { kitchenModifiers } from './item-note';
 import { PLACE_WORDS } from './order-place';
 import { formatDayMonthTime } from './dates';
 
@@ -123,15 +124,18 @@ export interface TicketItem {
 
 /** One row of a ticket's dish list, before it is drawn. */
 export type TicketRow =
-  | { kind: 'set'; qty: number; name: string; modifiers?: string | null }
+  | { kind: 'set'; qty: number; name: string }
   | { kind: 'part'; qty: number; name: string }
+  | { kind: 'note'; text: string }                 // a set's note, after its parts
   | { kind: 'dish'; qty: number; name: string; modifiers?: string | null }
   | { kind: 'rule'; heavy: boolean };
 
 /**
  * A ticket's dishes as the cook reads them: each set once, upper-case, with its
  * parts at this sex under it and a dotted line between sets; then a double line
- * and the plain dishes. A set's note is shown once, under its name.
+ * and the plain dishes. A set's note is shown once, after its parts, so it is
+ * not read as the note of the part above it (Natiq, 2026-11-22). A Şərh is in
+ * capitals (kitchenModifiers).
  *
  *   2x ECO LAHMACUN SET
  *     · 2x Fri · yarim
@@ -155,11 +159,13 @@ export function ticketRows(items: TicketItem[]): TicketRow[] {
   const rows: TicketRow[] = [];
   [...sets.values()].sort(byName).forEach((block, i) => {
     if (i > 0) rows.push({ kind: 'rule', heavy: false });
-    rows.push({ kind: 'set', qty: block.qty, name: block.name.toLocaleUpperCase('az'), modifiers: block.modifiers });
+    rows.push({ kind: 'set', qty: block.qty, name: block.name.toLocaleUpperCase('az') });
     for (const p of block.parts.sort(byName)) rows.push({ kind: 'part', qty: p.qty, name: p.name });
+    const note = kitchenModifiers(block.modifiers);
+    if (note) rows.push({ kind: 'note', text: note });
   });
   if (rows.length > 0 && dishes.length > 0) rows.push({ kind: 'rule', heavy: true });
-  for (const d of dishes.sort(byName)) rows.push({ kind: 'dish', qty: d.qty, name: d.name, modifiers: d.modifiers });
+  for (const d of dishes.sort(byName)) rows.push({ kind: 'dish', qty: d.qty, name: d.name, modifiers: kitchenModifiers(d.modifiers) });
   return rows;
 }
 
@@ -266,12 +272,13 @@ export function buildStationTicket(p: TicketPayload): Uint8Array {
       for (const row of partRows(r.qty, r.name)) lines.push(ESC.BIG, `${row}\n`, ESC.NORMAL);
       continue;
     }
+    if (r.kind === 'note') { lines.push(`    ${r.text}\n`); continue; }
     if (r.kind === 'set') lines.push(ESC.BOLD_ON);
     for (const row of itemRows(`${r.qty}x`, r.name)) {
       lines.push(ESC.BIG, `${row}\n`, ESC.NORMAL);
     }
     if (r.kind === 'set') lines.push(ESC.BOLD_OFF);
-    if (r.modifiers) lines.push(`    ${r.modifiers}\n`);
+    if (r.kind === 'dish' && r.modifiers) lines.push(`    ${r.modifiers}\n`);
   }
 
   lines.push('='.repeat(WIDTH) + '\n');

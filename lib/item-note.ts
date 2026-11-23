@@ -57,3 +57,13 @@ export function withItemNote(modifiers: string | null | undefined, note: string)
   return out || undefined;
 }
 
+
+/**
+ * The modifiers as the kitchen ticket prints them: the options as they are, the
+ * Şərh in capitals so a cook does not miss it (Natiq, 2026-11-22).
+ */
+export function kitchenModifiers(modifiers?: string | null): string | undefined {
+  const { options, note } = splitItemNote(modifiers);
+  const loud = note ? (MARK + note).toLocaleUpperCase('az') : '';
+  return [options, loud].filter(Boolean).join(SEP) || undefined;
+}

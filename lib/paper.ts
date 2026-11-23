@@ -42,6 +42,22 @@ const STACK = `"${PAPER_FONT}", "${TICKET_FONT}", sans-serif`;
 const BODY = 22, BODY_W = 500;
 const LOGO_MAX_W = 380, LOGO_MAX_H = 180, LOGO_GAP = 14;
 const QTY_W = 96;                // the kitchen's quantity column: room for "12x"
+export const KITCHEN_ITEM = 37;  // a dish's name on a kitchen ticket
+export const KITCHEN_MOD = 30;   // a set's part or a note under a dish
+
+/** A note row in pieces, with only the word ŞƏRH: in bold (Natiq, 2026-11-23). */
+export function noteSegments(row: string): { text: string; bold: boolean }[] {
+  const WORD = 'ŞƏRH:';
+  const out: { text: string; bold: boolean }[] = [];
+  let rest = row;
+  for (let at = rest.indexOf(WORD); at >= 0; at = rest.indexOf(WORD)) {
+    if (at > 0) out.push({ text: rest.slice(0, at), bold: false });
+    out.push({ text: WORD, bold: true });
+    rest = rest.slice(at + WORD.length);
+  }
+  if (rest) out.push({ text: rest, bold: false });
+  return out;
+}
 const COL = { qty: 70, price: 100, total: 104 } as const;
 const BARCODE_H = 80;
 
@@ -217,17 +233,29 @@ function paint(ctx: CanvasRenderingContext2D, lines: Line[], logo: HTMLCanvasEle
         }
         y += 38; break;
       }
+      // Larger and lighter than before: heavy bold at small sizes ran together on
+      // a real printer (Natiq, 2026-11-23). Only the quantity, the lead and the
+      // word ŞƏRH stay heavy.
       case 'item': {
-        const f = font(32, 700);
+        const f = font(KITCHEN_ITEM, 600);
         text(st.qty, PAD_X, y + 36, font(40, 800));
-        for (const r of wrapToWidth(st.name, INNER - QTY_W, measure(f))) { text(r, PAD_X + QTY_W, y + 34, f); y += 40; }
+        for (const r of wrapToWidth(st.name, INNER - QTY_W, measure(f))) { text(r, PAD_X + QTY_W, y + 36, f); y += 44; }
         y += 6; break;
       }
       case 'mod': {
-        const f = font(23, 700);
-        const lead = measure(f)(st.lead);
-        text(st.lead, PAD_X + QTY_W, y + 23, f);
-        for (const r of wrapToWidth(st.text, INNER - QTY_W - lead, measure(f))) { text(r, PAD_X + QTY_W + lead, y + 23, f); y += 30; }
+        const f = font(KITCHEN_MOD, 500), fb = font(KITCHEN_MOD, 800);
+        const lead = measure(fb)(st.lead);
+        text(st.lead, PAD_X + QTY_W, y + KITCHEN_MOD, fb);
+        // A little room kept back: the bold ŞƏRH is wider than the width it was wrapped at.
+        for (const r of wrapToWidth(st.text, INNER - QTY_W - lead - 12, measure(f))) {
+          let x = PAD_X + QTY_W + lead;
+          for (const seg of noteSegments(r)) {
+            const sf = seg.bold ? fb : f;
+            text(seg.text, x, y + KITCHEN_MOD, sf);
+            x += measure(sf)(seg.text);
+          }
+          y += KITCHEN_MOD + 8;
+        }
         y += 2; break;
       }
     }

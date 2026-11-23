@@ -6,6 +6,7 @@ import { loadLogo } from './logo';
 import { orderLabel } from './order-label';
 import { PLACE_WORDS } from './order-place';
 import { mergeLines } from './add-again';
+import { splitItemNote } from './item-note';
 import { isValidIp } from './station-printer';
 import { installAndroidBridge } from './android-bridge';
 import { formatDateTime } from './dates';
@@ -477,14 +478,25 @@ export function shopItemLines(rows: ShopRow[], nameHead = 'Malın adı'): Line[]
 
 // An order's lines as shop rows — merged exactly as itemLines merges them, so
 // the two papers can never count the same order differently.
+// The seller's Şərh is for the kitchen, not the guest (Natiq, 2026-11-22): it is
+// left off, and lines that then read the same — dish, size, options, price —
+// print as one.
 export function orderShopRows(order: Order): ShopRow[] {
-  return mergeLines(order.items, [], {}).lines.map(({ item, quantity }) => ({
-    name: item.modifiers ? `${item.menuItem.name} (${item.modifiers})` : item.menuItem.name,
-    qty: quantity,
-    price: item.menuItem.price,
-    base: item.menuItem.name,
-    note: item.modifiers || undefined,
-  }));
+  const rows = new Map<string, ShopRow>();
+  for (const { item, quantity } of mergeLines(order.items, [], {}).lines) {
+    const { options } = splitItemNote(item.modifiers);
+    const key = [item.menuItem.id, item.variantId ?? '', options ?? '', item.menuItem.price].join('|');
+    const same = rows.get(key);
+    if (same) { same.qty += quantity; continue; }
+    rows.set(key, {
+      name: options ? `${item.menuItem.name} (${options})` : item.menuItem.name,
+      qty: quantity,
+      price: item.menuItem.price,
+      base: item.menuItem.name,
+      note: options,
+    });
+  }
+  return [...rows.values()];
 }
 
 async function send(lines: Line[], logo?: Logo | null): Promise<boolean> {
@@ -535,7 +547,7 @@ function moneyLine(label: string, amount: string, shown: string, strong = false)
 
 // What every bill and receipt ends with: thanks, and who made the till — one
 // small line, the way other systems sign their paper (2026-11-20).
-export const POWERED_BY = 'Powered by possiblle';
+export const POWERED_BY = 'Powered by Possiblle';
 function foot(): Line[] {
   return [
     { text: '-'.repeat(WIDTH), center: true, style: { k: 'hr' } },
@@ -606,12 +618,9 @@ export function receiptLines(order: Order, companyName: string, table?: string, 
   if (given > 0) lines.push(moneyLine('Nağd', cur(given), manat(given)));
   if ((order.cardAmount ?? 0) > 0) lines.push(moneyLine('Kart', cur(order.cardAmount!), manat(order.cardAmount!)));
   if ((order.changeAmount ?? 0) > 0) lines.push(moneyLine('Qaytarıldı', cur(order.changeAmount!), manat(order.changeAmount!)));
-  // The guest has not paid yet — the rider collects at the door. Saying so on
-  // the slip is the difference between a receipt and a demand for money.
-  if (debt > 0) {
-    lines.push(moneyLine('ÖDƏNİLMƏYİB', cur(debt), manat(debt), true));
-    lines.push({ text: 'Kuryer yığacaq', center: true, style: { k: 'center', weight: 700 } });
-  }
+  // A courier order closed on "Kuryer yığacaq" says nothing more than YEKUN:
+  // the rider is at the door asking for that amount, and ÖDƏNİLMƏYİB with
+  // "Kuryer yığacaq" under it was not wanted on the guest's paper (2026-11-23).
 
   lines.push(...foot());
   // A shop's receipt ends in its number as a barcode: a return finds the sale

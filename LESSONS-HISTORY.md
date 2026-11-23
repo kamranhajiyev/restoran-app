@@ -476,6 +476,23 @@ for winusb\Generator.node: winusb-driver-generator's binding.gyp builds it with
 vc_redist.x64 fixed the till; build-winusb now switches it to /MT and fails the
 build if the .node still imports the Visual C++ DLLs.
 
+**When a shared part changes how it is drawn, does every paper or screen that
+uses it still draw whole?**
+Kamran, test, 2026-11-22: the new Montserrat paper (lib/paper.ts) draws a
+paper the new way as soon as one of its lines carries a `style`, and skips
+every line without one. The receipt's item columns (shopItemLines) got styles;
+the Qaytarma slip used the same columns but its own lines had none, so it would
+have printed only the items. Caught while writing the checklist, before any
+till had it. Every line of the slip now has a style, and a test checks that no
+paper mixes the two.
+
+**Who reads this text: staff or the guest? Does it reach only them?**
+Natiq, 2026-11-22: the seller's Şərh rides in order_items.modifiers with the
+size and options, and the receipt printed modifiers whole, so "Şərh: az duzlu"
+reached the customer receipt and HESAB bill (it always had, in the old paper
+too). orderShopRows now keeps only the options (splitItemNote) and prints the
+lines that then match as one; the kitchen ticket and the screens keep the note.
+
 **Does every part of a build talk to the same server: the site it syncs with and
 the database it listens on?**
 Natiq, Test Restoran PR, 2026-11-23: on the test exe and APK, new orders showed
@@ -489,3 +506,10 @@ at the preview site. The till saved to testing and listened for signals on
 production, so it only noticed new orders on its 3-minute safety timer. Chrome
 on the preview site was fast. scripts/pick-database.mjs now picks testing for
 any non-production site, in both workflows.
+
+**Has the paper been read off a real printer, not only off a screen image?**
+Natiq, Test Restoran PR, 2026-11-23: a photo of real kitchen tickets on the new
+Montserrat paper. Set parts and notes were 23-dot type at weight 700, and the
+thermal head fattens strokes, so the letters ran together. Dishes are now 37 at
+600, parts and notes 30 at 500, and only the word ŞƏRH: and the lead mark stay
+heavy (lib/paper.ts noteSegments).

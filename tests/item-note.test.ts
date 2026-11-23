@@ -60,7 +60,7 @@ describe('the kitchen ticket', () => {
       items: [{ name: 'Latte', qty: 1, modifiers: withItemNote(undefined, 'buzlu') }],
     } as TicketPayload;
     const text = new TextDecoder('latin1').decode(buildStationTicket(p));
-    expect(text).toMatch(/Latte[\s\S]{0,20}rh: buzlu/);
+    expect(text).toMatch(/Latte[\s\S]{0,20}RH: BUZLU/); // in capitals since 2026-11-22
   });
 });
 

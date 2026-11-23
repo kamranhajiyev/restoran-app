@@ -54,7 +54,7 @@ describe('the receipt and the bill', () => {
     expect(receiptLines(paid, 'Ş').find(l => l.style?.k === 'total')!.style).toEqual({ k: 'total', left: 'YEKUN', right: '90.39 ₼' });
     expect(billLines(paid, 'Ş').find(l => l.style?.k === 'total')!.style).toMatchObject({ left: 'ÖDƏNİLƏCƏK' });
   });
-  it('a dish\'s note is drawn apart from its name', () => {
+  it('a dish\'s options are drawn apart from its name', () => {
     const row = receiptLines(paid, 'Ş').find(l => l.style?.k === 'cols' && l.style.cells[0] === 'Şah plov')!;
     expect(row.style).toMatchObject({ note: 'az duzlu', cells: ['Şah plov', '1', '18.00', '18.00'] });
   });
@@ -150,5 +150,30 @@ describe('every line of a paper is drawn', () => {
     expect(unstyled(receiptLines(paid, 'Mağaza', undefined, { delivery: false }, true))).toEqual([]);
     expect(unstyled(returnReceiptLines(back, 'Mağaza', '45'))).toEqual([]);
     expect(unstyled(returnReceiptLines({ ...back, approvedBy: null, sellerName: null }, 'Mağaza', null))).toEqual([]);
+  });
+});
+
+// The guest's paper is not the kitchen's: "Şərh: az duzlu" is for the cook
+// (Natiq, 2026-11-22). The size and options the guest pays for stay.
+describe('a dish\'s Şərh stays off the guest\'s paper', () => {
+  const noted = {
+    ...paid,
+    items: [
+      item('Şah plov', 18, 1, 'Şərh: az duzlu'),
+      item('Şah plov', 18, 1, 'Şərh: soğansız'),
+      item('Şah plov', 18, 1),
+      item('Latte', 5, 2, 'Böyük · Şərh: şəkərsiz'),
+      item('Latte', 5, 1, 'Böyük'),
+    ],
+  } as unknown as Order;
+  const rows = (lines: Line[]) => lines.filter(l => l.style?.k === 'cols' && !l.style.head).map(l => l.style);
+  it('receipt and bill: no note, same dishes on one line, options kept', () => {
+    for (const lines of [receiptLines(noted, 'Ş'), billLines(noted, 'Ş'), receiptLines(noted, 'Ş', undefined, { delivery: false })]) {
+      expect(lines.map(l => l.text).join('\n')).not.toMatch(/Şərh|duzlu|soğansız|şəkərsiz/);
+      expect(rows(lines)).toEqual([
+        { k: 'cols', cells: ['Şah plov', '3', '18.00', '54.00'], note: undefined },
+        { k: 'cols', cells: ['Latte', '3', '5.00', '15.00'], note: 'Böyük' },
+      ]);
+    }
   });
 });

@@ -21,13 +21,14 @@ const items: TicketItem[] = [
 describe('a set on a kitchen ticket', () => {
   it('prints once with its parts under it, a dotted line between sets, then the dishes', () => {
     expect(ticketRows(items)).toEqual([
-      { kind: 'set', qty: 2, name: 'ECO LAHMACUN SET', modifiers: undefined },
+      { kind: 'set', qty: 2, name: 'ECO LAHMACUN SET' },
       { kind: 'part', qty: 2, name: 'Fri · yarim' },
       { kind: 'part', qty: 2, name: 'Lahmacun Sade' },
       { kind: 'rule', heavy: false },
-      { kind: 'set', qty: 1, name: 'ECO ŞAURMA SET', modifiers: 'Şərh: soğansız' },
+      { kind: 'set', qty: 1, name: 'ECO ŞAURMA SET' },
       { kind: 'part', qty: 1, name: 'Fri · yarim' },
       { kind: 'part', qty: 1, name: 'Şaurma toyuq' },
+      { kind: 'note', text: 'ŞƏRH: SOĞANSIZ' },
       { kind: 'rule', heavy: true },
       { kind: 'dish', qty: 2, name: 'Çoban salatı', modifiers: undefined },
       { kind: 'dish', qty: 1, name: 'Plov', modifiers: undefined },
@@ -58,5 +59,34 @@ describe('a set on a kitchen ticket', () => {
     const sql = readFileSync('supabase/migrations/20261109_set_block_tickets.sql', 'utf8');
     expect(sql.match(/'set', pl\.set_name, 'setQty', pl\.set_qty, 'setKey'/g)).toHaveLength(7);
     expect(sql).not.toMatch(/' \(' \|\| p_name \|\| '\)'/);
+  });
+});
+
+// Natiq, 2026-11-22: a set's Şərh printed between its name and its parts, so it
+// read as the note of the part under it; and a cook should not miss a Şərh.
+describe('a Şərh on a kitchen ticket', () => {
+  it('a set\'s note comes after all its parts', () => {
+    const rows = ticketRows([set('Fanta · 0.5 L', 1, 'set 2', 1, 's', 'Şərh: pomidor, xiyar olmasın')]);
+    expect(rows).toEqual([
+      { kind: 'set', qty: 1, name: 'SET 2' },
+      { kind: 'part', qty: 1, name: 'Fanta · 0.5 L' },
+      { kind: 'note', text: 'ŞƏRH: POMİDOR, XİYAR OLMASIN' },
+    ]);
+  });
+  it('is in capitals on a dish too; the options stay as they are', () => {
+    expect(ticketRows([{ name: 'Latte', qty: 1, modifiers: 'Böyük · Şərh: şəkərsiz' }]))
+      .toEqual([{ kind: 'dish', qty: 1, name: 'Latte', modifiers: 'Böyük · ŞƏRH: ŞƏKƏRSİZ' }]);
+    expect(ticketRows([{ name: 'Latte', qty: 1, modifiers: 'Böyük' }]))
+      .toEqual([{ kind: 'dish', qty: 1, name: 'Latte', modifiers: 'Böyük' }]);
+  });
+  it('both printer paths print the note row', () => {
+    for (const f of ['lib/escpos.ts', 'lib/station-ticket.ts']) {
+      expect(readFileSync(f, 'utf8')).toMatch(/r\.kind === 'note'/);
+    }
+    const text = new TextDecoder('latin1').decode(buildStationTicket({
+      kind: 'new', station: 'Mətbəx', orderNumber: 1, table: 2, waiter: null, at: '2026-11-02T10:00:00Z',
+      items: [set('Fanta', 1, 'set 2', 1, 's', 'Şərh: xiyarsız')],
+    }));
+    expect(text.indexOf('Fanta')).toBeLessThan(text.indexOf('YARSIZ'));
   });
 });

@@ -96,12 +96,13 @@ export async function buildStationTicketRaster(p: TicketPayload, tableName?: (id
         style: n === 0 ? { k: 'mod', lead: '· ', text: `${r.qty}x ${r.name}` } : skip }));
       continue;
     }
+    if (r.kind === 'note') { lines.push({ text: `    ${r.text}`, style: { k: 'mod', lead: '→ ', text: r.text } }); continue; }
     // A hairline between dishes says which notes are whose.
     if (!first) lines.push({ text: '', style: { k: 'hr' } });
     first = false;
     itemRows(`${r.qty}x`, r.name, ITEM_COLS).forEach((row, n) => lines.push({ text: row, scale: ITEM_SCALE,
       style: n === 0 ? { k: 'item', qty: `${r.qty}x`, name: r.name } : skip }));
-    if (r.modifiers) lines.push({ text: `    ${r.modifiers}`, style: { k: 'mod', lead: '→ ', text: r.modifiers } });
+    if (r.kind === 'dish' && r.modifiers) lines.push({ text: `    ${r.modifiers}`, style: { k: 'mod', lead: '→ ', text: r.modifiers } });
   }
 
   lines.push({ text: '='.repeat(WIDTH), style: { k: 'hr', heavy: true } });

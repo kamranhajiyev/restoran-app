@@ -159,6 +159,10 @@ the database it listens on?**
 Natiq, 2026-11-23: a test exe synced with the preview site (testing) but was exported with production's Supabase, so it never heard a new order and waited 1-3 minutes.
 Guard: `tests/pick-database.test.ts`
 
+**Has the paper been read off a real printer, not only off a screen image?**
+Natiq, 2026-11-23: kitchen tickets in heavy bold at small sizes looked fine on screen but ran together on paper.
+Guard: `tests/kitchen-ticket-type.test.ts`
+
 **When data refreshes in the background, does a screen someone is reading start
 over?**
 Exe, 2026-10-08: every 5-minute pull reloaded Tarixçə back to the top.
@@ -321,6 +325,15 @@ Guard: `tests/border-colour.test.ts`
 **Does the screen still fit on a small till monitor (1024px, side menu open)?**
 Customer till, 2026-11-03: fixed-width buttons took the order table's width; "Sifariş" shrank to nothing and its heading overlapped "Durum".
 Guard: `tests/order-row-narrow.test.ts`
+
+**When a shared part changes how it is drawn, does every paper or screen that
+uses it still draw whole?**
+Kamran, test, 2026-11-22: the Qaytarma slip shared the receipt's item columns; with the new paper it printed only the items, no name, total or refund line.
+Guard: `tests/paper.test.ts` ("every line of a paper is drawn")
+
+**Who reads this text: staff or the guest? Does it reach only them?**
+Natiq, 2026-11-22: the seller's Şərh for the cook ("az duzlu") printed on the customer receipt and bill.
+Guard: `tests/paper.test.ts` ("a dish's Şərh stays off the guest's paper")
 
 ## 6. Before shipping, try it like a restaurant would
 
