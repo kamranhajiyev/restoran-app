@@ -292,6 +292,36 @@ export async function printRawToUsb(bytes: Uint8Array): Promise<void> {
   if (!(await sendBytes(new Uint8Array(bytes)))) throw new Error('USB printer did not take the ticket');
 }
 
+// Set once a USB printer has worked on this machine, so a till whose printer is
+// unplugged today is still the till that should print — and say it could not.
+const USB_SEEN_KEY = 'restoran_usb_printer_seen';
+
+function rememberUsb(): void {
+  try { localStorage.setItem(USB_SEEN_KEY, '1'); } catch { /* asked of the cable again next time */ }
+}
+
+/**
+ * Whether the tickets of a sex set to "USB" are this app's to take (the exe and
+ * the Android app). They belong to the till with the printer: a phone open
+ * beside the exe took a slip it could not print, and the slip waited up to three
+ * minutes for its next try (Natiq, Test Restoran PR, 2026-11-23).
+ *
+ * Not whether the printer answers right now: one that is off or busy must still
+ * be tried and counted, or nobody is told the ticket never came out.
+ */
+export async function ownsUsbTickets(): Promise<boolean> {
+  if (localReceipt()) return true;
+  if (ipReceipt()) return receiptIp() !== null;
+  if (!isWebUSBAvailable()) return false;
+  if (device) return true;
+  try { if (localStorage.getItem(USB_SEEN_KEY)) return true; } catch { /* ask the cable */ }
+  try {
+    return (await navigator.usb.getDevices()).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** A USB printer is open, or one this site was granted opens now. Never asks. */
 export async function usbPrinterReady(): Promise<boolean> {
   return !!device || connectPrinter();
@@ -310,6 +340,7 @@ export async function connectPrinter(): Promise<boolean> {
         await openDevice(d);
         await letGo(d);
         device = d;
+        rememberUsb();
         return true;
       } catch { /* not a printer, or busy — try the next */ }
     }
@@ -342,6 +373,7 @@ export async function selectPrinter(): Promise<boolean> {
     await openDevice(d);
     await letGo(d);
     device = d;
+    rememberUsb();
     setIpReceipt(false);
     return true;
   } catch (err) {

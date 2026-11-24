@@ -150,6 +150,11 @@ Guard: `lib/exe-focus`, `tests/exe-focus.test.ts`
 Customer, 2026-10-30: the sexes printed by IP, but the exe's receipt printer was USB only.
 Guard: `tests/android-print.test.ts` ("the exe")
 
+**When several devices can take the same job, does only one that can do it take
+it?**
+Natiq, Test Restoran PR, 2026-11-23: a phone open beside the exe took USB kitchen slips it could not print; they came out 1-3 minutes late.
+Guard: `ownsUsbTickets`, `tests/usb-tickets-owner.test.ts`
+
 **Does this hold a device, file or port that another program on the same PC
 also needs? Take it for the job and let go after.**
 Ani Coffeeshop, 2026-11-18: the till open in Chrome held the USB printer, so the exe could not print.

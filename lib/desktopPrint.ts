@@ -11,6 +11,7 @@
 // A plain browser cannot reach the network printers; it collects only the
 // tickets of sexes set to "USB", and only with a USB printer plugged in, so the
 // same bundle is safe on the tablets and phones that will never see a printer.
+// The apps likewise leave the "USB" sexes alone with no printer of their own.
 
 import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { supabase } from './supabase';
@@ -23,7 +24,7 @@ import { siteGet } from './till-data';
 import { tableTitle } from './order-place';
 import { prepLines, stationsForItem } from './stations';
 import { isUsbPrinter } from './station-printer';
-import { isWebUSBAvailable, printRawToUsb, usbPrinterReady } from './printer';
+import { isWebUSBAvailable, ownsUsbTickets, printRawToUsb, usbPrinterReady } from './printer';
 import { claimPending } from './print-claim';
 import { installAndroidBridge } from './android-bridge';
 import type { MenuItem, OrderItem, Station } from '@/types';
@@ -617,6 +618,20 @@ async function browserStations(): Promise<string[]> {
   return usb.length && (await usbPrinterReady()) ? usb : [];
 }
 
+// The exe and the Android app take every sex's tickets, except that one with no
+// printer of its own leaves the "USB" sexes to the till that has it. Undefined
+// means all of them, as before.
+async function nativeStations(): Promise<string[] | undefined> {
+  if (await ownsUsbTickets()) return undefined;
+  // Sexes that could not be read are no reason to stop collecting: the claim
+  // below is also what notices a login the server no longer takes, and a ticket
+  // whose sex is unknown goes back uncounted (runJob).
+  let all: [string, StationPrinter][] = [];
+  try { all = [...(await stations())]; } catch { /* as if none were USB */ }
+  if (!all.some(([, s]) => isUsbPrinter(s.ip))) return undefined;
+  return all.filter(([, s]) => s.ip && !isUsbPrinter(s.ip)).map(([id]) => id);
+}
+
 let draining = false;
 // A push that lands mid-drain used to be dropped, and its ticket waited for the
 // 15-second poll. Now it just asks the running drain to go round once more.
@@ -638,7 +653,7 @@ export async function drainPrintQueue(): Promise<void> {
   try {
     do {
       drainAgain = false;
-      const only = isDesktop() ? undefined : await browserStations();
+      const only = isDesktop() ? await nativeStations() : await browserStations();
       if (only?.length === 0) continue;
       const jobs = await from.claim(only);
       // Sequential, not Promise.all: one printer, and two tickets interleaved on

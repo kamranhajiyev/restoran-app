@@ -544,3 +544,16 @@ whole stock on top of the return. Sizes selling by the dish's recipe and set
 parts with a size were not put back, since record_return had its own copy of the
 sale's stock rule. Kassa, most of Statistika and Tarixçə's Məhsullar left the
 returns in (20261118_return_money.sql, lib/returns, lib/statistics).
+
+**When several devices can take the same job, does only one that can do it take
+it?**
+Natiq, Test Restoran PR, 2026-11-23: LƏĞV slips on testing came out 1-3 minutes
+late. First blamed on an old exe listening to production; the logs showed a new
+exe, and a Redmi 6 with the Android app open on the same restaurant. Both heard
+the signal, both asked for the slip, and the late ones carried failed attempts
+(1, 1, 2, and 4 on a new order's) while the one on time had none. The sexes were
+set to "USB", which only the PC could print, and a failed slip is tried again
+only at the next signal or the 3-minute timer. The log does not name the device
+that failed. claimed_at is rewritten by every retry, so it looked like a slow
+first claim: read attempts too. An app with no printer of its own now leaves
+those slips alone, as the browser till already did.
