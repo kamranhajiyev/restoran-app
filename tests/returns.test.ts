@@ -110,7 +110,7 @@ describe('the till', () => {
   it('turns a refusal into words the cashier understands', () => {
     expect(returnErrorText('more_than_sold')).toMatch(/alınandan çox/);
     expect(returnErrorText('no_shift')).toMatch(/növbə açıq/);
-    expect(returnErrorText('Failed to fetch')).toMatch(/yalnız onlayn/);
+    expect(returnErrorText('Failed to fetch')).toMatch(/yalnız internetlə/);
   });
 
   it('cart lines become return lines, with the size', () => {

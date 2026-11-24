@@ -74,6 +74,10 @@ that migration on production before the code reaches main?**
 İXLAS CAFE, 2026-10-07: the courier list read `deleted_at`, only on testing, and every courier vanished.
 Guard: none yet
 
+**Does the code treat what happens to be on the screen as what the person asked for?**
+Review, 2026-11-24: an unknown barcode took the open category for search results, and sold its only product.
+Guard: `tests/barcode.test.ts` ("a code nobody knows")
+
 **Can the button be reached? Does the list it sits in ever show the thing it is for?**
 Natiq, Test Restoran, 2026-10-24: "Qaytarıldı" was only for paid courier orders, on a list that shows only open ones; the Hesabat line it fed always read 0.
 Guard: `tests/history-report.test.ts`
@@ -96,7 +100,7 @@ Guard: `tests/update-order-status.test.ts`
 
 **Is it safe if this runs twice?**
 Lost replies mean the till sends the same thing again; paying twice must not charge twice.
-Guard: `tests/exe-till.test.ts`, `tests/stock-safety.test.ts`
+Guard: `tests/exe-till.test.ts`, `tests/stock-safety.test.ts`, `tests/pending-return.test.ts`
 
 **Did it happen, but the "done" got lost?**
 Code review, 2026-10-08: a kitchen ticket printed, the report was lost, and it printed again.

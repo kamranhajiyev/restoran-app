@@ -46,6 +46,15 @@ export function barcodeOwner(menu: MenuItem[], raw: string, self: { itemId: stri
   return null;
 }
 
+/** The products a code that is no barcode may stand for: what the search shows,
+ *  only when the code is the text typed in it. A code scanned anywhere else is
+ *  not a search: the list on screen is then the open category (or an older
+ *  search), and one product in it was sold for a barcode nobody knew
+ *  (2026-11-24). */
+export function searchedFor<T>(raw: string, typed: string, shown: T[]): T[] {
+  return typed.trim() !== '' && raw.trim() === typed.trim() ? shown : [];
+}
+
 /** Fewer keys than this in one burst is a person. */
 export const SCAN_MIN_KEYS = 4;
 /** A receipt's barcode is just its number ("45", "7/2"): while Qaytarma waits

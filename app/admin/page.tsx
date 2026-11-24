@@ -1332,6 +1332,10 @@ function AdminPageContent() {
     });
   }
 
+  // A return's cash line belongs to the return (20261119_return_kassa_line.sql).
+  const isReturnLine = (err: string) =>
+    /is_return/.test(err) ? 'Bu, Qaytarma qeydidir: məbləği dəyişmək və silmək olmaz.' : null;
+
   function cancelMovementEdit() {
     setEditingMovement(null);
     setMovEditAmount(''); setMovEditReason('');
@@ -1348,7 +1352,7 @@ function AdminPageContent() {
       movEditOut ? -raw : raw, movEditReason.trim(), adminName,
     );
     setKassaEditBusy(false);
-    if (err) { setKassaEditError('Düzəliş yadda saxlanılmadı. Yenidən cəhd edin.'); return; }
+    if (err) { setKassaEditError(isReturnLine(err) ?? 'Düzəliş yadda saxlanılmadı. Yenidən cəhd edin.'); return; }
     cancelMovementEdit();
     await refreshKassa();
   }
@@ -1360,7 +1364,7 @@ function AdminPageContent() {
       setKassaEditBusy(true); setKassaEditError(null);
       const err = await deleteShiftMovement(shiftId, m.id!, adminName);
       setKassaEditBusy(false);
-      if (err) { setKassaEditError('Hərəkət silinmədi. Yenidən cəhd edin.'); return; }
+      if (err) { setKassaEditError(isReturnLine(err) ?? 'Hərəkət silinmədi. Yenidən cəhd edin.'); return; }
       await refreshKassa();
     });
   }

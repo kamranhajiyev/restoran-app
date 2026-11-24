@@ -557,3 +557,22 @@ only at the next signal or the 3-minute timer. The log does not name the device
 that failed. claimed_at is rewritten by every retry, so it looked like a slow
 first claim: read attempts too. An app with no printer of its own now leaves
 those slips alone, as the browser till already did.
+
+**Does the code treat what happens to be on the screen as what the person asked for?**
+Review, 2026-11-24, found while writing the day's checklist (no real shop had
+it). A barcode the menu does not have, scanned with the cursor outside the
+search box, was checked against `filtered`: with nothing typed that is the open
+category. Several products there: no message at all. Exactly one: it went into
+the cart. An older search text left in the box did the same. Now the list counts
+only when the code is the text typed in the box (lib/barcode searchedFor).
+
+**Is it safe if this runs twice?**
+Review, 2026-11-24 (no real shop had it): a return kept its id only while
+Qaytarma stayed open. The answer lost, the cashier left and started again: a new
+id, and the same money went out twice. An unanswered return is now kept on the
+machine until the server says whether it was saved (lib/pending-return).
+
+**Does every way money moves show up in the shift and day totals?**
+Review, 2026-11-24: admin could change or delete a cash return's line in Kassa
+alone, and the drawer no longer matched Tarixçə and Anbar. The database keeps it
+(20261119_return_kassa_line.sql).

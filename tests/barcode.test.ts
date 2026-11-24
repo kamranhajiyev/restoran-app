@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import * as XLSX from 'xlsx';
 import { describe, expect, it } from 'vitest';
-import { addScannedLine, barcodeOwner, cleanBarcode, findByBarcode, scanCatcher, SCAN_GAP_MS } from '@/lib/barcode';
+import { addScannedLine, barcodeOwner, cleanBarcode, findByBarcode, scanCatcher, searchedFor, SCAN_GAP_MS } from '@/lib/barcode';
 import { menuRowBatches } from '@/lib/set-items';
 import { parseMenuFile } from '@/lib/excel';
 import type { MenuItem } from '@/types';
@@ -81,6 +81,25 @@ describe('the till', () => {
   });
   it('says "Barkod skan et" in a shop', () => {
     expect(seller).toMatch(/isShop \? 'Barkod skan et və ya məhsul axtar\.\.\.' : 'Məhsul axtar\.\.\.'/);
+  });
+});
+
+// The open category was taken for search results: its only product was sold for
+// a barcode nobody knew, and with several there was no message (2026-11-24).
+describe('a code nobody knows', () => {
+  it('scanned outside the search box stands for nothing, whatever is on the screen', () => {
+    expect(searchedFor('4600123456789', '', ['Cappy'])).toEqual([]);
+    expect(searchedFor('4600123456789', 'col', ['Cola'])).toEqual([]);   // an older search left in the box
+  });
+  it('typed in the search box is a search', () => {
+    expect(searchedFor('cap', 'cap ', ['Cappy'])).toEqual(['Cappy']);
+    expect(searchedFor('4600123456789', '4600123456789', [])).toEqual([]);
+  });
+  it('is asked that way by the till, for a sale and for Qaytarma', () => {
+    const seller = read('app/seller/page.tsx');
+    const fn = seller.slice(seller.indexOf('function scanned(raw: string)'), seller.indexOf('// Read on opening, every minute'));
+    expect(fn).toMatch(/const searched = searchedFor\(raw, menuSearch, filtered\);/);
+    expect(fn.match(/\bfiltered\b/g)).toHaveLength(1);
   });
 });
 

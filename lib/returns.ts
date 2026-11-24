@@ -97,6 +97,12 @@ export function cartToReturnLines(cart: { menuItem: { id: string; name: string; 
   }));
 }
 
+/** Was the return certainly not saved? Only the server's own refusals say so;
+ *  a dead line, a timeout or an unknown answer may have come after the save. */
+export function returnRefused(code: string): boolean {
+  return /not_on_receipt|more_than_sold|courier_unpaid|nothing_to_refund|revoked|not_allowed|bad_request|not_paid|not_found|no_shift|not_approved|^locked$/.test(code);
+}
+
 /** The database's refusal, in words for the cashier. */
 export function returnErrorText(code: string): string {
   if (/not_on_receipt/.test(code)) return 'Bu məhsul həmin qəbzdə yoxdur.';
@@ -110,8 +116,7 @@ export function returnErrorText(code: string): string {
   if (/no_shift/.test(code)) return 'Nağd qaytarmaq üçün növbə açıq olmalıdır (Kassa).';
   if (/not_approved/.test(code)) return 'Menecer təsdiqi lazımdır (PIN və ya kart yoxlanmadı).';
   if (/^locked$/.test(code)) return 'Çox sayda yanlış cəhd — bir az gözləyin.';
-  if (/fetch|network|failed to fetch|load failed/i.test(code)) return 'İnternet bağlantısı yoxdur — qaytarma yalnız onlayn olur.';
-  return 'Server cavab vermədi. Yenidən cəhd edin.';
+  return 'Serverdən cavab gəlmədi — qaytarma yazılmış ola bilər (yalnız internetlə işləyir).\n\nPulu verməzdən əvvəl internetə baxıb «Qaytar»a yenidən basın: iki dəfə yazılmır.';
 }
 
 /** A database row (with its return_lines) as the screens use it. */

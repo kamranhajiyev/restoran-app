@@ -84,10 +84,11 @@ import OrderNote from '@/components/OrderNote';
 import { OPENING_TAB, sellerTabs, type SellerTab } from '@/lib/seller-nav';
 import { cleanKind, type CompanyKind } from '@/lib/company-kind';
 import { paysNow, printsKitchen, shopDeliveryType, shopSaleType, tabLabel, takesNotes } from '@/lib/shop-mode';
-import { findByBarcode, RECEIPT_MIN_KEYS, SCAN_MIN_KEYS, scanCatcher } from '@/lib/barcode';
+import { findByBarcode, searchedFor, RECEIPT_MIN_KEYS, SCAN_MIN_KEYS, scanCatcher } from '@/lib/barcode';
 import { leftLabel, lowKey } from '@/lib/low-stock';
-import { afterReturns, cartToReturnLines, parseReceiptLabel, requestTotal, returnErrorText, returnTotals, rowToReturn, type ReturnReply, type ReturnRequest, type SaleForReturn, type SaleLookup, type SaleReturn } from '@/lib/returns';
+import { afterReturns, cartToReturnLines, parseReceiptLabel, requestTotal, returnErrorText, returnRefused, returnTotals, rowToReturn, type ReturnReply, type ReturnRequest, type SaleForReturn, type SaleLookup, type SaleReturn } from '@/lib/returns';
 import { READ_MS } from '@/lib/timeout';
+import { mustAskFirst, pendingOutcome, pendingWindow, readPendingReturn, writePendingReturn } from '@/lib/pending-return';
 import { refundNeeds } from '@/lib/till-rules';
 
 const TAB_ICONS: Record<SellerTab, typeof Receipt> = {
@@ -1990,19 +1991,48 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     });
   }
 
+  const returnCompany = () => overrideCompanyId ?? getSession()?.companyId ?? '';
+  // An earlier return whose answer never came is looked up before a new one is
+  // sent: saved, the cashier is told and decides; unread, nothing is sent.
+  async function settlePendingReturn(key: string): Promise<boolean> {
+    const pending = readPendingReturn(returnCompany());
+    if (!pending || !mustAskFirst(pending, returnIdRef.current, key)) return true;
+    setReturnBusy(true);
+    const { from, to } = pendingWindow(pending);
+    const outcome = pendingOutcome(pending, await returnsBetween(from, to, overrideCompanyId));
+    setReturnBusy(false);
+    if (outcome.state === 'unknown') {
+      showAlert('Əvvəlki qaytarmanın yazılıb-yazılmadığı bilinmir. İnternet bağlantısını yoxlayıb yenidən cəhd edin.');
+      return false;
+    }
+    writePendingReturn(returnCompany(), null);
+    if (outcome.state === 'not_saved') return true;
+    if (pending.pay === 'cash' && shift && pending.at >= shift.openedAt) await noteReturnInLocalShift(pending.id, outcome.total, pending.receipt, pending.seller);
+    if (await askConfirm(
+      `Əvvəlki qaytarma artıq yazılıb: −${outcome.total.toFixed(2)} ₼ (${formatDayMonthTime(pending.at, bizSettings.timezone)}${pending.receipt ? `, qəbz №${pending.receipt}` : ''}).\n\nSəbətdəki başqa qaytarmadır?`,
+      { confirmLabel: 'Bəli, başqadır' },
+    )) return true;
+    setCart([]); setReturnSale(null); setReturnCode(''); setMobileCartOpen(false);
+    returnIdRef.current = null;
+    return false;
+  }
+
   async function submitReturn() {
     if (cart.length === 0 || returnBusy) return;
+    const lines = cartToReturnLines(cart);
+    const key = JSON.stringify([returnSale?.id ?? null, returnPay, lines]);
+    if (!(await settlePendingReturn(key))) return;
     const approver = await approveReturn();
     if (!approver) return;
-    const lines = cartToReturnLines(cart);
     // The same return pressed again (a lost reply) keeps its id; a changed one gets a new one.
-    const key = JSON.stringify([returnSale?.id ?? null, returnPay, lines]);
     if (returnIdRef.current?.key !== key) returnIdRef.current = { key, id: crypto.randomUUID() };
     const request: ReturnRequest = {
       id: returnIdRef.current.id, orderId: returnSale?.id ?? null, pay: returnPay,
       seller: effectiveSeller, approvedBy: approver.name, pin: approver.pin, card: approver.card, device: getDeviceId(), lines,
     };
     setReturnBusy(true);
+    // Until the server answers, this one may or may not be saved (lib/pending-return).
+    writePendingReturn(returnCompany(), { id: request.id, key, at: new Date().toISOString(), total: requestTotal(lines), pay: request.pay, receipt: returnSale?.label ?? null, seller: request.seller });
     let err: string | null = null;
     let total = requestTotal(lines);
     let approvedBy = approver.name;
@@ -2015,6 +2045,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     if (!reply.ok) err = reply.error ?? 'not_approved';
     else { total = Number(reply.total ?? total); approvedBy = reply.approvedBy || approvedBy; }
     setReturnBusy(false);
+    if (!err || returnRefused(err)) writePendingReturn(returnCompany(), null);
+    if (err && !returnRefused(err)) { showAlert(returnErrorText(err)); return; }
     if (err) { showAlert(`Qaytarılmadı.\n\n${returnErrorText(err)}`); return; }
     // The exe/APK count the drawer from their own copy of the shift: the cash
     // that went back has to be in it too (the server's copy already has it).
@@ -2093,10 +2125,11 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // A product with option groups still asks for them; a size is already chosen.
   function scanned(raw: string) {
     const hit = findByBarcode(menu, raw);
+    const searched = searchedFor(raw, menuSearch, filtered);
     if (returnMode) {
       // No sale picked yet and not a product: it is the receipt's barcode.
       // "1.5" typed while products show is a search, not receipt 1 of till 5.
-      const search = raw.includes('.') && !!menuQuery && filtered.length > 0;
+      const search = raw.includes('.') && searched.length > 0;
       if (!returnSale && !hit && !search && parseReceiptLabel(raw)) { setMenuSearch(''); void findReturnSale(raw); return; }
       if (returnSale) {
         setMenuSearch('');
@@ -2110,8 +2143,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       // Typed text that names products is a search: Enter on exactly one adds
       // it, on several does nothing. Only a code that matches nothing at all
       // is a failed scan.
-      if (filtered.length === 1) { setMenuSearch(''); handleMenuItemTap(filtered[0]); return; }
-      if (filtered.length > 1) return;
+      if (searched.length === 1) { setMenuSearch(''); handleMenuItemTap(searched[0]); return; }
+      if (searched.length > 1) return;
       showAlert(`Barkod tapılmadı: ${raw.trim()}`);
       return;
     }
@@ -3538,7 +3571,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     const read = isShop ? siteGet : tillFetch;
     const sales = overrideCompanyId
       ? await salesOrNull<ShiftSales>(read(`/api/public-shift-sales?companyId=${overrideCompanyId}&openedAt=${encodeURIComponent(fresh.openedAt)}`))
-      : await fetchShiftSales(fresh.openedAt, { shop: isShop });
+      : await fetchShiftSales(fresh.openedAt, { shop: isShop, closing: true });
     // Closing on unread sales would save 0 ₼ as the shift's takings.
     if (!sales) {
       setShiftBusy(false);
@@ -4584,7 +4617,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                 {/* Terminal (card) — separate from drawer math */}
                 <div className="bg-white rounded-2xl border border-stone-100 shadow-sm p-5">
                   <div className="flex justify-between items-center font-bold">
-                    <span className="text-stone-800">💳 Terminal (kart məbləği)</span>
+                    <span className="text-stone-800">{isShop && kassaTotals && !kassaBack ? '💳 Terminal (qaytarmasız)' : '💳 Terminal (kart məbləği)'}</span>
                     <span className="text-primary-700 text-lg">{shiftSales.card.toFixed(2)} ₼</span>
                   </div>
                   <p className="text-xs text-stone-500 mt-1">Kassaya daxil deyil — bank terminalından keçir</p>

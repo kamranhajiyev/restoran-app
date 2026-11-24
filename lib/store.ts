@@ -1597,10 +1597,16 @@ export async function fetchOrderNumber(orderId: string): Promise<number | null> 
   } catch { return null; }
 }
 
+// A dead line is an answer too: the till must not be left waiting.
+async function rpcReturn(request: ReturnRequest): Promise<{ data: unknown; error: { message: string } | null }> {
+  try { return await supabase.rpc('record_return', returnRpcArgs(request)); }
+  catch (e) { return { data: null, error: { message: e instanceof Error ? e.message : 'network' } }; }
+}
+
 // Qaytarma (lib/returns). Signed-in tills call the database function straight;
 // a link till goes through /api/add-return. Online only — never queued.
 export async function recordReturn(request: ReturnRequest): Promise<ReturnReply> {
-  const { data, error } = await supabase.rpc('record_return', returnRpcArgs(request));
+  const { data, error } = await rpcReturn(request);
   if (error) { console.error('[recordReturn]', error.message); return { ok: false, error: error.message }; }
   const reply = data as ReturnReply;
   return reply.ok ? reply : { ok: false, error: reply.error ?? 'not_approved' };
@@ -3354,17 +3360,19 @@ export async function closeShift(
 // net of change — i.e. exactly what went into the drawer.
 /** Sales since the shift opened, or null when they could not be read — never
  *  zeros for a failure, which closing the shift would save as the takings. */
-export async function fetchShiftSales(openedAt: string, opts?: ReadOpts & { shop?: boolean }): Promise<ShiftSales | null> {
+export async function fetchShiftSales(openedAt: string, opts?: ReadOpts & { shop?: boolean; closing?: boolean }): Promise<ShiftSales | null> {
   // Payments made during an outage exist only on this machine until they sync,
   // so a drawer reconciled against the server would read short by exactly what
   // the till took while the line was down.
   const local = await fromLocal(opts, (till, companyId) =>
     till.shiftSales(companyId, openedAt) as Promise<ShiftSales>);
   // This machine holds no returns: a shop's card returns come off the Terminal
-  // figure from the server. Unread = unknown, never "none".
+  // figure from the server. Unread (no internet), Kassa still shows this
+  // machine's sales and says returns are not in; a shift never closes on it.
   if (local && opts?.shop) {
     const back = await fetchReturnsOrNull(openedAt);
-    return back ? { ...local, card: Math.round((local.card - returnTotals(back).card) * 100) / 100 } : null;
+    if (back) return { ...local, card: Math.round((local.card - returnTotals(back).card) * 100) / 100 };
+    return opts.closing ? null : local;
   }
   if (local) return local;
 

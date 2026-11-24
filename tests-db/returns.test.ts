@@ -223,6 +223,32 @@ describe('a return with a receipt', () => {
     expect(await stockNow()).toBe(before);
   });
 
+  it('a cash return\'s line in Kassa cannot be changed or deleted on its own', async () => {
+    const { data: open } = await admin.from('cash_shifts').select('opened_by').eq('company_id', companyA.id).is('closed_at', null);
+    if (open?.some(o => o.opened_by !== ORDER_NOTE)) throw new Error('Kamran test ucun has a shift open that is not the test\'s: close it first, it is left alone');
+    await admin.from('cash_shifts').delete().eq('company_id', companyA.id).eq('opened_by', ORDER_NOTE);
+    const own = { id: randomUUID(), at: new Date().toISOString(), amount: -3, reason: 'Autotest məxaric', by: 'Autotest' };
+    const { data: shift, error } = await admin.from('cash_shifts').insert({ company_id: companyA.id, opened_by: ORDER_NOTE, opening_cash: 50, movements: [own] }).select('id').single();
+    if (error) throw new Error(error.message);
+    try {
+      const orderId = await sell([{ id: dishId, price: 2, quantity: 1 }]);
+      expect(await giveBack(orderId, 1, { pay: 'cash' })).toMatchObject({ ok: true, total: 2 });
+      const id = made[made.length - 1];
+      const moves = async () => (await admin.from('cash_shifts').select('movements').eq('id', shift.id).single()).data!.movements as { id: string; amount: number }[];
+      expect((await moves()).map(m => [m.id, Number(m.amount)])).toEqual([[own.id, -3], [id, -2]]);
+      const change = await ownerA.rpc('update_shift_movement', { shift_id: shift.id, movement_id: id, new_amount: -1, new_reason: 'x', by_name: 'Autotest' });
+      expect(change.error?.message).toMatch(/is_return/);
+      expect((await ownerA.rpc('delete_shift_movement', { shift_id: shift.id, movement_id: id, by_name: 'Autotest' })).error?.message).toMatch(/is_return/);
+      expect((await moves()).map(m => Number(m.amount))).toEqual([-3, -2]);
+      // Any other line is the owner's to correct, as before.
+      expect((await ownerA.rpc('update_shift_movement', { shift_id: shift.id, movement_id: own.id, new_amount: -4, new_reason: 'Autotest', by_name: 'Autotest' })).error).toBeNull();
+      expect((await ownerA.rpc('delete_shift_movement', { shift_id: shift.id, movement_id: own.id, by_name: 'Autotest' })).error).toBeNull();
+      expect((await moves()).map(m => m.id)).toEqual([id]);
+    } finally {
+      await admin.from('cash_shifts').delete().eq('id', shift.id).eq('opened_by', ORDER_NOTE);
+    }
+  });
+
   it('a stranger runs none of the new functions', async () => {
     for (const who of [anon, ownerA]) {
       expect((await who.rpc('return_stock_lines', { p_return_id: randomUUID(), p_company_id: companyA.id })).error).not.toBeNull();

@@ -65,9 +65,11 @@ describe('the exe asks the server', () => {
 
   it('Kassa in a shop closes on the server\'s figures, card returns and all', () => {
     expect(seller).toMatch(/const read = isShop \? siteGet : tillFetch;/);
-    expect(seller).toMatch(/await fetchShiftSales\(fresh\.openedAt, \{ shop: isShop \}\)/);
+    expect(seller).toMatch(/await fetchShiftSales\(fresh\.openedAt, \{ shop: isShop, closing: true \}\)/);
     const store = read('lib/store.ts');
-    expect(store).toMatch(/if \(local && opts\?\.shop\) \{\s+const back = await fetchReturnsOrNull\(openedAt\);\s+return back \? [^;]+ : null;/);
+    // With no internet Kassa still shows this machine's sales; it only never closes on them.
+    expect(store).toMatch(/if \(local && opts\?\.shop\) \{[\s\S]{0,300}if \(back\) return [^;]+;\s+return opts\.closing \? null : local;/);
+    expect(seller).toMatch(/fetchShiftSales\(shift\.openedAt, \{ shop: isShop \}\)\.then/);
   });
 });
 
@@ -262,7 +264,7 @@ describe('the till\'s smaller ones', () => {
     for (const code of ['bad_request', 'revoked', 'not_allowed', 'nothing_to_refund', 'courier_unpaid', 'duplicate key value violates unique constraint']) {
       expect(returnErrorText(code)).not.toMatch(/_|duplicate|revoked/);
     }
-    expect(returnErrorText('network')).toMatch(/yalnız onlayn/);
+    expect(returnErrorText('network')).toMatch(/yalnız internetlə/);
   });
   it('each Qaytarma starts on Nağd, not the last one\'s Karta', () => {
     expect(seller).toMatch(/setReturnPay\('cash'\);\s+setReturnMode\(true\)/);
