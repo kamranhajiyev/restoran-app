@@ -69,9 +69,9 @@ import TillRulesPanel from '@/components/TillRulesPanel';
 import OrderTypesPanel from '@/components/OrderTypesPanel';
 import ServiceChargePanel from '@/components/ServiceChargePanel';
 import { orderServiceCharge } from '@/lib/service-charge';
-import { itemSales } from '@/lib/item-sales';
+import { itemSales, itemSalesAfterReturns } from '@/lib/item-sales';
 import {
-  categoryReport, costMap, ordersInDays, revenue, revenueByHour, revenueByWeekday, sellerStats as sellerStatsOf, statsSummary,
+  categoryReport, costMap, netRevenue, ordersInDays, payAfterReturns, placesAfterReturns, revenueByHour, revenueByWeekday, sellerStats as sellerStatsOf, statsSummary,
 } from '@/lib/statistics';
 import { cardSalesToSave, expectedCash, movementsIn, movementsOut, movementsTotal, paymentTooMuch } from '@/lib/shift-cash';
 import { ROLE_NAMES } from '@/lib/till-rules';
@@ -114,7 +114,7 @@ import type { CompanyKind } from '@/lib/company-kind';
 import { paidHow, SHOP_ADMIN } from '@/lib/shop-mode';
 import { INGREDIENTS_MAX, takesIngredients } from '@/lib/ingredients';
 import { lowStock } from '@/lib/low-stock';
-import { itemsAfterReturns, netOfReturns, type SaleReturn } from '@/lib/returns';
+import { afterReturns, netOfReturns, returnTotals, type SaleReturn } from '@/lib/returns';
 import { barcodeOwner, cleanBarcode } from '@/lib/barcode';
 
 // RPC raise messages are machine codes — translated here for display
@@ -625,7 +625,9 @@ function AdminPageContent() {
   const [lowCount, setLowCount] = useState(0);
   // A shop's returns in Statistika's range (lib/returns), taken off its
   // income, profit and Top məhsullar. A failed read keeps what it has.
-  const [statsReturns, setStatsReturns] = useState<SaleReturn[]>([]);
+  // Null: could not be read for the days picked, which is not "none".
+  const [statsReturns, setStatsReturns] = useState<SaleReturn[] | null>([]);
+  const statsReturnsFor = useRef('');
   useEffect(() => {
     if (!isShop) { setLowCount(0); return; }
     Promise.all([fetchStockLimits(), fetchBalances()]).then(([ls, bal]) => setLowCount(lowStock(ls, bal).length));
@@ -697,7 +699,8 @@ function AdminPageContent() {
   const [openShiftSales, setOpenShiftSales] = useState<ShiftSales>({ cash: 0, card: 0, courierCard: 0, courierSales: 0, courier: 0 });
   // A shift's sales, the same numbers Tarixçə shows for it. Loaded for the open
   // shift and when a closed one is opened; absent while loading.
-  const [closedShiftTotals, setClosedShiftTotals] = useState<Record<string, { nagd: number; kart: number; kuryer: number; cemi: number }>>({});
+  // `back`: a shop's returns in the shift; null = could not be read.
+  const [closedShiftTotals, setClosedShiftTotals] = useState<Record<string, { nagd: number; kart: number; kuryer: number; cemi: number; back: { total: number } | null }>>({});
   const closedTotalsAsked = useRef(new Set<string>());
   const [expandedShiftId, setExpandedShiftId] = useState<string | null>(null);
   const [adminCountedInput, setAdminCountedInput] = useState('');
@@ -1098,8 +1101,17 @@ function AdminPageContent() {
     const valid = !!(customFrom && customTo && customFrom <= customTo);
     const [f, t] = valid ? [customFrom, customTo] : presetRange('bugün', bizT);
     const [from, to] = statsRangeUtc(f, t, bizSettings);
-    fetchReturnsOrNull(from, to).then(rs => { if (rs) setStatsReturns(rs); });
-  }, [sessionReady, isShop, customFrom, customTo, bizSettings, tab]);
+    let cancelled = false;
+    // A failed read keeps these same days' returns, never another range's; a
+    // slow answer for days no longer picked is dropped.
+    const key = `${from}|${to}`;
+    fetchReturnsOrNull(from, to).then(rs => {
+      if (cancelled) return;
+      if (rs) { statsReturnsFor.current = key; setStatsReturns(rs); }
+      else if (statsReturnsFor.current !== key) setStatsReturns(null);
+    });
+    return () => { cancelled = true; };
+  }, [sessionReady, isShop, customFrom, customTo, bizSettings, tab, statsRefreshKey]);
 
   // Fetched ranges are cached in memory: fully-past ranges forever, ranges touching today for 60s.
   useEffect(() => {
@@ -1178,13 +1190,14 @@ function AdminPageContent() {
     closedTotalsAsked.current.add(s.id);
     const now = new Date().toISOString();
     const win = shiftLoadWindow(s, now);
-    const [orders, collected] = await Promise.all([
+    const [orders, collected, returns] = await Promise.all([
       fetchOrders({ from: win.from, to: win.to, limit: 1000 }),
       fetchCourierCollections(s.openedAt, s.closedAt ?? now),
+      isShop ? fetchReturnsOrNull(s.openedAt, s.closedAt ?? now) : [],
     ]);
     const paid = collected.paidOrderIds ? new Set(collected.paidOrderIds) : undefined;
-    setClosedShiftTotals(prev => ({ ...prev, [s.id]: shiftTotals(orders, s, now, saleTotal, paid) }));
-  }, []);
+    setClosedShiftTotals(prev => ({ ...prev, [s.id]: { ...shiftTotals(orders, s, now, saleTotal, paid), back: returns && returnTotals(returns) } }));
+  }, [isShop]);
 
   useEffect(() => {
     if (!sessionReady || tab !== 'kassa') return;
@@ -2689,6 +2702,8 @@ function AdminPageContent() {
   // ── stats computations ────────────────────────────────────────────────────
   // While a new range is loading, show empty charts — old orders plotted on the new axis would be misleading
   const paidOrders = (dataLoading || statsFailed ? [] : statsOrders).filter(o => o.status === 'ödənilib');
+  // A shop's returns in the same days; every sum below takes them off (lib/statistics).
+  const backs = dataLoading || statsFailed ? [] : statsReturns ?? [];
   const activeOrders = orders.filter(isOrderOpen);
   const orderQuery = orderSearch.trim().toLowerCase();
   const menuQuery = azNormalize(menuSearch.trim());
@@ -2771,7 +2786,7 @@ function AdminPageContent() {
         return {
           label: i === 0 || d.getDate() === 1 ? `${d.getDate()} ${AZ_MON_SHORT[d.getMonth()]}` : String(d.getDate()),
           fullLabel: dayFull(d),
-          rev: revenue(ordersInDays(paidOrders, bizSettings, ds, ds)),
+          rev: netRevenue(ordersInDays(paidOrders, bizSettings, ds, ds), ordersInDays(backs, bizSettings, ds, ds)),
         };
       });
     }
@@ -2783,7 +2798,7 @@ function AdminPageContent() {
         return {
           label: `${dayToDate(wS).getDate()} ${AZ_MON_SHORT[dayToDate(wS).getMonth()]}`,
           fullLabel: weekFull(dayToDate(wS), dayToDate(wE)),
-          rev: revenue(ordersInDays(paidOrders, bizSettings, wS, addDays(wE, -1))),
+          rev: netRevenue(ordersInDays(paidOrders, bizSettings, wS, addDays(wE, -1)), ordersInDays(backs, bizSettings, wS, addDays(wE, -1))),
         };
       });
     }
@@ -2799,7 +2814,7 @@ function AdminPageContent() {
       return {
         label: AZ_MON_SHORT[month],
         fullLabel: monthFull(new Date(year, month, 1)),
-        rev: revenue(ordersInDays(paidOrders, bizSettings, mS, addDays(mE, -1))),
+        rev: netRevenue(ordersInDays(paidOrders, bizSettings, mS, addDays(mE, -1)), ordersInDays(backs, bizSettings, mS, addDays(mE, -1))),
       };
     });
   })();
@@ -2812,7 +2827,7 @@ function AdminPageContent() {
   // After a shop's returns (lib/returns): what really stayed sold.
   const {
     revenue: chartRevenue, cost: chartCost, profit: chartProfit, marginPct: chartMarginPct, back: chartReturned,
-  } = netOfReturns(grossStats, statsReturns, id => menuCostMap[id] ?? 0);
+  } = netOfReturns(grossStats, backs, id => menuCostMap[id] ?? 0);
 
   // Counted like Tarixçə (lib/history-shifts): only the range's own sales. A
   // delivery the rider paid back inside the range is Nağd or Kart, otherwise
@@ -2822,22 +2837,20 @@ function AdminPageContent() {
   // (no amounts) count in no bar, so the bars still add up to 100%.
   const payTotals = historyTotals(chartPaid, orderTotal,
     courierCollected.paidOrderIds ? new Set(courierCollected.paidOrderIds) : undefined);
-  const cashRev = payTotals.nagd;
-  const cardRev = payTotals.kart;
-  const courierRev = payTotals.kuryer;
-  const totalPayRev = cashRev + cardRev + courierRev;
-  const sellerStats = sellerStatsOf(chartPaid);
+  const { nagd: cashRev, kart: cardRev, kuryer: courierRev } = payAfterReturns(payTotals, backs);
+  const totalPayRev = Math.max(0, cashRev) + Math.max(0, cardRev) + courierRev;
+  const sellerStats = sellerStatsOf(chartPaid, backs);
 
-  const repCategories = categoryReport(chartPaid, menu, menuCostMap);
+  const repCategories = categoryReport(chartPaid, menu, menuCostMap, backs);
   const maxRepCatProfit = Math.max(...repCategories.map(c => Math.abs(c.profit)), 0.01);
 
   // Counted by lib/item-sales, the same function Tarixçə's Məhsullar list uses.
   // A unit's cost is fixed per item and per size, so cost is qty × unit cost.
-  const soldItems = itemSales(chartPaid).items;
-  const itemMap: Record<string, { name: string; cat: string; qty: number; rev: number; cost: number }> = itemsAfterReturns(
-    Object.fromEntries(soldItems.map(s => [s.id, { name: s.name, cat: s.category, qty: s.qty, rev: s.rev, cost: (menuCostMap[s.id] ?? 0) * s.qty }])),
-    statsReturns, id => menuCostMap[id] ?? 0);
-  const topItemsSorted = Object.values(itemMap).sort((a, b) => {
+  const soldItems = itemSalesAfterReturns(itemSales(chartPaid), backs, menu).items;
+  const itemMap: Record<string, { name: string; cat: string; qty: number; rev: number; cost: number }> =
+    Object.fromEntries(soldItems.map(s => [s.id, { name: s.name, cat: s.category, qty: s.qty, rev: s.rev, cost: (menuCostMap[s.id] ?? 0) * s.qty }]));
+  // More came back than was sold: in Analiz (it adds up), not a top seller.
+  const topItemsSorted = Object.values(itemMap).filter(s => s.qty > 0).sort((a, b) => {
     if (topSort === 'profit') return (b.rev - b.cost) - (a.rev - a.cost);
     if (topSort === 'qty') return b.qty - a.qty;
     if (topSort === 'margin') return (b.cost > 0 ? (b.rev - b.cost) / b.rev : -1) - (a.cost > 0 ? (a.rev - a.cost) / a.rev : -1);
@@ -2918,11 +2931,11 @@ function AdminPageContent() {
     pushAnaliz(id, s.name, s.cat, [], false, true);
   });
 
-  const hourlyData = revenueByHour(chartPaid, bizSettings.timezone).map((rev, h) => ({ label: String(h), rev }));
+  const hourlyData = revenueByHour(chartPaid, bizSettings.timezone, backs).map((rev, h) => ({ label: String(h), rev }));
   const maxHourly = Math.max(...hourlyData.map(h => h.rev), 0.01);
 
   const WEEKDAYS = ['Be', 'Ça', 'Çə', 'Ca', 'Cü', 'Şə', 'Ba'];
-  const byWeekday = revenueByWeekday(chartPaid, bizSettings);
+  const byWeekday = revenueByWeekday(chartPaid, bizSettings, backs);
   const weeklyData = WEEKDAYS.map((label, i) => ({ label, rev: byWeekday[i] }));
   const maxWeekly = Math.max(...weeklyData.map(w => w.rev), 0.01);
 
@@ -3416,7 +3429,7 @@ function AdminPageContent() {
                     { label: 'Mənfəət',     value: `${chartProfit.toFixed(2)} ₼`,   icon: TrendingUp,color: chartProfit >= 0 ? 'text-green-600' : 'text-red-500' },
                     { label: 'Mənfəət %',   value: `${chartMarginPct.toFixed(1)}%`, icon: Percent,   color: chartMarginPct >= 0 ? 'text-green-600' : 'text-red-500' },
                     { label: 'Orta çek',    value: `${chartAvg.toFixed(2)} ₼`,      icon: Receipt,   color: 'text-stone-800' },
-                    ...(isShop ? [{ label: 'Qaytarma', value: `${chartReturned > 0 ? '−' : ''}${chartReturned.toFixed(2)} ₼`, icon: RefreshCw, color: 'text-red-600' }] : []),
+                    ...(isShop ? [{ label: 'Qaytarma', value: statsReturns === null ? '— (internet)' : `${chartReturned > 0 ? '−' : ''}${chartReturned.toFixed(2)} ₼`, icon: RefreshCw, color: 'text-red-600' }] : []),
                     { label: 'Sifarişlər',  value: String(chartPaid.length),         icon: Coffee,    color: 'text-stone-800' },
                   ].map((kpi, i, arr) => {
                     const Icon = kpi.icon;
@@ -3445,7 +3458,7 @@ function AdminPageContent() {
                           range — a venue without couriers should not read a permanent 0%. */}
                       {[{ label: 'Nağd', rev: cashRev }, { label: 'Kart', rev: cardRev },
                         ...(courierRev > 0 ? [{ label: 'Kuryer borcu', rev: courierRev }] : [])].map(pm => {
-                        const pct = totalPayRev > 0 ? (pm.rev / totalPayRev) * 100 : 0;
+                        const pct = totalPayRev > 0 ? Math.max(0, (pm.rev / totalPayRev) * 100) : 0;
                         return (
                           <div key={pm.label}>
                             <div className="flex justify-between items-center mb-1.5">
@@ -3500,8 +3513,8 @@ function AdminPageContent() {
                     <p className="text-sm text-stone-400 text-center py-4">Məlumat yoxdur</p>
                   ) : (
                     <div className="space-y-3">
-                      {placeSales(chartPaid, deliveryOn, orderTotal, isShop).map(ps => {
-                        const pct = (ps.rev / chartRevenue) * 100;
+                      {placesAfterReturns(placeSales(chartPaid, deliveryOn, orderTotal, isShop), chartPaid, backs, deliveryOn).map(ps => {
+                        const { pct } = ps;
                         const isMasa = ps.kind === 'masa';
                         return (
                           <div key={ps.kind}>
@@ -4047,6 +4060,7 @@ function AdminPageContent() {
                                     )}
                                   </>, onConfirm: async () => {
                                     const undone = await deleteOrder(order.id, getSession()?.name ?? '');
+                                    if (undone === 'has_returns') { setDialog({ title: 'Silinmədi', message: `№${orderLabel(order)} üzrə mal qaytarılıb. Silinsəydi, mal Anbara ikinci dəfə qayıdar və pul ikinci dəfə çıxılardı.` }); return; }
                                     if (undone !== null) patchOrder(order.id, o => ({ ...o, status: 'silinib' as OrderStatus }));
                                   }})}
                                   className="text-xs font-semibold text-red-400 border border-red-200 hover:bg-red-50 rounded-lg px-2.5 py-1 transition-colors"
@@ -4161,7 +4175,7 @@ function AdminPageContent() {
                 const closed = shifts.filter(s => s.closedAt);
                 // The same boxes as Tarixçə, open shift or closed — Nağd + Kart +
                 // Kuryer = Ümumi.
-                const renderSales = (t: { nagd: number; kart: number; kuryer: number; total: number } | null | undefined) => (
+                const renderSales = (t: { nagd: number; kart: number; kuryer: number; total: number; back: { total: number } | null } | null | undefined) => (
                   <div className="border-t pt-2.5 space-y-1 text-sm text-stone-600">
                     {!t ? (
                       <div className="flex justify-center py-1">
@@ -4174,8 +4188,11 @@ function AdminPageContent() {
                         {t.kuryer > 0.005 && (
                           <div className="flex justify-between"><span>Kuryer satışı</span><span>{t.kuryer.toFixed(2)} ₼</span></div>
                         )}
+                        {(!t.back || t.back.total > 0.005) && (
+                          <div className="flex justify-between text-red-600"><span>Qaytarma</span><span>{t.back ? `−${t.back.total.toFixed(2)} ₼` : '— (internet)'}</span></div>
+                        )}
                         <div className="flex justify-between font-semibold text-stone-800">
-                          <span>Ümumi satış</span><span>{t.total.toFixed(2)} ₼</span>
+                          <span>{t.back ? 'Ümumi satış' : 'Ümumi satış (qaytarmasız)'}</span><span>{t.total.toFixed(2)} ₼</span>
                         </div>
                       </>
                     )}
@@ -4183,7 +4200,7 @@ function AdminPageContent() {
                 );
                 const shiftSalesOf = (s: CashShift) => {
                   const t = closedShiftTotals[s.id];
-                  return t && { nagd: t.nagd, kart: t.kart, kuryer: t.kuryer, total: t.cemi };
+                  return t && { nagd: t.nagd, kart: t.kart, kuryer: t.kuryer, total: afterReturns(t.cemi, t.back ?? { total: 0 }), back: t.back };
                 };
                 return (
                   <>
@@ -4326,7 +4343,7 @@ function AdminPageContent() {
                                 )}
                                 {closedShiftTotals[s.id] && (
                                   <span className="text-xs text-stone-500 shrink-0">
-                                    Satış: {closedShiftTotals[s.id]!.cemi.toFixed(2)} ₼
+                                    Satış: {shiftSalesOf(s)!.total.toFixed(2)} ₼
                                   </span>
                                 )}
                                 <span className="text-sm font-semibold text-stone-700 shrink-0">{(s.countedCash ?? 0).toFixed(2)} ₼</span>

@@ -523,3 +523,24 @@ become 'silinib'. Tills skip slips over an hour old, but the slip was made at
 the delete, so its age never stopped it. Deleting a paid order now queues
 nothing (20261117_no_cancel_slip_for_closed_orders.sql); deleting an open one
 still does.
+
+**Does the exe hold this data itself? If not, does the request go out through the
+machine (`siteGet`, `tillPost`), not a page fetch that never leaves it?**
+Natiq, Test Restoran PR, 2026-11-24: on the test exe (a till opened by its link)
+Qaytarma said "Qəbz №100185 tapılmadı" for a paid sale. The lookup used
+tillFetch, which answers from the till's own database and otherwise fetches a
+relative path; the exe's page is served from app://till, so the request never
+left the machine. Saving a return, Tarixçə's returns and low stock had the same
+fault. A browser link worked, and every test called the route directly, so
+nothing saw it. The failed read was also shown as "no such receipt".
+
+**When money or goods go back, does it come to exactly what came in: after a
+discount, in parts, and when the sale is deleted later?**
+Review of Qaytarma, 2026-11-24, before any real shop had it. Unit prices were
+rounded and then multiplied (3 × 1.00 less 1.00 gave back 2.01), a product sold
+at two prices went back at the dearer one, and a "Kuryer yığacaq" sale could be
+refunded before the rider brought its money. Deleting a returned sale voided its
+whole stock on top of the return. Sizes selling by the dish's recipe and set
+parts with a size were not put back, since record_return had its own copy of the
+sale's stock rule. Kassa, most of Statistika and Tarixçə's Məhsullar left the
+returns in (20261118_return_money.sql, lib/returns, lib/statistics).

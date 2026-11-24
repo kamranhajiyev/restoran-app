@@ -26,8 +26,7 @@ import { cleanKind, newCompanyRow, type CompanyKind } from './company-kind';
 import { cleanBarcode } from './barcode';
 import { cleanIngredients } from './ingredients';
 import { lowForTill, lowStock, type StockLimit } from './low-stock';
-import { orderLabel } from './order-label';
-import { parseReceiptLabel, returnMovement, returnRpcArgs, rowToReturn, saleForReturn, type ReturnReply, type ReturnRequest, type SaleForReturn, type SaleReturn } from './returns';
+import { findSale, returnMovement, returnRpcArgs, returnTotals, rowToReturn, type ReturnReply, type ReturnRequest, type SaleLookup, type SaleReturn } from './returns';
 
 async function authHeaders(): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -1163,8 +1162,11 @@ export async function cancelOrder(orderId: string, reason: string, by: string): 
 // has already paid for must hand that payment back too, or the courier ends up
 // owed money and the drawer keeps cash nobody owes it. Returns how much was
 // handed back (0 for every other order), or null on failure.
-export async function deleteOrder(orderId: string, by: string): Promise<number | null> {
+// 'has_returns': goods of this sale came back (Qaytarma), so it stays — the
+// database refuses (20261118_return_money.sql).
+export async function deleteOrder(orderId: string, by: string): Promise<number | 'has_returns' | null> {
   const { data, error } = await supabase.rpc('delete_order', { p_order_id: orderId, p_by: by });
+  if (error && /has_returns/.test(error.message)) return 'has_returns';
   if (error) { console.error('[deleteOrder]', error.message); return null; }
   return Number(data ?? 0);
 }
@@ -1614,43 +1616,29 @@ export async function noteReturnInLocalShift(id: string, total: number, receipt:
 }
 
 /** Qaytarma with a receipt, signed in: the paid sale with that number, any
- *  day, and what of it can still come back. Null = not found or the read failed. */
-export async function fetchSaleForReturn(raw: string): Promise<SaleForReturn | null> {
-  const label = parseReceiptLabel(raw);
-  if (!label || !_companyId) return null;
-  try {
-    let q = supabase.from('orders').select('id, order_number, till_number, status, discount_amount, order_items(menu_item_id, variant_id, menu_item_name, menu_item_price, quantity, removed_at)')
-      .eq('company_id', _companyId).eq('order_number', label.number).eq('status', 'ödənilib')
-      .order('created_at', { ascending: false }).limit(1);
-    q = label.till && label.till > 1 ? q.eq('till_number', label.till) : q.or('till_number.is.null,till_number.lte.1');
-    const { data, error } = await q;
-    const o = data?.[0] as Record<string, unknown> | undefined;
-    if (error || !o) return null;
-    const { data: back } = await supabase.from('return_lines')
-      .select('menu_item_id, variant_id, qty, returns!inner(order_id)').eq('returns.order_id', o.id as string);
-    const items = ((o.order_items as Record<string, unknown>[]) ?? []).filter(i => !i.removed_at).map(i => ({
-      menuItemId: String(i.menu_item_id), variantId: (i.variant_id as string | null) || null,
-      name: String(i.menu_item_name), qty: Number(i.quantity), price: Number(i.menu_item_price),
-    }));
-    return saleForReturn(
-      { id: o.id as string, label: orderLabel({ orderNumber: o.order_number as number, tillNumber: (o.till_number as number) ?? undefined }), discountAmount: Number(o.discount_amount ?? 0) },
-      items,
-      (back ?? []).map(b => ({ menuItemId: b.menu_item_id as string | null, variantId: (b.variant_id as string | null) || null, qty: Number(b.qty) })),
-    );
-  } catch { return null; }
+ *  day, and what of it can still come back (lib/returns findSale). */
+export async function fetchSaleForReturn(raw: string): Promise<SaleLookup> {
+  if (!_companyId) return { state: 'failed' };
+  try { return await findSale(supabase, _companyId, raw); } catch { return { state: 'failed' }; }
 }
 
 /** The returns made between two times. Null when the read failed (the screen
  *  keeps what it has); [] on a database that has no returns table yet. */
 export async function fetchReturnsOrNull(from: string, to?: string): Promise<SaleReturn[] | null> {
   try {
-    let q = supabase.from('returns')
-      .select('id, order_id, total, pay, seller_name, approved_by, created_at, return_lines(menu_item_id, variant_id, name, qty, price)')
-      .gte('created_at', from).order('created_at', { ascending: false }).limit(1000);
-    if (to) q = q.lt('created_at', to);
-    const { data, error } = await q;
-    if (error) return /does not exist|schema cache/.test(error.message) ? [] : null;
-    return (data ?? []).map(r => rowToReturn(r as Record<string, unknown>));
+    let missing = false;
+    // Every row, not the first 1000 (lib/read-all).
+    const data = await readAll<Record<string, unknown>>(async (a, b) => {
+      let q = supabase.from('returns')
+        .select('id, order_id, total, pay, seller_name, approved_by, created_at, return_lines(menu_item_id, variant_id, name, qty, price)')
+        .gte('created_at', from);
+      if (to) q = q.lt('created_at', to);
+      const res = await q.order('created_at', { ascending: false }).order('id').range(a, b);
+      if (res.error && /does not exist|schema cache/.test(res.error.message)) missing = true;
+      return res;
+    });
+    if (missing) return [];
+    return data ? data.map(rowToReturn) : null;
   } catch { return null; }
 }
 
@@ -3366,12 +3354,18 @@ export async function closeShift(
 // net of change — i.e. exactly what went into the drawer.
 /** Sales since the shift opened, or null when they could not be read — never
  *  zeros for a failure, which closing the shift would save as the takings. */
-export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promise<ShiftSales | null> {
+export async function fetchShiftSales(openedAt: string, opts?: ReadOpts & { shop?: boolean }): Promise<ShiftSales | null> {
   // Payments made during an outage exist only on this machine until they sync,
   // so a drawer reconciled against the server would read short by exactly what
   // the till took while the line was down.
   const local = await fromLocal(opts, (till, companyId) =>
     till.shiftSales(companyId, openedAt) as Promise<ShiftSales>);
+  // This machine holds no returns: a shop's card returns come off the Terminal
+  // figure from the server. Unread = unknown, never "none".
+  if (local && opts?.shop) {
+    const back = await fetchReturnsOrNull(openedAt);
+    return back ? { ...local, card: Math.round((local.card - returnTotals(back).card) * 100) / 100 } : null;
+  }
   if (local) return local;
 
   try {
@@ -3396,9 +3390,9 @@ export async function fetchShiftSales(openedAt: string, opts?: ReadOpts): Promis
     // figure is short by all of it, and closing the shift saved it (2026-10-09).
     if (!courierCard) return null;
     // A shop's card returns since the shift opened (lib/returns), as the route.
-    const back = await supabase.from('returns').select('total').eq('pay', 'card').gte('created_at', openedAt);
-    if (back.error && !/does not exist|schema cache/.test(back.error.message)) return null;
-    return shiftSales(data, courierCard, back.data ?? []);
+    const back = await fetchReturnsOrNull(openedAt);
+    if (!back) return null;
+    return shiftSales(data, courierCard, back.filter(r => r.pay === 'card'));
   } catch { return null; }
 }
 

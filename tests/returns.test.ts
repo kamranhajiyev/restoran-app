@@ -7,12 +7,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  cartToReturnLines, itemsAfterReturns, netOfReturns, parseReceiptLabel, requestTotal, returnErrorText,
+  cartToReturnLines, netOfReturns, parseReceiptLabel, requestTotal, returnErrorText,
   returnTotals, saleForReturn, type SaleReturn,
 } from '@/lib/returns';
 import { refundNeeds, TILL_ACTIONS } from '@/lib/till-rules';
 import { shiftSales } from '@/lib/shift-sales';
 import { historyReportLines } from '@/lib/history-report';
+import { itemSalesAfterReturns } from '@/lib/item-sales';
 import { returnReceiptLines } from '@/lib/printer';
 
 const read = (p: string) => readFileSync(p, 'utf8');
@@ -47,11 +48,15 @@ describe('the figures', () => {
   });
 
   it('Top məhsullar: a returned item is not counted as sold', () => {
-    const items = { cappy: { name: 'Cappy', qty: 2, rev: 4, cost: 2.4 }, su: { name: 'Su', qty: 1, rev: 0.5, cost: 0.2 } };
-    const after = itemsAfterReturns(items, [ret({})], () => 1.2);
-    expect(after.cappy).toMatchObject({ qty: 1, rev: 2, cost: 1.2 });
-    expect(after.su).toEqual(items.su);
-    expect(itemsAfterReturns(items, [ret({ lines: [{ menuItemId: 'cappy', variantId: null, name: 'Cappy', qty: 2, price: 2 }] })], () => 1.2).cappy).toBeUndefined();
+    const item = (id: string, name: string, qty: number, rev: number) => ({ id, name, category: 'İçki', qty, rev, sizes: { '': { qty, rev } } });
+    const sales = { items: [item('cappy', 'Cappy', 2, 4), item('su', 'Su', 1, 0.5)], service: 0, total: 4.5 };
+    const after = itemSalesAfterReturns(sales, [ret({})]);
+    expect(after.items.find(i => i.id === 'cappy')).toMatchObject({ qty: 1, rev: 2, sizes: { '': { qty: 1, rev: 2 } } });
+    expect(after.items.find(i => i.id === 'su')).toEqual(sales.items[1]);
+    expect(after.total).toBe(2.5);
+    const all = ret({ total: 4, lines: [{ menuItemId: 'cappy', variantId: null, name: 'Cappy', qty: 2, price: 2 }] });
+    expect(itemSalesAfterReturns(sales, [all]).items.map(i => i.id)).toEqual(['su']);
+    expect(sales.items[0].qty).toBe(2);   // the orders' own list is left alone
   });
 
   it('the printed Hesabat shows the returns and what is left after them', () => {
@@ -79,8 +84,9 @@ describe('with a receipt', () => {
         { menuItemId: 'su', variantId: null, name: 'Su', qty: 2, price: 0.5 },
       ],
       [{ menuItemId: 'su', variantId: null, qty: 2 }]);
-    // gross 7.00, discount 1.00 → each price × 6/7.
-    expect(sale.lines).toEqual([{ menuItemId: 'cappy', variantId: null, name: 'Cappy', left: 3, price: 1.71 }]);
+    // gross 7.00, discount 1.00 → Cappy's 6.00 is worth 5.14, all three together.
+    expect(sale.lines).toEqual([{ menuItemId: 'cappy', variantId: null, name: 'Cappy', left: 3, price: 1.713333 }]);
+    expect(requestTotal([{ qty: 3, price: 1.713333 }])).toBe(5.14);
   });
 });
 
@@ -122,8 +128,8 @@ describe('the till', () => {
   });
 
   it('Tarixçə shows the returns and Cəmi after them, in a shop', () => {
-    expect(seller).toMatch(/const historyBack = returnTotals\(historyReturns\);/);
-    expect(seller).toMatch(/round2\(historyRevenue - \(isShop \? historyBack\.total : 0\)\)/);
+    expect(seller).toMatch(/const historyBack = returnTotals\(historyReturns \?\? \[\]\);/);
+    expect(seller).toMatch(/afterReturns\(historyRevenue, isShop \? historyBack : \{ total: 0 \}\)/);
   });
 });
 

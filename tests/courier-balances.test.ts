@@ -81,7 +81,7 @@ describe('no place sums the balance on its own or from one read', () => {
     }
     for (const f of ['app/api/public-couriers/route.ts', 'app/api/public-shift-sales/route.ts']) {
       const src = readFileSync(f, 'utf8');
-      expect((src.match(/\.from\('(orders|courier_payments)'\)/g) ?? []).length, f)
+      expect((src.match(/\.from\('(orders|courier_payments|returns)'\)/g) ?? []).length, f)
         .toBe((src.match(/\.range\(a, b\)/g) ?? []).length);
     }
   });

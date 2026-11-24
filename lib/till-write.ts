@@ -12,6 +12,7 @@
 // can replay it without a translation layer in between.
 
 import type { OutboxEntry, PosNative } from "./desktopPrint";
+import { within, withTimeout } from "./timeout";
 
 export type { OutboxEntry };
 
@@ -152,32 +153,33 @@ export async function apiBase(): Promise<string> {
  * reports a network problem on a machine that is perfectly connected. There it
  * goes out through the main process instead (electron/till-ipc.ts).
  *
+ * `ms` gives up after that long: only for a route that is safe to send again.
+ *
  * Always resolves. Callers read `ok` and `error`, exactly as they did when this
  * was a fetch with a .catch on the end.
  */
 export async function tillPost<T>(
   route: string,
   body: Record<string, unknown>,
+  ms?: number,
 ): Promise<T> {
   const till = local();
   try {
     if (till) {
-      const res = await till.api(route, {
+      const sent = till.api(route, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      const res = await (ms ? within(sent, ms) : sent);
       try {
         return JSON.parse(res.body) as T;
       } catch {
         return { ok: false, error: "network" } as T;
       }
     }
-    const res = await fetch(route, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const init = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+    const res = await fetch(route, ms ? withTimeout(init, ms) : init);
     return (await res.json()) as T;
   } catch {
     return { ok: false, error: "network" } as T;

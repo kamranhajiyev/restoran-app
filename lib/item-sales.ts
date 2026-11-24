@@ -12,6 +12,7 @@ import { orderServiceCharge } from './service-charge';
 import { WIDTH } from './escpos';
 import type { Line } from './raster';
 import { formatDate } from './dates';
+import type { SaleReturn } from './returns';
 
 export type Sale = { qty: number; rev: number };
 export type ItemSale = Sale & {
@@ -57,6 +58,38 @@ export function itemSales(orders: Order[]): ItemSales {
   return { items, service: r2(service), total: r2(total) };
 }
 
+/** The same list after a shop's returns (lib/returns): a returned item is not
+ *  counted as sold, and Cəmi is what is left. An item brought back that was not
+ *  sold in view (bought last week) is a row below zero, so the rows still add
+ *  up to Cəmi. */
+export function itemSalesAfterReturns(r: ItemSales, returns: Pick<SaleReturn, 'lines' | 'total'>[], menu: Pick<MenuItem, 'id' | 'name' | 'category'>[] = []): ItemSales {
+  if (returns.length === 0) return r;
+  const map = new Map(r.items.map(s => [s.id, { ...s, sizes: Object.fromEntries(Object.entries(s.sizes).map(([k, z]) => [k, { ...z }])) }]));
+  let back = 0;
+  for (const ret of returns) {
+    back += ret.total;
+    for (const l of ret.lines) {
+      const id = l.menuItemId ?? l.name;
+      let s = map.get(id);
+      if (!s) {
+        const m = menu.find(x => x.id === id);
+        s = { id, name: m?.name ?? l.name, category: m?.category || 'Digər', qty: 0, rev: 0, sizes: {} };
+        map.set(id, s);
+      }
+      const sum = r2(l.qty * l.price);
+      s.qty -= l.qty;
+      s.rev -= sum;
+      const z = (s.sizes[l.variantId ?? ''] ??= { qty: 0, rev: 0 });
+      z.qty -= l.qty;
+      z.rev -= sum;
+    }
+  }
+  const items = [...map.values()]
+    .filter(s => s.qty !== 0 || Math.abs(s.rev) > 0.005)
+    .sort((a, b) => b.qty - a.qty || b.rev - a.rev || a.name.localeCompare(b.name));
+  return { items, service: r.service, total: r2(r.total - back) };
+}
+
 /** A size's name from the menu, or what admin's Analiz calls one it cannot find. */
 export function sizeName(menu: MenuItem[], itemId: string, variantId: string): string {
   if (!variantId) return 'ölçüsüz';
@@ -86,6 +119,7 @@ export function itemSalesLines(r: ItemSales, menu: MenuItem[], head: {
   from: string;
   timezone: string;
   shift?: string;
+  note?: string;       // printed under the total: what the list could not read
 }): Line[] {
   const lines: Line[] = [
     { text: `Məhsullar ${formatDate(head.from, head.timezone)}`, big: true, center: true },
@@ -100,5 +134,6 @@ export function itemSalesLines(r: ItemSales, menu: MenuItem[], head: {
   lines.push({ text: '-'.repeat(WIDTH) });
   if (r.service > 0.005) lines.push({ text: row('Xidmət haqqı', money(r.service)) });
   lines.push({ text: row('CƏMİ', money(r.total)), big: true });
+  if (head.note) lines.push({ text: head.note });
   return lines;
 }

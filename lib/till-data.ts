@@ -15,7 +15,7 @@
 
 import type { PosNative } from "./desktopPrint";
 import { withTillToken } from "./till-read-token";
-import { READ_MS, withTimeout } from "./timeout";
+import { READ_MS, within, withTimeout } from "./timeout";
 
 // The terminal's token, so a read that goes to the network can prove which
 // till it is (lib/till-read-token.ts). Set by the seller page; inside the exe
@@ -165,7 +165,7 @@ export async function localCourierCollections(
 export async function siteGet(path: string): Promise<Response> {
   const till = local();
   if (!till) return networkFetch(path);
-  const res = await till.api(path);
+  const res = await within(till.api(path), READ_MS);
   return new Response(res.body, {
     status: res.status,
     headers: { "Content-Type": "application/json" },

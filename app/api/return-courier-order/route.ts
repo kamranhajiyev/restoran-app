@@ -27,6 +27,9 @@ export async function POST(req: NextRequest) {
   const { data, error } = await db.rpc('cancel_courier_order', {
     p_order_id: orderId, p_reason: reason, p_by: by,
   });
+  // Goods of it came back through Qaytarma: refused for good, so not a 500 the
+  // till would send again forever (20261118_return_money.sql).
+  if (error && /has_returns/.test(error.message)) return Response.json({ ok: false, error: 'has_returns' });
   if (error) return Response.json({ ok: false, error: error.message }, { status: 500 });
   const result = { ok: data === true };
   await held.commit(result);

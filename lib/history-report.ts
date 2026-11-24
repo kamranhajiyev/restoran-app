@@ -8,6 +8,7 @@ import type { Line } from './raster';
 import { WIDTH } from './escpos';
 import { historyTotals } from './history-shifts';
 import { formatDate, formatDateTime } from './dates';
+import { afterReturns } from './returns';
 
 type ReportOrder = { id: string; status: string; discountAmount?: number; cashAmount?: number; cardAmount?: number;
   courierDebt?: number; courierCash?: number; courierCard?: number };
@@ -62,7 +63,8 @@ export function historyReportLines(r: HistoryReport, head: {
   shift?: string;      // "Növbə 2" when one shift is picked
   // A shop's returns in the same window (lib/returns returnTotals): their own
   // lines, and what is left after them — so the cash count matches.
-  returns?: { cash: number; card: number; total: number };
+  // Null: they could not be read, and the paper says so.
+  returns?: { cash: number; card: number; total: number } | null;
 }): Line[] {
   const at = (iso: string) => formatDateTime(iso, head.timezone);
   const day = formatDate(head.from, head.timezone);
@@ -93,13 +95,14 @@ export function historyReportLines(r: HistoryReport, head: {
     { text: row(`Ödənişsiz bağlanan (${r.legv.count})`, money(r.legv.sum)) },
   );
   const back = head.returns;
+  if (back === null) lines.push({ text: '-'.repeat(WIDTH) }, { text: 'Qaytarmalar oxunmadı (internet)' });
   if (back && back.total > 0.005) {
     lines.push(
       { text: '-'.repeat(WIDTH) },
       { text: row('Qaytarma', `-${money(back.total)}`) },
       { text: row('  Nağd', `-${money(back.cash)}`) },
       { text: row('  Kart', `-${money(back.card)}`) },
-      { text: row('Qaytarmadan sonra', money(Math.round((r.cemi - back.total) * 100) / 100)), big: true },
+      { text: row('Qaytarmadan sonra', money(afterReturns(r.cemi, back))), big: true },
     );
   }
   return lines;

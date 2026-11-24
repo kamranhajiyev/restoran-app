@@ -137,6 +137,11 @@ Guard: `tests/sync-server-error.test.ts`
 They take different paths (exe: local database and `pay:` replay; browser: IndexedDB queue).
 Guard: `tests/exe-till.test.ts`, `tests/link-order-via-server.test.ts`, `tests/browser-usb-kitchen.test.ts`
 
+**Does the exe hold this data itself? If not, does the request go out through the
+machine (`siteGet`, `tillPost`), not a page fetch that never leaves it?**
+Natiq, Test Restoran PR, 2026-11-24: the exe looked for a receipt inside its own files, so Qaytarma said "tapılmadı" for a paid sale.
+Guard: `tests/return-money.test.ts` ("tillFetch is only used for what the till holds itself")
+
 **When the exe comes back to the front, can the page take a click?**
 Latte Art, 2026-10-09: Kart would not take a click until the payment sheet was reopened.
 Guard: `lib/exe-focus`, `tests/exe-focus.test.ts`
@@ -236,6 +241,11 @@ Guard: `tests/shift-close-money.test.ts`, `tests/shift-owner-lock.test.ts`
 **Which day does this belong to?**
 A business day ends at the company's `work_close` in its own timezone, not at midnight or in UTC.
 Guard: `lib/business-day`, `tests/keep-settings.test.ts`, `tests/statistics.test.ts`
+
+**When money or goods go back, does it come to exactly what came in: after a
+discount, in parts, and when the sale is deleted later?**
+Review of Qaytarma, 2026-11-24: 2.00 paid gave back 2.01, and deleting a returned sale put its goods into stock twice.
+Guard: `tests/return-money.test.ts`, `tests-db/returns.test.ts`
 
 **Can this box take more than the bill, and where does the extra go?**
 İXLAS CAFE, 2026-11-01: 6.01 by card on a 6.00 bill was booked as card income; cash gives change, a card does not.

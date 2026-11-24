@@ -17,5 +17,5 @@ export async function POST(req: NextRequest) {
   if (error) return Response.json({ ok: false, error: error.message }, { status: 422 });
   const reply = data as ReturnReply;
   if (!reply.ok) return Response.json({ ok: false, error: reply.error ?? 'not_approved' }, { status: 403 });
-  return Response.json({ ok: true, total: reply.total, approvedBy: reply.approvedBy });
+  return Response.json({ ok: true, total: reply.total, approvedBy: reply.approvedBy, lines: reply.lines });
 }

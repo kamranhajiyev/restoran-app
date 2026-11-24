@@ -36,7 +36,7 @@ import InstallPWA from '@/components/InstallPWA';
 import { connectPrinter, disconnectPrinter, selectPrinter, printBill, printReceipt, printHistoryReport, openCashDrawer, printReturnReceipt } from '@/lib/printer';
 import { cashGiven } from '@/lib/cash-given';
 import { historyReport, historyReportLines } from '@/lib/history-report';
-import { itemSales, itemSalesLines, shownSizes } from '@/lib/item-sales';
+import { itemSales, itemSalesAfterReturns, itemSalesLines, shownSizes } from '@/lib/item-sales';
 import { installExeFocusFix } from '@/lib/exe-focus';
 import { collectsTickets, drainPrintQueue, isDesktop, nextLocalOrderNumber, printKitchenNow, printNoteNow, startKitchenPrinting } from '@/lib/desktopPrint';
 import StationPrinters from '@/components/StationPrinters';
@@ -86,7 +86,8 @@ import { cleanKind, type CompanyKind } from '@/lib/company-kind';
 import { paysNow, printsKitchen, shopDeliveryType, shopSaleType, tabLabel, takesNotes } from '@/lib/shop-mode';
 import { findByBarcode, RECEIPT_MIN_KEYS, SCAN_MIN_KEYS, scanCatcher } from '@/lib/barcode';
 import { leftLabel, lowKey } from '@/lib/low-stock';
-import { cartToReturnLines, parseReceiptLabel, requestTotal, returnErrorText, returnTotals, rowToReturn, type ReturnRequest, type SaleForReturn, type SaleReturn } from '@/lib/returns';
+import { afterReturns, cartToReturnLines, parseReceiptLabel, requestTotal, returnErrorText, returnTotals, rowToReturn, type ReturnReply, type ReturnRequest, type SaleForReturn, type SaleLookup, type SaleReturn } from '@/lib/returns';
+import { READ_MS } from '@/lib/timeout';
 import { refundNeeds } from '@/lib/till-rules';
 
 const TAB_ICONS: Record<SellerTab, typeof Receipt> = {
@@ -203,6 +204,14 @@ async function courierCollections(
   } catch {
     return (await localCourierCollections(companyId, from, to)) ?? { nagd: 0, kart: 0 };
   }
+}
+
+// A shop's returns in a window, for Tarixçə and Kassa. siteGet, not tillFetch:
+// the till's own database holds no returns. Null when the read failed.
+async function returnsBetween(from: string, to: string, companyId: string | null | undefined): Promise<SaleReturn[] | null> {
+  if (!companyId) return fetchReturnsOrNull(from, to);
+  const d = await jsonOrNull(siteGet(`/api/public-returns?companyId=${companyId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`));
+  return Array.isArray(d?.returns) ? (d.returns as Record<string, unknown>[]).map(rowToReturn) : null;
 }
 
 // Orders in a window, the same read for Tarixçə and Kassa so the two count the
@@ -486,7 +495,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // same return, saved once (record_return).
   const returnIdRef = useRef<{ key: string; id: string } | null>(null);
   // Today's returns, for Tarixçə's boxes and its Hesabat.
-  const [historyReturns, setHistoryReturns] = useState<SaleReturn[]>([]);
+  // Null: not read for what is in view, which is not "none".
+  const [historyReturns, setHistoryReturns] = useState<SaleReturn[] | null>([]);
+  const historyReturnsFor = useRef('');
   // Çatdırılma, switched on by the owner in the admin panel. Starts off like
   // kassaOn so a venue that does not deliver never flashes a Kuryerlər tab it
   // will lose a moment later; the boot fetch turns it on where it belongs.
@@ -941,6 +952,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const [shiftBusy, setShiftBusy]       = useState(false);
   // Kassa's Ümumi satış box: the open shift as Tarixçə counts it (Natiq Aslan,
   // 2026-10-06: "rəqəmləri sadəcə oradan götürməsi lazımdır").
+  // A shop's returns in the open shift; null: could not be read.
+  const [kassaBack, setKassaBack]       = useState<{ total: number } | null>(null);
   const [kassaTotals, setKassaTotals]   = useState<{ nagd: number; kart: number; kuryer: number; cemi: number } | null>(null);
   const [shiftSales, setShiftSales]     = useState<{ cash: number; card: number; courierCard?: number; courierSales?: number; courier?: number }>({ cash: 0, card: 0 });
   const [countedInput, setCountedInput] = useState('');
@@ -1857,6 +1870,12 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // "+" on a line already in the cart: one more of that line, at its price.
   // Going through addToCart would put the type's change on a second time.
   function addCartLineAgain(item: MenuItem, mods?: string) {
+    // Returning with a receipt: never more than it has, as addFromSale.
+    if (returnMode && returnSale) {
+      const line = cart.find(ci => sameCartLine(ci, item.id, mods, item.price));
+      const sold = line && returnSale.lines.find(l => l.menuItemId === item.id && l.variantId === (line.variantId ?? null));
+      if (sold) { addFromSale(sold); return; }
+    }
     setCart(prev => prev.map(ci =>
       sameCartLine(ci, item.id, mods, item.price) ? { ...ci, quantity: ci.quantity + 1 } : ci
     ));
@@ -1939,11 +1958,22 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // With a receipt: the sale, any day, by its number (or its barcode).
   async function findReturnSale(raw: string) {
     if (!parseReceiptLabel(raw)) { showAlert(`Qəbz nömrəsi düzgün deyil: ${raw.trim()}`); return; }
-    const sale = overrideCompanyId
-      ? await jsonOrNull(tillFetch(`/api/public-sale?companyId=${overrideCompanyId}&label=${encodeURIComponent(raw.trim())}`)).then(d => (d?.sale ?? null) as SaleForReturn | null)
+    // siteGet: a receipt of any day, which only the server has (the exe looked
+    // for it in its own files and said "tapılmadı", Natiq 2026-11-24).
+    const found: SaleLookup = overrideCompanyId
+      ? await jsonOrNull(siteGet(`/api/public-sale?companyId=${overrideCompanyId}&label=${encodeURIComponent(raw.trim())}`))
+          .then(d => d && 'sale' in d ? (d.sale ? { state: 'found', sale: d.sale as SaleForReturn } : { state: 'none' }) : { state: 'failed' })
       : await fetchSaleForReturn(raw);
+    // Left Qaytarma meanwhile: the cart on screen is another sale's.
+    if (!receiptWaitRef.current) return;
+    if (found.state === 'failed') { showAlert('Qəbz yoxlanmadı — internet bağlantısını yoxlayıb yenidən cəhd edin.'); return; }
     setReturnCode('');
-    if (!sale) { showAlert(`Qəbz №${raw.trim()} tapılmadı (və ya hamısı artıq qaytarılıb).`); return; }
+    if (found.state === 'none') {
+      showAlert(`Qəbz №${raw.trim()} tapılmadı.${pendingCount > 0 ? '\n\nBu kassada hələ serverə göndərilməmiş satışlar var — bir az sonra yenidən yoxlayın.' : ''}`);
+      return;
+    }
+    const sale = found.sale;
+    if (sale.lines.length === 0) { showAlert(`Qəbz №${sale.label}: hamısı artıq qaytarılıb.`); return; }
     setReturnSale(sale); setCart([]); returnIdRef.current = null;
   }
 
@@ -1976,28 +2006,23 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     let err: string | null = null;
     let total = requestTotal(lines);
     let approvedBy = approver.name;
+    let reply: ReturnReply;
     if (overrideCompanyId) {
-      try {
-        const res = await tillFetch('/api/add-return', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ companyId: overrideCompanyId, token: overrideToken, request }),
-        });
-        const d = await res.json().catch(() => null);
-        if (!res.ok || !d?.ok) err = d?.error ?? `HTTP ${res.status}`;
-        else { total = Number(d.total); approvedBy = d.approvedBy || approvedBy; }
-      } catch (e) { err = String(e); }
+      reply = await tillPost<ReturnReply>('/api/add-return', { companyId: overrideCompanyId, token: overrideToken, request }, READ_MS);
     } else {
-      const reply = await recordReturn(request);
-      if (!reply.ok) err = reply.error ?? 'not_approved';
-      else { total = Number(reply.total ?? total); approvedBy = reply.approvedBy || approvedBy; }
+      reply = await recordReturn(request);
     }
+    if (!reply.ok) err = reply.error ?? 'not_approved';
+    else { total = Number(reply.total ?? total); approvedBy = reply.approvedBy || approvedBy; }
     setReturnBusy(false);
     if (err) { showAlert(`Qaytarılmadı.\n\n${returnErrorText(err)}`); return; }
     // The exe/APK count the drawer from their own copy of the shift: the cash
     // that went back has to be in it too (the server's copy already has it).
     if (request.pay === 'cash') await noteReturnInLocalShift(request.id, total, returnSale?.label ?? null, request.seller);
     returnIdRef.current = null;
-    const paper = { total, pay: request.pay, sellerName: request.seller, approvedBy, createdAt: new Date().toISOString(), lines };
+    const paper = { total, pay: request.pay, sellerName: request.seller, approvedBy, createdAt: new Date().toISOString(),
+      // As saved: the server prices them, and the slip adds up to its total.
+      lines: (reply.lines ?? lines).map(l => ({ menuItemId: null, variantId: null, name: l.name, qty: l.qty, price: l.price })) };
     if (printerConnected) {
       if (shouldPrintReceipt) void printReturnReceipt(paper, overrideCompanyName || getSession()?.companyName || '', returnSale?.label ?? null);
       if (request.pay === 'cash') openCashDrawer();
@@ -2070,7 +2095,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     const hit = findByBarcode(menu, raw);
     if (returnMode) {
       // No sale picked yet and not a product: it is the receipt's barcode.
-      if (!returnSale && !hit && parseReceiptLabel(raw)) { setMenuSearch(''); void findReturnSale(raw); return; }
+      // "1.5" typed while products show is a search, not receipt 1 of till 5.
+      const search = raw.includes('.') && !!menuQuery && filtered.length > 0;
+      if (!returnSale && !hit && !search && parseReceiptLabel(raw)) { setMenuSearch(''); void findReturnSale(raw); return; }
       if (returnSale) {
         setMenuSearch('');
         const line = hit && returnSale.lines.find(l => l.menuItemId === hit.item.id && l.variantId === (hit.variant?.id ?? null));
@@ -2089,7 +2116,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       return;
     }
     setMenuSearch('');
-    if (!hit.item.available) { showAlert(`${hit.item.name} hazırda satışda deyil.`); return; }
+    // Off sale is for selling: what was sold earlier can still come back.
+    if (!hit.item.available && !returnMode) { showAlert(`${hit.item.name} hazırda satışda deyil.`); return; }
     if (!hit.variant) { handleMenuItemTap(hit.item); return; }
     const v = hit.variant;
     if (groupsForItem(hit.item).length > 0) {
@@ -2104,7 +2132,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   // Read on opening, every minute, and after each sale (orders change).
   const loadLow = useCallback(async () => {
     const low = overrideCompanyId
-      ? await jsonOrNull(tillFetch(`/api/public-low-stock?companyId=${overrideCompanyId}`)).then(d => (d?.low ?? null) as Record<string, number> | null)
+      ? await jsonOrNull(siteGet(`/api/public-low-stock?companyId=${overrideCompanyId}`)).then(d => (d?.low ?? null) as Record<string, number> | null)
       : await fetchLowStockForTill();
     if (low) setLowLeft(low);
   }, [overrideCompanyId]);
@@ -2327,7 +2355,9 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   async function handleNav(id: View) {
     if (id === 'qaytarma') {
       if (!(await confirmDiscardRemovals())) return;
+      updatePendingRemovals({});
       setAppendOrderId(null);
+      setReturnPay('cash');
       setReturnMode(true); setReturnSale(null); setReturnCode(''); returnIdRef.current = null;
       setCart([]); setMobileCartOpen(false); setMenuSearch('');
       setSaleTypeId(shopType.id); setOrderType('takeaway'); setSelectedCourier(null);
@@ -2917,7 +2947,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         printedBy: effectiveSeller,
         timezone: bizSettings.timezone,
         shift: shiftNo >= 0 ? `Növbə ${shiftNo + 1}` : undefined,
-        returns: isShop ? historyBack : undefined,
+        returns: isShop ? (historyBackUnread ? null : historyBack) : undefined,
       });
       if (!(await printHistoryReport(lines))) {
         setPrinterConnected(false);
@@ -2940,7 +2970,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         if (!ready) return;
       }
       const shiftNo = historyShifts.findIndex(s => s.id === historyShiftId);
-      const lines = itemSalesLines(itemSales(historyOrders), menu, {
+      const lines = itemSalesLines(historyItems, menu, {
+        note: historyBackUnread ? 'Qaytarmalar oxunmadı (internet)' : undefined,
         companyName: overrideCompanyName || getSession()?.companyName || '',
         from: historyWindow.from,
         timezone: bizSettings.timezone,
@@ -3310,7 +3341,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
         salesOrNull<ShiftSales>(tillFetch(`/api/public-shift-sales?companyId=${overrideCompanyId}&openedAt=${encodeURIComponent(shift.openedAt)}`))
           .then(s => { if (s) setShiftSales(s); });
       } else {
-        fetchShiftSales(shift.openedAt).then(s => { if (s) setShiftSales(s); });
+        fetchShiftSales(shift.openedAt, { shop: isShop }).then(s => { if (s) setShiftSales(s); });
       }
       const now = new Date().toISOString();
       const hs: HistoryShift = { id: shift.id, openedAt: shift.openedAt, openedBy: shift.openedBy };
@@ -3318,12 +3349,14 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
       Promise.all([
         ordersBetween(win.from, win.to, overrideCompanyId),
         courierCollections(shift.openedAt, now, overrideCompanyId),
-      ]).then(([list, collected]) => {
+        isShop ? returnsBetween(shift.openedAt, now, overrideCompanyId) : [],
+      ]).then(([list, collected, returns]) => {
+        setKassaBack(returns && returnTotals(returns));
         if (list) setKassaTotals(shiftTotals(list, hs, now, orderTotal,
           collected.paidOrderIds ? new Set(collected.paidOrderIds) : undefined));
       });
     }
-  }, [view, shift, overrideCompanyId]);
+  }, [view, shift, overrideCompanyId, isShop]);
 
   // Detect when admin closes the shift externally
   // — at once on the restaurant's signal, and on a clock that slows to every
@@ -3368,12 +3401,13 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     Promise.all([
       load.then(list => { if (list) { setHistoryOrders(picked ? ordersOfShift(list, picked, now) : list); setHistoryWindow({ from, to }); } }),
       courierCollections(from, to, overrideCompanyId).then(setHistoryCollected),
-      // A shop's returns in the same window (lib/returns). A failed read keeps what it has.
-      (overrideCompanyId
-        ? jsonOrNull(tillFetch(`/api/public-returns?companyId=${overrideCompanyId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`))
-            .then(d => (Array.isArray(d?.returns) ? (d.returns as Record<string, unknown>[]).map(rowToReturn) : null))
-        : fetchReturnsOrNull(from, to)
-      ).then(rs => { if (rs) setHistoryReturns(rs); }),
+      // A shop's returns in the same window (lib/returns). A failed read keeps what it has
+      // of this same view, never another shift's.
+      ...(isShop ? [returnsBetween(from, to, overrideCompanyId).then(rs => {
+        const key = picked?.id ?? dayStart;
+        if (rs) { historyReturnsFor.current = key; setHistoryReturns(rs); }
+        else if (historyReturnsFor.current !== key) setHistoryReturns(null);
+      })] : []),
     ]).finally(() => setHistoryLoading(false));
     // siteGet, not tillFetch: the till keeps only the open shift, and closed
     // ones are what this list is for. Offline the picker simply stays hidden.
@@ -3384,7 +3418,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     shiftsLoad.then(list => setHistoryShifts(shiftsOfDay(list, dayStart, now)));
     // historyShifts is read, not watched: a fresh list must not reload the orders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bizSettings, overrideCompanyId, historyShiftId]);
+  }, [bizSettings, overrideCompanyId, historyShiftId, isShop]);
 
   useEffect(() => {
     if (view === 'history') loadHistory();
@@ -3499,9 +3533,12 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     const fresh = overrideCompanyId
       ? await tillFetch(`/api/public-shift?companyId=${overrideCompanyId}`).then(r => r.json()).then(d => d.shift ?? shift).catch(() => shift)
       : (await fetchOpenShift()) ?? shift;
+    // A shop closes on the server's figures: this machine's own count has no
+    // card returns. The check above proved the line up and nothing unsent.
+    const read = isShop ? siteGet : tillFetch;
     const sales = overrideCompanyId
-      ? await salesOrNull<ShiftSales>(tillFetch(`/api/public-shift-sales?companyId=${overrideCompanyId}&openedAt=${encodeURIComponent(fresh.openedAt)}`))
-      : await fetchShiftSales(fresh.openedAt);
+      ? await salesOrNull<ShiftSales>(read(`/api/public-shift-sales?companyId=${overrideCompanyId}&openedAt=${encodeURIComponent(fresh.openedAt)}`))
+      : await fetchShiftSales(fresh.openedAt, { shop: isShop });
     // Closing on unread sales would save 0 ₼ as the shift's takings.
     if (!sales) {
       setShiftBusy(false);
@@ -3628,8 +3665,8 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const categories  = [...new Set(availableCategories.filter(a => menu.some(i => i.category === a.name)).map(a => a.name))];
   const menuQuery   = azNormalize(menuSearch.trim());
   const filtered    = menuQuery
-    ? menu.filter(m => m.available && (azNormalize(m.name).includes(menuQuery) || !!findByBarcode([m], menuSearch)))
-    : menu.filter(m => m.category === activeCategory && m.available);
+    ? menu.filter(m => (m.available || returnMode) && (azNormalize(m.name).includes(menuQuery) || !!findByBarcode([m], menuSearch)))
+    : menu.filter(m => m.category === activeCategory && (m.available || returnMode));
   const active      = orders.filter(isOrderOpen);
   const bizToday    = businessToday(bizSettings);
   const isToday     = (iso: string) => businessDay(iso, bizSettings) === bizToday;
@@ -3685,9 +3722,11 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
   const { nagd: historyNagd, kart: historyKart, kuryer: historyKuryer, cemi: historyRevenue } =
     historyTotals(historyOrders, orderTotal, historyPaidIds);
   // A shop's returns in view: their own box, and Cəmi after them (lib/returns).
-  const historyBack = returnTotals(historyReturns);
+  const historyBack = returnTotals(historyReturns ?? []);
+  const historyBackUnread = isShop && historyReturns === null;
+  const historyShown = historyOrders.length > 0 || (isShop && (historyBackUnread || historyBack.total > 0));
   // Məhsullar: every order in view like the boxes, not only the ones the search shows.
-  const historyItems = itemSales(historyOrders);
+  const historyItems = itemSalesAfterReturns(itemSales(historyOrders), isShop ? historyReturns ?? [] : [], menu);
 
   // ── sidebar (desktop only) ────────────────────────────────────────────────
 
@@ -4288,7 +4327,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
               )}
 
               {/* Nağd / Kart summary */}
-              {!historyLoading && historyOrders.length > 0 && (
+              {!historyLoading && historyShown && (
                 <div className="px-4 md:px-6 pb-2">
                   <div className="flex gap-3">
                     <div className="flex-1 bg-white rounded-xl border border-stone-100 px-4 py-3">
@@ -4310,12 +4349,12 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                     {isShop && (
                       <div className="flex-1 bg-white rounded-xl border border-red-100 px-4 py-3">
                         <p className="text-xs text-stone-500 mb-0.5">Qaytarma</p>
-                        <p className="text-lg font-bold text-red-600">{historyBack.total > 0 ? '−' : ''}{historyBack.total.toFixed(2)} ₼</p>
+                        <p className="text-lg font-bold text-red-600">{historyBackUnread ? '— (internet)' : `${historyBack.total > 0 ? '−' : ''}${historyBack.total.toFixed(2)} ₼`}</p>
                       </div>
                     )}
                     <div className="flex-1 bg-primary-50 rounded-xl border border-primary-100 px-4 py-3">
-                      <p className="text-xs text-primary-700 mb-0.5">Cəmi</p>
-                      <p className="text-lg font-bold text-primary-800">{round2(historyRevenue - (isShop ? historyBack.total : 0)).toFixed(2)} ₼</p>
+                      <p className="text-xs text-primary-700 mb-0.5">{historyBackUnread ? 'Cəmi (qaytarmasız)' : 'Cəmi'}</p>
+                      <p className="text-lg font-bold text-primary-800">{afterReturns(historyRevenue, isShop ? historyBack : { total: 0 }).toFixed(2)} ₼</p>
                     </div>
                   </div>
                 </div>
@@ -4571,8 +4610,14 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                           <span>Kuryer</span><span className="font-semibold">{kassaTotals.kuryer.toFixed(2)} ₼</span>
                         </div>
                       )}
+                      {isShop && (!kassaBack || kassaBack.total > 0.005) && (
+                        <div className="flex justify-between text-sm text-red-600">
+                          <span>Qaytarma</span><span className="font-semibold">{kassaBack ? `−${kassaBack.total.toFixed(2)} ₼` : '— (internet)'}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between items-center border-t pt-3 font-bold text-lg">
-                        <span>Ümumi satış</span><span className="text-primary-700">{kassaTotals.cemi.toFixed(2)} ₼</span>
+                        <span>{isShop && !kassaBack ? 'Ümumi satış (qaytarmasız)' : 'Ümumi satış'}</span>
+                        <span className="text-primary-700">{afterReturns(kassaTotals.cemi, (isShop && kassaBack) || { total: 0 }).toFixed(2)} ₼</span>
                       </div>
                     </>
                   )}
@@ -5146,14 +5191,14 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
                   />}
                   {printsKitchen(kind) && !shopSale && <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />}
                   {returnMode && returnPanel()}
-                  <CartTotal dishes={cartTotal} percent={cartPercent} charge={cartCharge} />
+                  <CartTotal dishes={cartTotal} percent={returnMode ? 0 : cartPercent} charge={returnMode ? 0 : cartCharge} />
                   <button
                     onClick={returnMode ? () => void submitReturn() : submitOrder}
                     disabled={returnMode ? cart.length === 0 || returnBusy : submit.disabled}
                     className={`w-full ${returnMode ? 'bg-red-600 hover:bg-red-700' : 'bg-primary-800 hover:bg-primary-900'} disabled:bg-stone-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-xl transition-colors flex items-center justify-center gap-2`}
                   >
                     {(submitting || removing || returnBusy) && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                    {returnMode ? `Qaytar · −${cartToPayNow.toFixed(2)} ₼` : shopSale ? `Ödə · ${cartToPayNow.toFixed(2)} ₼` : submit.label}
+                    {returnMode ? `Qaytar · −${requestTotal(cartToReturnLines(cart)).toFixed(2)} ₼` : shopSale ? `Ödə · ${cartToPayNow.toFixed(2)} ₼` : submit.label}
                   </button>
                 </div>
               </div>
@@ -5265,14 +5310,14 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
               />}
               {printsKitchen(kind) && !shopSale && <PrintKitchenToggle on={printKitchen} onChange={setPrintKitchen} />}
                   {returnMode && returnPanel()}
-              <CartTotal dishes={cartTotal} percent={cartPercent} charge={cartCharge} big />
+              <CartTotal dishes={cartTotal} percent={returnMode ? 0 : cartPercent} charge={returnMode ? 0 : cartCharge} big />
               <button
                 onClick={returnMode ? () => void submitReturn() : submitOrder}
                 disabled={returnMode ? cart.length === 0 || returnBusy : submit.disabled}
                 className={`w-full ${returnMode ? 'bg-red-600 hover:bg-red-700' : 'bg-primary-800 hover:bg-primary-900'} disabled:bg-stone-300 text-white font-semibold py-4 rounded-2xl transition-colors text-base active:scale-95 flex items-center justify-center gap-2`}
               >
                 {(submitting || removing || returnBusy) && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                {returnMode ? `Qaytar · −${cartToPayNow.toFixed(2)} ₼` : shopSale ? `Ödə · ${cartToPayNow.toFixed(2)} ₼` : submit.label}
+                {returnMode ? `Qaytar · −${requestTotal(cartToReturnLines(cart)).toFixed(2)} ₼` : shopSale ? `Ödə · ${cartToPayNow.toFixed(2)} ₼` : submit.label}
               </button>
             </div>
           </div>
