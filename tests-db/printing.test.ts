@@ -1,7 +1,8 @@
 // Kitchen tickets, for real, on "restoran testing", through the routes a till
 // uses (/api/claim-print-jobs, /api/report-print-job): an order makes one
 // ticket for its station, more dishes make an "append" ticket, an unticked
-// dish makes none, a dish taken off makes a cancel slip, two tills asking at
+// dish makes none, a dish taken off makes a cancel slip, a deleted order makes one only while it
+// is open, two tills asking at
 // once never both get one ticket, a printed ticket is never handed out again,
 // a failed one comes back until it is given up on, and one restaurant's till
 // never sees another's.
@@ -147,6 +148,33 @@ describe('kitchen tickets', () => {
     expect(await claim()).toEqual([]);
     const { data } = await admin.from('print_jobs').select('status, attempts, error').eq('id', job.id).single();
     expect(data).toEqual({ status: 'failed', attempts: 5, error: 'printer off' });
+  });
+
+  it('make no cancel slip when a paid order is deleted, even after a restore', async () => {
+    const cancels = async () => (await jobsOfOrder()).filter(j => j.kind === 'cancel').length;
+    const before = await cancels();
+    expect((await admin.from('orders').update({ status: 'ödənilib' }).eq('id', orderId)).error).toBeNull();
+    for (let i = 0; i < 2; i++) {
+      expect((await ownerB.rpc('delete_order', { p_order_id: orderId, p_by: 'autotest' })).error).toBeNull();
+      const { data } = await admin.from('orders').select('status').eq('id', orderId).single();
+      expect(data!.status).toBe('silinib');
+      expect(await cancels()).toBe(before);
+      expect((await ownerB.from('orders').update({ status: 'ödənilib' }).eq('id', orderId)).error).toBeNull();
+    }
+  });
+
+  it('make a cancel slip when an open order is deleted', async () => {
+    const openId = randomUUID();
+    const order = {
+      id: openId, orderNumber: 0, tableNumber: 0, status: 'gözləyir', note: NOTE,
+      createdAt: new Date().toISOString(), sellerName: 'autotest',
+      items: [line(randomUUID(), 'Autotest kabab', kebabId, 1)],
+    };
+    expect((await send(addOrder, { order })).body).toEqual({ ok: true });
+    expect((await ownerB.rpc('delete_order', { p_order_id: openId, p_by: 'autotest' })).error).toBeNull();
+    const { data } = await admin.from('print_jobs').select('kind').eq('order_id', openId).order('created_at');
+    expect((data ?? []).map(j => j.kind)).toEqual(['new', 'cancel']);
+    await admin.from('print_jobs').delete().eq('order_id', openId);
   });
 
   it('are made and changed by the owner only, not by the seller or a till', async () => {

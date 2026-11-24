@@ -513,3 +513,13 @@ Montserrat paper. Set parts and notes were 23-dot type at weight 700, and the
 thermal head fattens strokes, so the letters ran together. Dishes are now 37 at
 600, parts and notes 30 at 500, and only the word ŞƏRH: and the lead mark stay
 heavy (lib/paper.ts noteSegments).
+
+**Does a rule that fires on a change look at what the thing was before, or only
+at what it became?**
+Natiq, Test Restoran PR, 2026-11-23: deleting an order from admin printed LƏĞV
+in the kitchen whenever it had had a kitchen ticket, also for paid orders and
+orders of earlier days. The trigger on orders asked only that the order had
+become 'silinib'. Tills skip slips over an hour old, but the slip was made at
+the delete, so its age never stopped it. Deleting a paid order now queues
+nothing (20261117_no_cancel_slip_for_closed_orders.sql); deleting an open one
+still does.

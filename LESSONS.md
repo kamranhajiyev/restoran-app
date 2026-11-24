@@ -302,6 +302,11 @@ sizes and without, Məhsul and Yemək?**
 Owner question, 2026-10-17: "Fanta 0.5L" inside a set took no stock.
 Guard: `tests/set-variants.test.ts`, `tests/set-stock.test.ts`, `tests/set-items.test.ts`
 
+**Does a rule that fires on a change look at what the thing was before, or only
+at what it became?**
+Natiq, 2026-11-23: deleting a paid order from admin, even an old one, printed LƏĞV in the kitchen.
+Guard: `tests/cancel-slip-closed-order.test.ts`, `tests-db/printing.test.ts`
+
 ## 5. Screens
 
 **Does anything open inside a box that cuts off what sticks out (a card, a list
