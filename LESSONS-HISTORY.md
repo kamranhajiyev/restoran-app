@@ -583,3 +583,14 @@ deleted → 274, restored → 270, deleted → 278, then 286. A restore takes st
 again with a new 'sale' line; a delete gave back the sum of every 'sale' line
 and ignored the 'sale_void' lines earlier deletes had written. Now a delete
 gives back only what the order still holds (20261120_sale_void_once.sql).
+
+**When the till hears "something changed", does it fetch every kind of change
+(new, edited, closed), or only new things?**
+Natiq, Test Restoran, 2026-11-27: an open order deleted in admin printed its
+LƏĞV slip in the kitchen at once, but stayed on the exe's order screen about
+five minutes. Both heard the database's signal straight away; the print loop
+fetched its jobs, but on "orders" the exe only asked for orders it had never
+seen (pullNewOrders), so an order it already held kept its old status until the
+five-minute sweep. The same request now also asks which of its open orders were
+closed (closedIds on /api/public-orders) and closes them here, except orders
+with writes not yet sent. No extra request.

@@ -138,8 +138,10 @@ export type OrderStatus = 'gözləyir' | 'hazırlanır' | 'hazırdır' | 'ödən
 
 // Paid and cancelled orders are both closed: they free the table and leave
 // every "active" list. Only paid ones count as revenue.
+export const CLOSED_STATUSES: readonly OrderStatus[] = ['ödənilib', 'ləğv edildi', 'silinib'];
+
 export function isOrderOpen(o: { status: OrderStatus }): boolean {
-  return o.status !== 'ödənilib' && o.status !== 'ləğv edildi' && o.status !== 'silinib';
+  return !CLOSED_STATUSES.includes(o.status);
 }
 
 export interface ShiftMovement {

@@ -17,7 +17,7 @@
 // the key; nothing here does, and nothing here can reach another company's data.
 
 import { setCompanyContext } from "@/lib/store";
-import type { MenuItem, ModifierGroup } from "@/types";
+import { isOrderOpen, type MenuItem, type ModifierGroup, type OrderStatus } from "@/types";
 import type { PosNative, TillSettings } from "./desktopPrint";
 import type { TillSignal } from "./till-signal";
 import { cacheImages } from "./till-image";
@@ -334,6 +334,24 @@ export function unseenOrders<T extends { id: string }>(server: T[], localIds: Se
   return server.filter(o => !localIds.has(o.id));
 }
 
+/** The open orders here worth asking about: none with unsent writes, at most 100. */
+export function openOrderIds(local: { id: string; status: OrderStatus }[], pending: Set<string>): string[] {
+  return local.filter(o => isOrderOpen(o) && !pending.has(o.id)).map(o => o.id).slice(0, 100);
+}
+
+/**
+ * The server's copies of open orders here that it has closed. A closed order
+ * never opens again, so its copy can only be newer than the open one here —
+ * unless this till has writes for it still waiting to go, which win.
+ */
+export function closedElsewhere<T extends { id: string; status: OrderStatus }>(
+  server: T[],
+  openHere: Set<string>,
+  pending: Set<string>,
+): T[] {
+  return server.filter(o => openHere.has(o.id) && !pending.has(o.id) && !isOrderOpen(o));
+}
+
 /**
  * Where the quick check starts reading: a little before the newest order this
  * machine holds, so an order the server stamped a moment earlier — another
@@ -356,22 +374,44 @@ export function newOrdersSince(newestLocal: string | undefined, now: number): st
  *
  * Asks only for orders newer than the newest one here, so on a quiet till the
  * answer is an empty list. Adds orders, never changes one; see unseenOrders.
+ *
+ * The one exception, asked in the same request: an open order here that the
+ * server has closed — deleted or cancelled in admin, paid on another till.
+ * 2026-11-27 (Natiq): an open order deleted in admin printed its LƏĞV slip at
+ * once but stayed on the exe's screen about five minutes, until the sweep.
+ * See closedElsewhere. `pendingIds`: orders with writes not yet sent
+ * (lib/sync.ts pendingOrderIds), which are left alone — asked again just
+ * before saving, since a waiter may pay one while the request is out.
+ *
+ * Returns how many orders changed here, new or closed.
  */
-export async function pullNewOrders(companyId: string): Promise<number> {
+export async function pullNewOrders(
+  companyId: string,
+  pendingIds: () => Promise<Set<string>> = async () => new Set(),
+): Promise<number> {
   const db = till();
   if (!db || !companyId) return 0;
   try {
-    const newest = (await db.orders(companyId, { limit: 1 })) as { orders?: { createdAt?: string }[] };
-    const from = newOrdersSince(newest.orders?.[0]?.createdAt, Date.now());
-    const { orders = [] } = await serverRead<{ orders?: { id: string }[] }>(
-      db, "public-orders", companyId, { from, limit: "30" },
+    const pending = await pendingIds();
+    const held = (await db.orders(companyId, { limit: 300 })) as { orders?: { id: string; createdAt?: string; status: OrderStatus }[] };
+    const from = newOrdersSince(held.orders?.[0]?.createdAt, Date.now());
+    const openHere = openOrderIds(held.orders ?? [], pending);
+    const { orders = [], closed = [] } = await serverRead<{
+      orders?: { id: string }[];
+      closed?: { id: string; status: OrderStatus }[];
+    }>(
+      db, "public-orders", companyId,
+      { from, limit: "30", ...(openHere.length ? { closedIds: openHere.join(",") } : {}) },
     );
-    if (orders.length === 0) return 0;
-    const local = (await db.orders(companyId, { from, limit: 1000 })) as { orders?: { id: string }[] };
-    const fresh = unseenOrders(orders, new Set((local.orders ?? []).map(o => o.id)));
-    if (fresh.length === 0) return 0;
-    await db.putOrders(companyId, fresh);
-    return fresh.length;
+    const shut = closed.length ? closedElsewhere(closed, new Set(openHere), await pendingIds()) : [];
+    let fresh: { id: string }[] = [];
+    if (orders.length > 0) {
+      const local = (await db.orders(companyId, { from, limit: 1000 })) as { orders?: { id: string }[] };
+      fresh = unseenOrders(orders, new Set((local.orders ?? []).map(o => o.id)));
+    }
+    if (fresh.length === 0 && shut.length === 0) return 0;
+    await db.putOrders(companyId, [...fresh, ...shut]);
+    return fresh.length + shut.length;
   } catch {
     // The next tick, or the sweep, will carry it.
     return 0;

@@ -209,6 +209,11 @@ codepage, a newer browser? Does the page bring its own?**
 Natiq, Test Restoran, 2026-10-21: the Android phone printed "Pivə" as "Piv□"; its font has no ə. (2026-10-22: a Chrome 101 phone could not load the APK at all. 2026-10-23: a Huawei tablet would not even install it.)
 Guard: `lib/ticket-font`, `tests/ticket-font.test.ts`, `lib/dates.ts`, `tests/dates.test.ts`, `lib/android-browsers.mjs`, `tests/android-old-phones.test.ts`, `tests/android-update.test.ts`
 
+**When the till hears "something changed", does it fetch every kind of change
+(new, edited, closed), or only new things?**
+Natiq, Test Restoran, 2026-11-27: an open order deleted in admin printed LƏĞV at once but stayed on the exe's screen ~5 minutes, until the sweep.
+Guard: `tests/pull-new-orders.test.ts` ("closes what was closed elsewhere")
+
 ## 3. Money
 
 **Can the screen calculate a total from data that has not loaded yet?**

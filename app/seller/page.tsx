@@ -1186,7 +1186,7 @@ function SellerScreens({ overrideCompanyId, overrideCompanyName, overrideToken, 
     const companyId = overrideCompanyId ?? getSession()?.companyId ?? null;
     if (!companyId) return;
     lastNewOrdersAt.current = Date.now();
-    if ((await pullNewOrders(companyId)) > 0) void refreshOrders({ silent: true });
+    if ((await pullNewOrders(companyId, pendingOrderIds)) > 0) void refreshOrders({ silent: true });
   }, [overrideCompanyId, refreshOrders]);
   useEffect(() => {
     if (!hasLocalDb()) return;

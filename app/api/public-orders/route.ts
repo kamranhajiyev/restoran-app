@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { splitOrderItems, type OrderItemRow } from '@/lib/order-items';
 import { createServerClient } from '@/lib/supabase-server';
 import { refuseTillRead } from '@/lib/till-read-auth';
+import { CLOSED_STATUSES } from '@/types';
 
 export async function GET(req: NextRequest) {
   const companyId = req.nextUrl.searchParams.get('companyId');
@@ -34,7 +35,34 @@ export async function GET(req: NextRequest) {
 
   if (error) return Response.json({ orders: [] }, { status: 500 });
 
-  const orders = (data ?? []).map((o: Record<string, unknown>, i: number) => ({
+  const orders = (data ?? []).map(toOrder);
+
+  // Which of the open orders the till holds have been closed since — deleted or
+  // cancelled in admin, paid on another till. Asked in the same request as the
+  // new orders, so the till learns both from one call (lib/till-sync.ts
+  // pullNewOrders). Almost always an empty answer.
+  const closedIds = idList(req.nextUrl.searchParams.get('closedIds'));
+  let closed: ReturnType<typeof toOrder>[] | undefined;
+  if (closedIds.length) {
+    const { data: rows, error: closedError } = await db.from('orders').select('*, order_items(*)')
+      .eq('company_id', companyId)
+      .in('id', closedIds)
+      .in('status', [...CLOSED_STATUSES])
+      .order('created_at', { referencedTable: 'order_items', ascending: true });
+    if (closedError) return Response.json({ orders: [] }, { status: 500 });
+    closed = (rows ?? []).map(toOrder);
+  }
+
+  return Response.json({ orders, total: totalCount, ...(closed ? { closed } : {}) });
+}
+
+/** Order ids from a comma list; anything that is not one is dropped. At most 100. */
+function idList(raw: string | null): string[] {
+  return (raw ?? '').split(',').filter(id => /^[0-9a-f-]{36}$/i.test(id)).slice(0, 100);
+}
+
+function toOrder(o: Record<string, unknown>) {
+  return {
     id: o.id,
     orderNumber: (o.order_number as number) ?? 0,
     tillNumber: (o.till_number as number) ?? undefined,
@@ -69,7 +97,5 @@ export async function GET(req: NextRequest) {
     // Same splitter as lib/store.ts fetchOrders: removed items never enter `items`,
     // so no total on this path can over-count them either.
     ...splitOrderItems(o.order_items as OrderItemRow[]),
-  }));
-
-  return Response.json({ orders, total: totalCount });
+  };
 }
