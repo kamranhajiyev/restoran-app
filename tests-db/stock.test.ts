@@ -133,4 +133,15 @@ describe('the warehouse', () => {
     const { data } = await admin.from('stock_movements').select('qty, reason').eq('order_id', orderId).order('created_at');
     expect(data!.map(m => `${m.reason} ${Number(m.qty)}`).sort()).toEqual(['sale -0.6', 'sale_void 0.6']);
   });
+
+  // Restore and delete again: each delete gave back every sale so far, 0.6,
+  // then 1.2, then 1.8 (customer report, 2026-11-27).
+  it('gives back exactly 0.6 kq again each time the order is restored and deleted', async () => {
+    for (let round = 0; round < 3; round++) {
+      expect((await ownerA.from('orders').update({ status: 'ödənilib' }).eq('id', orderId)).error).toBeNull();
+      expect(await rice()).toBe(9.4);
+      expect((await ownerA.from('orders').update({ status: 'silinib' }).eq('id', orderId)).error).toBeNull();
+      expect(await rice()).toBe(10);
+    }
+  });
 });

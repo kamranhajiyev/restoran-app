@@ -576,3 +576,10 @@ machine until the server says whether it was saved (lib/pending-return).
 Review, 2026-11-24: admin could change or delete a cash return's line in Kassa
 alone, and the drawer no longer matched Tarixçə and Anbar. The database keeps it
 (20261119_return_kassa_line.sql).
+
+**When goods go back, is it exactly what came in, also after a restore?**
+Customer, 2026-11-27 (shop and restaurant mode): 274 qazlı su, sold 4 → 270,
+deleted → 274, restored → 270, deleted → 278, then 286. A restore takes stock
+again with a new 'sale' line; a delete gave back the sum of every 'sale' line
+and ignored the 'sale_void' lines earlier deletes had written. Now a delete
+gives back only what the order still holds (20261120_sale_void_once.sql).

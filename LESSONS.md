@@ -252,9 +252,9 @@ A business day ends at the company's `work_close` in its own timezone, not at mi
 Guard: `lib/business-day`, `tests/keep-settings.test.ts`, `tests/statistics.test.ts`
 
 **When money or goods go back, does it come to exactly what came in: after a
-discount, in parts, and when the sale is deleted later?**
-Review of Qaytarma, 2026-11-24: 2.00 paid gave back 2.01, and deleting a returned sale put its goods into stock twice.
-Guard: `tests/return-money.test.ts`, `tests-db/returns.test.ts`
+discount, in parts, and when the sale is deleted later, or restored and deleted again?**
+Review of Qaytarma, 2026-11-24: 2.00 paid gave back 2.01, and deleting a returned sale put its goods into stock twice. Customer, 2026-11-27: each restore + delete gave back 4, then 8, then 12.
+Guard: `tests/return-money.test.ts`, `tests-db/returns.test.ts`, `tests/sale-void-once.test.ts`, `tests-db/stock.test.ts`
 
 **Can this box take more than the bill, and where does the extra go?**
 İXLAS CAFE, 2026-11-01: 6.01 by card on a 6.00 bill was booked as card income; cash gives change, a card does not.
