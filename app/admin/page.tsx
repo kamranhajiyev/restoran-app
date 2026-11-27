@@ -32,7 +32,7 @@ import {
   fetchTables, createTable, updateTable, updateTableLayout, deleteTable, moveTableToHall, fetchCompanySlug,
   fetchHalls, createHall, renameHall, deleteHall, saveHallOrder, adoptOrphanTables, fetchTablesOrNull, fetchHallsOrNull,
   fetchTablesEnabled, setTablesEnabled,
-  fetchDeliveryEnabled, setDeliveryEnabled, fetchCompanyKind, menuHasBarcode, menuHasIngredients, fetchStockLimits, fetchBalances, fetchReturnsOrNull,
+  fetchDeliveryEnabled, setDeliveryEnabled, fetchCompanyKind, menuHasBarcode, menuHasIngredients, fetchStockLimits, fetchBalances, fetchReturnsOrNull, fetchSaleLabelsOrNull,
   fetchQrEnabled, setQrEnabled, fetchMenuOnly, setMenuOnly,
   fetchKassaEnabled, setKassaEnabled,
   fetchCompanyProfile, updateMyCompanyProfile, fetchMyUsername, updateOwnerAccount, verifyPassword,
@@ -114,7 +114,7 @@ import type { CompanyKind } from '@/lib/company-kind';
 import { paidHow, SHOP_ADMIN } from '@/lib/shop-mode';
 import { INGREDIENTS_MAX, takesIngredients } from '@/lib/ingredients';
 import { lowStock } from '@/lib/low-stock';
-import { afterReturns, netOfReturns, returnTotals, type SaleReturn } from '@/lib/returns';
+import { afterReturns, filterReturnList, netOfReturns, returnReceipt, returnTotals, type SaleReturn } from '@/lib/returns';
 import { barcodeOwner, cleanBarcode } from '@/lib/barcode';
 
 // RPC raise messages are machine codes — translated here for display
@@ -755,6 +755,13 @@ function AdminPageContent() {
   // Empty while the range is incomplete or backwards — the presets stay in charge then.
   const ordersRangeKey = ordersFrom && ordersTo && ordersFrom <= ordersTo ? `${ordersFrom}|${ordersTo}` : '';
   const rangeOrders = ordersRangeKey && rangeResult?.key === ordersRangeKey ? rangeResult.data : null;
+  // A shop's Qaytarmalar: the returns themselves in place of the sales, for
+  // the same days (lib/returns filterReturnList). Tagged with the days they
+  // were read for, like rangeResult; null data = the read failed.
+  const [onlyReturns, setOnlyReturns] = useState(false);
+  const [returnList, setReturnList] = useState<{ key: string; data: SaleReturn[] | null; labels: Record<string, string> } | null>(null);
+  const [returnsRefreshKey, setReturnsRefreshKey] = useState(0);
+  const [expandedReturnId, setExpandedReturnId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const touchStartY = useRef<number | null>(null);
@@ -1184,6 +1191,29 @@ function AdminPageContent() {
     return () => { cancelled = true; clearTimeout(t); };
   }, [sessionReady, ordersRangeKey, ordersFrom, ordersTo, bizSettings, rangeRefreshKey]);
 
+  // Qaytarmalar: read from the server for the days on screen — a picked range,
+  // or the preset (Hamısı = every return; there are few).
+  const returnsKey = !isShop || !onlyReturns ? '' : ordersRangeKey || ordersPreset;
+  useEffect(() => {
+    if (!sessionReady || !returnsKey) return;
+    const today = businessToday(bizSettings);
+    const [from, to]: [string, string | undefined] = ordersRangeKey
+      ? statsRangeUtc(ordersFrom, ordersTo, bizSettings)
+      : ordersPreset === 'bugün'
+      ? statsRangeUtc(today, today, bizSettings)
+      : ordersPreset === 'bu həftə'
+      ? statsRangeUtc(addDays(today, -((dayOfWeek(today) + 6) % 7)), today, bizSettings)
+      : ['2000-01-01T00:00:00Z', undefined];
+    let cancelled = false;
+    (async () => {
+      const rs = await fetchReturnsOrNull(from, to);
+      const labels = rs ? await fetchSaleLabelsOrNull(rs.map(r => r.orderId ?? '')) : null;
+      if (cancelled) return;
+      setReturnList({ key: returnsKey, data: rs && labels ? rs : null, labels: labels ?? {} });
+    })();
+    return () => { cancelled = true; };
+  }, [sessionReady, returnsKey, ordersRangeKey, ordersPreset, ordersFrom, ordersTo, bizSettings, returnsRefreshKey]);
+
   // Shifts are counted like Tarixçə counts them (lib/history-shifts), not from
   // the drawer money — that holds courier payments for older shifts.
   const loadShiftTotals = useCallback(async (s: CashShift) => {
@@ -1535,6 +1565,7 @@ function AdminPageContent() {
       invalidateTodayStatsCache();
       // Past ranges never change on their own — only refetch one that reaches today.
       if (rangeOrders && ordersTo >= businessToday(bizSettings)) setRangeRefreshKey(k => k + 1);
+      if (onlyReturns) setReturnsRefreshKey(k => k + 1);
     } finally { setRefreshing(false); }
   }
 
@@ -2758,6 +2789,13 @@ function AdminPageContent() {
         ? (o.cashAmount ?? 0) + (o.courierCash ?? 0)
         : (o.cardAmount ?? 0) + (o.courierCard ?? 0)), 0) * 100) / 100
     : 0;
+  // Qaytarmalar in place of the sales (a shop only): same days, cash/card and search.
+  const returnsShown = isShop && onlyReturns;
+  const returnsLoaded = returnList && returnList.key === returnsKey ? returnList : null;
+  const visibleReturns = returnsLoaded?.data
+    ? filterReturnList(returnsLoaded.data, returnsLoaded.labels, { pay: payFilter, query: orderSearch })
+    : [];
+  const visibleReturnsSum = returnTotals(visibleReturns).total;
 
   const menuCostMap = costMap(menu);
 
@@ -3715,8 +3753,21 @@ function AdminPageContent() {
           {tab === 'orders' && (
             <div className="max-w-5xl space-y-3">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                {/* The seller page's count pills, same shades. */}
+                {/* The seller page's count pills, same shades. A shop first picks
+                    which list: its sales or its returns — a switch with both
+                    names on it, so the way back is always in sight. */}
                 <div className="flex items-center gap-2 flex-wrap">
+                  {isShop && (
+                    <Segmented
+                      options={[
+                        { value: 'sales', label: 'Satışlar' },
+                        { value: 'returns', label: 'Qaytarmalar' },
+                      ]}
+                      value={onlyReturns ? 'returns' : 'sales'}
+                      onChange={v => { setOnlyReturns(v === 'returns'); setOnlySuspicious(false); setExpandedReturnId(null); }}
+                    />
+                  )}
+                  {!returnsShown && (<>
                   <span className="px-2.5 py-0.5 rounded-full bg-stone-200/70 text-xs text-stone-700">
                     Cəmi <span className="font-semibold text-stone-900">{rangeOrders ? rangeOrders.length : totalOrders}</span>
                   </span>
@@ -3726,8 +3777,11 @@ function AdminPageContent() {
                   <span className="text-xs text-stone-400">
                     {rangeOrders ? 'seçilmiş tarix' : totalOrders > orders.length ? `son ${orders.length} göstərilir` : ''}
                   </span>
+                  </>)}
                 </div>
                 <div className="flex items-center gap-2">
+                  {/* The Excel file is the sales; it would not hold the returns. */}
+                  {!returnsShown && (
                   <button
                     onClick={() => exportOrdersExcel(visibleOrders, bizSettings.timezone, courierNames)}
                     title="Excel-ə ixrac et"
@@ -3736,6 +3790,7 @@ function AdminPageContent() {
                     <Upload className="w-3.5 h-3.5" />
                     İxrac
                   </button>
+                  )}
                   <button
                     onClick={refresh}
                     disabled={refreshing}
@@ -3774,7 +3829,7 @@ function AdminPageContent() {
                 {/* Offered only where the answer can differ. A company running
                     neither tables nor delivery has one kind of order and nothing
                     to choose between. */}
-                {(isShop ? deliveryOn : (tablesOn || deliveryOn)) && (
+                {!returnsShown && (isShop ? deliveryOn : (tablesOn || deliveryOn)) && (
                   <FilterSelect
                     icon={MapPin}
                     active={!!placeFilter}
@@ -3799,7 +3854,7 @@ function AdminPageContent() {
                 {/* Only once the list is deliveries. Asking "which courier"
                     about masa and takeaway orders is asking about rows that by
                     definition have none. */}
-                {deliveryOn && (placeFilter === 'delivery' || placeFilter === 'online') && courierOptions.length > 0 && (
+                {!returnsShown && deliveryOn && (placeFilter === 'delivery' || placeFilter === 'online') && courierOptions.length > 0 && (
                   <FilterSelect icon={Bike} active={!!courierFilter} value={courierFilter} onChange={setCourierFilter}>
                     <option value="">Bütün kuryerlər</option>
                     {courierOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -3814,6 +3869,7 @@ function AdminPageContent() {
 
                 {/* Amber only in its count and when on — an audit filter, not
                     another period preset. */}
+                {!returnsShown && (
                 <button
                   onClick={() => setOnlySuspicious(v => !v)}
                   title="Silinmiş məhsulu olan, endirimli və ödənişsiz bağlanan qəbzlər"
@@ -3827,6 +3883,7 @@ function AdminPageContent() {
                     </span>
                   )}
                 </button>
+                )}
 
                 {(placeFilter || courierFilter || payFilter) && (
                   <button
@@ -3843,11 +3900,106 @@ function AdminPageContent() {
                 <input
                   value={orderSearch}
                   onChange={e => setOrderSearch(e.target.value)}
-                  placeholder={isShop ? 'Qəbz № və ya satıcı adı ilə axtar' : 'Sifariş № və ya satıcı adı ilə axtar'}
+                  placeholder={returnsShown ? 'Qəbz №, satıcı və ya məhsul ilə axtar' : isShop ? 'Qəbz № və ya satıcı adı ilə axtar' : 'Sifariş № və ya satıcı adı ilə axtar'}
                   className="w-full bg-white border border-stone-200 rounded-lg pl-9 pr-3 py-2 text-sm text-stone-700 placeholder:text-stone-400 focus:outline-none focus:border-primary-300"
                 />
               </div>
 
+              {/* ── Qaytarmalar: the same columns and day rows as the sales. */}
+              {returnsShown && (
+                !returnsLoaded ? (
+                  <div className="bg-white rounded-lg border border-stone-200 card p-16 flex justify-center">
+                    <span className="w-5 h-5 border-2 border-primary-200 border-t-primary-800 rounded-full animate-spin" />
+                  </div>
+                ) : !returnsLoaded.data ? (
+                  <div className="bg-white rounded-lg border border-stone-200 card p-10 text-center">
+                    <p className="text-sm text-stone-500">Qaytarmalar yüklənmədi — internet bağlantısını yoxlayıb Yenilə basın.</p>
+                  </div>
+                ) : visibleReturns.length === 0 ? (
+                  <div className="bg-white rounded-lg border border-stone-200 card p-10 text-center">
+                    <p className="text-sm text-stone-500">
+                      {returnsLoaded.data.length === 0
+                        ? 'Seçilmiş dövrdə qaytarma yoxdur'
+                        : `Seçilmiş filtrə uyğun qaytarma yoxdur (${returnsLoaded.data.length} qaytarma arasında)`}
+                    </p>
+                  </div>
+                ) : (<>
+                  <div className="flex items-center justify-between bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">
+                    <span className="text-sm text-red-900">
+                      {payFilter === 'cash' ? '💵 Nağd · ' : payFilter === 'card' ? '💳 Kart · ' : ''}{visibleReturns.length} qaytarma
+                    </span>
+                    <span className="text-sm font-semibold text-red-700">−{visibleReturnsSum.toFixed(2)} ₼</span>
+                  </div>
+                  <div className={`${cardCls} overflow-hidden`}>
+                    <div className="hidden md:grid grid-cols-[96px_minmax(0,1fr)_150px_96px] gap-4 px-6 py-2.5 text-xs font-semibold text-stone-600 uppercase tracking-wide border-b border-stone-200 bg-stone-50">
+                      <span>Vaxt</span><span>Qaytarma</span><span>Ödəniş</span><span className="text-right">Ümumi</span>
+                    </div>
+                    {groupByDay(visibleReturns, r => businessDay(r.createdAt, bizSettings)).map(g => (
+                      <div key={g.day}>
+                        <div className="px-4 md:px-6 py-2.5 bg-stone-800 text-sm font-bold text-white uppercase tracking-wide">
+                          {dayHeading(g.day, businessToday(bizSettings))} <span className="font-medium text-stone-300">· {g.items.length}</span>
+                        </div>
+                        {g.items.map(r => {
+                          const open = expandedReturnId === r.id;
+                          const items = r.lines.reduce((n, l) => n + l.qty, 0);
+                          return (
+                            <div key={r.id} className="border-b border-stone-200 last:border-b-0">
+                              <button
+                                onClick={() => setExpandedReturnId(open ? null : r.id)}
+                                className="w-full grid grid-cols-[minmax(0,1fr)_auto_auto] md:grid-cols-[96px_minmax(0,1fr)_150px_96px] items-center gap-4 px-4 md:px-6 py-3 transition-colors text-left hover:bg-stone-50"
+                              >
+                                <span className="hidden md:block text-sm text-stone-900 tabular-nums">{formatTime(r.createdAt, bizSettings.timezone)}</span>
+                                <span className="min-w-0 flex items-start gap-2">
+                                  <ChevronDown className={`w-4 h-4 mt-0.5 text-stone-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+                                  <span className="min-w-0">
+                                    <span className="block text-sm font-medium text-stone-900 truncate">{r.sellerName || '—'}</span>
+                                    <span className="block text-xs text-stone-500 truncate mt-0.5">
+                                      <span className="md:hidden">{formatTime(r.createdAt, bizSettings.timezone)} · </span>
+                                      {returnReceipt(r, returnsLoaded.labels)} · {r.lines.map(l => l.name).join(', ')}
+                                    </span>
+                                  </span>
+                                </span>
+                                <span>
+                                  <span className="inline-block text-xs px-2.5 py-0.5 rounded-full font-medium whitespace-nowrap bg-stone-100 text-stone-700">{r.pay === 'card' ? 'Kart' : 'Nağd'}</span>
+                                </span>
+                                <span className="text-right tabular-nums">
+                                  <span className="block text-sm font-semibold text-red-600">−{r.total.toFixed(2)} ₼</span>
+                                  <span className="block text-[11px] text-stone-400">{items} məhsul</span>
+                                </span>
+                              </button>
+                              {open && (
+                                <div className="px-4 pb-4 bg-stone-50 border-t border-stone-100">
+                                  <div className="pt-3 mb-3">
+                                    <div className="hidden sm:grid grid-cols-[1fr_80px_80px] gap-2 text-xs font-medium text-stone-500 uppercase tracking-wide pb-1 border-b border-stone-200 mb-2">
+                                      <span>Məhsul</span><span className="text-right">Say</span><span className="text-right">Cəmi</span>
+                                    </div>
+                                    {r.lines.map((l, i) => (
+                                      <div key={i} className="grid grid-cols-[1fr_80px_80px] gap-2 text-sm text-stone-700 py-0.5">
+                                        <span className="min-w-0 truncate">{l.name}</span>
+                                        <span className="text-right tabular-nums">×{l.qty}</span>
+                                        <span className="text-right tabular-nums">{(l.qty * l.price).toFixed(2)} ₼</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-stone-200 text-xs text-stone-500">
+                                    <span>
+                                      {returnReceipt(r, returnsLoaded.labels)} · {formatDayMonthTime(r.createdAt, bizSettings.timezone)} · Satıcı: {r.sellerName || '—'}
+                                      {r.approvedBy ? ` · Təsdiq: ${r.approvedBy}` : ''}
+                                    </span>
+                                    <span className="text-sm font-semibold text-red-600">−{r.total.toFixed(2)} ₼ · {r.pay === 'card' ? '💳 Kart' : '💵 Nağd'}</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </>)
+              )}
+
+              {!returnsShown && (<>
               {payFilter && visibleOrders.length > 0 && (
                 <div className="flex items-center justify-between bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5">
                   <span className="text-sm text-primary-900">
@@ -4134,6 +4286,7 @@ function AdminPageContent() {
                   Daha çox göstər ({totalOrders - orders.length} qalıb)
                 </button>
               )}
+              </>)}
             </div>
           )}
 

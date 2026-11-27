@@ -27,6 +27,7 @@ import { cleanBarcode } from './barcode';
 import { cleanIngredients } from './ingredients';
 import { lowForTill, lowStock, type StockLimit } from './low-stock';
 import { findSale, returnMovement, returnRpcArgs, returnTotals, rowToReturn, type ReturnReply, type ReturnRequest, type SaleLookup, type SaleReturn } from './returns';
+import { orderLabel } from './order-label';
 
 async function authHeaders(): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -1645,6 +1646,24 @@ export async function fetchReturnsOrNull(from: string, to?: string): Promise<Sal
     });
     if (missing) return [];
     return data ? data.map(rowToReturn) : null;
+  } catch { return null; }
+}
+
+/** The receipt number of each sale the returns came from, by sale id, for the
+ *  admin's Qaytarmalar list. Null when the read failed: a list without its
+ *  numbers would read as returns made without a receipt. */
+export async function fetchSaleLabelsOrNull(orderIds: string[]): Promise<Record<string, string> | null> {
+  const ids = [...new Set(orderIds.filter(Boolean))];
+  const labels: Record<string, string> = {};
+  try {
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data, error } = await supabase.from('orders')
+        .select('id, order_number, till_number')
+        .in('id', ids.slice(i, i + 200));
+      if (error || !data) return null;
+      for (const o of data) labels[o.id] = orderLabel({ orderNumber: o.order_number ?? 0, tillNumber: o.till_number ?? undefined });
+    }
+    return labels;
   } catch { return null; }
 }
 

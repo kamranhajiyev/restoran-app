@@ -236,3 +236,31 @@ export function netOfReturns(
   const profit = round2(revenue - cost);
   return { revenue, cost, profit, marginPct: revenue > 0 ? (profit / revenue) * 100 : 0, back };
 }
+
+/** The receipt a return came from, as the admin's Qaytarmalar list shows it:
+ *  the sale's number, or none when the goods came back without the receipt
+ *  scanned. A sale since gone from the database still says it had one. */
+export function returnReceipt(r: Pick<SaleReturn, 'orderId'>, labels: Record<string, string>): string {
+  if (!r.orderId) return 'Qəbzsiz';
+  const label = labels[r.orderId];
+  return label ? `Qəbz №${label}` : 'Qəbz tapılmadı';
+}
+
+/** The admin's Qaytarmalar list after its cash/card filter and search box:
+ *  the search finds a return by its receipt number ("45" or "45/2"), the
+ *  seller, the manager who approved it, or a product brought back. */
+export function filterReturnList(
+  returns: SaleReturn[],
+  labels: Record<string, string>,
+  opts: { pay?: '' | 'cash' | 'card'; query?: string },
+): SaleReturn[] {
+  const q = (opts.query ?? '').trim().toLocaleLowerCase('az');
+  return returns.filter(r => {
+    if (opts.pay && r.pay !== opts.pay) return false;
+    if (!q) return true;
+    const label = r.orderId ? labels[r.orderId] ?? '' : '';
+    const hay = [label, label.split('/')[0], r.sellerName ?? '', r.approvedBy ?? '', ...r.lines.map(l => l.name)]
+      .join(' ').toLocaleLowerCase('az');
+    return hay.includes(q);
+  });
+}
